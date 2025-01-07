@@ -20,6 +20,9 @@ parts/
 sdist/
 var/
 wheels/
+vips-dev-8.16/
+apache-maven-3.9.9/
+jdk-21_windows-x64_bin/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
