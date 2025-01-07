@@ -20,10 +20,13 @@ parts/
 sdist/
 var/
 wheels/
+<<<<<<< HEAD
 vips-dev-8.16/
 apache-maven-3.9.9/
 jdk-21_windows-x64_bin/
 data/
+=======
+>>>>>>> 7a37497722c77dcbfcc8d96eb5c7ef770dcdc174
 share/python-wheels/
 *.egg-info/
 .installed.cfg
