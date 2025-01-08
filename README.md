@@ -1,8 +1,11 @@
-KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing
-</div>
+# KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing
+
+<div align="center">
 
 Multiplex image processing for challenging datasets with a focus on user integration rather than automation.
 
+<div>
+  
 Full documentation for the project can be found
 
 ## Table of Contents
