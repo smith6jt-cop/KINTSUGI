@@ -80,14 +80,14 @@ Multiplex image processing for challenging datasets with a focus on user integra
 
 
 ### Notebooks
-[1. Parameter tuning/testing](notebooks/1_Single_Channel_Eval.ipynb) 
+####[1. Parameter tuning/testing](notebooks/1_Single_Channel_Eval.ipynb) 
 
-[2. Batch processing](notebooks/2_Cycle_Processing.ipynb) 
+####[2. Batch processing](notebooks/2_Cycle_Processing.ipynb) 
 
-#### 3. Signal Isolation
+####[3. Signal Isolation](notebooks/3_Signal_Isolation.ipynb)
 
-#### 4. Segmentation
+####[4. Segmentation](notebooks/4_Segmentation.ipynb)
 
-#### 5. Pixel Clustering
+####[5. Pixel Clustering](notebooks/5_Cluster_Pixels.ipynb)
 
-#### 6. Cell Clustering
+####[6. Cell Clustering](notebooks/6_Cluster_Cells.ipynbb)
