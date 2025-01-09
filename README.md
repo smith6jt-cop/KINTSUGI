@@ -56,22 +56,22 @@ Multiplex image processing for challenging datasets with a focus on user integra
   ```
   mamba activate KINTSUGI
   ```
-  It is recommended to use VS Code to run the notebooks. Download and install VS Code https://code.visualstudio.com/.
+  It is recommended to use VS Code to run the notebooks. Download and install VS Code [https://code.visualstudio.com/](https://code.visualstudio.com/).
 
 #### 3. Download files
   Download the following zip files and extract them to KINTSUGI folder:
   
-  Java: https://www.oracle.com/java/technologies/downloads.
+  Java: [https://www.oracle.com/java/technologies/downloads](https://www.oracle.com/java/technologies/downloads).
   
-  Maven: https://maven.apache.org/download.cgi.
+  Maven: [https://maven.apache.org/download.cgi](https://maven.apache.org/download.cgi).
   
-  PyVips: https://github.com/libvips/libvips/releases.
+  PyVips: [https://github.com/libvips/libvips/releases](https://github.com/libvips/libvips/releases).
 
 #### 4. Copy/move raw image data
 
   Create a folder in the KINTSUGI folder called “data”.
   
-  If downloading test data use this link: src_CX_19-004_SP_CC2-B28.
+  If downloading test data use this link: [src_CX_19-004_SP_CC2-B28](https://uflorida-my.sharepoint.com/:f:/g/personal/smith6jt_ufl_edu1/Er5ui-wFA6BNnmgj9N1hPAsBYQaiKfSQa2do_lUMhQdaGg?e=5Uny95).
   
   Move all image data to [your user folder]\KINTSUGI\data.
 
@@ -80,9 +80,9 @@ Multiplex image processing for challenging datasets with a focus on user integra
 
 
 ### Notebooks
-#### 1. Parameter tuning/testing 
+[1. Parameter tuning/testing](notebooks/1_Single_Channel_Eval.ipynb) 
 
-#### 2. Batch processing
+[2. Batch processing](notebooks/2_Cycle_Processing.ipynb) 
 
 #### 3. Signal Isolation
 
