@@ -6,11 +6,11 @@ Multiplex image processing for challenging datasets with a focus on user integra
   
 ## Table of Contents
 
-  - [Installation Steps.](installation-steps)
-    - [1. Download miniforge](1.-download-miniforge)
-    - [2. Create mamba environment](2.-create-mamba-environment)
-    - [3. Download files](3.-download-files)
-    - [4. Copy/move raw image data](4.-copy/move-raw-image-data)
+  - [Installation Steps](#installation-steps)
+    - [1. Download miniforge](#1.-download-miniforge)
+    - [2. Create mamba environment](#2.-create-mamba-environment)
+    - [3. Download files](#3.-download-files)
+    - [4. Copy/move raw image data](#4.-copy/move-raw-image-data)
   - [Notebooks](#notebooks)
     - [1. Parameter tuning/testing](#1.-parameter-tuning/testing)
     - [2. Batch processing](#2.-batch-processing)
@@ -80,14 +80,14 @@ Multiplex image processing for challenging datasets with a focus on user integra
 
 
 ### Notebooks
-####[1. Parameter tuning/testing](notebooks/1_Single_Channel_Eval.ipynb) 
+[1. Parameter tuning/testing](notebooks/1_Single_Channel_Eval.ipynb) 
 
-####[2. Batch processing](notebooks/2_Cycle_Processing.ipynb) 
+[2. Batch processing](notebooks/2_Cycle_Processing.ipynb) 
 
-####[3. Signal Isolation](notebooks/3_Signal_Isolation.ipynb)
+[3. Signal Isolation](notebooks/3_Signal_Isolation.ipynb)
 
-####[4. Segmentation](notebooks/4_Segmentation.ipynb)
+[4. Segmentation](notebooks/4_Segmentation.ipynb)
 
-####[5. Pixel Clustering](notebooks/5_Cluster_Pixels.ipynb)
+[5. Pixel Clustering](notebooks/5_Cluster_Pixels.ipynb)
 
-####[6. Cell Clustering](notebooks/6_Cluster_Cells.ipynbb)
+[6. Cell Clustering](notebooks/6_Cluster_Cells.ipynbb)
