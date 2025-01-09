@@ -55,14 +55,14 @@ Multiplex image processing for challenging datasets with a focus on user integra
 #### 3. Download files
   Download the following zip files and extract them to KINTSUGI folder:
   
-  Java: https://www.oracle.com/java/technologies/downloads
-  Maven: https://maven.apache.org/download.cgi
-  PyVips: https://github.com/libvips/libvips/releases
+  Java: https://www.oracle.com/java/technologies/downloads.
+  Maven: https://maven.apache.org/download.cgi.
+  PyVips: https://github.com/libvips/libvips/releases.
 
 #### 4. Copy/move raw image data
-  Create a folder in the KINTSUGI folder called “data”
-  If downloading test data use this link: src_CX_19-004_SP_CC2-B28
-  Move all image data to [your user folder]\KINTSUGI\data
+  Create a folder in the KINTSUGI folder called “data”.
+  If downloading test data use this link: src_CX_19-004_SP_CC2-B28.
+  Move all image data to [your user folder]\KINTSUGI\data.
 
 
 <div>
