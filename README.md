@@ -19,22 +19,40 @@ Multiplex image processing for challenging datasets with a focus on user integra
 
 ### Installation Steps
 #### 1. Prepare environment 
-  Download and install environment management software
-  Download miniforge: https://github.com/conda-forge/miniforge
-  Follow installation instructions for your OS
+  Download and install environment management software.
+  
+  Download miniforge: https://github.com/conda-forge/miniforge.
+  
+  Follow installation instructions for your OS.
 
 #### 2. Create mamba environment
-Launch miniforge as administrator (if possible).  You will be in the default “base” environment.
+Launch miniforge as administrator (if possible). 
+
+You will be in the default “base” environment.
+
 If Windows OS, change directory to your user folder by entering without the quotes: 
 ```sh
 cd C:\Users\[your user name]\
 ```
-Now enter: 
+To download the code and associated files enter: 
 ```
 git clone https://github.com/smith6jt-cop/KINTSUGI.git
 ```
-which will download the code and associated files.
+Change directory to enter the folder just downloaded 
+```
+cd KINTSUGI
+```
+Create the environment by entering:
+```
+conda env create -f environment.yml
+```
+The downloading and installation of the packages will take several minutes depending on available computing resources and network speed.
+Activate the environment by entering:
+```
+mamba activate KINTSUGI
+```
 
+<div>
 
 
 ### Notebooks
