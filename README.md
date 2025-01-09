@@ -7,17 +7,17 @@ Multiplex image processing for challenging datasets with a focus on user integra
 ## Table of Contents
 
   - [Installation Steps](#installation-steps)
-    - [1. Download miniforge](#1.-download-miniforge)
-    - [2. Create mamba environment](#2.-create-mamba-environment)
-    - [3. Download files](#3.-download-files)
-    - [4. Copy/move raw image data](#4.-copy/move-raw-image-data)
+    - [1. Download miniforge](#1-download-miniforge)
+    - [2. Create mamba environment](#2-create-mamba-environment)
+    - [3. Download files](#3-download-files)
+    - [4. Copy/move raw image data](#4-copy/move-raw-image-data)
   - [Notebooks](#notebooks)
-    - [1. Parameter tuning/testing](#1.-parameter-tuning/testing)
-    - [2. Batch processing](#2.-batch-processing)
-    - [3. Signal Isolation](#3.-signal-isolation)
-    - [4. Segmentation](#4.-segmentation)
-    - [5. Pixel Clustering](#5.-pixel-clustering)
-    - [6. Cell Clustering](#5.-cell-clustering)
+    - [1. Parameter tuning/testing](#1-parameter-tuning/testing)
+    - [2. Batch processing](#2-batch-processing)
+    - [3. Signal Isolation](#3-signal-isolation)
+    - [4. Segmentation](#4-segmentation)
+    - [5. Pixel Clustering](#5-pixel-clustering)
+    - [6. Cell Clustering](#5-cell-clustering)
 
 ### Installation Steps
 
