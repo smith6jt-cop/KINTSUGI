@@ -4,27 +4,27 @@ Multiplex image processing for challenging datasets with a focus on user integra
 
 <div>
   
-Full documentation for the project can be found
-
 ## Table of Contents
-- [Pipeline Flowchart](#pipeline-steps)
 
   - [Notebooks](#notebooks)
     - [1. Parameter tuning/testing](#1.-parameter-tuning/testing)
     - [2. Batch processing](#2.-batch-processing)
-    - [3. Cell clustering with Pixie]
-    - [4. Post clustering tasks]
-    - [5. Spatial analysis]
+    - [3. Signal Isolation](#3.-signal-isolation)
+    - [4. Segmentation](#4.-segmentation)
+    - [5. Pixel Clustering](#5.-pixel-clustering)
+    - [6. Cell Clustering](#5.-cell-clustering)
   - [Installation Steps.]
-    - [Download the Repo]
-    - [Setting up Docker]
-    - [Running on Windows]
-    - [Using the Repository (Running the Docker)]
-
-
-## Pipeline Steps
+    - [Prepare environment]
 
 ### Notebooks
 #### 1. Parameter tuning/testing 
 
 #### 2. Batch processing
+
+#### 3. Signal Isolation
+
+#### 4. Segmentation
+
+#### 5. Pixel Clustering
+
+#### 6. Cell Clustering
