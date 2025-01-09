@@ -22,58 +22,46 @@ Multiplex image processing for challenging datasets with a focus on user integra
 ### Installation Steps
 
 #### 1. Download miniforge 
-
-  Download and install environment management software.
-  
-  Download miniforge: https://github.com/conda-forge/miniforge.
-  
-  Follow installation instructions for your OS.
+Download and install environment management software.
+Download miniforge: https://github.com/conda-forge/miniforge.
+Follow installation instructions for your OS.
 
 #### 2. Create mamba environment
-
-  Launch miniforge as administrator (if possible). 
-  
-  You will be in the default “base” environment.
-
-  If Windows OS, change directory to your user folder by entering without the quotes: 
-  ```sh
-  cd C:\Users\[your user name]\
-  ```
-  To download the code and associated files enter: 
-  ```
-  git clone https://github.com/smith6jt-cop/KINTSUGI.git
-  ```
-  Change directory to enter the folder just downloaded 
-  ```
-  cd KINTSUGI
-  ```
-  Create the environment by entering:
-  ```
-  conda env create -f environment.yml
-  ```
-  The downloading and installation of the packages will take several minutes depending on available computing resources and network speed.
-  Activate the environment by entering:
-  ```
-  mamba activate KINTSUGI
-  ```
-  It is recommended to use VS Code to run the notebooks. Download and install VS Code [https://code.visualstudio.com/](https://code.visualstudio.com/).
+Launch miniforge as administrator (if possible). 
+You will be in the default “base” environment.
+If Windows OS, change directory to your user folder by entering without the quotes: 
+```sh
+cd C:\Users\[your user name]\
+```
+To download the code and associated files enter: 
+```
+git clone https://github.com/smith6jt-cop/KINTSUGI.git
+```
+Change directory to enter the folder just downloaded 
+```
+cd KINTSUGI
+```
+Create the environment by entering:
+```
+conda env create -f environment.yml
+```
+The downloading and installation of the packages will take several minutes depending on available computing resources and network speed.
+Activate the environment by entering:
+```
+mamba activate KINTSUGI
+```
+It is recommended to use VS Code to run the notebooks. Download and install VS Code [https://code.visualstudio.com/](https://code.visualstudio.com/).
 
 #### 3. Download files
-  Download the following zip files and extract them to KINTSUGI folder:
-  
-  Java: [https://www.oracle.com/java/technologies/downloads](https://www.oracle.com/java/technologies/downloads).
-  
-  Maven: [https://maven.apache.org/download.cgi](https://maven.apache.org/download.cgi).
-  
-  PyVips: [https://github.com/libvips/libvips/releases](https://github.com/libvips/libvips/releases).
+Download the following zip files and extract them to KINTSUGI folder:
+Java: [https://www.oracle.com/java/technologies/downloads](https://www.oracle.com/java/technologies/downloads).
+Maven: [https://maven.apache.org/download.cgi](https://maven.apache.org/download.cgi).
+PyVips: [https://github.com/libvips/libvips/releases](https://github.com/libvips/libvips/releases).
 
 #### 4. Copy/move raw image data
-
-  Create a folder in the KINTSUGI folder called “data”.
-  
-  If downloading test data use this link: [src_CX_19-004_SP_CC2-B28](https://uflorida-my.sharepoint.com/:f:/g/personal/smith6jt_ufl_edu1/Er5ui-wFA6BNnmgj9N1hPAsBYQaiKfSQa2do_lUMhQdaGg?e=5Uny95).
-  
-  Move all image data to [your user folder]\KINTSUGI\data.
+Create a folder in the KINTSUGI folder called “data”.
+If downloading test data use this link: [src_CX_19-004_SP_CC2-B28](https://uflorida-my.sharepoint.com/:f:/g/personal/smith6jt_ufl_edu1/Er5ui-wFA6BNnmgj9N1hPAsBYQaiKfSQa2do_lUMhQdaGg?e=5Uny95).
+Move all image data to [your user folder]\KINTSUGI\data.
 
 
 <div>
