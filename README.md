@@ -7,7 +7,8 @@ Multiplex image processing for challenging datasets with a focus on user integra
 ## Table of Contents
 
   - [Installation Steps.](installation-steps)
-    - [Prepare environment](prepare-environment)
+    - [1. Prepare environment](1.-prepare-environment)
+    - [2. Create mamba environment](2.-create-mamba-environment)
   - [Notebooks](#notebooks)
     - [1. Parameter tuning/testing](#1.-parameter-tuning/testing)
     - [2. Batch processing](#2.-batch-processing)
