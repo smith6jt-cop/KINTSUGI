@@ -37,7 +37,11 @@ If Windows OS, change directory to your user folder by entering without the quot
 ```sh
 cd C:\Users\[your user name]\
 ```
-For Linux OS, open a terminal.
+For Linux OS, open a terminal and enter:
+```
+source "${HOME}/miniforge3/etc/profile.d/mamba.sh"
+mamba activate
+```
 
 To download the code and associated files enter: 
 ```
