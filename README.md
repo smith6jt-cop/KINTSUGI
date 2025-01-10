@@ -37,6 +37,8 @@ If Windows OS, change directory to your user folder by entering without the quot
 ```sh
 cd C:\Users\[your user name]\
 ```
+For Linux OS, open a terminal.
+
 To download the code and associated files enter: 
 ```
 git clone https://github.com/smith6jt-cop/KINTSUGI.git
@@ -45,9 +47,13 @@ Change directory to enter the folder just downloaded
 ```
 cd KINTSUGI
 ```
-Create the environment by entering:
+For Windows OS, create the environment by entering:
 ```
 conda env create -f environment.yml
+```
+For Windows OS, create the environment by entering:
+```
+conda env create -f environment_linux.yml
 ```
 The downloading and installation of the packages will take several minutes depending on available computing resources and network speed.
 
