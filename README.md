@@ -40,6 +40,7 @@ cd C:\Users\[your user name]\
 For Linux OS, open a terminal and enter:
 ```
 source "${HOME}/miniforge3/etc/profile.d/mamba.sh"
+source "${HOME}/miniforge3/etc/profile.d/conda.sh"
 mamba activate
 ```
 
