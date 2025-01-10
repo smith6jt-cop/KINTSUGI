@@ -49,11 +49,11 @@ cd KINTSUGI
 ```
 For Windows OS, create the environment by entering:
 ```
-conda env create -f environment.yml
+mamba env create -f environment.yml
 ```
 For Windows OS, create the environment by entering:
 ```
-conda env create -f environment_linux.yml
+mamba env create -f environment_linux.yml
 ```
 The downloading and installation of the packages will take several minutes depending on available computing resources and network speed.
 
