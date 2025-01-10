@@ -77,6 +77,10 @@ Maven: [https://maven.apache.org/download.cgi](https://maven.apache.org/download
 
 PyVips: [https://github.com/libvips/libvips/releases](https://github.com/libvips/libvips/releases).
 
+FIJI/ImageJ: [https://imagej.net/software/fiji/downloads](https://imagej.net/software/fiji/downloads)
+
+You will need to add the following plugins: BigDataProcessor, BigStitcher, BioFormats, clij, clij2
+
 #### 4. Copy/move raw image data
 Create a folder in the KINTSUGI folder called “data”.
 
