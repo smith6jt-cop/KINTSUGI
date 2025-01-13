@@ -37,6 +37,13 @@ If Windows OS, change directory to your user folder by entering without the quot
 ```sh
 cd C:\Users\[your user name]\
 ```
+For Linux OS, open a terminal and enter:
+```
+source "${HOME}/miniforge3/etc/profile.d/mamba.sh"
+source "${HOME}/miniforge3/etc/profile.d/conda.sh"
+mamba activate
+```
+
 To download the code and associated files enter: 
 ```
 git clone https://github.com/smith6jt-cop/KINTSUGI.git
@@ -45,9 +52,13 @@ Change directory to enter the folder just downloaded
 ```
 cd KINTSUGI
 ```
-Create the environment by entering:
+For Windows OS, create the environment by entering:
 ```
-conda env create -f environment.yml
+mamba env create -f environment.yml
+```
+For Windows OS, create the environment by entering:
+```
+mamba env create -f environment_linux.yml
 ```
 The downloading and installation of the packages will take several minutes depending on available computing resources and network speed.
 
@@ -65,6 +76,10 @@ Java: [https://www.oracle.com/java/technologies/downloads](https://www.oracle.co
 Maven: [https://maven.apache.org/download.cgi](https://maven.apache.org/download.cgi).
 
 PyVips: [https://github.com/libvips/libvips/releases](https://github.com/libvips/libvips/releases).
+
+FIJI/ImageJ: [https://imagej.net/software/fiji/downloads](https://imagej.net/software/fiji/downloads)
+
+You will need to add the following plugins: BigDataProcessor, BigStitcher, BioFormats, clij, clij2
 
 #### 4. Copy/move raw image data
 Create a folder in the KINTSUGI folder called “data”.
