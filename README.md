@@ -56,7 +56,7 @@ For Windows OS, create the environment by entering:
 ```
 mamba env create -f environment.yml
 ```
-For Windows OS, create the environment by entering:
+For Linux OS, create the environment by entering:
 ```
 mamba env create -f environment_linux.yml
 ```
