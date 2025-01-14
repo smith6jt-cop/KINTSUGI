@@ -121,7 +121,7 @@ def stitch_images(
     decrement_step: Float = -0.1,
     max_cores: int = NUM_THREADS//2,
     overlap_percentage: Optional[Float] = None,
-    use_gpu=True
+    use_gpu: bool = False
 ) -> Tuple[pd.DataFrame, dict]:
     """Compute image positions for stitching.
 
@@ -243,7 +243,7 @@ def stitch_images(
         with concurrent.futures.ProcessPoolExecutor(max_workers=max_cores) as executor:
             for direction in ["left", "top"]:
                 
-                futures = [executor.submit(process_image_pair, i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX) for i2, g in grid.iterrows()]
+                futures = [executor.submit(process_image_pair, i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX, use_gpu) for i2, g in grid.iterrows()]
 
                 for future in tqdm(concurrent.futures.as_completed(futures)):
                     # Free GPU memory after processing each image pair
@@ -316,7 +316,8 @@ def stitch_images(
 
     tree = compute_maximum_spanning_tree(grid)
     grid = compute_final_position(grid, tree)
-    cp.cuda.MemoryPool().free_all_blocks()
+    if use_gpu:
+        cp.cuda.MemoryPool().free_all_blocks()
    
     prop_dict = {
         "W": sizeY,
