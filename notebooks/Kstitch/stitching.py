@@ -60,7 +60,7 @@ class ElipticEnvelopPredictor:
         X = rng.normal(size=X.shape) * self.epsilon + X
         return ee.fit_predict(X) > 0
 
-def process_image_pair(i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX):
+def process_image_pair(i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX, use_gpu=True):
     
     # print("Processing", i2)
     i1 = g[direction]
@@ -70,12 +70,19 @@ def process_image_pair(i2, g, direction, images, position_initial_guess, overlap
     image1 = images[i1]
     image2 = images[i2]
 
-    # Move data to GPU and compute FFT
-    F1 = cp.fft.fft2(cp.asarray(image1))
-    F2 = cp.fft.fft2(cp.asarray(image2))
+    if use_gpu:
+        # Move data to GPU and compute FFT
+        F1 = cp.fft.fft2(cp.asarray(image1))
+        F2 = cp.fft.fft2(cp.asarray(image2))
+        # Compute PCM using Numba
+        PCM = pcm(cp.asnumpy(F1), cp.asnumpy(F2))
 
-    # Compute PCM using Numba
-    PCM = pcm(cp.asnumpy(F1), cp.asnumpy(F2))
+    else:
+        # Compute FFT on CPU
+        F1 = np.fft.fft2(image1)
+        F2 = np.fft.fft2(image2)
+        # Compute PCM using Numba
+        PCM = pcm(F1, F2)
 
     if position_initial_guess is not None:
         def get_lims(dimension, size):
@@ -113,7 +120,8 @@ def stitch_images(
     max_ncc_threshold: Float = -0.9,
     decrement_step: Float = -0.1,
     max_cores: int = NUM_THREADS//2,
-    overlap_percentage: Optional[Float] = None
+    overlap_percentage: Optional[Float] = None,
+    use_gpu=True
 ) -> Tuple[pd.DataFrame, dict]:
     """Compute image positions for stitching.
 
@@ -224,10 +232,10 @@ def stitch_images(
                     g[f"{dimension}_pos_init_guess"] - g2[f"{dimension}_pos_init_guess"]
                 )
 
-    ###### translationComputation ######
-    gpu_name = cp.cuda.runtime.getDeviceProperties(0)['name']
-    print(f"Using GPU: {gpu_name}")
-    cp.cuda.Device(0).use()
+    if use_gpu:
+        gpu_name = cp.cuda.runtime.getDeviceProperties(0)['name']
+        print(f"Using GPU: {gpu_name}")
+        cp.cuda.Device(0).use()
     for ncc_threshold in np.around(np.arange(initial_ncc_threshold, max_ncc_threshold, decrement_step), decimals=1):
         # print("Stitching in progress.  Enjoy a cold carbonated caffeinated drink.")
         
@@ -239,7 +247,8 @@ def stitch_images(
 
                 for future in tqdm(concurrent.futures.as_completed(futures)):
                     # Free GPU memory after processing each image pair
-                    cp.get_default_memory_pool().free_all_blocks()
+                    if use_gpu:
+                        cp.get_default_memory_pool().free_all_blocks()
                     result = future.result()
                     if result is not None:
                         i2, direction, max_peak = result
