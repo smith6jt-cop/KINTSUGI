@@ -1,6 +1,9 @@
 # KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing
 
-Multiplex image processing for challenging datasets with a focus on user integration rather than automation.
+<p align="center">
+  <img src="/docs/CD8_curtain.gif" alt="Description of the gif" style="float: right; margin-left: 20px;">
+  Multiplex image processing for challenging datasets with a focus on user integration rather than automation.
+</p>
 
 <div>
   
