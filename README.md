@@ -137,13 +137,13 @@ Move all image data to [your user folder]\KINTSUGI\data.
 
 Shoulders of giants we stand on:
 
-  For multiplex histology/imaging: Nolan lab
-  For illumination correction: Peng lab
-  For stitching: MIST, Fukai's m2stitch
-  For deconvolution: Becker's LsDeconv
-  For EDoF: Forster et al., Clij2
-  For registration: Gatenbee's VALIS
-  For segmentation: VanValen lab
-  For clustering: Angelo lab
-  For general processing: ImageJ/FIJI, pyImageJ, Haase's stackview
+  For multiplex histology/imaging: Nolan lab  
+  For illumination correction: Peng lab  
+  For stitching: MIST, Fukai's m2stitch  
+  For deconvolution: Becker's LsDeconv  
+  For EDoF: Forster et al., Clij2  
+  For registration: Gatenbee's VALIS  
+  For segmentation: VanValen lab  
+  For clustering: Angelo lab  
+  For general processing: ImageJ/FIJI, pyImageJ, Haase's stackview  
   Python, Jupyter, conda/mamba, Java, Maven, Linux, Windows, UF, NIH, HubMap, the power grid, the internet, the earth, gravity, the sun, oxygen, caffeine, love, neurons, neurotransmitters, water, and the unkown.
