@@ -2,7 +2,8 @@
 
 <p align="center">
   <img src="/docs/CD8_curtain.gif" alt="Description of the gif" style="float: right; margin-left: 20px;">
-  Multiplex image processing for challenging datasets with a focus on user integration rather than automation.
+    
+Multiplex image processing for challenging datasets with a focus on user integration rather than automation.
 </p>
 
 <div>
@@ -36,11 +37,12 @@ Launch miniforge as administrator (if possible).
 
 You will be in the default “base” environment.
 
-If Windows OS, change directory to your user folder by entering without the quotes: 
-```sh
-cd C:\Users\[your user name]\
+Change directory to your user folder: 
 ```
-For Linux OS, open a terminal and enter:
+cd C:\Users\[your user name]
+cd /home/[your user name]
+```
+For Linux OS, you may need to enter:
 ```
 source "${HOME}/miniforge3/etc/profile.d/mamba.sh"
 source "${HOME}/miniforge3/etc/profile.d/conda.sh"
