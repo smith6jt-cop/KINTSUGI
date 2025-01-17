@@ -146,4 +146,4 @@ Shoulders of giants we stand on:
 &emsp;For segmentation: VanValen lab  
 &emsp;For clustering: Angelo lab  
 &emsp;For general processing: ImageJ/FIJI, pyImageJ, Haase's stackview  
-&emsp;Python, Jupyter, conda/mamba, Java, Maven, Linux, Windows, UF, NIH, HubMap, the power grid, the internet, the earth, gravity, the sun, oxygen, caffeine, love, neurons, neurotransmitters, water, and the unkown.
+&emsp;Python, Jupyter, conda/mamba, Java, Maven, Linux, Windows, UF, UFDI, Maigan Brusko Lab, NIH, HubMap, the power grid, the internet, the earth, gravity, the sun, oxygen, caffeine, love, neurons, neurotransmitters, water, the truth and the unkown.
