@@ -1,0 +1,41 @@
+{
+    "editor.wordWrap": "on",
+    "type": "setting",
+    "settings": {
+      "terminal.integrated.defaultProfile.windows": "Command Prompt",
+      "terminal.integrated.defaultProfile.linux": "bash",
+      "terminal.integrated.profiles.windows": {
+      "Command Prompt": {
+        "path": "C:\\Windows\\System32\\cmd.exe",
+        "args": ["/K", "%userdir%\\miniforge3\\Scripts\\activate.bat"],
+        "icon": "terminal-cmd"
+      }
+      },
+      "terminal.integrated.profiles.linux": {
+      "bash": {
+        "path": "/bin/bash",
+        "args": ["-l"],
+        "icon": "terminal-bash"
+      }
+      }
+    },
+    "terminal.integrated.env.windows": {
+      "PATH": [
+        "${env:PATH}",
+        "%userdir%\\KINTSUGI\\miniforge3\\Scripts",
+        "%userdir%\\KINTSUGI\\miniforge3\\Library\\bin",
+        "%userdir%\\KINTSUGI\\jdk-21_windows-x64_bin\\jdk-21.0.5\\bin",
+        "%userdir%\\Fiji.app",
+        "%userdir%\\KINTSUGI\\apache-maven-3.9.9-bin\\apache-maven\\src\\bin"
+      ]
+    },
+    "terminal.integrated.env.linux": {
+      "PATH": [
+        "${env:PATH}",
+        "$HOME/KINTSUGI/jdk-21/bin",
+        "$HOME/Fiji.app",
+        "$HOME/KINTSUGI/apache-maven-3.9.9/bin"
+      ]
+    },
+    "python.envFile": "${workspaceFolder}/.env"
+}
