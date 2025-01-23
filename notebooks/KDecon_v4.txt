@@ -1,0 +1,62 @@
+ 
+KDecon v4 - KINTSUGI
+ 
+CPU supported with 54.64 GB memory
+CPU: 54.64 GB available
+GPU supported with 20.24 GB memory
+GPU: NVIDIA RTX A4500
+Available devices and their memory:
+Using GPU with 10.12 GB of memory
+Image dimensions: x=9962 y=9484 z=17 blocksize8192
+Total pixels: 6.42 GB Max block size: 8.10 GB
+deconvolution split into 2 x 1 x 1 blocks.
+calculating PSF...
+ok
+x 9962 y 9484 z 17
+Processing 2 blocks...
+loading block 1 from 2
+Processing block 1 from 2
+iteration: 1 delta: 0
+iteration: 2 delta: 39.5
+iteration: 3 delta: 24.1
+iteration: 4 delta: 18.9
+iteration: 5 delta: 15.7
+iteration: 6 delta: 13.3
+iteration: 7 delta: 11.2
+iteration: 8 delta: 9.57
+iteration: 9 delta: 8.24
+iteration: 10 delta: 7.21
+iteration: 11 delta: 6.42
+iteration: 12 delta: 5.82
+iteration: 13 delta: 5.35
+iteration: 14 delta: 4.98
+stop criterion reached. Finishing iterations.
+Saving block 1 from 2
+Block 1/2 complete (50.0%)
+loading block 2 from 2
+Processing block 2 from 2
+iteration: 1 delta: 0
+iteration: 2 delta: 39.9
+iteration: 3 delta: 24.4
+iteration: 4 delta: 19.3
+iteration: 5 delta: 16.2
+iteration: 6 delta: 13.7
+iteration: 7 delta: 11.7
+iteration: 8 delta: 9.94
+iteration: 9 delta: 8.53
+iteration: 10 delta: 7.42
+iteration: 11 delta: 6.55
+iteration: 12 delta: 5.88
+iteration: 13 delta: 5.35
+iteration: 14 delta: 4.94
+stop criterion reached. Finishing iterations.
+Saving block 2 from 2
+Block 2/2 complete (100.0%)
+calculating histogram...
+Creating results folder C:\Users\smith6jt\KINTSUGI\data\1904_CC2B_BaSiC_Stitched\cyc01\CH1\deconvolved
+mounting layer 1 from 1
+saving images...
+generating info file...
+deconvolution of: C:\Users\smith6jt\KINTSUGI\data\1904_CC2B_BaSiC_Stitched\cyc01\CH1 finished successfully
+elapsed time: 00:07
+----------------------------------------------------------------------------------------
