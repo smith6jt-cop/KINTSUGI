@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"terminal.integrated.env.windows": {
+			"PATH": "${env:PATH};C:\\path\\to\\jdk-21_windows-x64_bin\\jdk-21.0.5\\bin;C:\\path\\to\\Fiji.app"
+		}
+	}
+}
