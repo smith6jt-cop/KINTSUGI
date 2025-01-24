@@ -1,0 +1,47 @@
+ 
+KDecon v4 - KINTSUGI
+ 
+CPU supported with 49.80 GB memory
+CPU: 49.80 GB available
+GPU supported with 20.24 GB memory
+GPU: NVIDIA RTX A4500
+Available devices and their memory:
+Using GPU with 14.17 GB of memory
+Image dimensions: x=9964 y=9486 z=17 blocksize3072
+Total pixels: 6.43 GB Max block size: 11.34 GB
+block_x 4 block_y 4 block_z 1
+deconvolution split into 4 x 4 x 1 blocks.
+calculating PSF...
+ok
+x 9964 y 9486 z 17
+Processing 16 blocks...
+loading block 1 from 16
+Processing block 1 from 16
+iteration: 1 delta: 0
+iteration: 2 delta: 28.7
+iteration: 3 delta: 14.5
+iteration: 4 delta: 9.7
+iteration: 5 delta: 7.46
+iteration: 6 delta: 6.3
+iteration: 7 delta: 5.7
+iteration: 8 delta: 5.43
+iteration: 9 delta: 5.35
+iteration: 10 delta: 5.39
+iteration: 11 delta: 5.48
+iteration: 12 delta: 5.6
+iteration: 13 delta: 5.72
+iteration: 14 delta: 5.83
+iteration: 15 delta: 5.93
+iteration: 16 delta: 6
+iteration: 17 delta: 6.05
+iteration: 18 delta: 6.07
+iteration: 19 delta: 6.05
+iteration: 20 delta: 6.01
+iteration: 21 delta: 5.94
+iteration: 22 delta: 5.83
+iteration: 23 delta: 5.71
+iteration: 24 delta: 5.55
+iteration: 25 delta: 5.38
+Saving block 1 from 16
+Block 1/16 complete (6.2%)
+loading block 2 from 16
