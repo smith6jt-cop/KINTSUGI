@@ -11,12 +11,10 @@
 		"ms-toolsai.jupyter-keymap",
 		"ms-toolsai.jupyter-renderers",
 		"ms-toolsai.vscode-jupyter-slideshow",
-		"mathworks.language-matlab",
 		"ms-python.vscode-pylance",
 		"ms-python.python",
 		"ms-python.debugpy",
-		"ms-vscode.remote-repositories",
-		"ms-toolsai.datawrangler"
+		"ms-vscode.remote-repositories"
 		
 	],
 	// List of extensions recommended by VS Code that should not be recommended for users of this workspace.
