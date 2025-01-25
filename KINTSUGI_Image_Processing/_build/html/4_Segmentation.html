@@ -1,0 +1,946 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing &#8212; KINTSUGI</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=a3416100" />
+    <link rel="stylesheet" type="text/css" href="_static/togglebutton.css?v=13237357" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css?v=be8a1c11" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-thebe.css?v=4fa983c6" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="_static/togglebutton.js?v=4a39c7ea"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="_static/design-tabs.js?v=f930bc37"></script>
+    <script>const THEBE_JS_URL = "https://unpkg.com/thebe@0.8.2/lib/index.js"; const thebe_selector = ".thebe,.cell"; const thebe_selector_input = "pre"; const thebe_selector_output = ".output, .cell_output"</script>
+    <script async="async" src="_static/sphinx-thebe.js?v=c100c467"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script>const THEBE_JS_URL = "https://unpkg.com/thebe@0.8.2/lib/index.js"; const thebe_selector = ".thebe,.cell"; const thebe_selector_input = "pre"; const thebe_selector_output = ".output, .cell_output"</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = '4_Segmentation';</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search this book..."
+         aria-label="Search this book..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+        
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="README.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="_static/logo.png" class="logo__image only-light" alt="KINTSUGI - Home"/>
+    <img src="_static/logo.png" class="logo__image only-dark pst-js-only" alt="KINTSUGI - Home"/>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        
+        <ul class="nav bd-sidenav bd-sidenav__home-link">
+            <li class="toctree-l1">
+                <a class="reference internal" href="README.html">
+                    KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing
+                </a>
+            </li>
+        </ul>
+        <ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="Installation%20Steps.html">Installation Steps</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Notebooks.html">Notebooks</a></li>
+<li class="toctree-l1"><a class="reference internal" href="Acknowledgements.html">Acknowledgements</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/executablebooks/KINTSUGI" target="_blank"
+   class="btn btn-sm btn-source-repository-button dropdown-item"
+   title="Source repository"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+<span class="btn__text-container">Repository</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/executablebooks/KINTSUGI/issues/new?title=Issue%20on%20page%20%2F4_Segmentation.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/4_Segmentation.ipynb" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.ipynb</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#in-the-following-notebook-you-will-use-the-mesmer-algorithm-to-perfom-cell-and-nuclear-segmentation">In the following notebook you will use the Mesmer algorithm to perfom cell and nuclear segmentation.</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#import-packages">1. Import packages.</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#this-must-be-done-every-time-the-notebook-is-started-or-restarted">*This must be done every time the notebook is started or restarted.</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#define-directory-paths">2. Define directory paths.</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">*This must be done every time the notebook is started or restarted.</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#this-cell-only-needs-to-be-run-once">2.1 This cell only needs to be run once.</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prepare-data-for-mesmer">3. Prepare Data for Mesmer</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tile-images-to-size-below-mesmer-maximum">3.1 Tile Images to Size Below Mesmer Maximum.</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#define-nuclear-and-membrane-markers">3.2 Define nuclear and membrane markers</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#define-dataset">3.3 Define dataset</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#upload-files-to-deepcell">4. Upload files to Deepcell</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#inspect-and-save-registration-results">5. Inspect and save registration results</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#visualize-and-save-stitched-segmentation-masks">6. Visualize and save stitched segmentation masks</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#extract-segmentation-data">7. Extract segmentation data</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="kintsugi-knowledge-integration-with-new-technologies-for-simplified-user-guided-image-processing">
+<h1>KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing<a class="headerlink" href="#kintsugi-knowledge-integration-with-new-technologies-for-simplified-user-guided-image-processing" title="Link to this heading">#</a></h1>
+<section id="in-the-following-notebook-you-will-use-the-mesmer-algorithm-to-perfom-cell-and-nuclear-segmentation">
+<h2>In the following notebook you will use the Mesmer algorithm to perfom cell and nuclear segmentation.<a class="headerlink" href="#in-the-following-notebook-you-will-use-the-mesmer-algorithm-to-perfom-cell-and-nuclear-segmentation" title="Link to this heading">#</a></h2>
+</section>
+<section id="import-packages">
+<h2>1. Import packages.<a class="headerlink" href="#import-packages" title="Link to this heading">#</a></h2>
+<section id="this-must-be-done-every-time-the-notebook-is-started-or-restarted">
+<h3>*This must be done every time the notebook is started or restarted.<a class="headerlink" href="#this-must-be-done-every-time-the-notebook-is-started-or-restarted" title="Link to this heading">#</a></h3>
+<div class="cell tag_import docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># import required packages</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span><span class="s2">&quot;ignore&quot;</span><span class="p">)</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">PIL</span><span class="w"> </span><span class="kn">import</span> <span class="n">Image</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">matplotlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">pyplot</span> <span class="k">as</span> <span class="n">plt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">alpineer</span><span class="w"> </span><span class="kn">import</span> <span class="n">io_utils</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">skimage</span><span class="w"> </span><span class="kn">import</span> <span class="n">io</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ark.segmentation</span><span class="w"> </span><span class="kn">import</span> <span class="n">marker_quantification</span><span class="p">,</span> <span class="n">segmentation_utils</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">ark.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">deepcell_service_utils</span><span class="p">,</span> <span class="n">plot_utils</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output traceback highlight-ipythontb notranslate"><div class="highlight"><pre><span></span><span class="gt">---------------------------------------------------------------------------</span>
+<span class="ne">ModuleNotFoundError</span><span class="g g-Whitespace">                       </span>Traceback (most recent call last)
+<span class="n">Cell</span> <span class="n">In</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">line</span> <span class="mi">5</span>
+<span class="g g-Whitespace">      </span><span class="mi">3</span> <span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+<span class="g g-Whitespace">      </span><span class="mi">4</span> <span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span><span class="s2">&quot;ignore&quot;</span><span class="p">)</span>
+<span class="ne">----&gt; </span><span class="mi">5</span> <span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="g g-Whitespace">      </span><span class="mi">6</span> <span class="kn">from</span><span class="w"> </span><span class="nn">PIL</span><span class="w"> </span><span class="kn">import</span> <span class="n">Image</span>
+<span class="g g-Whitespace">      </span><span class="mi">7</span> <span class="kn">from</span><span class="w"> </span><span class="nn">matplotlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">pyplot</span> <span class="k">as</span> <span class="n">plt</span>
+
+<span class="ne">ModuleNotFoundError</span>: No module named &#39;numpy&#39;
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="define-directory-paths">
+<h2>2. Define directory paths.<a class="headerlink" href="#define-directory-paths" title="Link to this heading">#</a></h2>
+<section id="id1">
+<h3>*This must be done every time the notebook is started or restarted.<a class="headerlink" href="#id1" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">proc_dir</span> <span class="o">=</span> <span class="s2">&quot;C:/Users/smith6jt/KINTSUGI/data/1904_CC2B_Processed&quot;</span>
+<span class="n">base_dir</span> <span class="o">=</span> <span class="s2">&quot;C:/Users/smith6jt/KINTSUGI/data/1904_CC2B_Segmentation&quot;</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processed folder is </span><span class="si">{</span><span class="n">proc_dir</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Segmentation folder is </span><span class="si">{</span><span class="n">base_dir</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Processed folder is C:/Users/smith6jt/KINTSUGI/data/1904_CC2B_Processed.
+Segmentation folder is C:/Users/smith6jt/KINTSUGI/data/1904_CC2B_Segmentation.
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell tag_file_path docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># set up file paths</span>
+<span class="n">tiff_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="s2">&quot;image_data&quot;</span><span class="p">)</span>
+<span class="n">cell_table_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="s2">&quot;segmentation/cell_table&quot;</span><span class="p">)</span>
+<span class="n">deepcell_input_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="s2">&quot;segmentation/deepcell_input&quot;</span><span class="p">)</span>
+<span class="n">deepcell_output_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="s2">&quot;segmentation/deepcell_output&quot;</span><span class="p">)</span>
+<span class="n">deepcell_visualization_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="s2">&quot;segmentation/deepcell_visualization&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="this-cell-only-needs-to-be-run-once">
+<h3>2.1 This cell only needs to be run once.<a class="headerlink" href="#this-cell-only-needs-to-be-run-once" title="Link to this heading">#</a></h3>
+<div class="cell tag_create_dirs docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># create directories if do not exist</span>
+<span class="k">for</span> <span class="n">directory</span> <span class="ow">in</span> <span class="p">[</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">tiff_dir</span><span class="p">,</span> <span class="n">cell_table_dir</span><span class="p">,</span> <span class="n">deepcell_input_dir</span><span class="p">,</span> <span class="n">deepcell_output_dir</span><span class="p">,</span> <span class="n">deepcell_visualization_dir</span><span class="p">]:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">directory</span><span class="p">):</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">directory</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="prepare-data-for-mesmer">
+<h2>3. Prepare Data for Mesmer<a class="headerlink" href="#prepare-data-for-mesmer" title="Link to this heading">#</a></h2>
+<section id="tile-images-to-size-below-mesmer-maximum">
+<h3>3.1 Tile Images to Size Below Mesmer Maximum.<a class="headerlink" href="#tile-images-to-size-below-mesmer-maximum" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">tile</span><span class="p">(</span><span class="n">input_folder</span><span class="p">,</span> <span class="n">output_folder_base</span><span class="p">):</span>
+    
+    <span class="n">files</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">input_folder</span><span class="p">)</span>
+    <span class="n">filename</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">input_folder</span><span class="p">,</span> <span class="n">files</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">image</span> <span class="o">=</span> <span class="n">Image</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Using </span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s2"> for image dimensions.&quot;</span><span class="p">)</span>
+    <span class="n">img_width</span><span class="p">,</span> <span class="n">img_height</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">size</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Image width: </span><span class="si">{</span><span class="n">img_width</span><span class="si">}</span><span class="s2"> Image height: </span><span class="si">{</span><span class="n">img_height</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+    <span class="n">opt_tile_width</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">opt_tile_height</span> <span class="o">=</span> <span class="kc">None</span>
+    
+    <span class="n">tile_dim</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">1500</span><span class="p">,</span> <span class="mi">2041</span><span class="p">))</span>
+    <span class="k">for</span> <span class="n">tile_dim</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">tile_dim</span><span class="p">)):</span>
+        <span class="k">if</span> <span class="n">img_width</span> <span class="o">%</span> <span class="n">tile_dim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">opt_tile_width</span> <span class="o">=</span> <span class="n">tile_dim</span>            
+    <span class="k">if</span> <span class="n">opt_tile_width</span><span class="p">:</span>
+        <span class="n">num_tiles_width</span> <span class="o">=</span> <span class="n">img_width</span> <span class="o">//</span> <span class="n">opt_tile_width</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Number of tiles, width: </span><span class="si">{</span><span class="n">num_tiles_width</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">opt_tile_width</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">new_width</span><span class="o">=</span><span class="n">img_width</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;No optimal tile width between 1800-2040, finding optimal width to crop image.&quot;</span><span class="p">)</span>
+        <span class="n">new_width</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">img_width</span><span class="o">-</span><span class="mi">100</span><span class="p">,</span> <span class="n">img_width</span><span class="p">))</span>
+        <span class="k">for</span> <span class="n">new_width</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">new_width</span><span class="p">)):</span>
+            <span class="n">tile_dim</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">1800</span><span class="p">,</span> <span class="mi">2041</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">tile_dim</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">tile_dim</span><span class="p">)):</span>
+                <span class="k">if</span> <span class="n">new_width</span> <span class="o">%</span> <span class="n">tile_dim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">opt_tile_width</span> <span class="o">=</span> <span class="n">tile_dim</span>
+                    <span class="n">num_tiles_width</span> <span class="o">=</span> <span class="n">new_width</span> <span class="o">//</span> <span class="n">opt_tile_width</span>
+                    <span class="k">break</span>
+            <span class="k">if</span> <span class="n">opt_tile_width</span><span class="p">:</span>
+                <span class="k">break</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;New image width: </span><span class="si">{</span><span class="n">new_width</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Number of tiles, width: </span><span class="si">{</span><span class="n">num_tiles_width</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">opt_tile_width</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    
+       
+    <span class="n">tile_dim</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">1800</span><span class="p">,</span> <span class="mi">2041</span><span class="p">))</span>       
+    <span class="k">for</span> <span class="n">tile_dim</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">tile_dim</span><span class="p">)):</span>
+            <span class="k">if</span> <span class="n">img_height</span> <span class="o">%</span> <span class="n">tile_dim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">opt_tile_height</span> <span class="o">=</span> <span class="n">tile_dim</span>
+    <span class="k">if</span> <span class="n">opt_tile_height</span><span class="p">:</span>
+        <span class="n">num_tiles_height</span> <span class="o">=</span> <span class="n">img_height</span> <span class="o">//</span> <span class="n">opt_tile_height</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Number of tiles, height: </span><span class="si">{</span><span class="n">num_tiles_height</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">opt_tile_height</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">new_height</span><span class="o">=</span><span class="n">img_height</span>
+        
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;No optimal tile height between 1800-2040, finding optimal height to crop image.&quot;</span><span class="p">)</span>
+        <span class="n">new_height</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="n">img_height</span><span class="o">-</span><span class="mi">10</span><span class="p">,</span> <span class="n">img_height</span><span class="p">))</span>
+        <span class="k">for</span> <span class="n">new_height</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">new_height</span><span class="p">)):</span>
+            <span class="n">tile_dim</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">1800</span><span class="p">,</span> <span class="mi">2041</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">tile_dim</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="nb">reversed</span><span class="p">(</span><span class="n">tile_dim</span><span class="p">)):</span>
+                <span class="k">if</span> <span class="n">new_height</span> <span class="o">%</span> <span class="n">tile_dim</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">opt_tile_height</span> <span class="o">=</span> <span class="n">tile_dim</span>
+                    <span class="n">num_tiles_height</span> <span class="o">=</span> <span class="n">new_height</span> <span class="o">//</span> <span class="n">opt_tile_height</span>
+                    <span class="k">break</span>
+            <span class="k">if</span> <span class="n">opt_tile_height</span><span class="p">:</span>
+                <span class="k">break</span>
+                
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;New image height: </span><span class="si">{</span><span class="n">new_height</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Number of tiles, height: </span><span class="si">{</span><span class="n">num_tiles_height</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">opt_tile_height</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        
+    <span class="k">for</span> <span class="n">filename</span> <span class="ow">in</span> <span class="n">files</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">filename</span><span class="o">.</span><span class="n">endswith</span><span class="p">((</span><span class="s1">&#39;.tif&#39;</span><span class="p">)):</span>
+
+            <span class="n">image_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">input_folder</span><span class="p">,</span> <span class="n">filename</span><span class="p">)</span>
+            <span class="n">image</span> <span class="o">=</span> <span class="n">Image</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">image_path</span><span class="p">)</span>
+
+            <span class="n">tile_index</span> <span class="o">=</span> <span class="mi">0</span>
+
+            <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_tiles_width</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">y</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_tiles_height</span><span class="p">):</span>
+                
+                    <span class="n">left</span> <span class="o">=</span> <span class="n">x</span> <span class="o">*</span> <span class="n">opt_tile_width</span>
+                    <span class="n">upper</span> <span class="o">=</span> <span class="n">y</span> <span class="o">*</span> <span class="n">opt_tile_height</span>
+                    <span class="n">right</span> <span class="o">=</span> <span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">opt_tile_width</span> <span class="k">if</span> <span class="n">x</span> <span class="o">&lt;</span> <span class="n">num_tiles_width</span> <span class="k">else</span> <span class="n">new_width</span>
+                    <span class="n">lower</span> <span class="o">=</span> <span class="p">(</span><span class="n">y</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">opt_tile_height</span> <span class="k">if</span> <span class="n">y</span> <span class="o">&lt;</span> <span class="n">num_tiles_height</span> <span class="k">else</span> <span class="n">new_height</span>
+                    <span class="n">crop_box</span> <span class="o">=</span> <span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">upper</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">lower</span><span class="p">)</span>
+                    <span class="c1"># print(crop_box)</span>
+                    <span class="n">tile</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">crop</span><span class="p">(</span><span class="n">crop_box</span><span class="p">)</span>
+
+                    <span class="n">output_folder</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output_folder_base</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;fov</span><span class="si">{</span><span class="n">tile_index</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+                    <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">output_folder</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+                    <span class="n">tile_filename</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s2">&quot;</span>  
+                    <span class="n">tile</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">output_folder</span><span class="p">,</span> <span class="n">tile_filename</span><span class="p">))</span>
+
+                    <span class="n">tile_index</span> <span class="o">+=</span> <span class="mi">1</span>
+                    
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Image split into </span><span class="si">{</span><span class="n">tile_index</span><span class="si">}</span><span class="s2"> field of views.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">tile</span><span class="p">(</span><span class="n">proc_dir</span><span class="p">,</span> <span class="n">tiff_dir</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Using C:/Users/smith6jt/KINTSUGI/data/1904_CC2B_Processed\CD3e.tif for image dimensions.
+Image width: 9951 Image height: 9498
+No optimal tile width between 1800-2040, finding optimal width to crop image.
+New image width: 9950
+Number of tiles, width: 5 1990
+No optimal tile height between 1800-2040, finding optimal height to crop image.
+New image height: 9495
+Number of tiles, height: 5 1899
+Image split into 25 field of views.
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="define-nuclear-and-membrane-markers">
+<h3>3.2 Define nuclear and membrane markers<a class="headerlink" href="#define-nuclear-and-membrane-markers" title="Link to this heading">#</a></h3>
+<div class="cell tag_nuc_mem_set docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># nuclear channel name(s) (or nucs = None)</span>
+<span class="n">nucs</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;DAPI&#39;</span><span class="p">]</span>
+
+<span class="c1"># membrane channel name(s) (or mems = None)</span>
+<span class="n">mems</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;CD4&#39;</span><span class="p">,</span> <span class="s1">&#39;CD8&#39;</span><span class="p">]</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="define-dataset">
+<h3>3.3 Define dataset<a class="headerlink" href="#define-dataset" title="Link to this heading">#</a></h3>
+<p>Compute and filter fov paths</p>
+<div class="cell tag_load_fovs docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># either get all fovs in the folder...</span>
+<span class="n">fovs</span> <span class="o">=</span> <span class="n">io_utils</span><span class="o">.</span><span class="n">list_folders</span><span class="p">(</span><span class="n">tiff_dir</span><span class="p">)</span>
+
+<span class="c1"># ... or optionally, select a specific set of fovs manually</span>
+<span class="c1"># fovs = [&quot;fov0&quot;, &quot;fov1&quot;]</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Generate and save deepcell input tiffs.</p>
+<div class="cell tag_gen_input docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">deepcell_service_utils</span><span class="o">.</span><span class="n">generate_deepcell_input</span><span class="p">(</span>
+    <span class="n">deepcell_input_dir</span><span class="p">,</span>
+    <span class="n">tiff_dir</span><span class="p">,</span>
+    <span class="n">nucs</span><span class="p">,</span>
+    <span class="n">mems</span><span class="p">,</span>
+    <span class="n">fovs</span><span class="p">,</span>
+    <span class="n">img_sub_folder</span><span class="o">=</span><span class="kc">None</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Mesmer was trained on data acquired at 20X resolution. If your image data was acquired at a different resolution, you will get the best performance by rescaling. The rescale factor will increase or decrease the image resolution by the value you provide. For example, if you data was acquired at 10X, use a <code class="docutils literal notranslate"><span class="pre">rescale_factor</span></code> of 2. If your data was acquired at 60X resolution, use a <code class="docutils literal notranslate"><span class="pre">rescale_factor</span></code> of 0.33.</p>
+<div class="cell tag_seg_scale_set docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">rescale_factor</span> <span class="o">=</span> <span class="mi">1</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="upload-files-to-deepcell">
+<h2>4. Upload files to Deepcell<a class="headerlink" href="#upload-files-to-deepcell" title="Link to this heading">#</a></h2>
+<p>Deepcell input images will be zipped into a single file, uploaded to <a class="reference external" href="https://deepcell.org">deepcell.org</a>,</p>
+<p>and the output will be downloaded to the deepcell output directory.</p>
+<div class="cell tag_create_output docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">deepcell_service_utils</span><span class="o">.</span><span class="n">create_deepcell_output</span><span class="p">(</span><span class="n">deepcell_input_dir</span><span class="p">,</span> <span class="n">deepcell_output_dir</span><span class="p">,</span> <span class="n">fovs</span><span class="o">=</span><span class="n">fovs</span><span class="p">,</span> <span class="n">scale</span><span class="o">=</span><span class="n">rescale_factor</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">3600</span><span class="p">,</span> <span class="n">zip_size</span><span class="o">=</span><span class="mi">20</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Processing tiffs in 2 batches...
+Segmentation progress for batch_1:
+</pre></div>
+</div>
+<script type="application/vnd.jupyter.widget-view+json">{"model_id": "76bf2076782c486d83e31a6b39626570", "version_major": 2, "version_minor": 0}</script><div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Segmentation progress for batch_2:
+</pre></div>
+</div>
+<script type="application/vnd.jupyter.widget-view+json">{"model_id": "a64aa5fa90e84d518f911df195906ca5", "version_major": 2, "version_minor": 0}</script></div>
+</div>
+</section>
+<section id="inspect-and-save-registration-results">
+<h2>5. Inspect and save registration results<a class="headerlink" href="#inspect-and-save-registration-results" title="Link to this heading">#</a></h2>
+<p>Enter the number of the fov folder you want to visualize.</p>
+<div class="cell tag_overlay_mask docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fov_to_see</span> <span class="o">=</span> <span class="mi">6</span>
+
+<span class="n">fov_to_display</span> <span class="o">=</span> <span class="n">io_utils</span><span class="o">.</span><span class="n">remove_file_extensions</span><span class="p">([</span><span class="n">fovs</span><span class="p">[</span><span class="n">fov_to_see</span><span class="p">]])[</span><span class="mi">0</span><span class="p">]</span>
+
+<span class="n">fov_overlay</span> <span class="o">=</span> <span class="n">plot_utils</span><span class="o">.</span><span class="n">create_overlay</span><span class="p">(</span>
+    <span class="n">fov</span><span class="o">=</span><span class="n">fov_to_display</span><span class="p">,</span>
+    <span class="n">segmentation_dir</span><span class="o">=</span><span class="n">deepcell_output_dir</span><span class="p">,</span>
+    <span class="n">data_dir</span><span class="o">=</span><span class="n">deepcell_input_dir</span><span class="p">,</span>
+    <span class="n">img_overlay_chans</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;nuclear_channel&#39;</span><span class="p">,</span> <span class="s1">&#39;membrane_channel&#39;</span><span class="p">],</span>
+    <span class="n">seg_overlay_comp</span><span class="o">=</span><span class="s1">&#39;whole_cell&#39;</span>
+<span class="p">)</span>
+
+
+<span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span> <span class="o">=</span> <span class="p">(</span><span class="mi">14</span><span class="p">,</span><span class="mi">14</span><span class="p">))</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">fov_overlay</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>&lt;matplotlib.image.AxesImage at 0x11faa5e1b20&gt;
+</pre></div>
+</div>
+<img alt="_images/d30b44f4e6e2591fb9a7b49b383af6f0c7c337c0576cc470214c8bb2ca61e315.png" src="_images/d30b44f4e6e2591fb9a7b49b383af6f0c7c337c0576cc470214c8bb2ca61e315.png" />
+</div>
+</div>
+<p>Save the overlaid segmentation labels for each fov (these will not display, but will save in viz_dir).</p>
+<div class="cell tag_save_mask docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">segmentation_utils</span><span class="o">.</span><span class="n">save_segmentation_labels</span><span class="p">(</span>
+    <span class="n">segmentation_dir</span><span class="o">=</span><span class="n">deepcell_output_dir</span><span class="p">,</span>
+    <span class="n">data_dir</span><span class="o">=</span><span class="n">deepcell_input_dir</span><span class="p">,</span>
+    <span class="n">output_dir</span><span class="o">=</span><span class="n">deepcell_visualization_dir</span><span class="p">,</span>
+    <span class="n">fovs</span><span class="o">=</span><span class="n">io_utils</span><span class="o">.</span><span class="n">remove_file_extensions</span><span class="p">(</span><span class="n">fovs</span><span class="p">),</span>
+    <span class="n">channels</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;nuclear_channel&#39;</span><span class="p">,</span> <span class="s1">&#39;membrane_channel&#39;</span><span class="p">]</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="visualize-and-save-stitched-segmentation-masks">
+<h2>6. Visualize and save stitched segmentation masks<a class="headerlink" href="#visualize-and-save-stitched-segmentation-masks" title="Link to this heading">#</a></h2>
+<p>Define the function</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">stitch_tiles</span><span class="p">(</span><span class="n">tiles_folder</span><span class="p">,</span> <span class="n">num_tiles_width</span><span class="p">,</span> <span class="n">num_tiles_height</span><span class="p">,</span> <span class="n">tile_width</span><span class="p">,</span> <span class="n">tile_height</span><span class="p">,</span> <span class="n">output_filename</span><span class="p">):</span>
+
+    <span class="n">stitched_image</span> <span class="o">=</span> <span class="n">Image</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="s1">&#39;RGB&#39;</span><span class="p">,</span> <span class="p">(</span><span class="n">num_tiles_width</span> <span class="o">*</span> <span class="n">tile_width</span><span class="p">,</span> <span class="n">num_tiles_height</span> <span class="o">*</span> <span class="n">tile_height</span><span class="p">))</span>
+
+    <span class="n">tile_index</span> <span class="o">=</span> <span class="mi">0</span>
+    
+    <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_tiles_width</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">y</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_tiles_height</span><span class="p">):</span>
+
+            <span class="n">left</span> <span class="o">=</span> <span class="n">x</span> <span class="o">*</span> <span class="n">tile_width</span>
+            <span class="n">upper</span> <span class="o">=</span> <span class="n">y</span> <span class="o">*</span> <span class="n">tile_height</span>
+            <span class="n">tile_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tiles_folder</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;fov</span><span class="si">{</span><span class="n">tile_index</span><span class="si">}</span><span class="s1">_nuclear_channel_membrane_channel_overlay.tiff&#39;</span><span class="p">)</span>
+            <span class="n">tile</span> <span class="o">=</span> <span class="n">Image</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">tile_path</span><span class="p">)</span>
+            <span class="n">stitched_image</span><span class="o">.</span><span class="n">paste</span><span class="p">(</span><span class="n">tile</span><span class="p">,</span> <span class="p">(</span><span class="n">left</span><span class="p">,</span> <span class="n">upper</span><span class="p">))</span>
+
+            <span class="n">tile_index</span> <span class="o">+=</span> <span class="mi">1</span>
+
+    <span class="c1"># Save the stitched image</span>
+    <span class="n">stitched_image</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">tiles_folder</span><span class="o">+</span><span class="n">output_filename</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Enter the variables.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">tiles_folder</span> <span class="o">=</span> <span class="s1">&#39;../data/LN_/segmentation/deepcell_visualization&#39;</span>
+<span class="n">num_tiles_width</span> <span class="o">=</span> <span class="mi">7</span>  <span class="c1"># Adjust based on how many tiles in the width</span>
+<span class="n">num_tiles_height</span> <span class="o">=</span> <span class="mi">9</span>  <span class="c1"># Adjust based on how many tiles in the height</span>
+<span class="n">tile_width</span> <span class="o">=</span> <span class="mi">1500</span>  <span class="c1"># Width of each tile</span>
+<span class="n">tile_height</span> <span class="o">=</span> <span class="mi">1427</span>  <span class="c1"># Height of each tile</span>
+<span class="n">output_filename</span> <span class="o">=</span> <span class="s2">&quot;/stitched_nuc_mem.tif&quot;</span>
+
+<span class="n">stitch_tiles</span><span class="p">(</span><span class="n">tiles_folder</span><span class="p">,</span> <span class="n">num_tiles_width</span><span class="p">,</span> <span class="n">num_tiles_height</span><span class="p">,</span> <span class="n">tile_width</span><span class="p">,</span> <span class="n">tile_height</span><span class="p">,</span> <span class="n">output_filename</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Visualize the results.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">tifffile</span><span class="w"> </span><span class="kn">import</span> <span class="n">imread</span>
+<span class="n">image</span> <span class="o">=</span> <span class="n">imread</span><span class="p">(</span><span class="n">deepcell_visualization_dir</span><span class="o">+</span><span class="n">output_filename</span><span class="p">)</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">figure</span><span class="p">(</span><span class="n">figsize</span> <span class="o">=</span> <span class="p">(</span><span class="mi">25</span><span class="p">,</span><span class="mi">25</span><span class="p">))</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">image</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="extract-segmentation-data">
+<h2>7. Extract segmentation data<a class="headerlink" href="#extract-segmentation-data" title="Link to this heading">#</a></h2>
+<p>For a full list of features extracted, please refer to the cell table section of: <a class="reference external" href="https://ark-analysis.readthedocs.io/en/latest/_rtd/data_types.html">https://ark-analysis.readthedocs.io/en/latest/_rtd/data_types.html</a></p>
+<div class="cell tag_nuc_props_set docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># set to True to add nuclear cell properties to the expression matrix</span>
+<span class="n">nuclear_counts</span> <span class="o">=</span> <span class="kc">True</span>
+
+<span class="c1"># set to True to bypass expensive cell property calculations</span>
+<span class="c1"># only cell label, size, and centroid will be extracted if True</span>
+<span class="n">fast_extraction</span> <span class="o">=</span> <span class="kc">True</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Extract the segmented imaging data to create normalized and transformed expression matrices.  Note that if you’re loading your own dataset, all the imaging data must be in the same folder with each fov given its own folder and all fovs having the same channels.</p>
+<div class="cell tag_create_exp_mat docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">cell_table_size_normalized</span><span class="p">,</span> <span class="n">cell_table_arcsinh_transformed</span> <span class="o">=</span> \
+    <span class="n">marker_quantification</span><span class="o">.</span><span class="n">generate_cell_table</span><span class="p">(</span><span class="n">segmentation_dir</span><span class="o">=</span><span class="n">deepcell_output_dir</span><span class="p">,</span>
+                                              <span class="n">tiff_dir</span><span class="o">=</span><span class="n">tiff_dir</span><span class="p">,</span>
+                                              <span class="n">img_sub_folder</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                                              <span class="n">fovs</span><span class="o">=</span><span class="n">fovs</span><span class="p">,</span>
+                                              <span class="n">extraction</span><span class="o">=</span><span class="s1">&#39;center_weighting&#39;</span><span class="p">,</span>
+                                              <span class="n">nuclear_counts</span><span class="o">=</span><span class="n">nuclear_counts</span><span class="p">,</span>
+                                              <span class="n">fast_extraction</span><span class="o">=</span><span class="n">fast_extraction</span><span class="p">)</span>
+
+<span class="c1"># Set the compression level if desired, ZSTD compression can offer up to a 60-70% reduction in file size.</span>
+<span class="c1"># NOTE: Compressed `csv` files cannot be opened in Excel. They must be uncompressed beforehand.</span>
+<span class="n">compression</span> <span class="o">=</span> <span class="kc">None</span>
+
+<span class="c1"># Uncomment the line below to allow for compressed `csv` files.</span>
+<span class="c1"># compression = {&quot;method&quot;: &quot;zstd&quot;, &quot;level&quot;: 3}</span>
+
+<span class="n">cell_table_size_normalized</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">cell_table_dir</span><span class="p">,</span> <span class="s1">&#39;cell_table_size_normalized.csv&#39;</span><span class="p">),</span>
+                                  <span class="n">compression</span><span class="o">=</span><span class="n">compression</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">cell_table_arcsinh_transformed</span><span class="o">.</span><span class="n">to_csv</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">cell_table_dir</span><span class="p">,</span> <span class="s1">&#39;cell_table_arcsinh_transformed.csv&#39;</span><span class="p">),</span>
+                                      <span class="n">compression</span><span class="o">=</span><span class="n">compression</span><span class="p">,</span> <span class="n">index</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+
+    <script type="text/x-thebe-config">
+    {
+        requestKernel: true,
+        binderOptions: {
+            repo: "binder-examples/jupyter-stacks-datascience",
+            ref: "master",
+        },
+        codeMirrorConfig: {
+            theme: "abcdef",
+            mode: "python"
+        },
+        kernelOptions: {
+            name: "python3",
+            path: "./."
+        },
+        predefinedOutput: true
+    }
+    </script>
+    <script>kernelName = 'python3'</script>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#in-the-following-notebook-you-will-use-the-mesmer-algorithm-to-perfom-cell-and-nuclear-segmentation">In the following notebook you will use the Mesmer algorithm to perfom cell and nuclear segmentation.</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#import-packages">1. Import packages.</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#this-must-be-done-every-time-the-notebook-is-started-or-restarted">*This must be done every time the notebook is started or restarted.</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#define-directory-paths">2. Define directory paths.</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">*This must be done every time the notebook is started or restarted.</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#this-cell-only-needs-to-be-run-once">2.1 This cell only needs to be run once.</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#prepare-data-for-mesmer">3. Prepare Data for Mesmer</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tile-images-to-size-below-mesmer-maximum">3.1 Tile Images to Size Below Mesmer Maximum.</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#define-nuclear-and-membrane-markers">3.2 Define nuclear and membrane markers</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#define-dataset">3.3 Define dataset</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#upload-files-to-deepcell">4. Upload files to Deepcell</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#inspect-and-save-registration-results">5. Inspect and save registration results</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#visualize-and-save-stitched-segmentation-masks">6. Visualize and save stitched segmentation masks</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#extract-segmentation-data">7. Extract segmentation data</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By Justin Smith
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2023.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
