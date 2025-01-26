@@ -8,7 +8,7 @@
   "terminal.integrated.profiles.windows": {
       "Command Prompt": {
           "path": "C:\\Windows\\System32\\cmd.exe",
-          "args": ["%userdir%\\miniforge3\\Scripts\\activate.bat"],
+          "args": ["%USERPROFILE%\\miniforge3\\Scripts\\activate.bat"],
           "icon": "terminal-cmd"
       }
   },
@@ -20,7 +20,7 @@
       }
   },
   "terminal.integrated.env.windows": {
-      "PATH": "${env:PATH};%userdir%\\KINTSUGI\\miniforge3\\Scripts;%userdir%\\KINTSUGI\\miniforge3\\Library\\bin;%userdir%\\KINTSUGI\\jdk-21_windows-x64_bin\\jdk-21.0.5\\bin;%userdir%\\Fiji.app;%userdir%\\KINTSUGI\\apache-maven-3.9.9-bin\\apache-maven\\src\\bin",
+      "PATH": "${env:PATH};%USERPROFILE%\\KINTSUGI\\miniforge3\\Scripts;%USERPROFILE%\\KINTSUGI\\miniforge3\\Library\\bin;%USERPROFILE%\\KINTSUGI\\jdk-21_windows-x64_bin\\jdk-21.0.5\\bin;%USERPROFILE%\\Fiji.app;%USERPROFILE%\\KINTSUGI\\apache-maven-3.9.9-bin\\apache-maven\\src\\bin",
       "MCR_CACHE_ROOT": "${workspaceFolder}\\mcr_cache",
       "MCR_CACHE_VERBOSE": "1",
       "MCR_TOOLBOX_LOGGING": "file",
