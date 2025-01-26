@@ -1,0 +1,1277 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Part 5: Cluster pixels. &#8212; KINTSUGI</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=fa44fd50" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/sphinx-book-theme.css?v=a3416100" />
+    <link rel="stylesheet" type="text/css" href="../../_static/togglebutton.css?v=13237357" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css?v=be8a1c11" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-thebe.css?v=4fa983c6" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../../_static/scripts/fontawesome.js?digest=8878045cc6db502f8baf"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf" />
+
+    <script src="../../_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="../../_static/doctools.js?v=9a2dae69"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="../../_static/togglebutton.js?v=4a39c7ea"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>const THEBE_JS_URL = "https://unpkg.com/thebe@0.8.2/lib/index.js"; const thebe_selector = ".thebe,.cell"; const thebe_selector_input = "pre"; const thebe_selector_output = ".output, .cell_output"</script>
+    <script async="async" src="../../_static/sphinx-thebe.js?v=c100c467"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script>const THEBE_JS_URL = "https://unpkg.com/thebe@0.8.2/lib/index.js"; const thebe_selector = ".thebe,.cell"; const thebe_selector_input = "pre"; const thebe_selector_output = ".output, .cell_output"</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'src/notebooks/5_Cluster_Pixels';</script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Part 6: Cluster cells." href="6_Cluster_Cells.html" />
+    <link rel="prev" title="Part 4: Segment cells and nuclei." href="4_Segmentation.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search this book..."
+         aria-label="Search this book..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../Intro.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../../_static/cluster.gif" class="logo__image only-light" alt="KINTSUGI - Home"/>
+    <img src="../../_static/cluster.gif" class="logo__image only-dark pst-js-only" alt="KINTSUGI - Home"/>
+  
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        
+        <ul class="nav bd-sidenav bd-sidenav__home-link">
+            <li class="toctree-l1">
+                <a class="reference internal" href="../../Intro.html">
+                    KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing
+                </a>
+            </li>
+        </ul>
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="../../Installation%20Steps.html">Installation Steps</a></li>
+<li class="toctree-l1"><a class="reference internal" href="1_Single_Channel_Eval.html">Part 1: Explore data, test and tune processing parameters.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="2_Cycle_Processing.html">Part 2: Batch Process</a></li>
+<li class="toctree-l1"><a class="reference internal" href="3_Signal_Isolation.html">Part 3: Isolate signal from autofluorescence and noise.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="4_Segmentation.html">Part 4: Segment cells and nuclei.</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Part 5: Cluster pixels.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="6_Cluster_Cells.html">Part 6: Cluster cells.</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/smith6jt-cop/KINTSUGI" target="_blank"
+   class="btn btn-sm btn-source-repository-button dropdown-item"
+   title="Source repository"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+<span class="btn__text-container">Repository</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/smith6jt-cop/KINTSUGI/issues/new?title=Issue%20on%20page%20%2Fsrc/notebooks/5_Cluster_Pixels.html&body=Your%20issue%20content%20here." target="_blank"
+   class="btn btn-sm btn-source-issues-button dropdown-item"
+   title="Open an issue"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-lightbulb"></i>
+  </span>
+<span class="btn__text-container">Open issue</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="../../_sources/src/notebooks/5_Cluster_Pixels.ipynb" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.ipynb</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Part 5: Cluster pixels.</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#import-packages">1. Import packages.</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#this-must-be-done-every-time-the-notebook-is-started-or-restarted">*This must be done every time the notebook is started or restarted.</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#define-directory-paths">2. Define directory paths.</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">*This must be done every time the notebook is started or restarted.</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#define-multiprocessing-parameters">Define multiprocessing parameters</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#preprocess">3. Preprocess</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#blurring-and-masking">3.1 Blurring and masking</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pixel-clustering">4. Pixel clustering</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visualize-pixel-som-performance">4.1 Visualize pixel SOM performance</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#assign-pixel-som-clusters">4.2: Assign pixel SOM clusters</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#run-pixel-consensus-clustering">4.3: Run pixel consensus clustering</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#visualize-results">5. Visualize results</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#interactive-adjustments-to-relabel-pixel-meta-clusters">5.1: Interactive adjustments to relabel pixel meta clusters</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#generate-pixel-phenotype-maps">5.2: Generate pixel phenotype maps</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#save-parameters-for-use-in-cell-clustering-and-visual-inspection">6. Save parameters for use in cell clustering and visual inspection</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-images-for-mantis-viewer">6.1 Save images for Mantis Viewer</a></li>
+</ul>
+</li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="part-5-cluster-pixels">
+<h1>Part 5: Cluster pixels.<a class="headerlink" href="#part-5-cluster-pixels" title="Link to this heading">#</a></h1>
+<p>In the following notebook you will begin the process of phenotyping cells by using a self-organizing map algorithm to cluster the pixels.  This is the “Pixie” project from the ark-analysis repo <a class="github reference external" href="https://github.com/angelolab/ark-analysis/tree/main">angelolab/ark-analysis</a></p>
+<section id="import-packages">
+<h2>1. Import packages.<a class="headerlink" href="#import-packages" title="Link to this heading">#</a></h2>
+<section id="this-must-be-done-every-time-the-notebook-is-started-or-restarted">
+<h3>*This must be done every time the notebook is started or restarted.<a class="headerlink" href="#this-must-be-done-every-time-the-notebook-is-started-or-restarted" title="Link to this heading">#</a></h3>
+<div class="cell tag_import docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># import required packages</span>
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span> <span class="k">as</span> <span class="n">dt</span>
+<span class="kn">import</span> <span class="nn">warnings</span>
+<span class="n">warnings</span><span class="o">.</span><span class="n">filterwarnings</span><span class="p">(</span><span class="s1">&#39;ignore&#39;</span><span class="p">)</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="kn">from</span> <span class="nn">alpineer</span> <span class="kn">import</span> <span class="n">io_utils</span><span class="p">,</span> <span class="n">load_utils</span>
+<span class="kn">from</span> <span class="nn">matplotlib</span> <span class="kn">import</span> <span class="n">rc_file_defaults</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pyFlowSOM</span>
+<span class="kn">import</span> <span class="nn">seaborn</span> <span class="k">as</span> <span class="nn">sns</span>
+<span class="kn">from</span> <span class="nn">matplotlib.colors</span> <span class="kn">import</span> <span class="n">ListedColormap</span>
+<span class="kn">from</span> <span class="nn">tifffile</span> <span class="kn">import</span> <span class="n">imread</span>
+<span class="kn">from</span> <span class="nn">tqdm.notebook</span> <span class="kn">import</span> <span class="n">tqdm</span>
+<span class="kn">import</span> <span class="nn">stackview</span>
+
+<span class="kn">from</span> <span class="nn">ark.phenotyping</span> <span class="kn">import</span> <span class="p">(</span><span class="n">pixel_cluster_utils</span><span class="p">,</span> <span class="n">pixel_meta_clustering</span><span class="p">,</span>
+                             <span class="n">pixel_som_clustering</span><span class="p">,</span> <span class="n">pixie_preprocessing</span><span class="p">)</span>
+<span class="kn">from</span> <span class="nn">ark.utils</span> <span class="kn">import</span> <span class="n">data_utils</span>
+<span class="kn">from</span> <span class="nn">ark.utils</span> <span class="kn">import</span> <span class="n">plot_utils</span>
+<span class="kn">from</span> <span class="nn">ark.utils.metacluster_remap_gui</span> <span class="kn">import</span> <span class="p">(</span><span class="n">MetaClusterGui</span><span class="p">,</span>
+                                             <span class="n">colormap_helper</span><span class="p">,</span>
+                                             <span class="n">metaclusterdata_from_files</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="define-directory-paths">
+<h2>2. Define directory paths.<a class="headerlink" href="#define-directory-paths" title="Link to this heading">#</a></h2>
+<section id="id1">
+<h3>*This must be done every time the notebook is started or restarted.<a class="headerlink" href="#id1" title="Link to this heading">#</a></h3>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">base_dir</span> <span class="o">=</span> <span class="s2">&quot;C:/Users/smith6jt/KINTSUGI/data/1904_CC2B_Segmentation&quot;</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Segmentation folder is </span><span class="si">{</span><span class="n">base_dir</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Segmentation folder is C:/Users/smith6jt/KINTSUGI/data/1904_CC2B_Segmentation.
+</pre></div>
+</div>
+</div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">tiff_dir</span></code>: path to the directory containing your imaging data. Images should be single-channel TIFFs.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">img_sub_folder</span></code>: if <code class="docutils literal notranslate"><span class="pre">tiff_dir</span></code> contains an additional subfolder structure, override <code class="docutils literal notranslate"><span class="pre">None</span></code> with the appropriate folder name</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">segmentation_dir</span></code>: path to the directory containing your segmentations (which can be generated using <code class="docutils literal notranslate"><span class="pre">1_Segment_Image_Data.ipynb</span></code>). Set this argument to <code class="docutils literal notranslate"><span class="pre">None</span></code> if you do not have segmentation labels or wish to run pixel clustering without them (they are required for cell clustering)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">seg_suffix</span></code>: the suffix plus the file extension of the segmented images for each FOV. Note that these should be the same for all FOVs. This argument will be ignored if <code class="docutils literal notranslate"><span class="pre">segmentation_dir</span></code> is set to <code class="docutils literal notranslate"><span class="pre">None</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pixie_seg_dir</span></code>: the created path from the <code class="docutils literal notranslate"><span class="pre">segmentation_dir</span></code>. Is <code class="docutils literal notranslate"><span class="pre">None</span></code> if <code class="docutils literal notranslate"><span class="pre">segmentation_dir</span></code> is <code class="docutils literal notranslate"><span class="pre">None</span></code>.</p></li>
+</ul>
+<div class="cell tag_file_path docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">tiff_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="s2">&quot;image_data&quot;</span><span class="p">)</span>
+<span class="n">img_sub_folder</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="n">segmentation_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;segmentation&quot;</span><span class="p">,</span> <span class="s2">&quot;deepcell_output&quot;</span><span class="p">)</span>
+<span class="n">seg_suffix</span> <span class="o">=</span> <span class="s1">&#39;_whole_cell.tiff&#39;</span>
+
+<span class="k">if</span> <span class="n">segmentation_dir</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">pixie_seg_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">segmentation_dir</span><span class="p">)</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="n">pixie_seg_dir</span> <span class="o">=</span> <span class="kc">None</span>
+</pre></div>
+</div>
+</div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">fovs</span></code> (optional): set a specific set of fovs to load, default loads all the fovs in <code class="docutils literal notranslate"><span class="pre">tiff_dir</span></code></p></li>
+</ul>
+<div class="cell tag_load_fovs docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># either get all fovs in the folder...</span>
+<span class="n">fovs</span> <span class="o">=</span> <span class="n">io_utils</span><span class="o">.</span><span class="n">list_folders</span><span class="p">(</span><span class="n">tiff_dir</span><span class="p">)</span>
+
+<span class="c1"># ... or optionally, select a specific set of fovs manually</span>
+<span class="c1"># fovs = [&quot;fov14&quot;]</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="define-multiprocessing-parameters">
+<h3>Define multiprocessing parameters<a class="headerlink" href="#define-multiprocessing-parameters" title="Link to this heading">#</a></h3>
+<p>Turning on multiprocessing provides a speed boost; however, it is not always cross-platform compatible. If you receive errors such as hanging cells without progress updates, try setting <code class="docutils literal notranslate"><span class="pre">multiprocess</span></code> back to <code class="docutils literal notranslate"><span class="pre">False</span></code>.</p>
+<div class="cell tag_set_multi docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># set to True to turn on multiprocessing</span>
+<span class="n">multiprocess</span> <span class="o">=</span> <span class="kc">True</span>
+
+<span class="c1"># define the number of FOVs to process in parallel, ignored if multiprocessing is set to False</span>
+<span class="n">batch_size</span> <span class="o">=</span> <span class="mi">10</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="preprocess">
+<h2>3. Preprocess<a class="headerlink" href="#preprocess" title="Link to this heading">#</a></h2>
+<p>Set a prefix to be applied to all data directories/files created during pixel clustering. If the prefix is not set, a default of the datetime at the start of the run is used.</p>
+<div class="cell tag_pixel_prefix docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># explicitly set pixel_cluster_prefix to override datetime default</span>
+<span class="n">pixel_cluster_prefix</span> <span class="o">=</span> <span class="s2">&quot;1904CC2B28&quot;</span>
+
+<span class="k">if</span> <span class="n">pixel_cluster_prefix</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">pixel_cluster_prefix</span> <span class="o">=</span> <span class="n">dt</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s1">&#39;%Y-%m-</span><span class="si">%d</span><span class="s1">T%H:%M:%S&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>The following data directories/files will be created with names prefixed by <code class="docutils literal notranslate"><span class="pre">pixel_cluster_prefix</span></code>:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">pixel_output_dir</span></code>: directory name where the pixel clustering outputs are stored</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">preprocessed_dir</span></code>: directory name where the preprocessed pixel data are stored</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">subsetted_dir</span></code>: directory name where the subsetted pixel data are stored</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">norm_vals_name</span></code>: file name where the values used to normalize each channel are stored</p></li>
+</ul>
+<div class="cell tag_dir_set docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># define the output directory using the specified pixel cluster prefix</span>
+<span class="n">pixel_output_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="s2">&quot;pixie&quot;</span><span class="p">,</span> <span class="s2">&quot;</span><span class="si">%s</span><span class="s2">_pixel_output_dir&quot;</span> <span class="o">%</span> <span class="n">pixel_cluster_prefix</span><span class="p">)</span>
+<span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">exists</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_output_dir</span><span class="p">)):</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_output_dir</span><span class="p">))</span>
+
+<span class="c1"># define the preprocessed pixel data folders</span>
+<span class="n">pixel_data_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s1">&#39;pixel_mat_data&#39;</span><span class="p">)</span>
+<span class="n">pixel_subset_dir</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s1">&#39;pixel_mat_subset&#39;</span><span class="p">)</span>
+<span class="n">norm_vals_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s1">&#39;channel_norm_post_rownorm.feather&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<section id="blurring-and-masking">
+<h3>3.1 Blurring and masking<a class="headerlink" href="#blurring-and-masking" title="Link to this heading">#</a></h3>
+<p>For certain channels, such as membraneous tumor markers, the subcellular localization of the marker isn’t important. Instead, what matters is that cells which are positive for the marker show up as positive. In these cases, we have sometimes found it useful to add additional blurring to these markers before clustering. This ensures that more of the pixels within the cell are positive for the marker, instead of only a few pixels at the border, especially for cells which are under-segmented. However, higher blur levels will also cause more of the pixels in neighboring cells to show up as positive. Therefore, this works best when you have other, robust markers (like CD45) which you can use to determine which cells are false positives for the blurred channel. If you have markers in your panel which fit this description, you can add them in the cell below. Then, when specifying the list of markers to include for clustering, make sure to add <code class="docutils literal notranslate"><span class="pre">{marker_name}_smoothed</span></code>, as that is what the TIFF will be called.</p>
+<p>Skip this cell if you don’t want to add an additional blur.</p>
+<div class="cell tag_smooth_channels docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># set an optional list of markers for additional blurring</span>
+
+<span class="n">blurred_channels</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;Vimentin&quot;</span><span class="p">]</span>
+<span class="n">smooth_vals</span> <span class="o">=</span> <span class="mi">3</span>
+
+<span class="n">pixel_cluster_utils</span><span class="o">.</span><span class="n">smooth_channels</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="o">=</span><span class="n">fovs</span><span class="p">,</span>
+    <span class="n">tiff_dir</span><span class="o">=</span><span class="n">tiff_dir</span><span class="p">,</span>
+    <span class="n">img_sub_folder</span><span class="o">=</span><span class="n">img_sub_folder</span><span class="p">,</span>
+    <span class="n">channels</span><span class="o">=</span><span class="n">blurred_channels</span><span class="p">,</span>
+    <span class="n">smooth_vals</span><span class="o">=</span><span class="n">smooth_vals</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Sometimes, markers will have background staining that you’ll want to filter out for the clustering process. Define the name of the marker you want to filter using <code class="docutils literal notranslate"><span class="pre">filter_channel</span></code>. If the marker is only present in the nucleus, set <code class="docutils literal notranslate"><span class="pre">exclude</span> <span class="pre">=</span> <span class="pre">False</span></code> to filter it out from the membrane. Conversely, if the marker is only present in the membrane, set <code class="docutils literal notranslate"><span class="pre">exclude</span> <span class="pre">=</span> <span class="pre">True</span></code> to filter it out from the nucleus.</p>
+<p>When specifying the list of markers to include for clustering, make sure to add <code class="docutils literal notranslate"><span class="pre">{marker_name}_nuc_exclude</span></code> or <code class="docutils literal notranslate"><span class="pre">{marker_name}_nuc_include</span></code> depending on what type of signal was filtered out.</p>
+<p>Skip this cell if you don’t want to run marker filtering.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">filter_channel</span> <span class="o">=</span> <span class="s1">&#39;Ki67&#39;</span>
+<span class="n">nuclear_exclude</span> <span class="o">=</span> <span class="kc">False</span>
+
+<span class="n">pixel_cluster_utils</span><span class="o">.</span><span class="n">filter_with_nuclear</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="o">=</span><span class="n">fovs</span><span class="p">,</span>
+    <span class="n">tiff_dir</span><span class="o">=</span><span class="n">tiff_dir</span><span class="p">,</span>
+    <span class="n">seg_dir</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">segmentation_dir</span><span class="p">),</span>
+    <span class="n">channel</span><span class="o">=</span><span class="n">filter_channel</span><span class="p">,</span>
+    <span class="n">nuc_seg_suffix</span><span class="o">=</span><span class="s2">&quot;_nuclear.tiff&quot;</span><span class="p">,</span>
+    <span class="n">exclude</span><span class="o">=</span><span class="n">nuclear_exclude</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output traceback highlight-ipythontb notranslate"><div class="highlight"><pre><span></span><span class="gt">---------------------------------------------------------------------------</span>
+<span class="ne">AttributeError</span><span class="g g-Whitespace">                            </span>Traceback (most recent call last)
+<span class="n">Cell</span> <span class="n">In</span><span class="p">[</span><span class="mi">9</span><span class="p">],</span> <span class="n">line</span> <span class="mi">4</span>
+<span class="g g-Whitespace">      </span><span class="mi">1</span> <span class="n">filter_channel</span> <span class="o">=</span> <span class="s1">&#39;Ki67&#39;</span>
+<span class="g g-Whitespace">      </span><span class="mi">2</span> <span class="n">nuclear_exclude</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="ne">----&gt; </span><span class="mi">4</span> <span class="n">pixel_cluster_utils</span><span class="o">.</span><span class="n">filter_with_nuclear</span><span class="p">(</span>
+<span class="g g-Whitespace">      </span><span class="mi">5</span>     <span class="n">fovs</span><span class="o">=</span><span class="n">fovs</span><span class="p">,</span>
+<span class="g g-Whitespace">      </span><span class="mi">6</span>     <span class="n">tiff_dir</span><span class="o">=</span><span class="n">tiff_dir</span><span class="p">,</span>
+<span class="g g-Whitespace">      </span><span class="mi">7</span>     <span class="n">seg_dir</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">segmentation_dir</span><span class="p">),</span>
+<span class="g g-Whitespace">      </span><span class="mi">8</span>     <span class="n">channel</span><span class="o">=</span><span class="n">filter_channel</span><span class="p">,</span>
+<span class="g g-Whitespace">      </span><span class="mi">9</span>     <span class="n">nuc_seg_suffix</span><span class="o">=</span><span class="s2">&quot;_nuclear.tiff&quot;</span><span class="p">,</span>
+<span class="g g-Whitespace">     </span><span class="mi">10</span>     <span class="n">exclude</span><span class="o">=</span><span class="n">nuclear_exclude</span>
+<span class="g g-Whitespace">     </span><span class="mi">11</span> <span class="p">)</span>
+
+<span class="ne">AttributeError</span>: module &#39;ark.phenotyping.pixel_cluster_utils&#39; has no attribute &#39;filter_with_nuclear&#39;
+</pre></div>
+</div>
+</div>
+</div>
+<p>Set the following arguments:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">channels</span></code>: channels to run pixel clustering on</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">blur_factor</span></code>: sigma (standard deviation) for the Gaussian blur. Higher values are more aggressive in smoothing signal.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">subset_proportion</span></code>: the fraction of pixels to take from each FOV for training. Sampling is random.</p></li>
+</ul>
+<div class="cell tag_channel_set docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">channels</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;CD4&#39;</span><span class="p">,</span> <span class="s1">&#39;CD8&#39;</span><span class="p">,</span> <span class="s1">&#39;SMActin&#39;</span><span class="p">,</span> <span class="s1">&#39;CD3e&#39;</span><span class="p">]</span>
+<span class="n">blur_factor</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="n">subset_proportion</span> <span class="o">=</span> <span class="mf">0.1</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>During pixel preprocessing, the following is done for each FOV:</p>
+<ul class="simple">
+<li><p>Gaussian blur each channel separately</p></li>
+<li><p>Remove empty pixels</p></li>
+<li><p>For the remaining pixels, normalize each pixel by the sum of all the channels</p></li>
+<li><p>Subset a <code class="docutils literal notranslate"><span class="pre">subset_proportion</span></code> fraction of non-empty, normalized pixels. This creates the subsetted dataset for training</p></li>
+</ul>
+<p>Note: if you get integer overflow errors loading in your data, try changing the <code class="docutils literal notranslate"><span class="pre">dtype</span></code> argument to a larger type.</p>
+<div class="cell tag_gen_pixel_mat docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># run pixel data preprocessing</span>
+<span class="n">pixie_preprocessing</span><span class="o">.</span><span class="n">create_pixel_matrix</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="p">,</span>
+    <span class="n">channels</span><span class="p">,</span>
+    <span class="n">base_dir</span><span class="p">,</span>
+    <span class="n">tiff_dir</span><span class="p">,</span>
+    <span class="n">pixie_seg_dir</span><span class="p">,</span>
+    <span class="n">img_sub_folder</span><span class="o">=</span><span class="n">img_sub_folder</span><span class="p">,</span>
+    <span class="n">seg_suffix</span><span class="o">=</span><span class="n">seg_suffix</span><span class="p">,</span>
+    <span class="n">pixel_output_dir</span><span class="o">=</span><span class="n">pixel_output_dir</span><span class="p">,</span>
+    <span class="n">data_dir</span><span class="o">=</span><span class="n">pixel_data_dir</span><span class="p">,</span>
+    <span class="n">subset_dir</span><span class="o">=</span><span class="n">pixel_subset_dir</span><span class="p">,</span>
+    <span class="n">norm_vals_name_post_rownorm</span><span class="o">=</span><span class="n">norm_vals_name</span><span class="p">,</span>
+    <span class="n">blur_factor</span><span class="o">=</span><span class="n">blur_factor</span><span class="p">,</span>
+    <span class="n">subset_proportion</span><span class="o">=</span><span class="n">subset_proportion</span><span class="p">,</span>
+    <span class="n">multiprocess</span><span class="o">=</span><span class="n">multiprocess</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="pixel-clustering">
+<h2>4. Pixel clustering<a class="headerlink" href="#pixel-clustering" title="Link to this heading">#</a></h2>
+<section id="visualize-pixel-som-performance">
+<h3>4.1 Visualize pixel SOM performance<a class="headerlink" href="#visualize-pixel-som-performance" title="Link to this heading">#</a></h3>
+<p>Test parameters:  Choose fov and channel to visualize, channels to include, number of nodes (this will be xdim x ydim), and the number of training epochs (num_passes).  The learning rates are a more advanced parameter.  Seed is kept constant if reproducible results are important.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">visualize_som_training</span><span class="p">(</span><span class="n">fov_file</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> 
+                         <span class="n">channels</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span>
+                         <span class="n">channel_vis</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+                         <span class="n">xdim</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span> 
+                         <span class="n">ydim</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span>
+                         <span class="n">num_passes</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">5</span><span class="p">,</span>
+                         <span class="n">lr_start</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.05</span><span class="p">,</span>
+                         <span class="n">lr_end</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.01</span><span class="p">,</span>
+                         <span class="n">show_plots</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
+
+    <span class="n">pixel_data</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_feather</span><span class="p">(</span><span class="n">fov_file</span><span class="p">)</span>
+    <span class="n">train_data</span> <span class="o">=</span> <span class="n">pixel_data</span><span class="p">[</span><span class="n">channels</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">float64</span><span class="p">)</span>
+    <span class="n">num_nodes</span> <span class="o">=</span> <span class="n">xdim</span> <span class="o">*</span> <span class="n">ydim</span>
+    <span class="n">image</span> <span class="o">=</span> <span class="n">imread</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tiff_dir</span><span class="p">,</span> <span class="s2">&quot;fov1&quot;</span><span class="p">,</span> <span class="n">channel_vis</span><span class="o">+</span><span class="s2">&quot;.tif&quot;</span><span class="p">))</span>
+    <span class="n">colors</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">cm</span><span class="o">.</span><span class="n">tab20</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">linspace</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">num_nodes</span><span class="p">))</span>
+    <span class="n">node_cmap</span> <span class="o">=</span> <span class="n">ListedColormap</span><span class="p">(</span><span class="n">colors</span><span class="p">)</span>
+
+    <span class="n">pbar_filesave</span> <span class="o">=</span> <span class="n">tqdm</span><span class="p">(</span><span class="n">total</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">unit</span><span class="o">=</span><span class="s2">&quot;Percent&quot;</span><span class="p">,</span>
+                    <span class="n">bar_format</span><span class="o">=</span><span class="s1">&#39;</span><span class="si">{l_bar}{bar}</span><span class="s1">| </span><span class="si">{n_fmt}</span><span class="s1">/</span><span class="si">{total_fmt}</span><span class="s1"> [</span><span class="si">{elapsed}</span><span class="s1">&lt;</span><span class="si">{remaining}</span><span class="s1">]&#39;</span><span class="p">,</span>
+                    <span class="n">colour</span><span class="o">=</span><span class="s2">&quot;green&quot;</span><span class="p">,</span> <span class="n">position</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">leave</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="n">scatter_frames</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">rlen_iter</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">num_passes</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="c1"># print(f&quot;Training for rlen={rlen_iter}&quot;)</span>
+        <span class="n">som</span> <span class="o">=</span> <span class="n">pyFlowSOM</span><span class="o">.</span><span class="n">som</span><span class="p">(</span><span class="n">train_data</span><span class="p">,</span> <span class="n">xdim</span><span class="p">,</span> <span class="n">ydim</span><span class="p">,</span> <span class="n">rlen_iter</span><span class="p">,</span> <span class="n">alpha_range</span><span class="o">=</span><span class="p">(</span><span class="n">lr_start</span><span class="p">,</span> <span class="n">lr_end</span><span class="p">),</span> <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>
+        <span class="n">clusters</span><span class="p">,</span> <span class="n">dist</span> <span class="o">=</span> <span class="n">pyFlowSOM</span><span class="o">.</span><span class="n">map_data_to_nodes</span><span class="p">(</span><span class="n">som</span><span class="p">,</span> <span class="n">train_data</span><span class="p">)</span>
+
+        <span class="n">pixel_data</span><span class="p">[</span><span class="s1">&#39;cluster&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">clusters</span>
+        <span class="n">df_mean</span> <span class="o">=</span> <span class="n">pixel_data</span><span class="o">.</span><span class="n">groupby</span><span class="p">([</span><span class="s1">&#39;cluster&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+
+        <span class="n">fig</span><span class="p">,</span> <span class="n">axes</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">21</span><span class="p">,</span> <span class="mi">7</span><span class="p">))</span>
+        <span class="n">im</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">imshow</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="n">vmax</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">percentile</span><span class="p">(</span><span class="n">image</span><span class="p">,</span> <span class="mf">99.9</span><span class="p">),</span> <span class="n">cmap</span><span class="o">=</span><span class="s1">&#39;gray&#39;</span><span class="p">)</span>
+        <span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">shrink</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">cmap</span><span class="o">=</span><span class="n">node_cmap</span><span class="p">)</span>
+        <span class="n">axes</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Original Image: </span><span class="si">{</span><span class="n">channel_vis</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">im</span> <span class="o">=</span> <span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">scatter</span><span class="p">(</span><span class="n">pixel_data</span><span class="p">[</span><span class="s1">&#39;column_index&#39;</span><span class="p">],</span> <span class="n">pixel_data</span><span class="p">[</span><span class="s1">&#39;row_index&#39;</span><span class="p">],</span> 
+                                <span class="n">c</span><span class="o">=</span><span class="n">pixel_data</span><span class="p">[</span><span class="s1">&#39;cluster&#39;</span><span class="p">],</span>
+                                <span class="n">cmap</span><span class="o">=</span><span class="n">node_cmap</span><span class="p">,</span> <span class="n">s</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+        <span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">invert_yaxis</span><span class="p">()</span>
+        <span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_aspect</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">/</span> <span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;SOM Iteration </span><span class="si">{</span><span class="n">rlen_iter</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="n">fig</span><span class="o">.</span><span class="n">colorbar</span><span class="p">(</span><span class="n">im</span><span class="p">,</span> <span class="n">shrink</span><span class="o">=</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">ax</span><span class="o">=</span><span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">cmap</span><span class="o">=</span><span class="n">node_cmap</span><span class="p">)</span>
+        <span class="n">axes</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;SOM Visualization for rlen=(rlen=</span><span class="si">{</span><span class="n">rlen_iter</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+
+        <span class="n">g</span><span class="o">=</span><span class="n">sns</span><span class="o">.</span><span class="n">clustermap</span><span class="p">(</span><span class="n">df_mean</span><span class="p">,</span> <span class="n">z_score</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">cmap</span><span class="o">=</span><span class="s2">&quot;vlag&quot;</span><span class="p">,</span> <span class="n">center</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> 
+                        <span class="n">yticklabels</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">cbar</span><span class="o">=</span><span class="n">node_cmap</span><span class="p">)</span>
+        <span class="n">heatmap_data</span> <span class="o">=</span> <span class="n">g</span><span class="o">.</span><span class="n">data2d</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">g</span><span class="o">.</span><span class="n">figure</span><span class="p">)</span>
+        <span class="n">im</span> <span class="o">=</span> <span class="n">sns</span><span class="o">.</span><span class="n">heatmap</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">heatmap_data</span><span class="p">,</span> 
+                <span class="n">ax</span><span class="o">=</span><span class="n">axes</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span>
+                <span class="n">cmap</span><span class="o">=</span><span class="s2">&quot;vlag&quot;</span><span class="p">,</span>
+                <span class="n">center</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+                <span class="n">xticklabels</span><span class="o">=</span><span class="n">g</span><span class="o">.</span><span class="n">data2d</span><span class="o">.</span><span class="n">columns</span><span class="p">,</span>
+                <span class="n">yticklabels</span><span class="o">=</span><span class="n">g</span><span class="o">.</span><span class="n">data2d</span><span class="o">.</span><span class="n">index</span><span class="p">)</span>
+        
+        <span class="n">axes</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">set_aspect</span><span class="p">(</span><span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">/</span> <span class="n">image</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+        <span class="n">axes</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Cluster heatmap for rlen=</span><span class="si">{</span><span class="n">rlen_iter</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+        
+        <span class="c1"># plt.setp(axes[2].get_xticklabels(), rotation=120)</span>
+        <span class="c1"># plt.setp(axes[2].get_yticklabels(), rotation=45)</span>
+        <span class="n">fig</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+
+        <span class="n">canvas</span> <span class="o">=</span> <span class="n">fig</span><span class="o">.</span><span class="n">canvas</span>
+        <span class="n">canvas</span><span class="o">.</span><span class="n">draw</span><span class="p">()</span>
+        <span class="n">width</span><span class="p">,</span> <span class="n">height</span> <span class="o">=</span> <span class="n">fig</span><span class="o">.</span><span class="n">get_size_inches</span><span class="p">()</span> <span class="o">*</span> <span class="n">fig</span><span class="o">.</span><span class="n">dpi</span>
+        <span class="n">buf</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">frombuffer</span><span class="p">(</span><span class="n">canvas</span><span class="o">.</span><span class="n">buffer_rgba</span><span class="p">(),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">uint8</span><span class="p">)</span>
+        <span class="n">buf</span><span class="o">.</span><span class="n">shape</span> <span class="o">=</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">height</span><span class="p">),</span> <span class="nb">int</span><span class="p">(</span><span class="n">width</span><span class="p">),</span> <span class="mi">4</span><span class="p">)</span>
+        <span class="n">scatter_frame</span> <span class="o">=</span> <span class="n">buf</span><span class="p">[:,</span> <span class="p">:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>
+        
+        <span class="n">scatter_frames</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">scatter_frame</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">show_plots</span><span class="p">:</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+        <span class="n">plt</span><span class="o">.</span><span class="n">close</span><span class="p">(</span><span class="n">fig</span><span class="p">)</span>
+        <span class="n">pbar_filesave</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="mi">100</span> <span class="o">/</span> <span class="p">(</span><span class="n">num_passes</span><span class="p">))</span>
+
+    <span class="n">pbar_filesave</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    <span class="n">scatter_stack</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span><span class="n">scatter_frames</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">scatter_stack</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">fov_vis</span> <span class="o">=</span> <span class="s1">&#39;fov1&#39;</span>
+<span class="n">channel_vis</span> <span class="o">=</span> <span class="s1">&#39;CD4&#39;</span>
+<span class="n">channels</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;CD4&#39;</span><span class="p">,</span> <span class="s1">&#39;CD8&#39;</span><span class="p">,</span> <span class="s1">&#39;SMActin&#39;</span><span class="p">,</span> <span class="s1">&#39;CD3e&#39;</span><span class="p">]</span>
+<span class="n">xdim</span> <span class="o">=</span> <span class="mi">5</span>
+<span class="n">ydim</span> <span class="o">=</span> <span class="mi">5</span>
+<span class="n">num_passes</span> <span class="o">=</span> <span class="mi">10</span>
+<span class="n">lr_start</span> <span class="o">=</span> <span class="mf">0.05</span>
+<span class="n">lr_end</span> <span class="o">=</span> <span class="mf">0.01</span>
+<span class="n">fov_file</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_subset_dir</span><span class="p">,</span> <span class="n">fov_vis</span><span class="o">+</span><span class="s1">&#39;.feather&#39;</span><span class="p">)</span>
+
+<span class="n">stack</span> <span class="o">=</span> <span class="n">visualize_som_training</span><span class="p">(</span>
+    <span class="n">fov_file</span><span class="o">=</span><span class="n">fov_file</span><span class="p">,</span>
+    <span class="n">channels</span><span class="o">=</span><span class="n">channels</span><span class="p">,</span>
+    <span class="n">channel_vis</span> <span class="o">=</span> <span class="n">channel_vis</span><span class="p">,</span>
+    <span class="n">xdim</span><span class="o">=</span><span class="n">xdim</span><span class="p">,</span>
+    <span class="n">ydim</span><span class="o">=</span><span class="n">ydim</span><span class="p">,</span>
+    <span class="n">num_passes</span><span class="o">=</span><span class="n">num_passes</span><span class="p">,</span>
+    <span class="n">lr_start</span><span class="o">=</span><span class="n">lr_start</span><span class="p">,</span>
+    <span class="n">lr_end</span><span class="o">=</span><span class="n">lr_end</span><span class="p">,</span>
+    <span class="n">show_plots</span><span class="o">=</span><span class="kc">False</span>
+<span class="p">)</span>
+<span class="n">stackview</span><span class="o">.</span><span class="n">slice</span><span class="p">(</span><span class="n">stack</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<script type="application/vnd.jupyter.widget-view+json">{"model_id": "b67104135a574cd182fbd0c1a19ab3cb", "version_major": 2, "version_minor": 0}</script><script type="application/vnd.jupyter.widget-view+json">{"model_id": "fabb6c5125ec45f1a7cfa617a6b9ebb3", "version_major": 2, "version_minor": 0}</script></div>
+</div>
+</section>
+<section id="assign-pixel-som-clusters">
+<h3>4.2: Assign pixel SOM clusters<a class="headerlink" href="#assign-pixel-som-clusters" title="Link to this heading">#</a></h3>
+<p>Train the pixel SOM using the subsetted data. Training is done using a self-organizing map (SOM).</p>
+<p>The following data directories/files will be created for pixel clustering:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">pixel_som_weights_name</span></code>: file name to store the pixel SOM weights</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pc_chan_avg_som_cluster_name</span></code>: file name to store the average channel expression across all pixel SOM clusters</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pc_chan_avg_meta_cluster_name</span></code>: same as above for pixel meta clusters</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pixel_meta_cluster_remap_name</span></code>: file name to store the SOM cluster to meta cluster manual mappings created using the GUI below</p></li>
+</ul>
+<div class="cell tag_pixel_som_path_set docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">pixel_som_weights_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s1">&#39;pixel_som_weights.feather&#39;</span><span class="p">)</span>
+<span class="n">pc_chan_avg_som_cluster_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s1">&#39;pixel_channel_avg_som_cluster.csv&#39;</span><span class="p">)</span>
+<span class="n">pc_chan_avg_meta_cluster_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s1">&#39;pixel_channel_avg_meta_cluster.csv&#39;</span><span class="p">)</span>
+<span class="n">pixel_meta_cluster_remap_name</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s1">&#39;pixel_meta_cluster_mapping.csv&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Each channel is normalized by their 99.9% value across the entire dataset before training. These values get saved to <code class="docutils literal notranslate"><span class="pre">norm_vals_name</span></code>.</p>
+<p>For a full set of parameters you can customize for <code class="docutils literal notranslate"><span class="pre">train_pixel_som</span></code>, please consult <a href=https://ark-analysis.readthedocs.io/en/latest/_markdown/ark.phenotyping.html#ark.phenotyping.pixel_cluster_utils.train_pixel_som>pixel training docs</a>.</p>
+<div class="cell tag_train_pixel_som docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># create the pixel SOM weights</span>
+<span class="n">pixel_pysom</span> <span class="o">=</span> <span class="n">pixel_som_clustering</span><span class="o">.</span><span class="n">train_pixel_som</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="p">,</span>
+    <span class="n">channels</span><span class="p">,</span>
+    <span class="n">base_dir</span><span class="p">,</span>
+    <span class="n">subset_dir</span><span class="o">=</span><span class="n">pixel_subset_dir</span><span class="p">,</span>
+    <span class="n">norm_vals_name</span><span class="o">=</span><span class="n">norm_vals_name</span><span class="p">,</span>
+    <span class="n">som_weights_name</span><span class="o">=</span><span class="n">pixel_som_weights_name</span><span class="p">,</span>
+    <span class="n">num_passes</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+    <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">,</span>
+    <span class="n">overwrite</span><span class="o">=</span><span class="kc">False</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Use the SOM weights learned from <code class="docutils literal notranslate"><span class="pre">train_pixel_som</span></code> to assign pixel clusters to the full preprocessed dataset.</p>
+<p>Note that each channel is normalized by the respective value stored in <code class="docutils literal notranslate"><span class="pre">norm_vals_name</span></code> (computed in <code class="docutils literal notranslate"><span class="pre">train_pixel_som</span></code>) prior to cluster assignment.</p>
+<p><code class="docutils literal notranslate"><span class="pre">generate_som_avg_files</span></code> will compute the average channel expression across all pixel SOM clusters, as well as the number of pixels in each pixel SOM cluster (the data in <code class="docutils literal notranslate"><span class="pre">pc_chan_avg_som_cluster_name</span></code>). This is needed for consensus clustering.</p>
+<div class="cell tag_cluster_pixel_mat docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># use pixel SOM weights to assign pixel clusters</span>
+<span class="n">pixel_som_clustering</span><span class="o">.</span><span class="n">cluster_pixels</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="p">,</span>
+    <span class="n">base_dir</span><span class="o">=</span><span class="n">base_dir</span><span class="p">,</span>
+    <span class="n">pixel_pysom</span><span class="o">=</span><span class="n">pixel_pysom</span><span class="p">,</span>
+    <span class="n">data_dir</span><span class="o">=</span><span class="n">pixel_data_dir</span><span class="p">,</span>
+    <span class="n">multiprocess</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span><span class="p">,</span>
+    <span class="n">overwrite</span><span class="o">=</span><span class="kc">False</span>
+<span class="p">)</span>
+
+<span class="c1"># generate the SOM cluster summary files</span>
+<span class="n">pixel_som_clustering</span><span class="o">.</span><span class="n">generate_som_avg_files</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="p">,</span>
+    <span class="n">channels</span><span class="p">,</span>
+    <span class="n">base_dir</span><span class="p">,</span>
+    <span class="n">pixel_pysom</span><span class="p">,</span>
+    <span class="n">data_dir</span><span class="o">=</span><span class="n">pixel_data_dir</span><span class="p">,</span>
+    <span class="n">pc_chan_avg_som_cluster_name</span><span class="o">=</span><span class="n">pc_chan_avg_som_cluster_name</span><span class="p">,</span>
+    <span class="n">overwrite</span><span class="o">=</span><span class="kc">False</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="run-pixel-consensus-clustering">
+<h3>4.3: Run pixel consensus clustering<a class="headerlink" href="#run-pixel-consensus-clustering" title="Link to this heading">#</a></h3>
+<p>Use consensus hierarchical clustering to cluster pixel SOM clusters into a user-defined number of meta clusters. The consensus clusters are trained on the average channel expression across all pixel SOM clusters (the data stored in <code class="docutils literal notranslate"><span class="pre">pc_chan_avg_som_cluster_name</span></code>). These values are z-scored and capped at the value specified in the <code class="docutils literal notranslate"><span class="pre">cap</span></code> argument prior to consensus clustering. This helps improve meta clustering performance.</p>
+<p>After consensus clustering, the following are computed by <code class="docutils literal notranslate"><span class="pre">generate_meta_avg_files</span></code>:</p>
+<ul class="simple">
+<li><p>The average channel expression across all pixel meta clusters, and the number of pixels per meta cluster (the data in <code class="docutils literal notranslate"><span class="pre">pc_chan_avg_meta_cluster_name</span></code>)</p></li>
+<li><p>The meta cluster mapping for each pixel SOM cluster in <code class="docutils literal notranslate"><span class="pre">pc_chan_avg_som_cluster_name</span></code> (data is resaved, same data except with an associated meta cluster column)</p></li>
+</ul>
+<p>For a full set of parameters you can customize for <code class="docutils literal notranslate"><span class="pre">pixel_consensus_cluster</span></code>, please consult <a href=https://ark-analysis.readthedocs.io/en/latest/_markdown/ark.phenotyping.html#ark.phenotyping.pixel_cluster_utils.pixel_consensus_cluster>pixel consensus clustering docs</a></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">max_k</span></code>: the number of consensus clusters desired</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cap</span></code>: used to clip z-scored values prior to consensus clustering (in the range <code class="docutils literal notranslate"><span class="pre">[-cap,</span> <span class="pre">cap]</span></code>)</p></li>
+</ul>
+<div class="cell tag_pixel_consensus_cluster docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">max_k</span> <span class="o">=</span> <span class="mi">10</span>
+<span class="n">cap</span> <span class="o">=</span> <span class="mi">3</span>
+
+<span class="c1"># run hierarchical clustering using average pixel SOM cluster expression</span>
+<span class="n">pixel_cc</span> <span class="o">=</span> <span class="n">pixel_meta_clustering</span><span class="o">.</span><span class="n">pixel_consensus_cluster</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="p">,</span>
+    <span class="n">channels</span><span class="p">,</span>
+    <span class="n">base_dir</span><span class="p">,</span>
+    <span class="n">max_k</span><span class="o">=</span><span class="n">max_k</span><span class="p">,</span>
+    <span class="n">cap</span><span class="o">=</span><span class="n">cap</span><span class="p">,</span>
+    <span class="n">data_dir</span><span class="o">=</span><span class="n">pixel_data_dir</span><span class="p">,</span>
+    <span class="n">pc_chan_avg_som_cluster_name</span><span class="o">=</span><span class="n">pc_chan_avg_som_cluster_name</span><span class="p">,</span>
+    <span class="n">multiprocess</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">overwrite</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span>
+<span class="p">)</span>
+
+<span class="c1"># generate the meta cluster summary files</span>
+<span class="n">pixel_meta_clustering</span><span class="o">.</span><span class="n">generate_meta_avg_files</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="p">,</span>
+    <span class="n">channels</span><span class="p">,</span>
+    <span class="n">base_dir</span><span class="p">,</span>
+    <span class="n">pixel_cc</span><span class="p">,</span>
+    <span class="n">data_dir</span><span class="o">=</span><span class="n">pixel_data_dir</span><span class="p">,</span>
+    <span class="n">overwrite</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+    <span class="n">pc_chan_avg_som_cluster_name</span><span class="o">=</span><span class="n">pc_chan_avg_som_cluster_name</span><span class="p">,</span>
+    <span class="n">pc_chan_avg_meta_cluster_name</span><span class="o">=</span><span class="n">pc_chan_avg_meta_cluster_name</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="visualize-results">
+<h2>5. Visualize results<a class="headerlink" href="#visualize-results" title="Link to this heading">#</a></h2>
+<section id="interactive-adjustments-to-relabel-pixel-meta-clusters">
+<h3>5.1: Interactive adjustments to relabel pixel meta clusters<a class="headerlink" href="#interactive-adjustments-to-relabel-pixel-meta-clusters" title="Link to this heading">#</a></h3>
+<p>The visualization shows the z-scored average channel expression per pixel SOM and meta cluster. The heatmaps are faceted by pixel SOM clusters on the left and pixel meta clusters on the right.</p>
+<p>Quickstart</p>
+<ul class="simple">
+<li><p><strong>Select</strong>: Left Click</p></li>
+<li><p><strong>Remap</strong>: <strong>New metacluster</strong> button or Right Click</p></li>
+<li><p><strong>Edit Metacluster Name</strong>: Textbox at bottom right of the heatmaps.</p></li>
+</ul>
+<p>Selection and remapping details</p>
+<ul class="simple">
+<li><p>To select a SOM cluster, click on its respective position in the <strong>selected</strong> bar. Click on it again to deselect.</p></li>
+<li><p>To select a meta cluster, click on its corresponding color in the <strong>metacluster</strong> bar. Click on it again to deselect.</p></li>
+<li><p>To remap the selected clusters, click the <strong>New metacluster</strong> button (alternatively, right click anywhere). Note that remapping an entire metacluster deletes it.</p></li>
+<li><p>To clear the selected SOM/meta clusters, use the <strong>Clear Selection</strong> button.</p></li>
+<li><p><strong>After remapping a meta cluster, make sure to deselect the newly created one to prevent unwanted combinations.</strong></p></li>
+</ul>
+<p>Other features and notes</p>
+<ul class="simple">
+<li><p>You will likely need to zoom out to see the entire visualization. To toggle Zoom, use Ctrl -/Ctrl + on Windows or ⌘ +/⌘ - on Mac.</p></li>
+<li><p>The bars at the top show the number of pixels in each SOM cluster.</p></li>
+<li><p>The text box at the bottom right allows you to rename a particular meta cluster. This can be useful as remapping may cause inconsistent numbering. <strong>You cannot use the same name for different meta clusters; doing so will cause the next step to fail.</strong></p></li>
+<li><p>Adjust the z-score limit using the slider on the bottom left to adjust your dynamic range.</p></li>
+<li><p>When meta clusters are combined or a meta cluster is renamed, the change is immediately saved to <code class="docutils literal notranslate"><span class="pre">pixel_meta_cluster_remap_name</span></code>.</p></li>
+<li><p>You won’t be able to advance in the notebook until you’ve clicked <code class="docutils literal notranslate"><span class="pre">New</span> <span class="pre">metacluster</span></code> or renamed a meta cluster at least once. If you don’t want to make changes, just click <code class="docutils literal notranslate"><span class="pre">New</span> <span class="pre">metacluster</span></code> to trigger a save before continuing.</p></li>
+</ul>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="o">%</span><span class="k">matplotlib</span> widget
+<span class="n">rc_file_defaults</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">ion</span><span class="p">()</span>
+
+<span class="n">pixel_mcd</span> <span class="o">=</span> <span class="n">metaclusterdata_from_files</span><span class="p">(</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pc_chan_avg_som_cluster_name</span><span class="p">),</span>
+    <span class="n">cluster_type</span><span class="o">=</span><span class="s1">&#39;pixel&#39;</span>
+<span class="p">)</span>
+<span class="n">pixel_mcd</span><span class="o">.</span><span class="n">output_mapping_filename</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_meta_cluster_remap_name</span><span class="p">)</span>
+<span class="n">pixel_mcg</span> <span class="o">=</span> <span class="n">MetaClusterGui</span><span class="p">(</span><span class="n">pixel_mcd</span><span class="p">,</span> <span class="n">width</span><span class="o">=</span><span class="mi">15</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Relabel the pixel meta clusters using the mapping, and recompute the meta cluster average files with the new meta cluster names.</p>
+<div class="cell tag_pixel_apply_remap docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># rename the meta cluster values in the pixel dataset</span>
+<span class="n">pixel_meta_clustering</span><span class="o">.</span><span class="n">apply_pixel_meta_cluster_remapping</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="p">,</span>
+    <span class="n">channels</span><span class="p">,</span>
+    <span class="n">base_dir</span><span class="p">,</span>
+    <span class="n">pixel_data_dir</span><span class="p">,</span>
+    <span class="n">pixel_meta_cluster_remap_name</span><span class="p">,</span>
+    <span class="n">multiprocess</span><span class="o">=</span><span class="n">multiprocess</span><span class="p">,</span>
+    <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span>
+<span class="p">)</span>
+
+<span class="c1"># recompute the mean channel expression per meta cluster and apply these new names to the SOM cluster average data</span>
+<span class="n">pixel_meta_clustering</span><span class="o">.</span><span class="n">generate_remap_avg_files</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="p">,</span>
+    <span class="n">channels</span><span class="p">,</span>
+    <span class="n">base_dir</span><span class="p">,</span>
+    <span class="n">pixel_data_dir</span><span class="p">,</span>
+    <span class="n">pixel_meta_cluster_remap_name</span><span class="p">,</span>
+    <span class="n">pc_chan_avg_som_cluster_name</span><span class="p">,</span>
+    <span class="n">pc_chan_avg_meta_cluster_name</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Generate the color scheme returned by the interactive reclustering process. This will be for visualizing the pixel phenotype maps.</p>
+<div class="cell tag_pixel_cmap_gen docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">raw_cmap</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">colormap_helper</span><span class="o">.</span><span class="n">generate_meta_cluster_colormap_dict</span><span class="p">(</span>
+    <span class="n">pixel_mcd</span><span class="o">.</span><span class="n">output_mapping_filename</span><span class="p">,</span>
+    <span class="n">pixel_mcg</span><span class="o">.</span><span class="n">im_cl</span><span class="o">.</span><span class="n">cmap</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="generate-pixel-phenotype-maps">
+<h3>5.2: Generate pixel phenotype maps<a class="headerlink" href="#generate-pixel-phenotype-maps" title="Link to this heading">#</a></h3>
+<p>Generate pixel phenotype maps, in which each pixel in the image corresponds to its pixel meta cluster. Select a small subset of your FOVs to view within this notebook. Or if you wish to generate and save a significant amount of FOVs, the masks will be created and saved in batches.</p>
+<p>Files will be written as <code class="docutils literal notranslate"><span class="pre">{fov_name}_pixel_mask.tiff</span></code> in <code class="docutils literal notranslate"><span class="pre">pixel_output_dir</span></code></p>
+<div class="cell tag_pixel_overlay_fovs docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># select fovs to display</span>
+<span class="n">subset_pixel_fovs</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;fov0&#39;</span><span class="p">,</span> <span class="s1">&#39;fov1&#39;</span><span class="p">,</span> <span class="s1">&#39;fov2&#39;</span><span class="p">,</span> <span class="s1">&#39;fov3&#39;</span><span class="p">,</span> <span class="s1">&#39;fov4&#39;</span><span class="p">]</span>
+<span class="c1"># , &#39;fov5&#39;, &#39;fov6&#39;, &#39;fov7&#39;, &#39;fov8&#39;, &#39;fov9&#39;, &#39;fov10&#39;, &#39;fov11&#39;, &#39;fov12&#39;, &#39;fov13&#39;, &#39;fov14&#39;, &#39;fov15&#39;, &#39;fov16&#39;, &#39;fov17&#39;, &#39;fov18&#39;, &#39;fov19&#39;, &#39;fov20&#39;, &#39;fov21&#39;,&#39;fov22&#39;, &#39;fov23&#39;]</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell tag_pixel_mask_gen_save docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># define the path to the channel file</span>
+<span class="k">if</span> <span class="n">img_sub_folder</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">chan_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">io_utils</span><span class="o">.</span><span class="n">list_files</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tiff_dir</span><span class="p">,</span> <span class="n">fovs</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span> <span class="n">substrs</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;.tif&#39;</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="p">)</span>
+<span class="k">else</span><span class="p">:</span>
+    <span class="n">chan_file</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span>
+        <span class="n">img_sub_folder</span><span class="p">,</span> <span class="n">io_utils</span><span class="o">.</span><span class="n">list_files</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">tiff_dir</span><span class="p">,</span> <span class="n">fovs</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">img_sub_folder</span><span class="p">),</span> <span class="n">substrs</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;.tif&#39;</span><span class="p">])[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="p">)</span>
+
+<span class="c1"># generate and save the pixel cluster masks for each fov in subset_pixel_fovs</span>
+<span class="n">data_utils</span><span class="o">.</span><span class="n">generate_and_save_pixel_cluster_masks</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="o">=</span><span class="n">subset_pixel_fovs</span><span class="p">,</span>
+    <span class="n">base_dir</span><span class="o">=</span><span class="n">base_dir</span><span class="p">,</span>
+    <span class="n">save_dir</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_output_dir</span><span class="p">),</span>
+    <span class="n">tiff_dir</span><span class="o">=</span><span class="n">tiff_dir</span><span class="p">,</span>
+    <span class="n">chan_file</span><span class="o">=</span><span class="n">chan_file</span><span class="p">,</span>
+    <span class="n">pixel_data_dir</span><span class="o">=</span><span class="n">pixel_data_dir</span><span class="p">,</span>
+    <span class="n">cluster_id_to_name_path</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_meta_cluster_remap_name</span><span class="p">),</span>
+    <span class="n">pixel_cluster_col</span><span class="o">=</span><span class="s1">&#39;pixel_meta_cluster&#39;</span><span class="p">,</span>
+    <span class="n">sub_dir</span><span class="o">=</span><span class="s1">&#39;pixel_masks&#39;</span><span class="p">,</span>
+    <span class="n">name_suffix</span><span class="o">=</span><span class="s1">&#39;_pixel_mask&#39;</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Save the colored pixel masks for each FOV in <code class="docutils literal notranslate"><span class="pre">subset_pixel_fovs</span></code>.</p>
+<div class="cell tag_save_pixel_masks docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">plot_utils</span><span class="o">.</span><span class="n">save_colored_masks</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="o">=</span><span class="n">subset_pixel_fovs</span><span class="p">,</span>
+    <span class="n">mask_dir</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s2">&quot;pixel_masks&quot;</span><span class="p">),</span>
+    <span class="n">save_dir</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s2">&quot;pixel_mask_colored&quot;</span><span class="p">),</span>
+    <span class="n">cluster_id_to_name_path</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_meta_cluster_remap_name</span><span class="p">),</span>
+    <span class="n">metacluster_colors</span><span class="o">=</span><span class="n">raw_cmap</span><span class="p">,</span>
+    <span class="n">cluster_type</span><span class="o">=</span><span class="s2">&quot;pixel&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Load a subset of the pixel cluster masks that you would like to preview. If the dimensions or text size of the plot need to be adjusted for optimal viewing, change the <code class="docutils literal notranslate"><span class="pre">figsize</span></code> and <code class="docutils literal notranslate"><span class="pre">dpi</span></code> parameters.</p>
+<div class="cell tag_pixel_overlay_gen docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">pixel_fov</span> <span class="ow">in</span> <span class="n">subset_pixel_fovs</span><span class="p">:</span>
+    <span class="n">pixel_cluster_mask</span> <span class="o">=</span> <span class="n">load_utils</span><span class="o">.</span><span class="n">load_imgs_from_dir</span><span class="p">(</span>
+        <span class="n">data_dir</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s2">&quot;pixel_masks&quot;</span><span class="p">),</span>
+        <span class="n">files</span><span class="o">=</span><span class="p">[</span><span class="n">pixel_fov</span> <span class="o">+</span> <span class="s2">&quot;_pixel_mask.tiff&quot;</span><span class="p">],</span>
+        <span class="n">trim_suffix</span><span class="o">=</span><span class="s2">&quot;_pixel_mask&quot;</span><span class="p">,</span>
+        <span class="n">match_substring</span><span class="o">=</span><span class="s2">&quot;_pixel_mask&quot;</span><span class="p">,</span>
+        <span class="n">xr_dim_name</span><span class="o">=</span><span class="s2">&quot;pixel_mask&quot;</span><span class="p">,</span>
+        <span class="n">xr_channel_names</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">plot_utils</span><span class="o">.</span><span class="n">plot_pixel_cell_cluster</span><span class="p">(</span>
+        <span class="n">pixel_cluster_mask</span><span class="p">,</span>
+        <span class="p">[</span><span class="n">pixel_fov</span><span class="p">],</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_meta_cluster_remap_name</span><span class="p">),</span>
+        <span class="n">metacluster_colors</span><span class="o">=</span><span class="n">raw_cmap</span><span class="p">,</span>
+        <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="mi">8</span><span class="p">),</span>
+        <span class="n">dpi</span><span class="o">=</span><span class="mi">100</span>
+    <span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="save-parameters-for-use-in-cell-clustering-and-visual-inspection">
+<h2>6. Save parameters for use in cell clustering and visual inspection<a class="headerlink" href="#save-parameters-for-use-in-cell-clustering-and-visual-inspection" title="Link to this heading">#</a></h2>
+<p>The following parameters are saved:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">fovs</span></code>: fovs in <code class="docutils literal notranslate"><span class="pre">pixel_data_dir</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">channels</span></code>: channels used for clustering</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">segmentation_dir</span></code>: path to the directory containing your segmentated images for each FOV (can be generated using <code class="docutils literal notranslate"><span class="pre">1_Segment_Image_Data.ipynb</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">seg_suffix</span></code>: suffix plus the file extension of the segmented images for each FOV</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pixel_data_dir</span></code>: name of the directory containing the full pixel data with the pixel SOM and meta cluster assignments</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pc_chan_avg_som_cluster_name</span></code>: name of the file containing the average channel expression per pixel SOM cluster</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pc_chan_avg_meta_cluster_name</span></code>: same as above for pixel meta clusters</p></li>
+</ul>
+<p>The file will be saved to <code class="docutils literal notranslate"><span class="pre">{pixel_cluster_prefix}_cell_clustering_params.json</span></code> and will be placed in <code class="docutils literal notranslate"><span class="pre">pixel_output_dir</span></code>. Note that the <code class="docutils literal notranslate"><span class="pre">pixel_output_dir</span></code> you use in <code class="docutils literal notranslate"><span class="pre">2_Pixie_Cluster_Pixels.ipynb</span></code> should be the same as in <code class="docutils literal notranslate"><span class="pre">3_Pixie_Cluster_Cells.ipynb</span></code>.</p>
+<div class="cell tag_cell_param_save docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># define the params dict</span>
+<span class="n">cell_clustering_params</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;fovs&#39;</span><span class="p">:</span> <span class="n">io_utils</span><span class="o">.</span><span class="n">remove_file_extensions</span><span class="p">(</span><span class="n">io_utils</span><span class="o">.</span><span class="n">list_files</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_data_dir</span><span class="p">),</span> <span class="n">substrs</span><span class="o">=</span><span class="s1">&#39;.feather&#39;</span><span class="p">)),</span>
+    <span class="s1">&#39;channels&#39;</span><span class="p">:</span> <span class="n">channels</span><span class="p">,</span>
+    <span class="s1">&#39;tiff_dir&#39;</span><span class="p">:</span> <span class="n">tiff_dir</span><span class="p">,</span>
+    <span class="s1">&#39;img_sub_folder&#39;</span><span class="p">:</span> <span class="n">img_sub_folder</span><span class="p">,</span>
+    <span class="s1">&#39;segmentation_dir&#39;</span><span class="p">:</span> <span class="n">segmentation_dir</span><span class="p">,</span>
+    <span class="s1">&#39;seg_suffix&#39;</span><span class="p">:</span> <span class="n">seg_suffix</span><span class="p">,</span>
+    <span class="s1">&#39;pixel_data_dir&#39;</span><span class="p">:</span> <span class="n">pixel_data_dir</span><span class="p">,</span>
+    <span class="s1">&#39;pc_chan_avg_som_cluster_name&#39;</span><span class="p">:</span> <span class="n">pc_chan_avg_som_cluster_name</span><span class="p">,</span>
+    <span class="s1">&#39;pc_chan_avg_meta_cluster_name&#39;</span><span class="p">:</span> <span class="n">pc_chan_avg_meta_cluster_name</span>
+<span class="p">}</span>
+
+<span class="c1"># save the params dict</span>
+<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s1">&#39;cell_clustering_params.json&#39;</span><span class="p">),</span> <span class="s1">&#39;w&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+    <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">cell_clustering_params</span><span class="p">,</span> <span class="n">fh</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<section id="save-images-for-mantis-viewer">
+<h3>6.1 Save images for Mantis Viewer<a class="headerlink" href="#save-images-for-mantis-viewer" title="Link to this heading">#</a></h3>
+<p>Mantis Viewer is a visualization tool for multi-dimensional imaging in pathology. Learn more about Mantis Viewer <a class="github reference external" href="https://github.com/angelolab/ark-analysis/tree/main">angelolab/ark-analysis</a>.</p>
+<div class="cell tag_pixel_mantis_project docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">plot_utils</span><span class="o">.</span><span class="n">create_mantis_dir</span><span class="p">(</span>
+    <span class="n">fovs</span><span class="o">=</span><span class="n">subset_pixel_fovs</span><span class="p">,</span>
+    <span class="n">mantis_project_path</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="s2">&quot;mantis&quot;</span><span class="p">),</span>
+    <span class="n">img_data_path</span><span class="o">=</span><span class="n">tiff_dir</span><span class="p">,</span>
+    <span class="n">mask_output_dir</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_output_dir</span><span class="p">,</span> <span class="s2">&quot;pixel_masks&quot;</span><span class="p">),</span>
+    <span class="n">mapping</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">base_dir</span><span class="p">,</span> <span class="n">pixel_meta_cluster_remap_name</span><span class="p">),</span>
+    <span class="n">seg_dir</span><span class="o">=</span><span class="n">pixie_seg_dir</span><span class="p">,</span>
+    <span class="n">mask_suffix</span><span class="o">=</span><span class="s2">&quot;_pixel_mask&quot;</span><span class="p">,</span>
+    <span class="n">seg_suffix_name</span><span class="o">=</span><span class="n">seg_suffix</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+</section>
+
+    <script type="text/x-thebe-config">
+    {
+        requestKernel: true,
+        binderOptions: {
+            repo: "binder-examples/jupyter-stacks-datascience",
+            ref: "master",
+        },
+        codeMirrorConfig: {
+            theme: "abcdef",
+            mode: "python"
+        },
+        kernelOptions: {
+            name: "python3",
+            path: "./src\notebooks"
+        },
+        predefinedOutput: true
+    }
+    </script>
+    <script>kernelName = 'python3'</script>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="4_Segmentation.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Part 4: Segment cells and nuclei.</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="6_Cluster_Cells.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Part 6: Cluster cells.</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#import-packages">1. Import packages.</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#this-must-be-done-every-time-the-notebook-is-started-or-restarted">*This must be done every time the notebook is started or restarted.</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#define-directory-paths">2. Define directory paths.</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">*This must be done every time the notebook is started or restarted.</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#define-multiprocessing-parameters">Define multiprocessing parameters</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#preprocess">3. Preprocess</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#blurring-and-masking">3.1 Blurring and masking</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#pixel-clustering">4. Pixel clustering</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#visualize-pixel-som-performance">4.1 Visualize pixel SOM performance</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#assign-pixel-som-clusters">4.2: Assign pixel SOM clusters</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#run-pixel-consensus-clustering">4.3: Run pixel consensus clustering</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#visualize-results">5. Visualize results</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#interactive-adjustments-to-relabel-pixel-meta-clusters">5.1: Interactive adjustments to relabel pixel meta clusters</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#generate-pixel-phenotype-maps">5.2: Generate pixel phenotype maps</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#save-parameters-for-use-in-cell-clustering-and-visual-inspection">6. Save parameters for use in cell clustering and visual inspection</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#save-images-for-mantis-viewer">6.1 Save images for Mantis Viewer</a></li>
+</ul>
+</li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By Justin Smith
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2023.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../../_static/scripts/bootstrap.js?digest=8878045cc6db502f8baf"></script>
+<script defer src="../../_static/scripts/pydata-sphinx-theme.js?digest=8878045cc6db502f8baf"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

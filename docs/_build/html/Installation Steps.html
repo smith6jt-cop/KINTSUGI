@@ -30,7 +30,7 @@
   <link href="_static/styles/theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
 <link href="_static/styles/pydata-sphinx-theme.css?digest=8878045cc6db502f8baf" rel="stylesheet" />
 
-    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=fa44fd50" />
     <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=a3416100" />
     <link rel="stylesheet" type="text/css" href="_static/togglebutton.css?v=13237357" />
     <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
@@ -63,8 +63,8 @@
     <script>DOCUMENTATION_OPTIONS.pagename = 'Installation Steps';</script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Notebooks" href="Notebooks.html" />
-    <link rel="prev" title="KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing" href="README.html" />
+    <link rel="next" title="Part 1: Explore data, test and tune processing parameters." href="src/notebooks/1_Single_Channel_Eval.html" />
+    <link rel="prev" title="KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing" href="Intro.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -135,7 +135,7 @@
     
   
 
-<a class="navbar-brand logo" href="README.html">
+<a class="navbar-brand logo" href="Intro.html">
   
   
   
@@ -146,8 +146,8 @@
       
     
     
-    <img src="_static/logo.png" class="logo__image only-light" alt="KINTSUGI - Home"/>
-    <img src="_static/logo.png" class="logo__image only-dark pst-js-only" alt="KINTSUGI - Home"/>
+    <img src="_static/cluster.gif" class="logo__image only-light" alt="KINTSUGI - Home"/>
+    <img src="_static/cluster.gif" class="logo__image only-dark pst-js-only" alt="KINTSUGI - Home"/>
   
   
 </a></div>
@@ -163,15 +163,19 @@
         
         <ul class="nav bd-sidenav bd-sidenav__home-link">
             <li class="toctree-l1">
-                <a class="reference internal" href="README.html">
+                <a class="reference internal" href="Intro.html">
                     KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing
                 </a>
             </li>
         </ul>
         <ul class="current nav bd-sidenav">
 <li class="toctree-l1 current active"><a class="current reference internal" href="#">Installation Steps</a></li>
-<li class="toctree-l1"><a class="reference internal" href="Notebooks.html">Notebooks</a></li>
-<li class="toctree-l1"><a class="reference internal" href="Acknowledgements.html">Acknowledgements</a></li>
+<li class="toctree-l1"><a class="reference internal" href="src/notebooks/1_Single_Channel_Eval.html">Part 1: Explore data, test and tune processing parameters.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="src/notebooks/2_Cycle_Processing.html">Part 2: Batch Process</a></li>
+<li class="toctree-l1"><a class="reference internal" href="src/notebooks/3_Signal_Isolation.html">Part 3: Isolate signal from autofluorescence and noise.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="src/notebooks/4_Segmentation.html">Part 4: Segment cells and nuclei.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="src/notebooks/5_Cluster_Pixels.html">Part 5: Cluster pixels.</a></li>
+<li class="toctree-l1"><a class="reference internal" href="src/notebooks/6_Cluster_Cells.html">Part 6: Cluster cells.</a></li>
 </ul>
 
     </div>
@@ -231,7 +235,7 @@
       
       
       
-      <li><a href="https://github.com/executablebooks/KINTSUGI" target="_blank"
+      <li><a href="https://github.com/smith6jt-cop/KINTSUGI" target="_blank"
    class="btn btn-sm btn-source-repository-button dropdown-item"
    title="Source repository"
    data-bs-placement="left" data-bs-toggle="tooltip"
@@ -248,7 +252,7 @@
       
       
       
-      <li><a href="https://github.com/executablebooks/KINTSUGI/issues/new?title=Issue%20on%20page%20%2FInstallation Steps.html&body=Your%20issue%20content%20here." target="_blank"
+      <li><a href="https://github.com/smith6jt-cop/KINTSUGI/issues/new?title=Issue%20on%20page%20%2FInstallation Steps.html&body=Your%20issue%20content%20here." target="_blank"
    class="btn btn-sm btn-source-issues-button dropdown-item"
    title="Open an issue"
    data-bs-placement="left" data-bs-toggle="tooltip"
@@ -379,7 +383,7 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="installation-steps">
+  <section class="tex2jax_ignore mathjax_ignore" id="installation-steps">
 <h1>Installation Steps<a class="headerlink" href="#installation-steps" title="Link to this heading">#</a></h1>
 <section id="download-miniforge">
 <h2>1. Download miniforge<a class="headerlink" href="#download-miniforge" title="Link to this heading">#</a></h2>
@@ -483,7 +487,7 @@
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="README.html"
+       href="Intro.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
@@ -492,11 +496,11 @@
       </div>
     </a>
     <a class="right-next"
-       href="Notebooks.html"
+       href="src/notebooks/1_Single_Channel_Eval.html"
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Notebooks</p>
+        <p class="prev-next-title">Part 1: Explore data, test and tune processing parameters.</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
