@@ -1,0 +1,32 @@
+{
+  "editor.wordWrap": "on",
+  "notebook.output.wordWrap": true,
+  "jupyter.logging.level": "info",
+  "python.envFile": "${workspaceFolder}/.env",
+  "terminal.integrated.defaultProfile.windows": "Command Prompt",
+  "terminal.integrated.defaultProfile.linux": "bash",
+  "terminal.integrated.profiles.windows": {
+      "Command Prompt": {
+          "path": "C:\\Windows\\System32\\cmd.exe",
+          "args": ["%userdir%\\miniforge3\\Scripts\\activate.bat"],
+          "icon": "terminal-cmd"
+      }
+  },
+  "terminal.integrated.profiles.linux": {
+      "bash": {
+          "path": "/bin/bash",
+          "args": ["-l"],
+          "icon": "terminal-bash"
+      }
+  },
+  "terminal.integrated.env.windows": {
+      "PATH": "${env:PATH};%userdir%\\KINTSUGI\\miniforge3\\Scripts;%userdir%\\KINTSUGI\\miniforge3\\Library\\bin;%userdir%\\KINTSUGI\\jdk-21_windows-x64_bin\\jdk-21.0.5\\bin;%userdir%\\Fiji.app;%userdir%\\KINTSUGI\\apache-maven-3.9.9-bin\\apache-maven\\src\\bin",
+      "MCR_CACHE_ROOT": "${workspaceFolder}\\mcr_cache",
+      "MCR_CACHE_VERBOSE": "1",
+      "MCR_TOOLBOX_LOGGING": "file",
+      "MCR_SUPPRESS_LAUNCH_MESSAGE": "1"
+  },
+  "terminal.integrated.env.linux": {
+      "PATH": "${env:PATH}:$HOME/KINTSUGI/jdk-21/bin:$HOME/Fiji.app:$HOME/KINTSUGI/apache-maven-3.9.9/bin"
+  }
+}
