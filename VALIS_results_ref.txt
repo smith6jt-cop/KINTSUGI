@@ -37,3 +37,46 @@ The results directory contains several folders:
 
 After registraation is complete, one should view the
 results to determine if they aare acceptable.
+
+Description of csv results:
+`summary_df` contains various information about the registration.
+
+            The "from" column is the name of the image, while the "to" column
+            name of the image it was aligned to. "from" is analagous to "moving"
+            or "current", while "to" is analgous to "fixed" or "previous".
+
+            Columns begining with "original" refer to error measurements of the
+            unregistered images. Those beginning with "rigid" or "non_rigid" refer
+            to measurements related to rigid or non-rigid registration, respectively.
+
+            Columns beginning with "mean" are averages of error measurements. In
+            the case of errors based on feature distances (i.e. those ending in "D"),
+            the mean is weighted by the number of feature matches between "from" and "to".
+
+            Columns endining in "D" indicate the median distance between matched
+            features in "from" and "to".
+
+            Columns ending in "TRE" indicate the target registration error between
+            "from" and "to".
+
+            Columns ending in "mattesMI" contain measurements of the Mattes mutual
+            information between "from" and "to".
+
+            "processed_img_shape" indicates the shape (row, column) of the processed
+            image actually used to conduct the registration
+
+            "shape" is the shape of the slide at full resolution
+
+            "aligned_shape" is the shape of the registered full resolution slide
+
+            "physical_units" are the names of the pixels physcial unit, e.g. u'\u00B5m'
+
+            "resolution" is the physical unit per pixel
+
+            "name" is the name assigned to the Valis instance
+
+            "rigid_time_minutes" is the total number of minutes it took
+            to convert the images and then rigidly align them.
+
+            "non_rigid_time_minutes" is the total number of minutes it took
+            to convert the images, and then perform rigid -> non-rigid registration.
