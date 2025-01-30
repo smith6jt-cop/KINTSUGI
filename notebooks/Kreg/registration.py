@@ -53,7 +53,7 @@ MASK_DIR = "masks"
 DEFAULT_BRIGHTFIELD_CLASS = preprocessing.OD
 DEFAULT_BRIGHTFIELD_PROCESSING_ARGS = {"adaptive_eq": True} #{'c': preprocessing.DEFAULT_COLOR_STD_C, "h": 0}
 DEFAULT_FLOURESCENCE_CLASS = preprocessing.ChannelGetter
-DEFAULT_FLOURESCENCE_PROCESSING_ARGS = {"channel": "dapi", "adaptive_eq": True}
+DEFAULT_FLOURESCENCE_PROCESSING_ARGS = {"channel": "DAPI", "adaptive_eq": True}
 DEFAULT_NORM_METHOD = "img_stats"
 
 # Default rigid registration parameters #
@@ -64,7 +64,7 @@ DEFAULT_SIMILARITY_METRIC = "n_matches"
 DEFAULT_AFFINE_OPTIMIZER_CLASS = None
 DEFAULT_MAX_PROCESSED_IMG_SIZE = 1024
 DEFAULT_MAX_IMG_DIM = 1024
-DEFAULT_THUMBNAIL_SIZE = 500
+DEFAULT_THUMBNAIL_SIZE = 800
 DEFAULT_MAX_NON_RIGID_REG_SIZE = 3000
 
 # Tiled non-rigid registration arguments
