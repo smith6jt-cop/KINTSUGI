@@ -127,7 +127,7 @@ class ChannelGetter(ImageProcesser):
 
         return tissue_mask
 
-    def process_image(self, channel="dapi", adaptive_eq=True, invert=False, *args, **kwaargs):
+    def process_image(self, channel="DAPI", adaptive_eq=True, invert=False, *args, **kwargs):
         if self.image is None:
             chnl = self.reader.get_channel(channel=channel, level=self.level, series=self.series).astype(float)
         else:
