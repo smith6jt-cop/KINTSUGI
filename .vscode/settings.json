@@ -3,7 +3,7 @@
   "notebook.output.wordWrap": true,
   "jupyter.logging.level": "info",
   "jupyter.widgetScriptSources": ["jsdelivr.com", "unpkg.com"],
-  "jupyter.notebookFileRoot": "${workspaceFolder}",
+  "jupyter.notebookFileRoot": "${workspaceFolder}/notebooks",
   "python.envFile": "${workspaceFolder}/.env",
   "terminal.integrated.defaultProfile.windows": "Command Prompt",
   "terminal.integrated.defaultProfile.linux": "bash",
