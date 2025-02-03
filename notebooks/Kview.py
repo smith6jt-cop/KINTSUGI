@@ -105,7 +105,7 @@ def interact(func,
             default_value = int_slider(min=min_value, max=max_value, step=step, value=default_value, continuous_update=continuous_update)
             exposable = True
         elif sig.parameters[key].annotation is float: #or 'sigma' in key or 'radius' in key:
-            default_value = float_slider(min=0, max=2, step=0.1, value=default_value, continuous_update=continuous_update)
+            default_value = float_slider(min=0, max=10, step=0.1, value=default_value, continuous_update=continuous_update)
             exposable = True
         elif key.startswith("is_") or sig.parameters[key].annotation is bool:
             default_value = ipywidgets.Checkbox(value=default_value)

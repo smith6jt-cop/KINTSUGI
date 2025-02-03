@@ -88,8 +88,9 @@ def get_name(f):
     """
     To get an object's name, remove image type extension from filename
     """
+    
     f = str(f)
-    if re.search("\.", f) is None:
+    if re.search("\.", str(os.path.basename(f))) is None:
         # Extension already removed
         return f
 
