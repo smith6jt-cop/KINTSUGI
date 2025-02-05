@@ -94,7 +94,7 @@ def get_name(f):
         # Extension already removed
         return f
 
-    f = os.path.split(f)[-1]
+    f = os.path.basename(f)
 
     if f.endswith(".ome.tiff") or f.endswith(".ome.tif"):
         back_slice_idx = 2
