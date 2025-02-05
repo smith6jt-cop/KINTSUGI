@@ -30,5 +30,6 @@
   },
   "terminal.integrated.env.linux": {
       "PATH": "${env:PATH}:$HOME/KINTSUGI/jdk-21/bin:$HOME/Fiji.app:$HOME/KINTSUGI/apache-maven-3.9.9/bin"
-  }
+},
+"application.experimental.rendererProfiling": true
 }
