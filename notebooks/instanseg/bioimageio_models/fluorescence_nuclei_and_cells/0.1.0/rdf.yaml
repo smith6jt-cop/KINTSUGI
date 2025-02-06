@@ -1,0 +1,127 @@
+attachments:
+  files:
+  - per_sample_scale_range.ijm
+authors:
+- name: Thibaut Goldsborough
+cite:
+- doi: https://doi.org/10.48550/arXiv.2408.15954
+  text: 'Goldsborough, T. et al. (2024) InstanSeg: an embedding-based instance segmentation
+    algorithm optimized for accurate, efficient and portable cell segmentation. _arXiv_.
+    Available at: https://doi.org/10.48550/arXiv.2408.15954'
+- doi: https://doi.org/10.1101/2024.09.04.611150
+  text: 'Goldsborough, T. et al. (2024) A novel channel invariant architecture for
+    the segmentation of cells and nuclei in multiplexed images using InstanSeg. _bioRxiv_,
+    p. 2024.09.04.611150. Available at: https://doi.org/10.1101/2024.09.04.611150.'
+config:
+  deepimagej:
+    allow_tiling: true
+    model_keys: null
+    prediction:
+      postprocess:
+      - kwargs: instanseg_postprocess.ijm
+      preprocess:
+      - kwargs: instanseg_preprocess.ijm
+    pyramidal_model: false
+    test_information:
+      inputs:
+      - name: test-input.npy
+        pixel_size:
+          x: 1.0
+          y: 1.0
+          z: 1.0
+        size: 256 x 256 x 1 x 1
+      memory_peak: null
+      outputs:
+      - name: test-output.npy
+        size: 256 x 256 x 1 x 2
+        type: image
+      runtime: null
+  qupath:
+    axes:
+    - role: x
+      step: 0.5
+      unit: um
+    - role: y
+      step: 0.5
+      unit: um
+covers:
+- cover.png
+description: InstanSeg model
+documentation: fluorescence_nuclei_and_cells_README.md
+format_version: 0.4.9
+git_repo: https://github.com/instanseg/instanseg
+inputs:
+- axes: bcyx
+  data_range:
+  - -.inf
+  - .inf
+  data_type: float32
+  name: raw
+  preprocessing:
+  - kwargs:
+      axes: xy
+      eps: 1e-06
+      max_percentile: 99.9
+      min_percentile: 0.1
+      mode: per_sample
+    name: scale_range
+  shape:
+    min:
+    - 1
+    - 1
+    - 128
+    - 128
+    step:
+    - 0
+    - 1
+    - 32
+    - 32
+license: Apache-2.0
+links:
+- deepimagej/deepimagej
+name: fluorescence_nuclei_and_cells
+outputs:
+- axes: bcyx
+  data_range:
+  - -.inf
+  - .inf
+  data_type: float32
+  name: instance
+  shape:
+    offset:
+    - 0.0
+    - 1.0
+    - 0.0
+    - 0.0
+    reference_tensor: raw
+    scale:
+    - 1.0
+    - 0.0
+    - 1.0
+    - 1.0
+sample_inputs:
+- sample_input_0.tif
+sample_outputs:
+- sample_output_0.tif
+tags:
+- cell-segmentation
+- nuclei
+- cells
+- unet
+- fiji
+- qupath
+- pytorch
+- instanseg
+- whole-slide-imaging
+test_inputs:
+- test-input.npy
+test_outputs:
+- test-output.npy
+timestamp: '2024-09-10T10:32:15.988466'
+type: model
+version: 0.1.0
+weights:
+  torchscript:
+    pytorch_version: 2.0.0
+    sha256: 164d21a1d3c95b7aef2068801b74bd2647b1dfabeef9278861a49e3a847cd0dc
+    source: instanseg.pt

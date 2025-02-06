@@ -453,9 +453,8 @@ def create_marker_count_matrices(segmentation_labels, image_data, nuclear_counts
 
 
 def generate_cell_table(segmentation_dir, tiff_dir, img_sub_folder="TIFs",
-                        is_mibitiff=False, fovs=None,
                         extraction='total_intensity', nuclear_counts=False,
-                        fast_extraction=False, mask_types=['whole_cell'], **kwargs):
+                        fast_extraction=False, mask_types=['cells'], **kwargs):
     """This function takes the segmented data and computes the expression matrices batch-wise
     while also validating inputs
 
@@ -467,10 +466,6 @@ def generate_cell_table(segmentation_dir, tiff_dir, img_sub_folder="TIFs",
         img_sub_folder (str):
             the name of the folder where the TIF images are located
             ignored if is_mibitiff is True
-        fovs (list):
-            a list of fovs we wish to analyze, if None will default to all fovs
-        is_mibitiff (bool):
-            a flag to indicate whether or not the base images are MIBItiffs
         extraction (str):
             extraction function used to compute marker counts
         nuclear_counts (bool):
@@ -489,50 +484,25 @@ def generate_cell_table(segmentation_dir, tiff_dir, img_sub_folder="TIFs",
         - arcsinh transformed data
     """
 
-    # if no fovs are specified, then load all the fovs
-    if fovs is None:
-        if is_mibitiff:
-            fovs = io_utils.list_files(tiff_dir, substrs=[".tif", ".tiff"])
-        else:
-            fovs = io_utils.list_folders(tiff_dir)
+    filenames = io_utils.list_files(tiff_dir, exact_match=True)
 
-    # drop file extensions
-    fovs = io_utils.remove_file_extensions(fovs)
-
-    misc_utils.verify_in_list(
-        extraction=extraction,
-        extraction_options=list(EXTRACTION_FUNCTION.keys())
-    )
-
-    # get full filenames from given fovs
-    # TODO: deprecate filenames support as part of MIBItiff phasing out
-    filenames = io_utils.list_files(tiff_dir, substrs=fovs, exact_match=True)
-
-    # sort the fovs
-    fovs.sort()
-    filenames.sort()
-
-    # define number of FOVs for batch processing
-    cohort_len = len(fovs)
+    cohort_len = len(filenames)
 
     # create the final dfs to store the processed data
     normalized_tables = []
     arcsinh_tables = []
 
-    for fov_index, fov_name in enumerate(fovs):
-        if is_mibitiff:
-            image_data = load_utils.load_imgs_from_mibitiff(data_dir=tiff_dir,
-                                                            mibitiff_files=[filenames[fov_index]])
-        else:
-            image_data = load_utils.load_imgs_from_tree(data_dir=tiff_dir,
-                                                        img_sub_folder=img_sub_folder,
-                                                        fovs=[fov_name])
+    for file in filenames:
+
+        image_data = load_utils.load_imgs_from_tree(data_dir=tiff_dir,
+                                                    img_sub_folder=img_sub_folder,
+                                                    fovs=file)
 
         for mask_type in mask_types:
             # load the segmentation labels in
-            fov_mask_name = fov_name + '_' + mask_type + ".tiff"
+            mask_name = file + '_' + mask_type + "_labels_instanseg_prediction.tiff"
             current_labels_cell = load_utils.load_imgs_from_dir(data_dir=segmentation_dir,
-                                                                files=[fov_mask_name],
+                                                                files=[mask_name], # 
                                                                 xr_dim_name='compartments',
                                                                 xr_channel_names=[mask_type],
                                                                 trim_suffix='_' + mask_type)
