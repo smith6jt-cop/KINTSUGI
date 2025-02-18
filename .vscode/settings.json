@@ -5,6 +5,7 @@
   "jupyter.widgetScriptSources": ["jsdelivr.com", "unpkg.com"],
   "jupyter.notebookFileRoot": "${workspaceFolder}/notebooks",
   "python.envFile": "${workspaceFolder}/.env",
+  "python.defaultInterpreterPath": "%USERPROFILE%\\miniforge3\\envs\\KINTSUGI\\python.exe",
   "terminal.integrated.defaultProfile.windows": "Command Prompt",
   "terminal.integrated.defaultProfile.linux": "bash",
   "terminal.integrated.profiles.windows": {
