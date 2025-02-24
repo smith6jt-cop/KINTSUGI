@@ -1,4 +1,5 @@
 from ._slice_viewer import _SliceViewer
+from ._crop import _Cropper, crop
 
 def interact(func,
              image = None,
@@ -53,6 +54,8 @@ def interact(func,
     from ._context import Context
     from ._utilities import _no_resize
     from ._slice_viewer import _SliceViewer
+    from skimage import morphology
+    from ipywidgets import GridspecLayout
 
     if 'cupy.ndarray' in str(type(image)):
         image = image.get()
@@ -86,33 +89,33 @@ def interact(func,
 
         elif isinstance(sig.parameters[key].default, float):
             min_value_float, max_value_float, step_float = min_value_float, max_value_float, step_float
-        #if min_value is not None:
+
         int_slider = ipywidgets.IntSlider
         float_slider = ipywidgets.FloatSlider
-        #else:
-        #    int_slider = ipywidgets.IntText
-        #    float_slider = ipywidgets.FloatText
+
         if min_value is None:
             min_value = 0
         if max_value is None:
             max_value = 10
+
+        default_slider_layout = ipywidgets.Layout(width='300px', description_width='150px')
 
         if sig.parameters[key].annotation is str:
             default_value = ipywidgets.Text(value=default_value,
                                        continuous_update=continuous_update)
             exposable = True
         elif sig.parameters[key].annotation is int:
-            default_value = int_slider(min=min_value, max=max_value, step=step, value=default_value, continuous_update=continuous_update)
+            default_value = int_slider(min=min_value, max=max_value, step=step, value=default_value, continuous_update=continuous_update,layout=default_slider_layout, style={'description_width': 'initial'})
             exposable = True
         elif sig.parameters[key].annotation is float or 'sigma' in key or 'radius' in key:
-            default_value = float_slider(min=min_value_float, max=max_value_float, step=step_float, value=default_value, continuous_update=continuous_update)
+            default_value = float_slider(min=min_value_float, max=max_value_float, step=step_float, value=default_value, continuous_update=continuous_update,layout=default_slider_layout, style={'description_width': 'initial'})
             exposable = True
         elif key.startswith("is_") or sig.parameters[key].annotation is bool:
             default_value = ipywidgets.Checkbox(value=default_value)
             exposable = True
         elif key == 'footprint' or key == 'selem' or key == 'structuring_element':
             footprint_parameters.append(key)
-            default_value = int_slider(min=0, max=10, step=1, value=default_value, continuous_update=continuous_update)
+            default_value = int_slider(min=0, max=10, step=1, value=default_value,  continuous_update=continuous_update)
             exposable = True
         elif parameter_is_image_parameter(sig.parameters[key]) and "destination" not in key and key != "out"  and key != "output":
             if context is not None:
@@ -126,16 +129,15 @@ def interact(func,
         if exposable:
             if key in kwargs.keys():
                 default_value = kwargs[key]
+          
             exposable_parameters.append(inspect.Parameter(key, inspect.Parameter.KEYWORD_ONLY, default=default_value))
 
     viewer_was_none = viewer is None
     if viewer_was_none:
         viewer = _SliceViewer(image, zoom_factor=zoom_factor, zoom_spline_order=zoom_spline_order, colormap=colormap, display_min=display_min, display_max=display_max)
+        viewer_crop = _Cropper(image, zoom_factor=zoom_factor, zoom_spline_order=zoom_spline_order, colormap=colormap, display_min=display_min, display_max=display_max)
     viewer.slice_slider.continuous_update=continuous_update
-    command_label = ipywidgets.Label(value=func_name + "()")
-    command_label.style.font_family = "Courier"
 
-    from skimage import morphology
     execution_blocked = True
 
     def worker_function(*otherargs, **kwargs):
@@ -159,35 +161,40 @@ def interact(func,
             else:
                 command = command + ", " + key + "=" + str(kwargs[key])
         command = command + ")"
-        command_label.value = command.replace("(,", "(")
 
         if not execution_blocked:
             if image_passed:
-                viewer.image = func(image, *args, **kwargs)
+                result = func(image, *args, **kwargs)
+                viewer.image = result
+                viewer_crop._image = result
             else:
                 viewer.image = func(*args, **kwargs)
 
         viewer.slice_slider.max = viewer.image.shape[0] - 1
         viewer.configuration_updated(None)
-
+  
     worker_function.__signature__ = inspect.Signature(exposable_parameters)
     inter = ipywidgets.interactive(worker_function, dict(manual=False, auto_display=False))
-
     execution_blocked = False
-
     inter.update()
-
+    
     output_widgets = []
     output_widgets.append(inter)
-    output_widgets.append(command_label)
-
     if viewer_was_none:
-        output_widgets.append(_no_resize(viewer.view))
-        output_widgets.append(viewer.slice_slider)
+        full_view = _no_resize(viewer.view)
+        crop_view = viewer_crop
+        # output_widgets.append(viewer.slice_slider)
 
-    result = _no_resize(ipywidgets.VBox(output_widgets))
-    result.update = viewer.configuration_updated
-    return result
+    box_layout = ipywidgets.Layout(description_width='auto',
+                    border='solid', width='100%', align_items='center', justify_content='center')
+    widget_result = ipywidgets.HBox(output_widgets, layout=box_layout)
+ 
+    grid = GridspecLayout(4, 4, height='800px')
+    grid[:, 1:] =  crop_view 
+    grid[:2, 0:1] = widget_result
+    grid[2:, 0:1] = full_view
+    
+    return grid
 
 
 def guess_range(name, annotation):
