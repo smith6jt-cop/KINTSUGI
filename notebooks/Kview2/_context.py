@@ -24,6 +24,7 @@ class Context():
         self._modules = { }
         # self._images = {"no_image": logo}
         #self._label_images = {}
+        self._images = {} 
 
         self.parse(variables.items())
 
@@ -47,10 +48,16 @@ class Context():
                                 self._functions[name] = value
                             else:
                                 self._functions[prefix + name] = value
-                elif is_image(value):
+                elif isinstance(value, dict) and ("cropped" in name.lower()):
+                    # If a dictionary of images is found, add them to the _images attribute.
                     if prefix is None:
-                        #if is_label_image(value):
-                        #    self._label_images[name] = value
-                        #else:
-                            self._images[name] = value
+                        self._images.update(value)
+                    else:
+                        self._images.update({f"{prefix}{k}": v for k, v in value.items()})
+                # elif is_image(value):
+                #     if prefix is None:
+                #         self._images[name] = value
+                #     else:
+                #         self._images[prefix + name] = value
+
 
