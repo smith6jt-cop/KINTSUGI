@@ -1,5 +1,5 @@
 from ._slice_viewer import _SliceViewer
-from ._crop import _Cropper
+from ._crop import _Cropper, crop
 
 def interact(func,
              image = None,
@@ -186,10 +186,9 @@ def interact(func,
     box_layout = ipywidgets.Layout(description_width='auto',
                     border='solid', width='100%', align_items='center', justify_content='center')
     widget_result = ipywidgets.HBox(output_widgets, layout=box_layout)
-
  
-    grid = GridspecLayout(4, 4, height='800px', grid_gap="5px 5px")
-    grid[:, 1:3] =  crop_view
+    grid = GridspecLayout(4, 4, height='800px')
+    grid[:, 1:] =  crop_view 
     grid[:2, 0:1] = widget_result
     grid[2:, 0:1] = full_view
     

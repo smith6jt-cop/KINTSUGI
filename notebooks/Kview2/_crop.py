@@ -158,6 +158,9 @@ class _Cropper(VBox):
             self._viewer.update(None)
         except:
             self._viewer.view.data = np.zeros((2,2))
+    @property
+    def image(self):
+        return self._image
 
     @property
     def image(self):
