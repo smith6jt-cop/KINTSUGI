@@ -81,10 +81,10 @@ class _Cropper(VBox):
                  colormap:str = None,
                  display_min:float = None,
                  display_max:float = None):
-        from ipywidgets import IntRangeSlider
+        from ipywidgets import IntRangeSlider, Image
         from ._slice_viewer import _SliceViewer
         from ._utilities import _no_resize
-
+       
         self._image = image
 
         viewer = _SliceViewer(image,
@@ -112,6 +112,7 @@ class _Cropper(VBox):
 
         self._viewer = viewer
         view = viewer.view
+        
         slice_slider = viewer.slice_slider
 
         self._range_sliders = []
@@ -135,17 +136,39 @@ class _Cropper(VBox):
         if len(image.shape) > 2:
             widgets.append(slice_slider)
 
-        super(_Cropper, self).__init__([_no_resize(VBox(widgets))])
+        no_resize_vbox = _no_resize(VBox(widgets))
+        super(_Cropper, self).__init__([no_resize_vbox])
 
     def update(self, event=None):
         import numpy as np
+        from ipywidgets import Layout
+        
         self._viewer.image = self._image[self.range]
         self._viewer.slice_slider.max = self._viewer.image.shape[0] - 1
+        self._viewer.view.layout = Layout(
+            width='stretch',        
+            height='stretch',      
+            object_fit='cover', 
+            display='flex',
+            align_items='center',
+            justify_content='center'
+        )
+    
         try:
             self._viewer.update(None)
         except:
             self._viewer.view.data = np.zeros((2,2))
 
+    @property
+    def image(self):
+
+        return self._image
+        
+    @image.setter
+    def image(self, new_image):
+
+        self._image = new_image
+        self.update()
 
     @property
     def range(self):

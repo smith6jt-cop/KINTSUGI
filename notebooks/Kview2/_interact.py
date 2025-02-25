@@ -1,5 +1,5 @@
 from ._slice_viewer import _SliceViewer
-from ._crop import _Cropper, crop
+from ._crop import _Cropper
 
 def interact(func,
              image = None,
@@ -19,6 +19,7 @@ def interact(func,
              step:int = 100,
              viewer: _SliceViewer = None,
              **kwargs):
+    
     """Takes a function which has an image as first parameter and additional parameters.
     It will build a user interface consisting of sliders for numeric parameters and parameters
     that are called "footprint" or "selem".
@@ -60,8 +61,6 @@ def interact(func,
     if 'cupy.ndarray' in str(type(image)):
         image = image.get()
 
-
-    # hidden feature: func can be a tuple of (function, alias_name)
     if isinstance(func, tuple):
         func_name = func[1]
         func = func[0]
@@ -117,14 +116,12 @@ def interact(func,
             footprint_parameters.append(key)
             default_value = int_slider(min=0, max=10, step=1, value=default_value,  continuous_update=continuous_update)
             exposable = True
-        elif parameter_is_image_parameter(sig.parameters[key]) and "destination" not in key and key != "out"  and key != "output":
-            if context is not None:
-                image_parameters.append(key)
-                default_value = ipywidgets.Dropdown(
-                    options=list(context._images.keys())
-                    #options=[(k, v) for k, v in context._images.items()],
-                )
-                exposable = True
+        elif context is not None:
+            
+            image_parameters.append(key)
+            default_value = ipywidgets.Dropdown(
+                options=list(context._images.keys()))
+            exposable = True
 
         if exposable:
             if key in kwargs.keys():
@@ -134,13 +131,14 @@ def interact(func,
 
     viewer_was_none = viewer is None
     if viewer_was_none:
+        zoom_factor_slider = 0.1
         viewer = _SliceViewer(image, zoom_factor=zoom_factor, zoom_spline_order=zoom_spline_order, colormap=colormap, display_min=display_min, display_max=display_max)
-        viewer_crop = _Cropper(image, zoom_factor=zoom_factor, zoom_spline_order=zoom_spline_order, colormap=colormap, display_min=display_min, display_max=display_max)
+        viewer_crop = _Cropper(image, zoom_factor=zoom_factor_slider, zoom_spline_order=zoom_spline_order, colormap=colormap, display_min=display_min, display_max=display_max)
     viewer.slice_slider.continuous_update=continuous_update
 
     execution_blocked = True
 
-    def worker_function(*otherargs, **kwargs):
+    def worker_function(*args, **kwargs):
 
         command = func_name + "("
         if image_passed:
@@ -165,10 +163,11 @@ def interact(func,
         if not execution_blocked:
             if image_passed:
                 result = func(image, *args, **kwargs)
-                viewer.image = result
-                viewer_crop._image = result
             else:
-                viewer.image = func(*args, **kwargs)
+                result = func(*args, **kwargs)
+            viewer.image = result
+            viewer_crop.image = result
+            viewer_crop.update()
 
         viewer.slice_slider.max = viewer.image.shape[0] - 1
         viewer.configuration_updated(None)
@@ -182,15 +181,15 @@ def interact(func,
     output_widgets.append(inter)
     if viewer_was_none:
         full_view = _no_resize(viewer.view)
-        crop_view = viewer_crop
-        # output_widgets.append(viewer.slice_slider)
+        crop_view = ipywidgets.Box([viewer_crop])
 
     box_layout = ipywidgets.Layout(description_width='auto',
                     border='solid', width='100%', align_items='center', justify_content='center')
     widget_result = ipywidgets.HBox(output_widgets, layout=box_layout)
+
  
-    grid = GridspecLayout(4, 4, height='800px')
-    grid[:, 1:] =  crop_view 
+    grid = GridspecLayout(4, 4, height='800px', grid_gap="5px 5px")
+    grid[:, 1:3] =  crop_view
     grid[:2, 0:1] = widget_result
     grid[2:, 0:1] = full_view
     

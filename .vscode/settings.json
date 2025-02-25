@@ -6,6 +6,7 @@
   "jupyter.notebookFileRoot": "${workspaceFolder}/notebooks",
   "python.envFile": "${workspaceFolder}/.env",
   "python.defaultInterpreterPath": "%USERPROFILE%\\miniforge3\\envs\\KINTSUGI\\python.exe",
+  "python.analysis.exclude": ["**/R2024a", "**/vips-dev-8.16", "**/apache-maven-3.9.9-bin", "**/Fiji.app", "**/jdk-21_windows-x64_bin"],
   "terminal.integrated.defaultProfile.windows": "Command Prompt",
   "terminal.integrated.defaultProfile.linux": "bash",
   "terminal.integrated.profiles.windows": {
