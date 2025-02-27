@@ -48,16 +48,16 @@ class Context():
                                 self._functions[name] = value
                             else:
                                 self._functions[prefix + name] = value
-                elif isinstance(value, dict) and ("cropped" in name.lower()):
+                elif isinstance(value, dict) and ("marker_dict_cropped" in str(name)):
                     # If a dictionary of images is found, add them to the _images attribute.
                     if prefix is None:
                         self._images.update(value)
                     else:
                         self._images.update({f"{prefix}{k}": v for k, v in value.items()})
-                # elif is_image(value):
-                #     if prefix is None:
-                #         self._images[name] = value
-                #     else:
-                #         self._images[prefix + name] = value
+                elif is_image(value) and (("signal_sub1" == str(name)) or ("signal_sub2" == str(name)) or ("dn_signal" == str(name)) or ("signal_gauss" == str(name)) or ("signal_final" == str(name))):
+                    if prefix is None:
+                        self._images[name] = value
+                    else:
+                        self._images[prefix + name] = value
 
 

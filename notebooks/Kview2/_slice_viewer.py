@@ -57,7 +57,7 @@ class _SliceViewer():
                                 display_max=display_max)
 
         # setup user interface for changing the slice
-
+  
         self.slice_slider = ipywidgets.VBox(self.sliders[::-1])
         self.update()
 

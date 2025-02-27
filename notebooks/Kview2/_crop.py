@@ -69,6 +69,7 @@ class _Cropper(VBox):
     --------
     crop()
     """
+    
     def __init__(self,
                  image,
                  slice_number: int = None,
@@ -81,12 +82,11 @@ class _Cropper(VBox):
                  colormap:str = None,
                  display_min:float = None,
                  display_max:float = None):
+
+        self._image = image
         from ipywidgets import IntRangeSlider, Image
         from ._slice_viewer import _SliceViewer
         from ._utilities import _no_resize
-       
-        self._image = image
-
         viewer = _SliceViewer(image,
                               slice_number,
                               axis,
@@ -135,7 +135,7 @@ class _Cropper(VBox):
         widgets.append(_no_resize(view))
         if len(image.shape) > 2:
             widgets.append(slice_slider)
-
+        
         no_resize_vbox = _no_resize(VBox(widgets))
         super(_Cropper, self).__init__([no_resize_vbox])
 
@@ -144,14 +144,12 @@ class _Cropper(VBox):
         from ipywidgets import Layout
         
         self._viewer.image = self._image[self.range]
-        self._viewer.slice_slider.max = self._viewer.image.shape[0] - 1
+        self._viewer.slice_slider.max = Layout(width='100%')
         self._viewer.view.layout = Layout(
-            width='stretch',        
-            height='stretch',      
+            height='800px',
+            width='1000px',
             object_fit='cover', 
-            display='flex',
-            align_items='center',
-            justify_content='center'
+
         )
     
         try:
@@ -160,11 +158,6 @@ class _Cropper(VBox):
             self._viewer.view.data = np.zeros((2,2))
     @property
     def image(self):
-        return self._image
-
-    @property
-    def image(self):
-
         return self._image
         
     @image.setter
