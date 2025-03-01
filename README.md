@@ -5,7 +5,6 @@
     
 ## Multiplex image processing for challenging datasets with a focus on user integration rather than automation.  This pipeline includes 2D/3D GPU/CPU illumination correction, stitching, deconvolution, extended depth of focus, registration, autofluorescence removal, segmentation, clustering, and spatial analysis.
 
-To view notebooks in browser see: [https://smith6jt-cop.github.io/KINTSUGI-docs/Intro.html](https://smith6jt-cop.github.io/KINTSUGI-docs/Intro.html)
 
 </p>
 
