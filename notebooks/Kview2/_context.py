@@ -54,7 +54,7 @@ class Context():
                         self._images.update(value)
                     else:
                         self._images.update({f"{prefix}{k}": v for k, v in value.items()})
-                elif is_image(value) and (("signal_sub1" == str(name)) or ("signal_sub2" == str(name)) or ("dn_signal" == str(name)) or ("signal_gauss" == str(name)) or ("signal_final" == str(name))):
+                elif is_image(value) and (("signal_sub1" == str(name)) or ("signal_sub2" == str(name)) or ("dn_signal" == str(name)) or ("signal_gauss" == str(name)) or ("signal_final" == str(name)) or ("signal_final_clahe" == str(name))):
                     if prefix is None:
                         self._images[name] = value
                     else:

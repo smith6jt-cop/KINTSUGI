@@ -44,7 +44,7 @@ def convert_array_to_zarr(array, out_dir, name, chunk_size=(1000, 1000)):
     z[:] = array
     return z
 
-def clean(im_cl, background_threshold:int=1000, smooth:bool=False, smooth_threshold:int = 1000, footprint:int=1, remove_small:bool=False, small_size:int=30, View_original:bool=False):
+def clean(im_cl, background_threshold:int=100, smooth:bool=False, smooth_threshold:int = 100, footprint:int=1, remove_small:bool=False, small_size:int=30, View_original:bool=False):
 
     background_threshold = max(1, background_threshold)
     smooth_threshold = max(1, smooth_threshold)
@@ -52,23 +52,36 @@ def clean(im_cl, background_threshold:int=1000, smooth:bool=False, smooth_thresh
     
     processed = im_cl.copy()
     
-    background = processed <= background_threshold
-    processed[background] = 0
+    processed = da.where(processed <= background_threshold, 0, processed)
 
     if smooth:
-        transition_mask = (processed > 0) & (processed < 2*smooth_threshold)
-        processed[transition_mask] = median_filter(processed, size=footprint)[transition_mask]
+        transition_mask = da.where((processed < smooth_threshold), processed, 0)
+        processed = da.where(transition_mask, median_filter(processed, size=footprint), processed)
     
     if remove_small:
-        signal_mask = processed > 0
-        signal_mask = morphology.remove_small_objects(signal_mask, min_size=small_size, connectivity=2)
-        processed[~signal_mask] = 0
-        processed = morphology.closing(processed, morphology.disk(1))
+        # Create a boolean mask
+        binary_mask = processed > 0
+        
+        # Process each chunk with remove_small_objects
+        def remove_small_chunk(chunk):
+            return morphology.remove_small_objects(chunk, min_size=small_size, connectivity=2)
+        
+        # Apply to each block and maintain boolean dtype
+        filtered_mask = binary_mask.map_blocks(remove_small_chunk, dtype=bool)
+        
+        # Apply mask to processed data
+        processed = da.where(filtered_mask, processed, 0)
+        
+        # Apply closing operation through map_blocks
+        def apply_closing(chunk):
+            return morphology.closing(chunk, morphology.disk(1))
+        
+        processed = processed.map_blocks(apply_closing, dtype=processed.dtype)
     
     result = im_cl if View_original else processed
 
-    print(f"Original range: {im_cl.max()}/{im_cl.min()}")
-    print(f"Output range: {result.max()}/{result.min()}")
+    print(f"Original range: {im_cl.compute().max()}/{im_cl.compute().min()}")
+    print(f"Output range: {result.compute().max()}/{result.compute().min()}")
     
     return result
 
@@ -141,3 +154,49 @@ def ini_params_full(im1, im2, blank_clip_factor:int=0, blank_scale_factor:float=
     im3 = da.map_blocks(process_chunk, im2, im1, dtype=im2.dtype)
     im4 = im3.copy()
     return im4
+from skimage.filters import threshold_otsu
+
+
+def ini_params_SNR(im1, im2, blank_clip_factor:int=10000, blank_scale_factor:float=0.8, smooth_low:bool=True, smooth_high:bool=True, show_labels:bool=True, smoothing_size:int=3):
+
+    im2_clip = np.clip(im2, blank_clip_factor, im2.max())
+    im2_clip[im2_clip <= blank_clip_factor] = 0
+
+    im3 = im1 - (np.minimum(im1, im2_clip * blank_scale_factor))
+    if smooth_low:
+        low_values_mask = im3 < np.percentile(im3, 25)
+        im3[low_values_mask] = median_filter(im3, size=smoothing_size)[low_values_mask]
+    
+    if smooth_high:
+        high_values_mask = im3 > np.percentile(im3, 95)
+        im3[high_values_mask] = median_filter(im3, size=smoothing_size)[high_values_mask]
+    mask = im3 == 0
+    im4 = im3.copy()
+    
+    binary_image = im4  <= threshold_otsu(im4 )
+    # edge_image = sobel(binary_image)
+    seg_mask = label(binary_image, background=0)
+    properties = regionprops(seg_mask, intensity_image=im4 )
+    statistics = {
+   
+    'area':       [p.area               for p in properties if p.area<800],
+    'mean':       [p.mean_intensity     for p in properties if p.area<800]
+    }
+    df = pd.DataFrame(statistics)
+    
+    MFI = np.asarray(df['mean'])
+    aX = MFI.flatten()
+    # compute 20 largest values in aX
+    top20 = np.sort(aX)[-20:]
+    # compute the mean of bottom 10th percentile of aX
+    btm10 = np.sort(aX)[:int(len(aX)*0.1)]
+    top20btm10 = np.mean(top20)/np.mean(btm10)
+    
+
+    print(f'SNR is {top20btm10}') 
+    print(df.describe())
+
+    if show_labels:
+        return label(binary_image)
+    else:
+        return im4
