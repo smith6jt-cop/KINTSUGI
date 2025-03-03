@@ -158,7 +158,8 @@ from skimage.filters import threshold_otsu
 
 
 def ini_params_SNR(im1, im2, blank_clip_factor:int=10000, blank_scale_factor:float=0.8, smooth_low:bool=True, smooth_high:bool=True, show_labels:bool=True, smoothing_size:int=3):
-
+    from skimage.measure import label, regionprops
+    import pandas as pd
     im2_clip = np.clip(im2, blank_clip_factor, im2.max())
     im2_clip[im2_clip <= blank_clip_factor] = 0
 
