@@ -74,6 +74,8 @@ conda env create -f env.yml
 
 &emsp;To download test data, use Globus with your institution or Google/ORCID/Github account: [https://app.globus.org/file-manager?origin_id=dce1f3d9-f067-11ef-a905-0207be7ee3a1&origin_path=%2F](https://app.globus.org/file-manager?origin_id=dce1f3d9-f067-11ef-a905-0207be7ee3a1&origin_path=%2F) Alternatively download from the KINTSUGI Zenodo community: [https://zenodo.org/communities/kintsugi/records?q=&l=list&p=2&s=10&sort=newest](https://zenodo.org/communities/kintsugi/records?q=&l=list&p=2&s=10&sort=newest)
 
+Results of processing the test dataset can be found at: [ https://app.globus.org/file-manager?origin_id=10f408d9-f5ee-11ef-bf21-0affeb6b961d&origin_path=%2F]( https://app.globus.org/file-manager?origin_id=10f408d9-f5ee-11ef-bf21-0affeb6b961d&origin_path=%2F)
+
 &emsp;Move all image data to [your user folder]\KINTSUGI\data.  
 
 #### 5. Setup VS Code
