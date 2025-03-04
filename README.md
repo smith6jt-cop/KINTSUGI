@@ -13,10 +13,11 @@
 ## Table of Contents
 
   - [Installation Steps](#installation-steps)
-    - [1. Download miniforge](#1-download-miniforge)
-    - [2. Create mamba environment](#2-create-mamba-environment)
-    - [3. Download files](#3-download-files)
+    - [1. Download miniconda](#1-download-miniconda)
+    - [2. Create environment](#2-create-environment)
+    - [3. Download dependency files](#3-download-dependency-files)
     - [4. Copy/move raw image data](#4-copy/move-raw-image-data)
+    - [5. Setup VS Code](#5-setup-vs-code)
   - [Notebooks](#notebooks)
     - [1. Parameter tuning/testing](#1-parameter-tuning/testing)
     - [2. Batch processing](#2-batch-processing)
@@ -25,19 +26,27 @@
 
 ### Installation Steps
 
-#### 1. Download miniforge 
+#### 1. Download miniconda 
 &emsp;Download and install conda-based environment management software.  If you already have, skip to step 2.
 
-&emsp;Download miniforge: [https://github.com/conda-forge/miniforge](https://github.com/conda-forge/miniforge.).
+&emsp;Download miniconda: [https://www.anaconda.com/download/success#miniconda](https://www.anaconda.com/download/success#miniconda).
 
-&emsp;Follow installation instructions for your OS.
+&emsp;Follow installation instructions.
 
-#### 2. Create mamba environment
-&emsp;Launch miniforge as administrator (if possible). You will be in the default “base” environment.
-
+#### 2. Create environment
+&emsp;Open a miniconda "Anaconda Prompt” terminal.   You will be in the default “base” environment. Update the base environment and to set the default dependency solver to libmamba by copying and entering the following: 
+```
+conda update -n base conda 
+conda install -n base conda-libmamba-solver 
+conda config --set solver libmamba
+```
 &emsp;Change directory to your user folder: 
 ```
 cd C:\Users\[your user name]
+```
+&emsp;Install “git” to the base environment: 
+```
+conda install git -y 
 ```
 &emsp;To download the code and associated files enter: 
 ```
@@ -49,27 +58,52 @@ cd KINTSUGI
 ```
 &emsp;Create the environment by entering:
 ```
-mamba env create -f environment.yml
+conda env create -f env.yml
 ```
-```
-&emsp;Activate the environment by entering:
-```
-mamba activate KINTSUGI
-```
-&emsp;It is recommended to use VS Code to run the notebooks. Download and install VS Code [https://code.visualstudio.com/](https://code.visualstudio.com/).
 
+&emsp;Close the Anaconda PowerShell Prompt 
 
 #### 3. Download dependency files
+
+&emsp;There are necessary files that are too large to host on GitHub. To download the extra dependency zip file, use this link: [https://drive.google.com/file/d/1_CoQ2o4iqc1HT9AlrlmrawKEt5A9dWJx/view?usp=sharing](https://drive.google.com/file/d/1_CoQ2o4iqc1HT9AlrlmrawKEt5A9dWJx/view?usp=sharing) and extract contents.  Extract each zipped file to the KINTSUGI folder.  Alternatively, you may download, install, and configure maven3.9.9, java-jdk21, MatlabRuntime 2024a, PyVips-dev-8.16, and FIJI with the Clij2 plugin.
+
 &emsp;Download zip files and extract them to KINTSUGI folder. 
 
 #### 4. Copy/move raw image data  
 &emsp;Create a folder in the KINTSUGI folder called “data”.  
 
-&emsp;If downloading test data use this link: [https://uflorida-my.sharepoint.com/:f:/g/personal/smith6jt_ufl_edu1/Er5ui-wFA6BNnmgj9N1hPAsBYQaiKfSQa2do_lUMhQdaGg?e=5Uny95](https://uflorida-my.sharepoint.com/:f:/g/personal/smith6jt_ufl_edu1/Er5ui-wFA6BNnmgj9N1hPAsB_Z8EwL7jkfekJwrWEfVRbw?e=oxaxMH)  
+&emsp;To download test data, use Globus with your institution or Google/ORCID/Github account: [https://app.globus.org/file-manager?origin_id=dce1f3d9-f067-11ef-a905-0207be7ee3a1&origin_path=%2F](https://app.globus.org/file-manager?origin_id=dce1f3d9-f067-11ef-a905-0207be7ee3a1&origin_path=%2F) Alternatively download from the KINTSUGI Zenodo community: [https://zenodo.org/communities/kintsugi/records?q=&l=list&p=2&s=10&sort=newest](https://zenodo.org/communities/kintsugi/records?q=&l=list&p=2&s=10&sort=newest)
 
 &emsp;Move all image data to [your user folder]\KINTSUGI\data.  
 
+#### 5. Setup VS Code
+&emsp;It is recommended to use VS Code to run the notebooks. Download and install VS Code [https://code.visualstudio.com/](https://code.visualstudio.com/).
 
+&emsp;Create a GitHub account if you do not have one.  This is necessary for using the AI assistant CoPilot in VSCode. 
+
+&emsp;Launch VS Code and sign in to GitHub. 
+
+&emsp;Close VS Code.  
+
+&emsp;Launch Anaconda PowerShell Prompt 
+
+&emsp;Change the directory: 
+```
+cd C:\Users\[username]\ KINTSUGI
+```
+&emsp;Activate the environment by entering: 
+```
+conda activate KINTSUGI
+```
+&emsp;Launch VS Code by entering “code .” (the word ‘code’ followed by a space and a period) from your conda terminal in the activated KINTSUGI environment. 
+
+&emsp;Launching VS Code from the activated environment in the Anaconda Prompt terminal is the only way KINTSUGI should be initiated.  This will ensure all package functions are available.
+
+&emsp;If prompted to trust the authors of the files in the folder, check the box and click “Yes, I trust the authors.” 
+
+&emsp;If prompted to Download or configure “Git” click “Do Not Show Again”. 
+
+&emsp;If prompted to “install the recommended extensions ...” click “Install”. 
 <div>
 
 
