@@ -118,7 +118,7 @@ conda activate KINTSUGI
   For autofluorescence subtraction, filtering, and final processing to isolate signal.
 
 [4. Segmentation](notebooks/4_Segmentation.ipynb)
-  For Mesmer segmentation and feature extraction.
+  For Instanseg segmentation, feature extraction, and spatial analysis.
 
 <div>
 
