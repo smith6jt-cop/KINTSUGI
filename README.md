@@ -7,7 +7,7 @@
 
 
 </p>
-
+[![DOI](https://zenodo.org/badge/794118146.svg)](https://doi.org/10.5281/zenodo.14984518)
 <div>
   
 ## Table of Contents
