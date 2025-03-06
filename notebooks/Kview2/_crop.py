@@ -147,7 +147,7 @@ class _Cropper(VBox):
         self._viewer.slice_slider.max = Layout(width='100%')
         self._viewer.view.layout = Layout(
             height='800px',
-            width='1000px',
+            width='800px',
             object_fit='cover', 
 
         )
