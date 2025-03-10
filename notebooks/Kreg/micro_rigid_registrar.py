@@ -3,6 +3,8 @@ from skimage import exposure, transform
 import multiprocessing
 from colorama import Fore
 from contextlib import suppress
+from itertools import chain
+import gc
 
 from . import feature_matcher
 from . import feature_detectors
@@ -73,7 +75,7 @@ class MicroRigidRegistrar(object):
 
     def __init__(self, val_obj, feature_detector_cls=DEFAULT_FD,
                  matcher=DEFAULT_MATCHER, processor_dict=None,
-                 scale=0.5**3, tile_wh=2**9, roi=DEFAULT_ROI):
+                 scale=0.75, tile_wh=2**9, roi=DEFAULT_ROI):
         """
 
         Parameters
@@ -295,11 +297,29 @@ class MicroRigidRegistrar(object):
             high_rez_fixed_match_xy_list[bbox_id] = matched_fixed_xy
 
         print(f"Aligning {moving_slide.name} to {fixed_slide.name}. ROI width, height is {reg_bbox[2:]} pixels")
+        
         n_cpu = valtils.get_ncpus_available() - 1
-
+        # Process tiles in batches instead of individually
+        batch_size = max(1, n_tiles // (n_cpu * 2))  # Adjust batch size based on CPU count
+        
+        def _process_tile_batch(batch_indices):
+            results = []
+            for idx in batch_indices:
+                results.append(_match_tile(idx))
+            gc.collect()
+            return results
+            
+        # Create batches of indices
+        batches = [list(range(i, min(i+batch_size, n_tiles))) for i in range(0, n_tiles, batch_size)]
+        
         with suppress(UserWarning):
-            # Avoid printing warnings that not enough matches were found, which can happen frequently with this
-            res = pqdm(range(n_tiles), _match_tile, n_jobs=n_cpu)
+            batch_results = pqdm(batches, _process_tile_batch, n_jobs=n_cpu)
+            # Flatten results
+            res = list(chain.from_iterable(batch_results))
+
+        # with suppress(UserWarning):
+        #     # Avoid printing warnings that not enough matches were found, which can happen frequently with this
+        #     res = pqdm(range(n_tiles), _match_tile, n_jobs=n_cpu)
 
         # Remove tiles that didn't have any matches
         high_rez_moving_match_xy_list = [xy for xy in high_rez_moving_match_xy_list if xy is not None]

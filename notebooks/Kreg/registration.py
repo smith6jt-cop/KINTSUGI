@@ -3999,7 +3999,7 @@ class Valis(object):
             temp_missing_mask = cv2.bitwise_xor(slide_obj.non_rigid_reg_mask, rigid_reg_mask)
             r_nr_intersection = cv2.bitwise_and(slide_obj.non_rigid_reg_mask, rigid_reg_mask)
             combined_mask = cv2.bitwise_or(r_nr_intersection, temp_missing_mask)
-            small_missing_mask = cv2.bitwise_xor(slide_obj.non_rigid_reg_mask, combined_mask)
+            missing_mask = cv2.bitwise_xor(slide_obj.non_rigid_reg_mask, combined_mask)
 
             inpaint_mask = cv2.bitwise_or(inv_tears, missing_mask)
             inpaint_mask[inpaint_mask != 0] = 255
