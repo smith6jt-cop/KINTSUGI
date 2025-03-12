@@ -44,15 +44,15 @@ def convert_array_to_zarr(array, out_dir, name, chunk_size=(1000, 1000)):
     z[:] = array
     return z
 
-def clean(im_cl, background_threshold:int=100, smooth:bool=False, smooth_threshold:int = 100, footprint:int=1, remove_small:bool=False, small_size:int=30, View_original:bool=False):
+def clean(im_cl, backgrnd_thresh:int=100, smooth:bool=False, smooth_threshold:int = 100, footprint:int=1, remove_small:bool=False, small_size:int=30, View_original:bool=False):
 
-    background_threshold = max(1, background_threshold)
+    background_threshold = max(1, backgrnd_thresh)
     smooth_threshold = max(1, smooth_threshold)
     footprint = max(1, footprint)
     
     processed = im_cl.copy()
     
-    processed = da.where(processed <= background_threshold, 0, processed)
+    processed = da.where(processed <= backgrnd_thresh, 0, processed)
 
     if smooth:
         transition_mask = da.where((processed < smooth_threshold), processed, 0)
