@@ -5,6 +5,7 @@ from skimage import morphology, filters
 from skimage.exposure import rescale_intensity
 import numpy as np
 from scipy.ndimage import median_filter, uniform_filter
+import dask_image.ndfilters
 import dask.array as da
 
 
@@ -50,13 +51,13 @@ def clean(im_cl, backgrnd_thresh:int=100, smooth:bool=False, smooth_thresh:int =
     smooth_thresh = max(1, smooth_thresh)
     footprint = max(1, footprint)
     
-    processed = im_cl.copy()
+    processed = da.copy(im_cl)
     
     processed = da.where(processed <= backgrnd_thresh, 0, processed)
 
     if smooth:
         transition_mask = da.where((processed < smooth_thresh), processed, 0)
-        processed = da.where(transition_mask, median_filter(processed, size=footprint), processed)
+        processed = da.where(transition_mask, dask_image.ndfilters.median_filter(processed, size=footprint), processed)
     
     if remove_small:
         # Create a boolean mask

@@ -179,7 +179,7 @@ def interact(func,
     output_widgets.append(inter)
     if viewer_was_none:
         full_view = ipywidgets.HBox([ipywidgets.VBox([viewer.view], layout=ipywidgets.Layout(object_fit='cover'))], layout=ipywidgets.Layout( object_fit='cover'))
-        crop_view = ipywidgets.Box([viewer_crop], layout=ipywidgets.Layout(height='800px',width='800px',object_fit='cover'))
+        crop_view = ipywidgets.HBox([ipywidgets.VBox([viewer_crop], layout=ipywidgets.Layout(height='800px',width='800px', object_fit='cover'))], layout=ipywidgets.Layout( object_fit='cover'))
 
     box_layout = ipywidgets.Layout(description_width='auto', 
                     border='solid', width='100%', align_items='center', justify_content='center')
