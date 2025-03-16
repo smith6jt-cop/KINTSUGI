@@ -51,7 +51,7 @@ def clean(im_cl, backgrnd_thresh:int=100, smooth:bool=False, smooth_thresh:int =
     smooth_thresh = max(1, smooth_thresh)
     footprint = max(1, footprint)
     
-    processed = da.copy(im_cl)
+    processed = da.Array.copy(im_cl)
     
     processed = da.where(processed <= backgrnd_thresh, 0, processed)
 
