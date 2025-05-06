@@ -67,16 +67,16 @@ conda env create -f env.yml
 
 #### 3. Download dependency files
 
-&emsp;There are necessary files that are too large to host on GitHub. To download the extra dependency zip file, use this link: [https://drive.google.com/file/d/1_CoQ2o4iqc1HT9AlrlmrawKEt5A9dWJx/view?usp=sharing](https://drive.google.com/file/d/1_CoQ2o4iqc1HT9AlrlmrawKEt5A9dWJx/view?usp=sharing) and extract contents.  Extract each zipped file to the KINTSUGI folder.  Alternatively, you may download, install, and configure maven3.9.9, java-jdk21, MatlabRuntime 2024a, PyVips-dev-8.16, and FIJI with the Clij2 plugin.
+&emsp;There are necessary files that are too large to host on GitHub. To download the extra dependency zip file, use this link: [https://zenodo.org/records/14969214?token=eyJhbGciOiJIUzUxMiJ9.eyJpZCI6ImVkNGE2ZWQxLWNjNGItNDgzNi04MTBmLWI0ZmU2MWM1N2Q1MSIsImRhdGEiOnt9LCJyYW5kb20iOiJjYmUwY2U2YTg1ODc1YmQ4MGE2NDk4NjI4ZDQ1ZTcwYSJ9.uMgV9EeOeGi6MsaPqrVgasA1oNoDI7SWFtKU6OK_RZ_BdOpHsq-4XHB-jfQA9aV3tVWbp23cD2XqL4B3VSEiEw](https://zenodo.org/records/14969214?token=eyJhbGciOiJIUzUxMiJ9.eyJpZCI6ImVkNGE2ZWQxLWNjNGItNDgzNi04MTBmLWI0ZmU2MWM1N2Q1MSIsImRhdGEiOnt9LCJyYW5kb20iOiJjYmUwY2U2YTg1ODc1YmQ4MGE2NDk4NjI4ZDQ1ZTcwYSJ9.uMgV9EeOeGi6MsaPqrVgasA1oNoDI7SWFtKU6OK_RZ_BdOpHsq-4XHB-jfQA9aV3tVWbp23cD2XqL4B3VSEiEw) and extract contents.  Extract each zipped file to the KINTSUGI folder.  Alternatively, you may download, install, and configure maven3.9.9, java-jdk21, MatlabRuntime 2024a, PyVips-dev-8.16, and FIJI with the Clij2 plugin.
 
 &emsp;Download zip files and extract them to KINTSUGI folder. 
 
 #### 4. Copy/move raw image data  
 &emsp;Create a folder in the KINTSUGI folder called “data”.  
 
-&emsp;To download test data, use Globus with your institution or Google/ORCID/Github account: [https://app.globus.org/file-manager?origin_id=dce1f3d9-f067-11ef-a905-0207be7ee3a1&origin_path=%2F](https://app.globus.org/file-manager?origin_id=dce1f3d9-f067-11ef-a905-0207be7ee3a1&origin_path=%2F) Alternatively download from the KINTSUGI Zenodo community: [https://zenodo.org/communities/kintsugi/records?q=&l=list&p=2&s=10&sort=newest](https://zenodo.org/communities/kintsugi/records?q=&l=list&p=2&s=10&sort=newest)
+&emsp;To download test data, use the KINTSUGI Zenodo community: [https://zenodo.org/communities/kintsugi/records?q=&l=list&p=2&s=10&sort=newest](https://zenodo.org/communities/kintsugi/records?q=&l=list&p=2&s=10&sort=newest)
 
-Results of processing the test dataset can be found at: [ https://app.globus.org/file-manager?origin_id=10f408d9-f5ee-11ef-bf21-0affeb6b961d&origin_path=%2F]( https://app.globus.org/file-manager?origin_id=10f408d9-f5ee-11ef-bf21-0affeb6b961d&origin_path=%2F)
+Results of processing the test dataset can be found at: [https://app.globus.org/file-manager?origin_id=10f408d9-f5ee-11ef-bf21-0affeb6b961d&origin_path=%2F]( https://app.globus.org/file-manager?origin_id=10f408d9-f5ee-11ef-bf21-0affeb6b961d&origin_path=%2F)
 
 &emsp;Move all image data to [your user folder]\KINTSUGI\data.  
 
