@@ -100,7 +100,7 @@ def process_chunk(image, subtracted, smooth_low, low_size, smooth_high, high_siz
 
     return subtracted
 
-def ini_params(im1, im2, blank_clip_factor:int=0, blank_scale_factor:float=0.0, smooth_low:bool=False, low_size:int=1, smooth_high:bool=False, high_size:int=1, erosion:int=0, View_original:bool=False):
+def ini_params_alt(im1, im2, blank_clip_factor:int=0, blank_scale_factor:float=0.0, smooth_low:bool=False, low_size:int=1, smooth_high:bool=False, high_size:int=1, erosion:int=0, View_original:bool=False):
     im2_clip = np.clip(im2, blank_clip_factor, im2.max())
     im2_clip[im2_clip <= blank_clip_factor] = 0
     im3 = im1 - (np.minimum(im1, im2_clip * blank_scale_factor))
@@ -202,3 +202,102 @@ def ini_params_SNR(im1, im2, blank_clip_factor:int=10000, blank_scale_factor:flo
         return label(binary_image)
     else:
         return im4
+    
+def ini_params(im1, im2, blank_clip_factor:int=0, blank_scale_factor:float=0.0, smooth_low:bool=False, low_size:int=1, low_percentile:int=60, smooth_high:bool=False, high_size:int=1, high_percentile:int=90, erosion:int=0,   View_original:bool=False):
+    
+    low_percentile = max(1, low_percentile)
+    high_percentile = max(1, high_percentile)
+
+    dask_array_blank = da.Array.copy(im2)
+    dask_array_signal = im1.astype(im2.dtype)
+
+    dask_array_blank = da.clip(dask_array_blank, blank_clip_factor, dask_array_blank.max())
+    dask_array_blank = da.where(dask_array_blank <= blank_clip_factor, 0, dask_array_blank)
+    dask_signal_sub = dask_array_signal - da.minimum(dask_array_signal, dask_array_blank * blank_scale_factor)
+    
+    if smooth_low:
+        low_mask = da.where(dask_array_signal < da.percentile(dask_array_signal.ravel(), low_percentile), 1, 0)
+        low_mask = dask_image.ndmorph.binary_dilation(low_mask, morphology.disk(1))
+        dask_signal_sub = da.where(low_mask, dask_image.ndfilters.uniform_filter(dask_signal_sub, size=low_size), dask_signal_sub)
+        
+    if smooth_high:
+        high_mask = da.where(dask_array_signal > da.percentile(dask_array_signal.ravel(), high_percentile), 1, 0)
+        high_mask = dask_image.ndmorph.binary_dilation(high_mask, morphology.disk(1))
+        dask_signal_sub = da.where(high_mask, dask_image.ndfilters.uniform_filter(dask_signal_sub, size=high_size), dask_signal_sub)   
+
+    if View_original:
+        signal = da.Array.copy(im1)
+
+    else:
+        erod_mask = da.where(dask_signal_sub > 0, 1, 0)
+        signal_mask = dask_image.ndmorph.binary_erosion(erod_mask, morphology.disk(erosion))
+        signal = da.where(signal_mask, dask_signal_sub, 0)   
+
+    return signal.astype(np.uint16)
+    
+def denoise(im1, percentile:int=10, upper:bool=False, perctl:bool=False, per_size:int=4, unifrm:bool=False,  un_size:int=3,  medn:bool=False, med_size:int=2):
+        
+        im_d1 = da.Array.copy(im1)
+
+        if perctl:
+            if upper:
+                percentile = -percentile
+            im_d2 = dask_image.ndfilters.percentile_filter(im_d1, percentile, per_size)
+            if medn:
+                im_d2 = dask_image.ndfilters.median_filter(im_d2, med_size)
+
+        elif unifrm:
+            im_d2 = dask_image.ndfilters.uniform_filter(im_d1, un_size)
+            if medn:
+                im_d2 = dask_image.ndfilters.median_filter(im_d2, med_size)
+
+        elif medn:
+            im_d2 = dask_image.ndfilters.median_filter(im_d1, med_size)
+
+        else:
+            im_d2 = da.Array.copy(im_d1)
+            
+        return im_d2
+
+def find_gauss(im_g1: np.ndarray, sigma_value:int=10):
+
+    im_g2 = dask_image.ndfilters.gaussian_filter(im_g1, sigma=sigma_value)
+    return im_g2
+
+def clipped_gauss(im_cl1, Gauss_low:int = 0, Gauss_high:int = 65535, high:bool=False):
+    
+    im_cl2 = da.Array.copy(im_cl1)
+    im_cl2 = da.where(Gauss_low >= im_cl2, 0, im_cl2)
+    # im_cl2[Gauss_low >= im_cl2] = 0  
+    if high:
+        im_cl2 = da.where(im_cl2 >= Gauss_high, 0, im_cl2)
+        # im_cl2[im_cl2 >= Gauss_high] = 0
+
+    return im_cl2
+
+def gauss_factor(im_f1_init, im_f2_init, low:int = 0, high:int = 65535, Gauss_Percentile:float=0.1):
+    
+    im_f1 = da.Array.copy(im_f1_init)
+    im_f2 = da.Array.copy(im_f2_init)
+
+    # im_f2[low >= im_f2] = 0  
+    # im_f2[im_f2 >= high] = 0
+    im_f2 = da.where(low >= im_f2, 0, im_f2)
+    im_f2 = da.where(im_f2 >= high, 0, im_f2)
+
+    im_f3 = im_f1 - da.minimum(im_f1, im_f2 * Gauss_Percentile)
+    
+    return im_f3
+
+def CLAHE(im, clip_limit:float=0.01, tileGridSize:int=70, nbins:int=128, View_original:bool=False):
+
+    if View_original:
+        im_c3 = im.astype(np.uint16)
+    else:
+        im_c2 = im.astype(np.uint16)
+        im_c3 = equalize_adapthist(im_c2, clip_limit=clip_limit, kernel_size=im_c2.shape[0]//tileGridSize, nbins=nbins)
+        im_c3 = rescale_intensity(im_c3, out_range=(im_c2.compute().min(), im_c2.compute().max())).astype(np.float64)
+        print(f'Tile size is {im_c2.shape[0]//tileGridSize} x {im_c2.shape[0]//tileGridSize}')
+
+    return im_c3
+
