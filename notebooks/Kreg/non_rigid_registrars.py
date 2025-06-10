@@ -594,7 +594,7 @@ class NonRigidRegistrarGroupwise(NonRigidRegistrar):
         self.img_list = img_list
         self.size = len(img_list)
         if mask is None:
-            mask = np.full(self.img_list[0].shape[0:2], 255, dtype=np.uiint8)
+            mask = np.full(self.img_list[0].shape[0:2], 255, dtype=np.uint8)
 
         self.mask = mask
         if self.mask is not None:
@@ -1073,97 +1073,172 @@ class SimpleElastixGroupwiseWarper(NonRigidRegistrarGroupwise):
 
     def __init__(self, params=None):
         super().__init__(params=params)
+        self.method = "SimpleElastix Groupwise"
+
+        # Default parameters for groupwise registration
+        if params is None:
+            self.params = self.get_default_groupwise_params()
+        else:
+            self.params = params
 
     @staticmethod
-    def get_default_params(img_shape, grid_spacing_ratio=0.025):
+    # def get_default_params(img_shape, grid_spacing_ratio=0.025):
+    def get_default_params():
         """
         See https://simpleelastix.readthedocs.io/Introduction.html for advice on parameter selection
         """
-        p = sitk.GetDefaultParameterMap("groupwise")
-        p["Metric"] = ['AdvancedMattesMutualInformation']
-        p["MaximumNumberOfIterations"] = ['1500']  # Can try up to 2000
-        p['FixedImagePyramid'] = ["FixedRecursiveImagePyramid"]
-        p['MovingImagePyramid'] = ["MovingRecursiveImagePyramid"]
-        p["ImageSampler"] = ["RandomCoordinate"]
-        p["MetricSamplingStrategy"] = ["None"]  # Use all points
-        p["UseRandomSampleRegion"] = ["true"]
-        p["ErodeMask"] = ["true"]
-        p["NumberOfSpatialSamples"] = ["3000"]
-        p["NewSamplesEveryIteration"] = ["true"]
-        p["Optimizer"] = ["AdaptiveStochasticGradientDescent"]
-        p["ASGDParameterEstimationMethod"] = ["DisplacementDistribution"]
-        p["HowToCombineTransforms"] = ["Compose"]
-        grid_spacing_x = img_shape[1]*grid_spacing_ratio
-        grid_spacing_y = img_shape[0]*grid_spacing_ratio
-        grid_spacing = str(int(np.mean([grid_spacing_x, grid_spacing_y])))
-        p["FinalGridSpacingInPhysicalUnits"] = [grid_spacing]
-        p["WriteResultImage"] = ["false"]
+        import SimpleITK as sitk
+        parameterMap = sitk.GetDefaultParameterMap("groupwise")
+        # parameterMap["Metric"] = ['AdvancedMattesMutualInformation']
+        parameterMap["MaximumNumberOfIterations"] = ['256']  # Can try up to 2000
+        # parameterMap['FixedImagePyramid'] = ["FixedRecursiveImagePyramid"]
+        # parameterMap['MovingImagePyramid'] = ["MovingRecursiveImagePyramid"]
+        # parameterMap["ImageSampler"] = ["RandomCoordinate"]
+        # parameterMap["MetricSamplingStrategy"] = ["None"]  # Use all points
+        # parameterMap["UseRandomSampleRegion"] = ["true"]
+        # parameterMap["ErodeMask"] = ["true"]
+        parameterMap["NumberOfSpatialSamples"] = ["2048"]
+        parameterMap["NumberOfResolutions"] = ["3"]
+        # parameterMap["NewSamplesEveryIteration"] = ["true"]
+        # parameterMap["Optimizer"] = ["AdaptiveStochasticGradientDescent"]
+        # parameterMap["ASGDParameterEstimationMethod"] = ["DisplacementDistribution"]
+        # parameterMap["HowToCombineTransforms"] = ["Compose"]
+        # grid_spacing_x = img_shape[1]*grid_spacing_ratio
+        # grid_spacing_y = img_shape[0]*grid_spacing_ratio
+        # grid_spacing = str(int(np.mean([grid_spacing_x, grid_spacing_y])))
+        # parameterMap["FinalGridSpacingInPhysicalUnits"] = [grid_spacing]
+        parameterMap["WriteResultImage"] = ["false"]
 
-        return p
-
-    def calc(self, img_list, mask=None, *args, **kwargs):
-        if self.params is None:
-            self.params = SimpleElastixGroupwiseWarper.get_default_params(self.img_list[0].shape[:2])
-
-        vectorOfImages = sitk.VectorOfImage()
+        return [parameterMap]
+    
+    def calc(self, img_list, mask=None):
+        """Perform groupwise registration using SimpleElastix"""
+        import SimpleITK as sitk
+        
+        # Convert images to SimpleITK format
+        sitk_images = []
         for img in img_list:
-            vectorOfImages.push_back(sitk.GetImageFromArray(img))
-
-        image = sitk.JoinSeries(vectorOfImages)
-        elastix_image_filter_obj = sitk.ElastixImageFilter()
-        elastix_image_filter_obj.SetFixedImage(image)
-        elastix_image_filter_obj.SetMovingImage(image)
-        elastix_image_filter_obj.SetParameterMap(self.params)
-
+            # Ensure image is float32
+            if img.dtype != np.float32:
+                img = img.astype(np.float32)
+            sitk_img = sitk.GetImageFromArray(img)
+            sitk_images.append(sitk_img)
+        
+        # Set up groupwise registration
+        elastixImageFilter = sitk.ElastixImageFilter()
+        elastixImageFilter.LogToConsoleOn()
+        # Set the first image as fixed, others as moving
+        elastixImageFilter.SetFixedImage(sitk_images[0])
+        elastixImageFilter.SetMovingImage(sitk_images[1])  # Start with second image
+        
+        # Add additional moving images for groupwise
+        for i in range(2, len(sitk_images)):
+            elastixImageFilter.AddMovingImage(sitk_images[i])
+        
+        # Set parameter maps
+        elastixImageFilter.SetParameterMap(self.params)
+        
+        # Apply mask if provided
         if mask is not None:
-            vectorOfMasks = sitk.VectorOfImage()
-            for i in range(len(img_list)):
-                vectorOfMasks.push_back(sitk.GetImageFromArray(mask))
-            mask3d = sitk.JoinSeries(vectorOfMasks)
-            elastix_image_filter_obj.SetFixedMask(mask3d)
+            mask_sitk = sitk.GetImageFromArray(mask.astype(np.uint8))
+            elastixImageFilter.SetFixedMask(mask_sitk)
+        
+        # Execute registration
+        try:
+            elastixImageFilter.Execute()
+            
+            # Get transformation parameters
+            transform_params = elastixImageFilter.GetTransformParameterMap()
+            
+            # Convert back to displacement fields
+            displacement_fields = []
+            transformixImageFilter = sitk.TransformixImageFilter()
+            
+            for i, params in enumerate(transform_params):
+                transformixImageFilter.SetTransformParameterMap(params)
+                transformixImageFilter.SetMovingImage(sitk_images[i+1])
+                
+                # Generate deformation field
+                transformixImageFilter.Execute()
+                deformed = transformixImageFilter.GetResultImage()
+                
+                # Convert to numpy displacement field
+                deformed_np = sitk.GetArrayFromImage(deformed)
+                displacement_fields.append(deformed_np)
+            
+            return displacement_fields
+        
+        except Exception as e:
+            print(f"SimpleElastix groupwise registration failed: {e}")
+            # Fallback to identity transform
+            shape = img_list[0].shape
+            identity_field = np.zeros((len(img_list)-1, 2, shape[0], shape[1]))
+            return identity_field
+            
 
-        elastix_image_filter_obj.Execute()
+    # def calc(self, img_list, mask=None, *args, **kwargs):
+    #     if self.params is None:
+    #         self.params = SimpleElastixGroupwiseWarper.get_default_params(self.img_list[0].shape[:2])
 
-        # Get warped images #
-        resultImage = elastix_image_filter_obj.GetResultImage()
-        resultImage = sitk.GetArrayFromImage(resultImage)
+    #     vectorOfImages = sitk.VectorOfImage()
+    #     for img in img_list:
+    #         vectorOfImages.push_back(sitk.GetImageFromArray(img))
 
-        # Get deformation fields #
-        transformixImageFilter = sitk.TransformixImageFilter()
-        transformixImageFilter.SetTransformParameterMap(elastix_image_filter_obj.GetTransformParameterMap())
-        transformixImageFilter.SetMovingImage(image)
-        transformixImageFilter.ComputeDeformationFieldOn()
-        transformixImageFilter.Execute()
-        deformationField = sitk.GetArrayFromImage(transformixImageFilter.GetDeformationField())[..., 0:2]
+    #     image = sitk.JoinSeries(vectorOfImages)
+    #     elastix_image_filter_obj = sitk.ElastixImageFilter()
+    #     elastix_image_filter_obj.SetFixedImage(image)
+    #     elastix_image_filter_obj.SetMovingImage(image)
+    #     elastix_image_filter_obj.SetParameterMap(self.params)
 
-        # Get deformation grid #
-        grid_spacing = int(eval(self.params["FinalGridSpacingInPhysicalUnits"][0]))
-        self.elastix_params = self.params.asdict()
-        self.params = None  # Can't pickle SimpleITK.ParameterMap
-        grid_img = self.get_grid_image(grid_spacing=grid_spacing)
-        self.method = elastix_image_filter_obj.__class__.__name__
+    #     if mask is not None:
+    #         vectorOfMasks = sitk.VectorOfImage()
+    #         for i in range(len(img_list)):
+    #             vectorOfMasks.push_back(sitk.GetImageFromArray(mask))
+    #         mask3d = sitk.JoinSeries(vectorOfMasks)
+    #         elastix_image_filter_obj.SetFixedMask(mask3d)
 
-        vectorOfGrids = sitk.VectorOfImage()
-        for i in range(len(img_list)):
-            vectorOfGrids.push_back(sitk.GetImageFromArray(grid_img))
-        grid3d = sitk.JoinSeries(vectorOfGrids)
+    #     elastix_image_filter_obj.Execute()
 
-        transformixImageFilter.SetMovingImage(grid3d)
-        transformixImageFilter.Execute()
-        warped_grid = sitk.GetArrayFromImage(transformixImageFilter.GetResultImage())
+    #     # Get warped images #
+    #     resultImage = elastix_image_filter_obj.GetResultImage()
+    #     resultImage = sitk.GetArrayFromImage(resultImage)
 
-        tform_files = [f for f in os.listdir(".")
-                    if f.startswith("TransformParameters.")
-                    and f.endswith(".txt")]
+    #     # Get deformation fields #
+    #     transformixImageFilter = sitk.TransformixImageFilter()
+    #     transformixImageFilter.SetTransformParameterMap(elastix_image_filter_obj.GetTransformParameterMap())
+    #     transformixImageFilter.SetMovingImage(image)
+    #     transformixImageFilter.ComputeDeformationFieldOn()
+    #     transformixImageFilter.Execute()
+    #     deformationField = sitk.GetArrayFromImage(transformixImageFilter.GetDeformationField())[..., 0:2]
 
-        if len(tform_files) > 0:
-            for f in tform_files:
-                os.remove(f)
+    #     # Get deformation grid #
+    #     grid_spacing = int(eval(self.params["FinalGridSpacingInPhysicalUnits"][0]))
+    #     self.elastix_params = self.params.asdict()
+    #     self.params = None  # Can't pickle SimpleITK.ParameterMap
+    #     grid_img = self.get_grid_image(grid_spacing=grid_spacing)
+    #     self.method = elastix_image_filter_obj.__class__.__name__
 
-        deformationField = np.array([[deformationField[i][...,  0],
-                                      deformationField[i][...,  1]]
-                                     for i in range(len(deformationField))])
-        return deformationField
+    #     vectorOfGrids = sitk.VectorOfImage()
+    #     for i in range(len(img_list)):
+    #         vectorOfGrids.push_back(sitk.GetImageFromArray(grid_img))
+    #     grid3d = sitk.JoinSeries(vectorOfGrids)
+
+    #     transformixImageFilter.SetMovingImage(grid3d)
+    #     transformixImageFilter.Execute()
+    #     warped_grid = sitk.GetArrayFromImage(transformixImageFilter.GetResultImage())
+
+    #     tform_files = [f for f in os.listdir(".")
+    #                 if f.startswith("TransformParameters.")
+    #                 and f.endswith(".txt")]
+
+    #     if len(tform_files) > 0:
+    #         for f in tform_files:
+    #             os.remove(f)
+
+    #     deformationField = np.array([[deformationField[i][...,  0],
+    #                                   deformationField[i][...,  1]]
+    #                                  for i in range(len(deformationField))])
+    #     return deformationField
 
 
 class NonRigidTileRegistrar(object):

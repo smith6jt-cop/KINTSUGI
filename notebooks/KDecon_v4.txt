@@ -1,0 +1,54 @@
+ 
+KDecon v4 - KINTSUGI
+ 
+CPU supported with 53.90 GB memory
+CPU: 53.90 GB available
+GPU supported with 20.24 GB memory
+GPU: NVIDIA RTX A4500
+Available devices and their memory:
+Using GPU with 10.12 GB of memory
+Image dimensions: x=9970 y=9488 z=17 blocksize=8196
+Total pixels: 6.43 GB Max block size: 8.10 GB
+deconvolution split into 2 x 1 x 1 blocks.
+calculating PSF...
+ok
+x 9970 y 9488 z 17
+Processing 2 blocks...
+loading block 1 from 2
+Processing block 1 from 2
+iteration: 1 delta: 0
+iteration: 2 delta: 18.4
+Difference between last error and current error is 8.43
+iteration: 3 delta: 9.94
+Difference between last error and current error is 3
+iteration: 4 delta: 6.94
+Difference between last error and current error is 1.37
+iteration: 5 delta: 5.58
+Difference between last error and current error is 0.656
+iteration: 6 delta: 4.92
+Stop criterion reached. Finishing iterations.
+Saving block 1 from 2
+Block 1/2 complete (50.0%)
+loading block 2 from 2
+Processing block 2 from 2
+iteration: 1 delta: 0
+iteration: 2 delta: 20.6
+Difference between last error and current error is 10.4
+iteration: 3 delta: 10.3
+Difference between last error and current error is 3.29
+iteration: 4 delta: 6.96
+Difference between last error and current error is 1.42
+iteration: 5 delta: 5.54
+Difference between last error and current error is 0.66
+iteration: 6 delta: 4.88
+Stop criterion reached. Finishing iterations.
+Saving block 2 from 2
+Block 2/2 complete (100.0%)
+calculating histogram...
+Creating results folder C:\Users\smith6jt\KINTSUGI\data\2008CC2B_BaSiC_Stitched\cyc13\CH4\deconvolved
+mounting layer 1 from 1
+saving images...
+generating info file...
+deconvolution of: C:\Users\smith6jt\KINTSUGI\data\2008CC2B_BaSiC_Stitched\cyc13\CH4 finished successfully
+elapsed time: 00:06
+----------------------------------------------------------------------------------------
