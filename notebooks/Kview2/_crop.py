@@ -84,7 +84,7 @@ class _Cropper(VBox):
                  display_max:float = None):
 
         self._image = image
-        from ipywidgets import IntRangeSlider, Image
+        from ipywidgets import IntRangeSlider, Image, Layout
         from ._slice_viewer import _SliceViewer
         from ._utilities import _no_resize
         viewer = _SliceViewer(image,
@@ -126,6 +126,7 @@ class _Cropper(VBox):
                 max=max_,
                 description=axis_names[dim],
                 continuous_update=continuous_update,
+                layout=Layout(width='400px', description_width='50px') 
             )
             range_slider.observe(self.update)
             self._range_sliders.append(range_slider)
