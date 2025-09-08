@@ -1,0 +1,16 @@
+{
+  "pancreas": {
+    "name": "PANCREAS",
+    "fixed_image": "data/pancreas_fixed.ome.tiff",
+    "moving_image": "data/pancreas_moving.ome.tiff",
+    "channel_names_file": "data/pancreas_channel_names.txt",
+    "output_file": "outputs/PANCREAS_registered_62ch_ImageJ.tiff"
+  },
+  "thymus": {
+    "name": "THYMUS",
+    "fixed_image": "data/ThymusDAPI_Xenium_downsampled2x_EDF.ome.tiff",
+    "moving_image": "data/THYMUS.ome.tiff",
+    "channel_names_file": "data/thymus_channel_names.txt",
+    "output_file": "outputs/THYMUS_registered_62ch_ImageJ.tiff"
+  }
+}

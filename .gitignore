@@ -94,6 +94,12 @@ target/
 profile_default/
 ipython_config.py
 
+# Output files from registration workflow
+outputs/
+*_registered_*.tiff
+*_registered_*.tif
+temp_*_registration/
+
 # pyenv
 #   For a library or package, you might want to ignore these files since the code is
 #   intended to run in multiple environments; otherwise, check them in:
