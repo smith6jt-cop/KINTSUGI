@@ -91,6 +91,7 @@ def curtain(
         max=max_curtain_position,
         continuous_update=continuous_update,
         description="Curtain"
+        
     )
 
     viewer = None
