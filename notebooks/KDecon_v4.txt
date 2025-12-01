@@ -1,54 +1,413 @@
  
 KDecon v4 - KINTSUGI
  
-CPU supported with 53.90 GB memory
-CPU: 53.90 GB available
 GPU supported with 20.24 GB memory
-GPU: NVIDIA RTX A4500
 Available devices and their memory:
-Using GPU with 10.12 GB of memory
-Image dimensions: x=9970 y=9488 z=17 blocksize=8196
-Total pixels: 6.43 GB Max block size: 8.10 GB
-deconvolution split into 2 x 1 x 1 blocks.
+CPU: 8.0 GB (estimated)
+GPU: NVIDIA RTX A4500 (20.24 GB)
+Using GPU with 0.24 GB of memory
+Image dimensions: x=9970 y=9487 z=17
+Available memory: 0.24 GB
+Final configuration: 6 x 5 x 1 blocks
+Block size: 1662 x 1898 x 17 pixels (0.21 GB per block)
+Total blocks to process: 30
+deconvolution split into 6 x 5 x 1 blocks.
 calculating PSF...
-ok
-x 9970 y 9488 z 17
-Processing 2 blocks...
-loading block 1 from 2
-Processing block 1 from 2
-iteration: 1 delta: 0
-iteration: 2 delta: 18.4
-Difference between last error and current error is 8.43
-iteration: 3 delta: 9.94
-Difference between last error and current error is 3
-iteration: 4 delta: 6.94
-Difference between last error and current error is 1.37
-iteration: 5 delta: 5.58
-Difference between last error and current error is 0.656
-iteration: 6 delta: 4.92
-Stop criterion reached. Finishing iterations.
-Saving block 1 from 2
-Block 1/2 complete (50.0%)
-loading block 2 from 2
-Processing block 2 from 2
-iteration: 1 delta: 0
-iteration: 2 delta: 20.6
-Difference between last error and current error is 10.4
-iteration: 3 delta: 10.3
-Difference between last error and current error is 3.29
-iteration: 4 delta: 6.96
-Difference between last error and current error is 1.42
-iteration: 5 delta: 5.54
-Difference between last error and current error is 0.66
-iteration: 6 delta: 4.88
-Stop criterion reached. Finishing iterations.
-Saving block 2 from 2
-Block 2/2 complete (100.0%)
+PSF calculation complete
+Stack dimensions: x=9970 y=9487 z=17
+Processing 30 blocks...
+Loading and processing block 1 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 33.643%
+iteration: 3 delta: 17.644%
+iteration: 4 delta: 11.873%
+iteration: 5 delta: 8.914%
+iteration: 6 delta: 7.158%
+iteration: 7 delta: 6.029%
+iteration: 8 delta: 5.259%
+iteration: 9 delta: 4.709%
+stop criterion reached. Finishing iterations.
+Saving block 1 to temporary file
+Block 1/30 complete (3.3%)
+Loading and processing block 2 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 30.038%
+iteration: 3 delta: 16.130%
+iteration: 4 delta: 11.126%
+iteration: 5 delta: 8.508%
+iteration: 6 delta: 6.900%
+iteration: 7 delta: 5.823%
+iteration: 8 delta: 5.053%
+iteration: 9 delta: 4.477%
+stop criterion reached. Finishing iterations.
+Saving block 2 to temporary file
+Block 2/30 complete (6.7%)
+Loading and processing block 3 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 26.924%
+iteration: 3 delta: 14.426%
+iteration: 4 delta: 10.134%
+iteration: 5 delta: 7.892%
+iteration: 6 delta: 6.497%
+iteration: 7 delta: 5.545%
+iteration: 8 delta: 4.851%
+stop criterion reached. Finishing iterations.
+Saving block 3 to temporary file
+Block 3/30 complete (10.0%)
+Loading and processing block 4 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 32.022%
+iteration: 3 delta: 16.294%
+iteration: 4 delta: 10.931%
+iteration: 5 delta: 8.288%
+iteration: 6 delta: 6.734%
+iteration: 7 delta: 5.725%
+iteration: 8 delta: 5.026%
+iteration: 9 delta: 4.513%
+stop criterion reached. Finishing iterations.
+Saving block 4 to temporary file
+Block 4/30 complete (13.3%)
+Loading and processing block 5 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 42.375%
+iteration: 3 delta: 22.371%
+iteration: 4 delta: 14.408%
+iteration: 5 delta: 10.418%
+iteration: 6 delta: 8.111%
+iteration: 7 delta: 6.650%
+iteration: 8 delta: 5.654%
+iteration: 9 delta: 4.938%
+stop criterion reached. Finishing iterations.
+Saving block 5 to temporary file
+Block 5/30 complete (16.7%)
+Loading and processing block 6 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 42.090%
+iteration: 3 delta: 21.856%
+iteration: 4 delta: 14.008%
+iteration: 5 delta: 10.109%
+iteration: 6 delta: 7.883%
+iteration: 7 delta: 6.497%
+iteration: 8 delta: 5.575%
+iteration: 9 delta: 4.923%
+stop criterion reached. Finishing iterations.
+Saving block 6 to temporary file
+Block 6/30 complete (20.0%)
+Loading and processing block 7 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 27.341%
+iteration: 3 delta: 15.424%
+iteration: 4 delta: 10.912%
+iteration: 5 delta: 8.434%
+iteration: 6 delta: 6.876%
+iteration: 7 delta: 5.818%
+iteration: 8 delta: 5.060%
+iteration: 9 delta: 4.493%
+stop criterion reached. Finishing iterations.
+Saving block 7 to temporary file
+Block 7/30 complete (23.3%)
+Loading and processing block 8 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 26.512%
+iteration: 3 delta: 14.970%
+iteration: 4 delta: 10.637%
+iteration: 5 delta: 8.256%
+iteration: 6 delta: 6.752%
+iteration: 7 delta: 5.721%
+iteration: 8 delta: 4.976%
+stop criterion reached. Finishing iterations.
+Saving block 8 to temporary file
+Block 8/30 complete (26.7%)
+Loading and processing block 9 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 28.699%
+iteration: 3 delta: 15.374%
+iteration: 4 delta: 10.703%
+iteration: 5 delta: 8.242%
+iteration: 6 delta: 6.720%
+iteration: 7 delta: 5.690%
+iteration: 8 delta: 4.948%
+stop criterion reached. Finishing iterations.
+Saving block 9 to temporary file
+Block 9/30 complete (30.0%)
+Loading and processing block 10 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 31.882%
+iteration: 3 delta: 16.454%
+iteration: 4 delta: 11.149%
+iteration: 5 delta: 8.461%
+iteration: 6 delta: 6.841%
+iteration: 7 delta: 5.764%
+iteration: 8 delta: 4.997%
+stop criterion reached. Finishing iterations.
+Saving block 10 to temporary file
+Block 10/30 complete (33.3%)
+Loading and processing block 11 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 41.059%
+iteration: 3 delta: 21.181%
+iteration: 4 delta: 13.715%
+iteration: 5 delta: 9.968%
+iteration: 6 delta: 7.788%
+iteration: 7 delta: 6.399%
+iteration: 8 delta: 5.447%
+iteration: 9 delta: 4.758%
+stop criterion reached. Finishing iterations.
+Saving block 11 to temporary file
+Block 11/30 complete (36.7%)
+Loading and processing block 12 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 42.164%
+iteration: 3 delta: 21.882%
+iteration: 4 delta: 14.083%
+iteration: 5 delta: 10.158%
+iteration: 6 delta: 7.900%
+iteration: 7 delta: 6.487%
+iteration: 8 delta: 5.541%
+iteration: 9 delta: 4.871%
+stop criterion reached. Finishing iterations.
+Saving block 12 to temporary file
+Block 12/30 complete (40.0%)
+Loading and processing block 13 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 27.943%
+iteration: 3 delta: 15.575%
+iteration: 4 delta: 10.954%
+iteration: 5 delta: 8.442%
+iteration: 6 delta: 6.879%
+iteration: 7 delta: 5.829%
+iteration: 8 delta: 5.083%
+iteration: 9 delta: 4.530%
+stop criterion reached. Finishing iterations.
+Saving block 13 to temporary file
+Block 13/30 complete (43.3%)
+Loading and processing block 14 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 29.815%
+iteration: 3 delta: 16.166%
+iteration: 4 delta: 11.237%
+iteration: 5 delta: 8.600%
+iteration: 6 delta: 6.966%
+iteration: 7 delta: 5.865%
+iteration: 8 delta: 5.075%
+iteration: 9 delta: 4.484%
+stop criterion reached. Finishing iterations.
+Saving block 14 to temporary file
+Block 14/30 complete (46.7%)
+Loading and processing block 15 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 31.126%
+iteration: 3 delta: 16.506%
+iteration: 4 delta: 11.333%
+iteration: 5 delta: 8.620%
+iteration: 6 delta: 6.960%
+iteration: 7 delta: 5.850%
+iteration: 8 delta: 5.060%
+iteration: 9 delta: 4.469%
+stop criterion reached. Finishing iterations.
+Saving block 15 to temporary file
+Block 15/30 complete (50.0%)
+Loading and processing block 16 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 33.223%
+iteration: 3 delta: 17.146%
+iteration: 4 delta: 11.565%
+iteration: 5 delta: 8.710%
+iteration: 6 delta: 6.996%
+iteration: 7 delta: 5.865%
+iteration: 8 delta: 5.065%
+iteration: 9 delta: 4.470%
+stop criterion reached. Finishing iterations.
+Saving block 16 to temporary file
+Block 16/30 complete (53.3%)
+Loading and processing block 17 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 40.089%
+iteration: 3 delta: 20.740%
+iteration: 4 delta: 13.527%
+iteration: 5 delta: 9.855%
+iteration: 6 delta: 7.707%
+iteration: 7 delta: 6.335%
+iteration: 8 delta: 5.392%
+iteration: 9 delta: 4.709%
+stop criterion reached. Finishing iterations.
+Saving block 17 to temporary file
+Block 17/30 complete (56.7%)
+Loading and processing block 18 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 42.378%
+iteration: 3 delta: 22.462%
+iteration: 4 delta: 14.600%
+iteration: 5 delta: 10.523%
+iteration: 6 delta: 8.142%
+iteration: 7 delta: 6.640%
+iteration: 8 delta: 5.630%
+iteration: 9 delta: 4.916%
+stop criterion reached. Finishing iterations.
+Saving block 18 to temporary file
+Block 18/30 complete (60.0%)
+Loading and processing block 19 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 32.302%
+iteration: 3 delta: 17.649%
+iteration: 4 delta: 12.109%
+iteration: 5 delta: 9.137%
+iteration: 6 delta: 7.323%
+iteration: 7 delta: 6.130%
+iteration: 8 delta: 5.300%
+iteration: 9 delta: 4.697%
+stop criterion reached. Finishing iterations.
+Saving block 19 to temporary file
+Block 19/30 complete (63.3%)
+Loading and processing block 20 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 33.180%
+iteration: 3 delta: 17.995%
+iteration: 4 delta: 12.296%
+iteration: 5 delta: 9.254%
+iteration: 6 delta: 7.393%
+iteration: 7 delta: 6.160%
+iteration: 8 delta: 5.289%
+iteration: 9 delta: 4.646%
+stop criterion reached. Finishing iterations.
+Saving block 20 to temporary file
+Block 20/30 complete (66.7%)
+Loading and processing block 21 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 33.099%
+iteration: 3 delta: 17.579%
+iteration: 4 delta: 11.946%
+iteration: 5 delta: 8.993%
+iteration: 6 delta: 7.204%
+iteration: 7 delta: 6.019%
+iteration: 8 delta: 5.183%
+iteration: 9 delta: 4.564%
+stop criterion reached. Finishing iterations.
+Saving block 21 to temporary file
+Block 21/30 complete (70.0%)
+Loading and processing block 22 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 33.922%
+iteration: 3 delta: 17.524%
+iteration: 4 delta: 11.777%
+iteration: 5 delta: 8.838%
+iteration: 6 delta: 7.079%
+iteration: 7 delta: 5.922%
+iteration: 8 delta: 5.108%
+iteration: 9 delta: 4.502%
+stop criterion reached. Finishing iterations.
+Saving block 22 to temporary file
+Block 22/30 complete (73.3%)
+Loading and processing block 23 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 39.573%
+iteration: 3 delta: 20.519%
+iteration: 4 delta: 13.421%
+iteration: 5 delta: 9.798%
+iteration: 6 delta: 7.674%
+iteration: 7 delta: 6.313%
+iteration: 8 delta: 5.377%
+iteration: 9 delta: 4.698%
+stop criterion reached. Finishing iterations.
+Saving block 23 to temporary file
+Block 23/30 complete (76.7%)
+Loading and processing block 24 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 42.289%
+iteration: 3 delta: 22.235%
+iteration: 4 delta: 14.410%
+iteration: 5 delta: 10.378%
+iteration: 6 delta: 8.035%
+iteration: 7 delta: 6.564%
+iteration: 8 delta: 5.581%
+iteration: 9 delta: 4.890%
+stop criterion reached. Finishing iterations.
+Saving block 24 to temporary file
+Block 24/30 complete (80.0%)
+Loading and processing block 25 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 32.194%
+iteration: 3 delta: 17.757%
+iteration: 4 delta: 12.176%
+iteration: 5 delta: 9.180%
+iteration: 6 delta: 7.360%
+iteration: 7 delta: 6.170%
+iteration: 8 delta: 5.347%
+iteration: 9 delta: 4.750%
+stop criterion reached. Finishing iterations.
+Saving block 25 to temporary file
+Block 25/30 complete (83.3%)
+Loading and processing block 26 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 33.037%
+iteration: 3 delta: 17.919%
+iteration: 4 delta: 12.188%
+iteration: 5 delta: 9.144%
+iteration: 6 delta: 7.303%
+iteration: 7 delta: 6.096%
+iteration: 8 delta: 5.258%
+iteration: 9 delta: 4.647%
+stop criterion reached. Finishing iterations.
+Saving block 26 to temporary file
+Block 26/30 complete (86.7%)
+Loading and processing block 27 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 32.547%
+iteration: 3 delta: 17.229%
+iteration: 4 delta: 11.688%
+iteration: 5 delta: 8.799%
+iteration: 6 delta: 7.062%
+iteration: 7 delta: 5.923%
+iteration: 8 delta: 5.131%
+iteration: 9 delta: 4.550%
+stop criterion reached. Finishing iterations.
+Saving block 27 to temporary file
+Block 27/30 complete (90.0%)
+Loading and processing block 28 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 33.916%
+iteration: 3 delta: 17.621%
+iteration: 4 delta: 11.790%
+iteration: 5 delta: 8.814%
+iteration: 6 delta: 7.055%
+iteration: 7 delta: 5.919%
+iteration: 8 delta: 5.134%
+iteration: 9 delta: 4.564%
+stop criterion reached. Finishing iterations.
+Saving block 28 to temporary file
+Block 28/30 complete (93.3%)
+Loading and processing block 29 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 39.233%
+iteration: 3 delta: 20.469%
+iteration: 4 delta: 13.345%
+iteration: 5 delta: 9.713%
+iteration: 6 delta: 7.613%
+iteration: 7 delta: 6.296%
+iteration: 8 delta: 5.415%
+iteration: 9 delta: 4.793%
+stop criterion reached. Finishing iterations.
+Saving block 29 to temporary file
+Block 29/30 complete (96.7%)
+Loading and processing block 30 of 30
+iteration: 1 delta: 0.000%
+iteration: 2 delta: 42.876%
+iteration: 3 delta: 23.454%
+iteration: 4 delta: 15.364%
+iteration: 5 delta: 11.050%
+iteration: 6 delta: 8.511%
+iteration: 7 delta: 6.917%
+iteration: 8 delta: 5.862%
+iteration: 9 delta: 5.127%
+iteration: 10 delta: 4.593%
+stop criterion reached. Finishing iterations.
+Saving block 30 to temporary file
+Block 30/30 complete (100.0%)
 calculating histogram...
-Creating results folder C:\Users\smith6jt\KINTSUGI\data\2008CC2B_BaSiC_Stitched\cyc13\CH4\deconvolved
-mounting layer 1 from 1
-saving images...
+Creating results folder C:\Users\smith6jt\KINTSUGI\data\2008CC2B_BaSiC_Stitched\cyc01\CH4\deconvolved
+Mounting and saving layer block 1 of 1
+Saving 17 images...
 generating info file...
-deconvolution of: C:\Users\smith6jt\KINTSUGI\data\2008CC2B_BaSiC_Stitched\cyc13\CH4 finished successfully
-elapsed time: 00:06
+deconvolution of: C:\Users\smith6jt\KINTSUGI\data\2008CC2B_BaSiC_Stitched\cyc01\CH4 finished successfully
+elapsed time: 00:07:08
 ----------------------------------------------------------------------------------------
