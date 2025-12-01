@@ -44,6 +44,8 @@ def intSlider(min:int=0, max:int=100, step:int=1, value:int=1, continuous_update
     slider.layout.width = '100%'
 
     label = ipywidgets.Label(description)
+    label.layout.width = 'auto'  # Allow the label to take necessary width
+    label.layout.min_width = '60px'  # Set a reasonable minimum width
 
     custom_css = "<style>.widget-readout { min-width: 20px !important; }</style>"
     html = ipywidgets.HTML(custom_css)

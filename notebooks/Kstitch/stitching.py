@@ -158,6 +158,14 @@ def stitch_images(
         if True, row and col indices are switched.
         only for compatibility and the default value will be False in the future.
 
+    overlap_percentage : Float, optional
+        the expected overlap percentage between adjacent tiles (0-100).
+        If provided, this value will be used instead of automatic overlap detection.
+        Should be the actual overlap percentage, e.g., 30 for 30% overlap.
+
+    use_gpu : bool, default False
+        if True, use GPU acceleration for FFT computations.
+
     ncc_threshold : Float, default 0.5
         the threshold of the normalized cross correlation used to select the initial
         stitched pairs.
@@ -236,44 +244,72 @@ def stitch_images(
         gpu_name = cp.cuda.runtime.getDeviceProperties(0)['name']
         print(f"Using GPU: {gpu_name}")
         cp.cuda.Device(0).use()
-    for ncc_threshold in np.around(np.arange(initial_ncc_threshold, max_ncc_threshold, decrement_step), decimals=1):
-        # print("Stitching in progress.  Enjoy a cold carbonated caffeinated drink.")
+    
+    # Process all image pairs once to compute correlations
+    print("Computing phase correlations for all image pairs...")
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_cores) as executor:
+        for direction in ["left", "top"]:
+            futures = [executor.submit(process_image_pair, i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX, use_gpu) for i2, g in grid.iterrows()]
+
+            for future in tqdm(concurrent.futures.as_completed(futures), desc=f"Processing {direction} pairs"):
+                # Free GPU memory after processing each image pair
+                if use_gpu:
+                    cp.get_default_memory_pool().free_all_blocks()
+                result = future.result()
+                if result is not None:
+                    i2, direction, max_peak = result
+                    for j, key in enumerate(["ncc", "y", "x"]):
+                        grid.loc[i2, f"{direction}_{key}_first"] = max_peak[j]
+
+    # Analyze actual NCC values to select appropriate threshold
+    top_ncc_values = grid["top_ncc_first"].dropna()
+    left_ncc_values = grid["left_ncc_first"].dropna()
+    all_ncc_values = pd.concat([top_ncc_values, left_ncc_values])
+    
+    if len(all_ncc_values) > 0:
+        min_ncc = all_ncc_values.min()
+        mean_ncc = all_ncc_values.mean()
+        max_ncc = all_ncc_values.max()
         
-
-        with concurrent.futures.ProcessPoolExecutor(max_workers=max_cores) as executor:
-            for direction in ["left", "top"]:
-                
-                futures = [executor.submit(process_image_pair, i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX, use_gpu) for i2, g in grid.iterrows()]
-
-                for future in tqdm(concurrent.futures.as_completed(futures)):
-                    # Free GPU memory after processing each image pair
-                    if use_gpu:
-                        cp.get_default_memory_pool().free_all_blocks()
-                    result = future.result()
-                    if result is not None:
-                        i2, direction, max_peak = result
-                        for j, key in enumerate(["ncc", "y", "x"]):
-                            grid.loc[i2, f"{direction}_{key}_first"] = max_peak[j]
-
-          
-                       
-             
-        if np.any(grid["top_ncc_first"] < ncc_threshold)|np.any(grid["left_ncc_first"] < ncc_threshold):
-            # print(f"ncc_threshold {ncc_threshold} failed, trying next value")
-            continue
+        print(f"NCC Statistics: min={min_ncc:.3f}, mean={mean_ncc:.3f}, max={max_ncc:.3f}")
         
+        # Select threshold based on actual data
+        if initial_ncc_threshold > max_ncc:
+            # Requested threshold is higher than any actual NCC - use a more conservative value
+            ncc_threshold = max(min_ncc, mean_ncc * 0.5)  # Use half of mean or minimum, whichever is higher
+            print(f"Initial threshold {initial_ncc_threshold:.1f} > max NCC {max_ncc:.3f}")
+            print(f"Using conservative adaptive threshold: {ncc_threshold:.3f}")
+        elif initial_ncc_threshold >= min_ncc:
+            # Requested threshold is achievable
+            ncc_threshold = initial_ncc_threshold
+            print(f"Using requested threshold: {ncc_threshold:.3f}")
         else:
-            print(f"Ready to go!")
-            break
+            # Even the initial threshold is below minimum - use minimum
+            ncc_threshold = min_ncc
+            print(f"Using minimum possible threshold: {ncc_threshold:.3f}")
+    else:
+        ncc_threshold = 0.0
+        print("No NCC values found, using threshold 0.0")
     predictor = ElipticEnvelopPredictor(contamination=0.1, epsilon=0.01, random_seed=0)
-    left_displacement = compute_image_overlap2(
-        grid[grid["left_ncc_first"] > ncc_threshold], "left", sizeY, sizeX, predictor
-    )
-    top_displacement = compute_image_overlap2(
-        grid[grid["top_ncc_first"] > ncc_threshold], "top", sizeY, sizeX, predictor
-    )
-    overlap_top = np.clip(100 - top_displacement[0] * 100, pou, 100 - pou)
-    overlap_left = np.clip(100 - left_displacement[1] * 100, pou, 100 - pou)
+    
+    # Use provided overlap_percentage if available, otherwise compute automatically
+    if overlap_percentage is not None:
+        # User provided overlap percentage - don't clip by POU here, let filter function handle it
+        overlap_top = overlap_percentage
+        overlap_left = overlap_percentage
+        print(f"Using provided overlap_percentage: {overlap_percentage}% with POU: {pou}%")
+    else:
+        # Compute overlap automatically from phase correlation analysis
+        print("Computing overlap from phase correlation analysis...")
+        left_displacement = compute_image_overlap2(
+            grid[grid["left_ncc_first"] >= ncc_threshold], "left", sizeY, sizeX, predictor
+        )
+        top_displacement = compute_image_overlap2(
+            grid[grid["top_ncc_first"] >= ncc_threshold], "top", sizeY, sizeX, predictor
+        )
+        overlap_top = np.clip(100 - top_displacement[0] * 100, pou, 100 - pou)
+        overlap_left = np.clip(100 - left_displacement[1] * 100, pou, 100 - pou)
+        print(f"Computed overlap automatically - top: {overlap_top:.1f}%, left: {overlap_left:.1f}%")
 
     ### compute_repeatability ###
     grid["top_valid1"] = filter_by_overlap_and_correlation(
@@ -282,7 +318,8 @@ def stitch_images(
         overlap_top,
         sizeY,
         pou,
-        ncc_threshold
+        ncc_threshold,
+        overlap_percentage
     )
     grid["top_valid2"] = filter_outliers(grid["top_y_first"], grid["top_valid1"])
     grid["left_valid1"] = filter_by_overlap_and_correlation(
@@ -291,7 +328,8 @@ def stitch_images(
         overlap_left,
         sizeX,
         pou,
-        ncc_threshold
+        ncc_threshold,
+        overlap_percentage
     )
     grid["left_valid2"] = filter_outliers(grid["left_x_first"], grid["left_valid1"])
 
