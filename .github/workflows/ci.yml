@@ -71,11 +71,27 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          choco install vips -y
-          # Add vips to PATH for this session
-          $vipsBin = 'C:\ProgramData\chocolatey\lib\vips\tools\vips-dev-8.16\bin'
-          if (Test-Path $vipsBin) {
-            echo "$vipsBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # Try installing vips; if stable not found, try prerelease
+          choco install vips -y -r
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "Stable vips not found, trying prerelease..."
+            choco install vips --pre -y -r
+          }
+
+          # Find the vips bin directory dynamically
+          $libRoot = 'C:\ProgramData\chocolatey\lib'
+          $vipsPkg = Get-ChildItem $libRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^vips' } | Select-Object -First 1
+
+          if ($vipsPkg) {
+            $binDir = Get-ChildItem (Join-Path $vipsPkg.FullName 'tools') -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq 'bin' } | Select-Object -First 1
+            if ($binDir) {
+              Write-Output "Found vips bin at: $($binDir.FullName)"
+              $binDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            } else {
+              Write-Warning "vips installed but bin directory not found - pyvips may not work"
+            }
+          } else {
+            Write-Warning "vips package not found - pyvips may not work"
           }
 
       - name: Install Python dependencies
