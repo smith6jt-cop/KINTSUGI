@@ -103,9 +103,6 @@ class DependencyChecker:
             ("scikit-learn", "1.3.0"),
             ("opencv-python", None),  # opencv-contrib-python-headless
             ("tifffile", "2023.7.0"),
-            ("valis-wsi", "1.2.0"),
-            ("pyvips", "2.2.0"),
-            ("stackview", "0.18.0"),
             ("matplotlib", "3.7.0"),
             ("zarr", "2.16.0"),
             ("dask", "2023.7.0"),
@@ -126,6 +123,10 @@ class DependencyChecker:
             print("\n[Optional Packages]")
 
         optional_packages = [
+            # Image processing (require native libraries)
+            ("valis-wsi", "1.2.0", "registration"),
+            ("pyvips", "2.2.0", "imaging"),
+            ("stackview", "0.18.0", "viz"),
             # GPU
             ("torch", "2.0.0", "gpu"),
             ("torchvision", "0.15.0", "gpu"),
