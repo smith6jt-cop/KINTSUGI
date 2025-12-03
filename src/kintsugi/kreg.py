@@ -20,6 +20,7 @@ try:
         affine_optimizer,
         feature_detectors,
         feature_matcher,
+        micro_rigid_registrar,
         non_rigid_registrars,
         preprocessing,
         registration,
@@ -30,7 +31,6 @@ try:
         valtils,
         viz,
         warp_tools,
-        micro_rigid_registrar,
     )
 
     # Main classes for convenience
@@ -57,9 +57,11 @@ try:
 
 except ImportError as e:
     import warnings
+
     warnings.warn(
         f"Failed to import Kreg module: {e}. "
         "Make sure you're running from the KINTSUGI directory or "
-        "have installed the package properly."
+        "have installed the package properly.",
+        stacklevel=2,
     )
     __all__ = []

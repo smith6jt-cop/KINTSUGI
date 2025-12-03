@@ -6,16 +6,15 @@ native libraries (libvips), Java/Maven, and Python packages.
 """
 
 import os
-import sys
 import shutil
 import subprocess
 from dataclasses import dataclass, field
-from typing import Optional
 from enum import Enum
 
 
 class DependencyStatus(Enum):
     """Status of a dependency check."""
+
     OK = "ok"
     MISSING = "missing"
     VERSION_MISMATCH = "version_mismatch"
@@ -26,10 +25,11 @@ class DependencyStatus(Enum):
 @dataclass
 class DependencyResult:
     """Result of checking a single dependency."""
+
     name: str
     status: DependencyStatus
-    version: Optional[str] = None
-    required_version: Optional[str] = None
+    version: str | None = None
+    required_version: str | None = None
     message: str = ""
     is_optional: bool = False
     details: dict = field(default_factory=dict)
@@ -130,25 +130,20 @@ class DependencyChecker:
             ("torch", "2.0.0", "gpu"),
             ("torchvision", "0.15.0", "gpu"),
             ("cupy", None, "gpu"),
-
             # Java
             ("jpype1", "1.5.0", "java"),
             ("scyjava", "1.0.0", "java"),
             ("pyimagej", "1.4.0", "java"),
-
             # Visualization
             ("napari", "0.4.19", "viz"),
             ("magicgui", "0.7.0", "viz"),
-
             # Deep learning
             ("instanseg", "0.0.2", "dl"),
             ("kornia", "0.7.0", "dl"),
-
             # Analysis
             ("scanpy", "1.9.0", "analysis"),
             ("anndata", "0.9.0", "analysis"),
             ("phenograph", "1.5.0", "analysis"),
-
             # Bio formats
             ("aicsimageio", None, "bio"),
             ("ome-types", "0.5.0", "bio"),
@@ -163,10 +158,7 @@ class DependencyChecker:
                 self._print_result(result)
 
     def _check_python_package(
-        self,
-        package: str,
-        min_version: Optional[str],
-        optional: bool = False
+        self, package: str, min_version: str | None, optional: bool = False
     ) -> DependencyResult:
         """Check if a Python package is installed and meets version requirements."""
         # Handle package name variations
@@ -186,6 +178,7 @@ class DependencyChecker:
                 # Try importlib.metadata
                 try:
                     from importlib.metadata import version as get_version
+
                     version = get_version(package)
                 except Exception:
                     version = "unknown"
@@ -193,6 +186,7 @@ class DependencyChecker:
             # Version comparison
             if min_version and version != "unknown":
                 from packaging.version import parse
+
                 if parse(version) < parse(min_version):
                     return DependencyResult(
                         name=package,
@@ -259,7 +253,7 @@ class DependencyChecker:
                 message=str(e),
                 details={
                     "hint": "Install libvips: conda install -c conda-forge libvips "
-                            "or download from Zenodo"
+                    "or download from Zenodo"
                 },
             )
 
@@ -300,10 +294,7 @@ class DependencyChecker:
             java_cmd = shutil.which("java")
             if java_cmd:
                 result = subprocess.run(
-                    [java_cmd, "-version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
+                    [java_cmd, "-version"], capture_output=True, text=True, timeout=10
                 )
                 # Java version info goes to stderr
                 output = result.stderr or result.stdout
@@ -340,10 +331,7 @@ class DependencyChecker:
             mvn_cmd = shutil.which("mvn")
             if mvn_cmd:
                 result = subprocess.run(
-                    [mvn_cmd, "--version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
+                    [mvn_cmd, "--version"], capture_output=True, text=True, timeout=10
                 )
                 output = result.stdout or ""
                 version_line = output.split("\n")[0] if output else ""
@@ -431,14 +419,13 @@ class DependencyChecker:
         # Check PyTorch CUDA
         try:
             import torch
+
             cuda_available = torch.cuda.is_available()
 
             if cuda_available:
                 device_count = torch.cuda.device_count()
                 cuda_version = torch.version.cuda
-                devices = [
-                    torch.cuda.get_device_name(i) for i in range(device_count)
-                ]
+                devices = [torch.cuda.get_device_name(i) for i in range(device_count)]
 
                 result = DependencyResult(
                     name="cuda-pytorch",
@@ -494,25 +481,22 @@ class DependencyChecker:
 
         if result.message and result.status not in (
             DependencyStatus.OK,
-            DependencyStatus.OPTIONAL_MISSING
+            DependencyStatus.OPTIONAL_MISSING,
         ):
             print(f"             {result.message}")
 
     def _generate_summary(self, verbose: bool) -> dict:
         """Generate summary of all checks."""
         required_ok = sum(
-            1 for r in self.results
-            if not r.is_optional and r.status == DependencyStatus.OK
+            1 for r in self.results if not r.is_optional and r.status == DependencyStatus.OK
         )
         required_total = sum(1 for r in self.results if not r.is_optional)
         required_missing = [
-            r.name for r in self.results
-            if not r.is_optional and r.status != DependencyStatus.OK
+            r.name for r in self.results if not r.is_optional and r.status != DependencyStatus.OK
         ]
 
         optional_ok = sum(
-            1 for r in self.results
-            if r.is_optional and r.status == DependencyStatus.OK
+            1 for r in self.results if r.is_optional and r.status == DependencyStatus.OK
         )
         optional_total = sum(1 for r in self.results if r.is_optional)
 
@@ -546,7 +530,7 @@ class DependencyChecker:
             print(f"  Optional: {optional_ok}/{optional_total} available")
 
             if required_missing:
-                print(f"\n  Missing required dependencies:")
+                print("\n  Missing required dependencies:")
                 for name in required_missing:
                     print(f"    - {name}")
                 print("\n  Install with: pip install kintsugi[full]")

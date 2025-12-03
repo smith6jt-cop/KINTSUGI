@@ -16,13 +16,13 @@ if str(_notebooks_path) not in sys.path:
 # Import and re-export from notebooks/dl_refinement
 try:
     from dl_refinement import (
-        ChannelAssessor,
-        HeuristicChannelAssessor,
-        ChannelQualityResult,
         BatchChannelProcessor,
-        StreamingBatchProcessor,
-        ChannelReviewInterface,
         BatchReviewInterface,
+        ChannelAssessor,
+        ChannelQualityResult,
+        ChannelReviewInterface,
+        HeuristicChannelAssessor,
+        StreamingBatchProcessor,
     )
 
     __all__ = [
@@ -37,9 +37,11 @@ try:
 
 except ImportError as e:
     import warnings
+
     warnings.warn(
         f"Failed to import dl_refinement module: {e}. "
         "Make sure you're running from the KINTSUGI directory or "
-        "have installed the package properly."
+        "have installed the package properly.",
+        stacklevel=2,
     )
     __all__ = []

@@ -17,28 +17,28 @@ if str(_notebooks_path) not in sys.path:
 try:
     from Kview2 import (
         __version__,
-        jupyter_displayable_output,
-        insight,
-        merge_rgb,
-        nop,
-        crop,
-        annotate,
-        interact,
-        slice,
-        curtain,
-        orthogonal,
-        side_by_side,
-        picker,
-        switch,
-        create_colormap,
-        imshow,
         animate,
         animate_curtain,
-        display_range,
-        scatterplot,
-        grid,
+        annotate,
         clusterplot,
+        create_colormap,
+        crop,
+        curtain,
+        display_range,
+        grid,
+        imshow,
+        insight,
+        interact,
+        jupyter_displayable_output,
+        merge_rgb,
+        nop,
+        orthogonal,
+        picker,
+        scatterplot,
+        side_by_side,
+        slice,
         sliceplot,
+        switch,
     )
 
     __all__ = [
@@ -69,9 +69,11 @@ try:
 
 except ImportError as e:
     import warnings
+
     warnings.warn(
         f"Failed to import Kview2 module: {e}. "
         "Make sure you're running from the KINTSUGI directory or "
-        "have installed the package properly."
+        "have installed the package properly.",
+        stacklevel=2,
     )
     __all__ = []

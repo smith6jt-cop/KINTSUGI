@@ -7,15 +7,14 @@ Provides CLI entry points for:
 - kintsugi-check: Dependency checking
 """
 
-import sys
 import json
+import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 
 console = Console()
 
@@ -54,13 +53,7 @@ def check(verbose: bool, output_json: bool):
 @click.option("--dst", "-d", type=click.Path(), help="Destination directory")
 @click.option("--reference", "-r", help="Reference image filename")
 @click.option("--dry-run", is_flag=True, help="Show what would be done")
-def register(
-    config: str,
-    src: Optional[str],
-    dst: Optional[str],
-    reference: Optional[str],
-    dry_run: bool
-):
+def register(config: str, src: str | None, dst: str | None, reference: str | None, dry_run: bool):
     """
     Run image registration workflow.
 
@@ -86,25 +79,27 @@ def register(
 
     if missing:
         console.print(f"[red]Missing required fields: {', '.join(missing)}[/red]")
-        sys.exit(1)
+        raise SystemExit(1)
 
     src_path = Path(cfg["src_dir"])
     dst_path = Path(cfg["dst_dir"])
 
     if not src_path.exists():
         console.print(f"[red]Source directory does not exist: {src_path}[/red]")
-        sys.exit(1)
+        raise SystemExit(1)
 
     if dry_run:
-        console.print(Panel.fit(
-            f"[bold]Registration Workflow (Dry Run)[/bold]\n\n"
-            f"Source: {src_path}\n"
-            f"Destination: {dst_path}\n"
-            f"Reference: {cfg.get('reference_image', 'auto')}\n"
-            f"Image type: {cfg.get('image_type', 'tif')}\n"
-            f"Max dimension: {cfg.get('max_image_dim_px', 2048)}px",
-            title="KINTSUGI"
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold]Registration Workflow (Dry Run)[/bold]\n\n"
+                f"Source: {src_path}\n"
+                f"Destination: {dst_path}\n"
+                f"Reference: {cfg.get('reference_image', 'auto')}\n"
+                f"Image type: {cfg.get('image_type', 'tif')}\n"
+                f"Max dimension: {cfg.get('max_image_dim_px', 2048)}px",
+                title="KINTSUGI",
+            )
+        )
         return
 
     # Create destination directory
@@ -116,7 +111,6 @@ def register(
         # Import Kreg and run registration
         # Note: Uses the notebooks/Kreg module via path manipulation
         # This will be improved when notebooks are properly packaged
-        import sys
         notebooks_path = Path(__file__).parent.parent.parent / "notebooks"
         if str(notebooks_path) not in sys.path:
             sys.path.insert(0, str(notebooks_path))
@@ -151,15 +145,15 @@ def register(
     except ImportError as e:
         console.print(f"[red]Import error: {e}[/red]")
         console.print("Make sure KINTSUGI is properly installed.")
-        sys.exit(1)
+        raise SystemExit(1)
     except Exception as e:
         console.print(f"[red]Registration failed: {e}[/red]")
-        sys.exit(1)
+        raise SystemExit(1)
 
 
 @main.command()
 @click.option("--output", "-o", type=click.Path(), help="Output file path")
-def template(output: Optional[str]):
+def template(output: str | None):
     """Generate a template configuration file."""
     from kintsugi import get_config_template
 
@@ -176,8 +170,9 @@ def template(output: Optional[str]):
 @main.command()
 def info():
     """Show KINTSUGI version and environment information."""
-    from kintsugi import __version__
     import platform
+
+    from kintsugi import __version__
 
     table = Table(title="KINTSUGI Information")
     table.add_column("Property", style="cyan")
@@ -191,6 +186,7 @@ def info():
     # Check for GPU
     try:
         import torch
+
         if torch.cuda.is_available():
             gpu_info = f"{torch.cuda.device_count()} GPU(s): {torch.cuda.get_device_name(0)}"
         else:
@@ -207,10 +203,11 @@ def info():
 def check_dependencies():
     """Entry point for kintsugi-check command."""
     from kintsugi.deps import check_dependencies as _check
+
     _check(verbose=True)
 
 
-def register():
+def register_cli():
     """Entry point for kintsugi-register command."""
     # This wraps the main CLI for direct invocation
     main(["register"])

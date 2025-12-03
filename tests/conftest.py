@@ -4,9 +4,9 @@ Pytest configuration and fixtures for KINTSUGI tests.
 
 import sys
 from pathlib import Path
-import pytest
-import numpy as np
 
+import numpy as np
+import pytest
 
 # Add project paths
 PROJECT_ROOT = Path(__file__).parent.parent

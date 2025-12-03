@@ -21,9 +21,11 @@ try:
 
 except ImportError as e:
     import warnings
+
     warnings.warn(
         f"Failed to import Kstitch module: {e}. "
         "Make sure you're running from the KINTSUGI directory or "
-        "have installed the package properly."
+        "have installed the package properly.",
+        stacklevel=2,
     )
     __all__ = []

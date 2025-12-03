@@ -12,7 +12,7 @@ Citation:
     STAR Protocols 6, 103976 (2025).
 """
 
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("kintsugi")
@@ -22,23 +22,29 @@ except PackageNotFoundError:
 __author__ = "Smith JT"
 __email__ = "smith6jt@cop.ufl.edu"
 
+
 # Lazy imports to avoid loading heavy dependencies at startup
 def __getattr__(name: str):
     """Lazy loading of submodules."""
     if name == "Kreg":
         from kintsugi import kreg
+
         return kreg
     elif name == "Kview2":
         from kintsugi import kview2
+
         return kview2
     elif name == "Kstitch":
         from kintsugi import kstitch
+
         return kstitch
     elif name == "dl_refinement":
         from kintsugi import dl_refinement
+
         return dl_refinement
     elif name == "deps":
         from kintsugi import deps
+
         return deps
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -58,6 +64,7 @@ def check_dependencies(verbose: bool = True) -> dict:
         Dictionary with dependency status information.
     """
     from kintsugi.deps import DependencyChecker
+
     checker = DependencyChecker()
     return checker.check_all(verbose=verbose)
 

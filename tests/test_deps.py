@@ -2,8 +2,6 @@
 Tests for the dependency validation module.
 """
 
-import pytest
-
 
 class TestDependencyChecker:
     """Test DependencyChecker class."""
@@ -155,9 +153,7 @@ class TestPythonPackageChecks:
 
         checker = DependencyChecker()
         result = checker._check_python_package(
-            "nonexistent_package_xyz_12345",
-            None,
-            optional=False
+            "nonexistent_package_xyz_12345", None, optional=False
         )
 
         assert result.status == DependencyStatus.MISSING
@@ -167,11 +163,7 @@ class TestPythonPackageChecks:
         from kintsugi.deps import DependencyChecker, DependencyStatus
 
         checker = DependencyChecker()
-        result = checker._check_python_package(
-            "nonexistent_package_xyz_12345",
-            None,
-            optional=True
-        )
+        result = checker._check_python_package("nonexistent_package_xyz_12345", None, optional=True)
 
         assert result.status == DependencyStatus.OPTIONAL_MISSING
         assert result.is_optional is True

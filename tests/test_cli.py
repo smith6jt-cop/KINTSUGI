@@ -3,6 +3,7 @@ Tests for the CLI module.
 """
 
 import json
+
 import pytest
 from click.testing import CliRunner
 

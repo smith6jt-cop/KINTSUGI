@@ -2,7 +2,6 @@
 Tests for core functionality without heavy dependencies.
 """
 
-import pytest
 import numpy as np
 
 
