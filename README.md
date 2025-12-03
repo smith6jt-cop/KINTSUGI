@@ -107,7 +107,16 @@ Windows requires additional binary dependencies from Zenodo:
   - `java-jdk21`
   - `PyVips-dev-8.16`
   - `FIJI` with Clij2 plugin
-  - `MatlabRuntime 2024a` (optional, for deconvolution)
+
+#### GPU Acceleration (Optional)
+For GPU-accelerated deconvolution, install CuPy for your CUDA version:
+```bash
+# For CUDA 11.x
+pip install cupy-cuda11x
+
+# For CUDA 12.x
+pip install cupy-cuda12x
+```
 
 ### Linux Installation
 
@@ -175,7 +184,7 @@ KINTSUGI relies on several external dependencies:
 | **Maven** | Java dependency management | `conda install maven` or Zenodo |
 | **VALIS** | Image registration | `pip install valis-wsi` (included) |
 | **FIJI + Clij2** | ImageJ integration | Download from Zenodo |
-| **MATLAB Runtime** | Deconvolution (optional) | Download from Zenodo |
+| **CuPy** | GPU acceleration for deconvolution (optional) | `pip install cupy-cuda11x` |
 
 ## Usage
 
