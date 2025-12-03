@@ -7,7 +7,7 @@ Napari-based GUI for reviewing channels flagged by quality assessment.
 import numpy as np
 import zarr
 from pathlib import Path
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Tuple
 import json
 import logging
 
