@@ -1,0 +1,272 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kintsugi"
+version = "1.1.0"
+description = "Multi-cycle immunofluorescence image registration and analysis pipeline"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Smith JT", email = "smith6jt@cop.ufl.edu"}
+]
+keywords = [
+    "image-processing",
+    "registration",
+    "microscopy",
+    "immunofluorescence",
+    "multiplex-imaging",
+    "spatial-analysis"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+
+# Core dependencies - minimal set for basic functionality
+dependencies = [
+    # Core scientific computing
+    "numpy>=1.24.0,<2.0.0",
+    "scipy>=1.10.0",
+    "pandas>=2.0.0",
+    "scikit-learn>=1.3.0",
+    "scikit-image>=0.21.0",
+
+    # Image processing
+    "opencv-contrib-python-headless>=4.8.0",
+    "tifffile>=2023.7.0",
+    "imageio>=2.31.0",
+    "pillow>=10.0.0",
+
+    # VALIS registration
+    "valis-wsi>=1.2.0",
+
+    # libvips bindings
+    "pyvips>=2.2.0",
+
+    # Visualization
+    "matplotlib>=3.7.0",
+    "stackview>=0.18.0",
+
+    # Data handling
+    "zarr>=2.16.0",
+    "h5py>=3.9.0",
+    "dask>=2023.7.0",
+
+    # Utilities
+    "tqdm>=4.65.0",
+    "pyyaml>=6.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "natsort>=8.4.0",
+    "packaging>=23.0",
+]
+
+[project.optional-dependencies]
+# GPU acceleration with PyTorch
+gpu = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "cupy-cuda12x>=12.0.0",
+]
+
+# Java/ImageJ integration
+java = [
+    "JPype1>=1.5.0",
+    "scyjava>=1.0.0",
+    "pyimagej>=1.4.0",
+]
+
+# Napari visualization
+viz = [
+    "napari>=0.4.19",
+    "magicgui>=0.7.0",
+    "napari-console>=0.0.9",
+    "napari-crop>=0.1.0",
+    "napari-simpleitk-image-processing>=0.4.0",
+    "napari-skimage-regionprops>=0.10.0",
+]
+
+# Deep learning and segmentation
+dl = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "instanseg>=0.0.2",
+    "instanseg-torch>=0.0.9",
+    "kornia>=0.7.0",
+]
+
+# Spatial analysis
+analysis = [
+    "scanpy>=1.9.0",
+    "anndata>=0.9.0",
+    "phenograph>=1.5.0",
+    "scimap>=0.0.1",
+    "umap-learn>=0.5.0",
+    "hdbscan>=0.8.0",
+]
+
+# Slide/bioformats I/O
+bio = [
+    "aicsimageio>=4.14.0",
+    "bioio>=1.0.0",
+    "bioio-ome-tiff>=1.0.0",
+    "ome-types>=0.5.0",
+    "ome-zarr>=0.9.0",
+    "slideio>=2.6.0",
+    "readlif>=0.6.0",
+]
+
+# Development and testing
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-xdist>=3.3.0",
+    "black>=23.7.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+    "pre-commit>=3.4.0",
+]
+
+# Documentation
+docs = [
+    "sphinx>=7.0.0",
+    "sphinx-rtd-theme>=1.3.0",
+    "myst-parser>=2.0.0",
+]
+
+# Full installation (all optional dependencies)
+full = [
+    "kintsugi[gpu,java,viz,dl,analysis,bio]",
+]
+
+[project.scripts]
+kintsugi = "kintsugi.cli:main"
+kintsugi-register = "kintsugi.cli:register"
+kintsugi-check = "kintsugi.cli:check_dependencies"
+
+[project.urls]
+Homepage = "https://github.com/smith6jt-cop/KINTSUGI"
+Documentation = "https://github.com/smith6jt-cop/KINTSUGI#readme"
+Repository = "https://github.com/smith6jt-cop/KINTSUGI.git"
+Issues = "https://github.com/smith6jt-cop/KINTSUGI/issues"
+Zenodo = "https://zenodo.org/records/14969214"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["kintsugi*"]
+
+[tool.setuptools.package-data]
+kintsugi = ["py.typed"]
+
+# Pytest configuration
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "-ra",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+]
+
+# Coverage configuration
+[tool.coverage.run]
+source = ["src/kintsugi"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+# Black configuration
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | superglue_models
+)/
+'''
+
+# Ruff configuration
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+    "B904",  # raise from err
+]
+exclude = [
+    ".git",
+    ".mypy_cache",
+    ".ruff_cache",
+    "build",
+    "dist",
+    "superglue_models",
+]
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/*" = ["S101"]
+
+# Mypy configuration
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+exclude = [
+    "superglue_models",
+    "tests",
+]
