@@ -67,6 +67,17 @@ jobs:
         run: |
           brew install vips
 
+      - name: Install system dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          choco install vips -y
+          # Add vips to PATH for this session
+          $vipsBin = 'C:\ProgramData\chocolatey\lib\vips\tools\vips-dev-8.16\bin'
+          if (Test-Path $vipsBin) {
+            echo "$vipsBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
