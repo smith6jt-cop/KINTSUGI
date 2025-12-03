@@ -71,27 +71,70 @@ jobs:
         if: runner.os == 'Windows'
         shell: powershell
         run: |
-          # Try installing vips; if stable not found, try prerelease
-          choco install vips -y -r
-          if ($LASTEXITCODE -ne 0) {
+          $success = $false
+
+          # Try installing vips via Chocolatey first
+          try {
+            choco install vips -y -r 2>$null
+            if ($LASTEXITCODE -eq 0) { $success = $true }
+          } catch { }
+
+          if (-not $success) {
             Write-Output "Stable vips not found, trying prerelease..."
-            choco install vips --pre -y -r
+            try {
+              choco install vips --pre -y -r 2>$null
+              if ($LASTEXITCODE -eq 0) { $success = $true }
+            } catch { }
           }
 
-          # Find the vips bin directory dynamically
-          $libRoot = 'C:\ProgramData\chocolatey\lib'
-          $vipsPkg = Get-ChildItem $libRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^vips' } | Select-Object -First 1
-
-          if ($vipsPkg) {
-            $binDir = Get-ChildItem (Join-Path $vipsPkg.FullName 'tools') -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq 'bin' } | Select-Object -First 1
-            if ($binDir) {
-              Write-Output "Found vips bin at: $($binDir.FullName)"
-              $binDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # Check if Chocolatey succeeded
+          if ($success) {
+            $libRoot = 'C:\ProgramData\chocolatey\lib'
+            $vipsPkg = Get-ChildItem $libRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^vips' } | Select-Object -First 1
+            if ($vipsPkg) {
+              $binDir = Get-ChildItem (Join-Path $vipsPkg.FullName 'tools') -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq 'bin' } | Select-Object -First 1
+              if ($binDir) {
+                Write-Output "Found vips bin at: $($binDir.FullName)"
+                $binDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+              } else {
+                $success = $false
+              }
             } else {
-              Write-Warning "vips installed but bin directory not found - pyvips may not work"
+              $success = $false
             }
-          } else {
-            Write-Warning "vips package not found - pyvips may not work"
+          }
+
+          # Fallback: download libvips from GitHub releases
+          if (-not $success) {
+            Write-Output "Chocolatey failed; downloading libvips from GitHub releases..."
+            try {
+              $api = "https://api.github.com/repos/libvips/build-win64-mxe/releases/latest"
+              $release = Invoke-RestMethod -Uri $api -UseBasicParsing
+              $asset = $release.assets | Where-Object { $_.name -match 'vips-dev-w64.*\.zip$' } | Select-Object -First 1
+
+              if ($asset) {
+                $zipPath = Join-Path $env:TEMP $asset.name
+                Write-Output "Downloading $($asset.name)..."
+                Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
+
+                $dest = 'C:\vips'
+                if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+                Expand-Archive -Path $zipPath -DestinationPath $dest -Force
+
+                $binDir = Get-ChildItem $dest -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq 'bin' } | Select-Object -First 1
+                if ($binDir) {
+                  Write-Output "Found vips bin at: $($binDir.FullName)"
+                  $binDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+                  $success = $true
+                }
+              }
+            } catch {
+              Write-Warning "Download failed: $($_.Exception.Message)"
+            }
+          }
+
+          if (-not $success) {
+            Write-Warning "libvips installation failed - pyvips tests may fail"
           }
 
       - name: Install Python dependencies
