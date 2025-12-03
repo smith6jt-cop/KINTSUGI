@@ -1,10 +1,10 @@
-# Deep Learning Channel Refinement Module
+# Deep Learning Channel Refinement
 
 Automated channel quality assessment and interactive review tools for multiplex imaging workflows.
 
 ## Overview
 
-The `dl_refinement` module reduces manual review workload by **80-90%** through automated quality assessment of microscopy channels. It uses deep learning (optional) and heuristic methods to identify problematic channels, allowing researchers to focus their attention only where manual inspection is truly needed.
+The `dl_refinement` folder provides tools to reduce manual review workload by **80-90%** through automated quality assessment of microscopy channels. It uses deep learning (optional) and heuristic methods to identify problematic channels, allowing researchers to focus their attention only where manual inspection is truly needed.
 
 ### Key Features
 
@@ -18,7 +18,7 @@ The `dl_refinement` module reduces manual review workload by **80-90%** through 
 
 ## Installation
 
-The module is included with KINTSUGI v2.0+. Ensure you have the required dependencies:
+This code is part of the KINTSUGI notebooks folder. Ensure you have the required dependencies:
 
 ```bash
 # Core dependencies (already in KINTSUGI environment)
@@ -34,7 +34,7 @@ pip install napari[all] magicgui
 ### 1. Heuristic-Based Assessment (No Model Required)
 
 ```python
-from kintsugi.dl_refinement import HeuristicChannelAssessor, BatchChannelProcessor
+from dl_refinement import HeuristicChannelAssessor, BatchChannelProcessor
 
 # Initialize assessor
 assessor = HeuristicChannelAssessor(
@@ -56,7 +56,7 @@ print(f"Auto-approved: {results['auto_approved_ratio']*100:.1f}%")
 ### 2. DL Model-Based Assessment
 
 ```python
-from kintsugi.dl_refinement import ChannelAssessor, BatchChannelProcessor
+from dl_refinement import ChannelAssessor, BatchChannelProcessor
 
 # Initialize with trained model
 assessor = ChannelAssessor(
@@ -79,7 +79,7 @@ results = processor.process_zarr_dataset('data/processed.zarr')
 ### 3. Interactive Review
 
 ```python
-from kintsugi.dl_refinement import ChannelReviewInterface
+from dl_refinement import ChannelReviewInterface
 
 # Launch review GUI
 reviewer = ChannelReviewInterface(
@@ -213,7 +213,7 @@ print(f"Approved: {decisions['summary']['approved']}")
 
 ### Integration with KINTSUGI Pipeline
 
-The DL refinement module fits between Notebook 3 (Signal Isolation) and Notebook 4 (Segmentation):
+The DL refinement code fits between Notebook 3 (Signal Isolation) and Notebook 4 (Segmentation):
 
 ```
 Notebook 1: Parameter Testing
@@ -231,7 +231,7 @@ Notebook 4: Segmentation & Analysis
 
 ```python
 # After Notebook 3 (Signal Isolation)
-from kintsugi.dl_refinement import (
+from dl_refinement import (
     HeuristicChannelAssessor,
     BatchChannelProcessor,
     ChannelReviewInterface
@@ -330,7 +330,7 @@ reviewer = ChannelReviewInterface(
 ### Processing Multiple Datasets
 
 ```python
-from kintsugi.dl_refinement import BatchReviewInterface
+from dl_refinement import BatchReviewInterface
 
 datasets = [
     ('experiment1/qa/summary.json', 'experiment1/data.zarr'),
@@ -453,7 +453,7 @@ class ChannelQualityResult:
 
 ## Examples
 
-See `notebooks/5_DL_Channel_Refinement.ipynb` for complete examples including:
+See `5_DL_Channel_Refinement.ipynb` (in the notebooks folder) for complete examples including:
 - Single channel testing
 - Batch dataset processing
 - Interactive review workflow
@@ -491,4 +491,4 @@ For issues and questions:
 
 ---
 
-**KINTSUGI v2.0** - Deep Learning Channel Refinement Module
+**KINTSUGI** - Deep Learning Channel Refinement
