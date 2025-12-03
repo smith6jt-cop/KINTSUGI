@@ -137,6 +137,9 @@ jobs:
             Write-Warning "libvips installation failed - pyvips tests may fail"
           }
 
+          # Normalize exit code so previous native process failures don't fail the step
+          exit 0
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
