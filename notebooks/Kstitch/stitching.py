@@ -13,7 +13,13 @@ from typing import Union
 import gc
 from multiprocessing import cpu_count
 
-import cupy as cp
+try:
+    import cupy as cp
+    HAS_CUPY = True
+except (ImportError, ModuleNotFoundError):
+    import numpy as cp  # Fallback to numpy with same alias
+    HAS_CUPY = False
+
 import numpy as np
 import pandas as pd
 from sklearn.covariance import EllipticEnvelope
