@@ -1,0 +1,511 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quick Start Guide &mdash; KINTSUGI 1.1.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=fc837d61"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
+      <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Processing Workflows" href="workflows.html" />
+    <link rel="prev" title="Installation" href="installation.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            KINTSUGI
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#quick-start-all-platforms">Quick Start (All Platforms)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#windows-installation">Windows Installation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="installation.html#option-a-using-installation-script-recommended">Option A: Using Installation Script (Recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="installation.html#option-b-manual-installation">Option B: Manual Installation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="installation.html#download-windows-dependencies">Download Windows Dependencies</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#linux-installation">Linux Installation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="installation.html#id1">Option A: Using Installation Script (Recommended)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="installation.html#id2">Option B: Manual Installation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#macos-installation">macOS Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#gpu-acceleration-optional">GPU Acceleration (Optional)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="installation.html#external-dependencies">External Dependencies</a></li>
+</ul>
+</li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Quick Start Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#verify-installation">Verify Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#command-line-interface">Command Line Interface</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#python-api">Python API</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#jupyter-notebooks">Jupyter Notebooks</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#parameter-tuning-and-testing">1. Parameter Tuning and Testing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#batch-processing">2. Batch Processing</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#signal-isolation">3. Signal Isolation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#segmentation-analysis">4. Segmentation Analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#vessel-analysis">5. Vessel Analysis</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#running-notebooks">Running Notebooks</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#data-organization">Data Organization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#next-steps">Next Steps</a></li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="workflows.html">Processing Workflows</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="workflows.html#overview">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="workflows.html#workflow-1-single-channel-evaluation">Workflow 1: Single Channel Evaluation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="workflows.html#steps">Steps:</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="workflows.html#workflow-2-cycle-processing">Workflow 2: Cycle Processing</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="workflows.html#id1">Steps:</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="workflows.html#workflow-3-signal-isolation">Workflow 3: Signal Isolation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="workflows.html#id2">Steps:</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="workflows.html#workflow-4-segmentation-analysis">Workflow 4: Segmentation Analysis</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="workflows.html#id3">Steps:</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="workflows.html#registration-module-kreg">Registration Module (Kreg)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="workflows.html#basic-usage">Basic Usage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="workflows.html#configuration-options">Configuration Options</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="workflows.html#visualization-module-kview2">Visualization Module (Kview2)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="workflows.html#id4">Basic Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="workflows.html#stitching-module-kstitch">Stitching Module (Kstitch)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="workflows.html#id5">Basic Usage</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="workflows.html#tips-for-large-datasets">Tips for Large Datasets</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">Command Line Interface</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#commands">Commands</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#kintsugi-check">kintsugi check</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#kintsugi-info">kintsugi info</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#kintsugi-template">kintsugi template</a></li>
+<li class="toctree-l3"><a class="reference internal" href="cli.html#kintsugi-register">kintsugi register</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#configuration-file-format">Configuration File Format</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cli.html#environment-variables">Environment Variables</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api.html#main-package">Main Package</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api.html#functions">Functions</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api.html#kintsugi-check-dependencies">kintsugi.check_dependencies</a></li>
+<li class="toctree-l4"><a class="reference internal" href="api.html#kintsugi-get-config-template">kintsugi.get_config_template</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#kreg-module-registration">Kreg Module (Registration)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api.html#valis-class">Valis Class</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#kview2-module-visualization">Kview2 Module (Visualization)</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api.html#imshow">imshow</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api.html#curtain">curtain</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api.html#crop">crop</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#kstitch-module-stitching">Kstitch Module (Stitching)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#dl-refinement-module">dl_refinement Module</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api.html#deps-module">deps Module</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api.html#dependencychecker-class">DependencyChecker Class</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="TROUBLESHOOTING.html">KINTSUGI Troubleshooting Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="TROUBLESHOOTING.html#table-of-contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="TROUBLESHOOTING.html#installation-issues">Installation Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#conda-environment-creation-fails">Conda Environment Creation Fails</a></li>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#package-installation-errors">Package Installation Errors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="TROUBLESHOOTING.html#dependency-issues">Dependency Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#libvips-not-found">libvips Not Found</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#windows">Windows</a></li>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#linux">Linux</a></li>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#macos">macOS</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#verify-libvips-installation">Verify libvips Installation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#java-jvm-issues">Java/JVM Issues</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#check-java-installation">Check Java Installation</a></li>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#fix-missing-java">Fix Missing Java</a></li>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#jvm-already-started-error">JVM Already Started Error</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#cuda-gpu-issues">CUDA/GPU Issues</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#verify-gpu-detection">Verify GPU Detection</a></li>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#solutions">Solutions</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="TROUBLESHOOTING.html#runtime-issues">Runtime Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#import-errors">Import Errors</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#general-solutions">General Solutions</a></li>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#specific-import-errors">Specific Import Errors</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#memory-issues">Memory Issues</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#id1">Solutions</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#registration-failures">Registration Failures</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#check-input-images">Check Input Images</a></li>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#adjust-parameters">Adjust Parameters</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="TROUBLESHOOTING.html#platform-specific-issues">Platform-Specific Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#id2">Windows</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#long-path-issues">Long Path Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#dll-load-failures">DLL Load Failures</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#id3">Linux</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#permission-issues">Permission Issues</a></li>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#display-issues-napari">Display Issues (Napari)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="TROUBLESHOOTING.html#id4">macOS</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#apple-silicon-m1-m2">Apple Silicon (M1/M2)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="TROUBLESHOOTING.html#gatekeeper-blocks">Gatekeeper Blocks</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="TROUBLESHOOTING.html#getting-help">Getting Help</a></li>
+<li class="toctree-l2"><a class="reference internal" href="TROUBLESHOOTING.html#quick-reference">Quick Reference</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html">KINTSUGI Dependency Analysis Report</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#executive-summary">Executive Summary</a></li>
+<li class="toctree-l2"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#current-project-structure">1. Current Project Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#external-dependencies-analysis">2. External Dependencies Analysis</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#libvips-via-pyvips">2.1 libvips (via pyvips)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#maven-java-jdk">2.2 Maven &amp; Java-JDK</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#valis-valis-wsi">2.3 VALIS (valis-wsi)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#stackview">2.4 Stackview</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#dependency-management-assessment">3. Dependency Management Assessment</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#current-state">3.1 Current State</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#what-s-missing">3.2 What’s Missing</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#identified-issues">4. Identified Issues</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#critical-issues">4.1 Critical Issues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#moderate-issues">4.2 Moderate Issues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#minor-issues">4.3 Minor Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#proposed-improvements">5. Proposed Improvements</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#package-structure-priority-high">5.1 Package Structure (Priority: High)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#dependency-validation-priority-high">5.2 Dependency Validation (Priority: High)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#environment-consolidation-priority-medium">5.3 Environment Consolidation (Priority: Medium)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#installation-script-priority-medium">5.4 Installation Script (Priority: Medium)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#documentation-updates-priority-low">5.5 Documentation Updates (Priority: Low)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#implementation-roadmap">6. Implementation Roadmap</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#phase-1-package-structure-week-1">Phase 1: Package Structure (Week 1)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#phase-2-dependency-management-week-2">Phase 2: Dependency Management (Week 2)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#phase-3-testing-ci-week-3">Phase 3: Testing &amp; CI (Week 3)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#phase-4-documentation-week-4">Phase 4: Documentation (Week 4)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#summary">7. Summary</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#id1">Current State</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#recommended-actions">Recommended Actions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DEPENDENCY_ANALYSIS.html#risk-assessment">Risk Assessment</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Development</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="contributing.html">Contributing to KINTSUGI</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#development-setup">Development Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#running-tests">Running Tests</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#code-quality">Code Quality</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#pull-request-process">Pull Request Process</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#documentation">Documentation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="contributing.html#reporting-issues">Reporting Issues</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="DOCS_MAINTENANCE.html">Documentation Maintenance Guide</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="DOCS_MAINTENANCE.html#documentation-structure">Documentation Structure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="DOCS_MAINTENANCE.html#building-documentation-locally">Building Documentation Locally</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#on-windows">On Windows</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#on-linux-macos">On Linux/macOS</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#viewing-the-built-documentation">Viewing the Built Documentation</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="DOCS_MAINTENANCE.html#live-preview-during-development">Live Preview During Development</a></li>
+<li class="toctree-l2"><a class="reference internal" href="DOCS_MAINTENANCE.html#deploying-to-github-pages">Deploying to GitHub Pages</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#automatic-deployment">Automatic Deployment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#manual-deployment">Manual Deployment</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#accessing-the-live-site">Accessing the Live Site</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#enabling-github-pages-first-time-setup">Enabling GitHub Pages (First Time Setup)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="DOCS_MAINTENANCE.html#adding-new-documentation">Adding New Documentation</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#adding-a-new-page">Adding a New Page</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#adding-api-documentation">Adding API Documentation</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#adding-images">Adding Images</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="DOCS_MAINTENANCE.html#writing-style-guidelines">Writing Style Guidelines</a></li>
+<li class="toctree-l2"><a class="reference internal" href="DOCS_MAINTENANCE.html#common-tasks">Common Tasks</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#clean-build">Clean Build</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#check-for-broken-links">Check for Broken Links</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#generate-pdf-requires-latex">Generate PDF (requires LaTeX)</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="DOCS_MAINTENANCE.html#troubleshooting-documentation-builds">Troubleshooting Documentation Builds</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#sphinx-build-not-found">“sphinx-build not found”</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#make-is-not-recognized-windows">“make is not recognized” (Windows)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#import-errors-during-build">Import errors during build</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#theme-not-found">Theme not found</a></li>
+<li class="toctree-l3"><a class="reference internal" href="DOCS_MAINTENANCE.html#myst-parser-errors">MyST parser errors</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="DOCS_MAINTENANCE.html#version-updates">Version Updates</a></li>
+<li class="toctree-l2"><a class="reference internal" href="DOCS_MAINTENANCE.html#contact">Contact</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">KINTSUGI</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Quick Start Guide</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/quickstart.md.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="quick-start-guide">
+<h1>Quick Start Guide<a class="headerlink" href="#quick-start-guide" title="Link to this heading"></a></h1>
+<section id="verify-installation">
+<h2>Verify Installation<a class="headerlink" href="#verify-installation" title="Link to this heading"></a></h2>
+<p>After installation, verify everything is working:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Check all dependencies</span>
+kintsugi<span class="w"> </span>check
+
+<span class="c1"># Show version info</span>
+kintsugi<span class="w"> </span>info
+
+<span class="c1"># Generate config template</span>
+kintsugi<span class="w"> </span>template<span class="w"> </span>-o<span class="w"> </span>my_config.json
+</pre></div>
+</div>
+</section>
+<section id="command-line-interface">
+<h2>Command Line Interface<a class="headerlink" href="#command-line-interface" title="Link to this heading"></a></h2>
+<p>KINTSUGI provides a CLI for common operations:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Check dependencies</span>
+kintsugi<span class="w"> </span>check
+
+<span class="c1"># Show system info</span>
+kintsugi<span class="w"> </span>info
+
+<span class="c1"># Generate configuration template</span>
+kintsugi<span class="w"> </span>template<span class="w"> </span>-o<span class="w"> </span>config.json
+
+<span class="c1"># Run registration workflow</span>
+kintsugi<span class="w"> </span>register<span class="w"> </span>config.json<span class="w"> </span>--dry-run
+kintsugi<span class="w"> </span>register<span class="w"> </span>config.json
+</pre></div>
+</div>
+</section>
+<section id="python-api">
+<h2>Python API<a class="headerlink" href="#python-api" title="Link to this heading"></a></h2>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">kintsugi</span>
+
+<span class="c1"># Check dependencies</span>
+<span class="n">kintsugi</span><span class="o">.</span><span class="n">check_dependencies</span><span class="p">()</span>
+
+<span class="c1"># Get configuration template</span>
+<span class="n">config</span> <span class="o">=</span> <span class="n">kintsugi</span><span class="o">.</span><span class="n">get_config_template</span><span class="p">()</span>
+
+<span class="c1"># Access modules</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">kintsugi</span><span class="w"> </span><span class="kn">import</span> <span class="n">Kreg</span><span class="p">,</span> <span class="n">Kview2</span><span class="p">,</span> <span class="n">Kstitch</span>
+
+<span class="c1"># Registration</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">kintsugi.kreg</span><span class="w"> </span><span class="kn">import</span> <span class="n">Valis</span>
+<span class="n">registrar</span> <span class="o">=</span> <span class="n">Valis</span><span class="p">(</span>
+    <span class="n">src_dir</span><span class="o">=</span><span class="s2">&quot;/path/to/images&quot;</span><span class="p">,</span>
+    <span class="n">dst_dir</span><span class="o">=</span><span class="s2">&quot;/path/to/output&quot;</span><span class="p">,</span>
+    <span class="n">reference_img_f</span><span class="o">=</span><span class="s2">&quot;cycle1.tif&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="n">registrar</span><span class="o">.</span><span class="n">register</span><span class="p">()</span>
+
+<span class="c1"># Visualization</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">kintsugi.kview2</span><span class="w"> </span><span class="kn">import</span> <span class="n">imshow</span><span class="p">,</span> <span class="n">curtain</span><span class="p">,</span> <span class="n">crop</span>
+</pre></div>
+</div>
+</section>
+<section id="jupyter-notebooks">
+<h2>Jupyter Notebooks<a class="headerlink" href="#jupyter-notebooks" title="Link to this heading"></a></h2>
+<p>The following Jupyter notebooks provide step-by-step workflows:</p>
+<section id="parameter-tuning-and-testing">
+<h3>1. Parameter Tuning and Testing<a class="headerlink" href="#parameter-tuning-and-testing" title="Link to this heading"></a></h3>
+<p>Test illumination correction, stitching, deconvolution, and EDoF.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">notebooks/1_Single_Channel_Eval.ipynb</span></code></p></li>
+</ul>
+</section>
+<section id="batch-processing">
+<h3>2. Batch Processing<a class="headerlink" href="#batch-processing" title="Link to this heading"></a></h3>
+<p>Batch processing for illumination correction, stitching, deconvolution, EDoF, and registration.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">notebooks/2_Cycle_Processing.ipynb</span></code></p></li>
+</ul>
+</section>
+<section id="signal-isolation">
+<h3>3. Signal Isolation<a class="headerlink" href="#signal-isolation" title="Link to this heading"></a></h3>
+<p>Autofluorescence subtraction, filtering, and final processing to isolate signal.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">notebooks/3_Signal_Isolation.ipynb</span></code></p></li>
+</ul>
+</section>
+<section id="segmentation-analysis">
+<h3>4. Segmentation Analysis<a class="headerlink" href="#segmentation-analysis" title="Link to this heading"></a></h3>
+<p>InstanSeg segmentation, feature extraction, and spatial analysis.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">notebooks/4_Segmentation_Analysis.ipynb</span></code></p></li>
+</ul>
+</section>
+<section id="vessel-analysis">
+<h3>5. Vessel Analysis<a class="headerlink" href="#vessel-analysis" title="Link to this heading"></a></h3>
+<p>Specialized analysis for vessel structures.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">notebooks/Vessel_Analysis.ipynb</span></code></p></li>
+</ul>
+</section>
+<section id="running-notebooks">
+<h3>Running Notebooks<a class="headerlink" href="#running-notebooks" title="Link to this heading"></a></h3>
+<p>Launch VS Code from the activated environment:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>conda<span class="w"> </span>activate<span class="w"> </span>KINTSUGI
+code<span class="w"> </span>.
+</pre></div>
+</div>
+<p><strong>Important</strong>: Always launch VS Code from the activated conda environment to ensure all packages are available.</p>
+</section>
+</section>
+<section id="data-organization">
+<h2>Data Organization<a class="headerlink" href="#data-organization" title="Link to this heading"></a></h2>
+<p>Create a <code class="docutils literal notranslate"><span class="pre">data</span></code> folder in the KINTSUGI directory and move your image data there:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>KINTSUGI/
+└── data/
+    └── [your image files]
+</pre></div>
+</div>
+</section>
+<section id="next-steps">
+<h2>Next Steps<a class="headerlink" href="#next-steps" title="Link to this heading"></a></h2>
+<ul class="simple">
+<li><p>See the <a class="reference internal" href="workflows.html"><span class="std std-doc">Workflows</span></a> guide for detailed processing pipelines</p></li>
+<li><p>Check <a class="reference internal" href="TROUBLESHOOTING.html"><span class="std std-doc">Troubleshooting</span></a> if you encounter issues</p></li>
+<li><p>Review the <a class="reference internal" href="api.html"><span class="std std-doc">API Reference</span></a> for programmatic usage</p></li>
+</ul>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="installation.html" class="btn btn-neutral float-left" title="Installation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="workflows.html" class="btn btn-neutral float-right" title="Processing Workflows" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Smith JT.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
