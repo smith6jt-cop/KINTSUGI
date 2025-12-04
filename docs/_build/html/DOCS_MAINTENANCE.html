@@ -389,18 +389,18 @@ pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </s
 <section id="on-windows">
 <h3>On Windows<a class="headerlink" href="#on-windows" title="Link to this heading"></a></h3>
 <p><strong>Option 1: Using make.bat</strong></p>
-<div class="highlight-cmd notranslate"><div class="highlight"><pre><span></span>cd docs
+<div class="highlight-batch notranslate"><div class="highlight"><pre><span></span><span class="k">cd</span> docs
 .\make.bat html
 </pre></div>
 </div>
 <p><strong>Option 2: Direct sphinx-build command</strong></p>
 <p>If <code class="docutils literal notranslate"><span class="pre">make</span></code> is not available (common on Windows), use sphinx-build directly:</p>
-<div class="highlight-cmd notranslate"><div class="highlight"><pre><span></span>cd docs
+<div class="highlight-batch notranslate"><div class="highlight"><pre><span></span><span class="k">cd</span> docs
 sphinx-build -M html . _build
 </pre></div>
 </div>
 <p><strong>Option 3: Using Python module</strong></p>
-<div class="highlight-cmd notranslate"><div class="highlight"><pre><span></span>cd docs
+<div class="highlight-batch notranslate"><div class="highlight"><pre><span></span><span class="k">cd</span> docs
 python -m sphinx -M html . _build
 </pre></div>
 </div>
@@ -558,7 +558,7 @@ make<span class="w"> </span>clean<span class="w"> </span><span class="o">&amp;&a
 <section id="make-is-not-recognized-windows">
 <h3>“make is not recognized” (Windows)<a class="headerlink" href="#make-is-not-recognized-windows" title="Link to this heading"></a></h3>
 <p>Use the direct sphinx-build command:</p>
-<div class="highlight-cmd notranslate"><div class="highlight"><pre><span></span>sphinx-build -M html . _build
+<div class="highlight-batch notranslate"><div class="highlight"><pre><span></span>sphinx-build -M html . _build
 </pre></div>
 </div>
 <p>Or install GNU Make via:</p>
