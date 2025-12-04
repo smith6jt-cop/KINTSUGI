@@ -42,7 +42,7 @@ pip install -r requirements.txt
 
 **Option 1: Using make.bat**
 
-```cmd
+```batch
 cd docs
 .\make.bat html
 ```
@@ -51,14 +51,14 @@ cd docs
 
 If `make` is not available (common on Windows), use sphinx-build directly:
 
-```cmd
+```batch
 cd docs
 sphinx-build -M html . _build
 ```
 
 **Option 3: Using Python module**
 
-```cmd
+```batch
 cd docs
 python -m sphinx -M html . _build
 ```
@@ -211,7 +211,7 @@ pip install sphinx sphinx-rtd-theme myst-parser
 
 Use the direct sphinx-build command:
 
-```cmd
+```batch
 sphinx-build -M html . _build
 ```
 

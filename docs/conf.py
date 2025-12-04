@@ -79,3 +79,9 @@ myst_enable_extensions = [
     "fieldlist",
     "tasklist",
 ]
+
+# Enable heading anchors for cross-references
+myst_heading_anchors = 3
+
+# Suppress warnings for GitHub-style anchor links (they work but generate warnings)
+suppress_warnings = ["myst.xref_missing"]
