@@ -89,6 +89,7 @@ autodoc_mock_imports = [
     "seaborn",
     "plotly",
     "bokeh",
+    "pqdm",
 ]
 
 # Napoleon settings for Google/NumPy docstring support
