@@ -60,6 +60,38 @@ autodoc_default_options = {
     "exclude-members": "__weakref__",
 }
 
+# Mock heavy external modules that are not needed for doc builds
+# This prevents import errors for optional dependencies like GPU libraries,
+# image processing backends, and deep learning frameworks
+autodoc_mock_imports = [
+    "cv2",
+    "cupy",
+    "pyvips",
+    "torch",
+    "torchvision",
+    "napari",
+    "JPype1",
+    "valis_wsi",
+    "valis",
+    "basicpy",
+    "aicsimageio",
+    "readlif",
+    "numba",
+    "SimpleITK",
+    "sitk",
+    "kornia",
+    "imagecodecs",
+    "shapely",
+    "rasterio",
+    "fiona",
+    "pyproj",
+    "seaborn",
+    "plotly",
+    "bokeh",
+    "pqdm",
+    "weightedstats",
+]
+
 # Napoleon settings for Google/NumPy docstring support
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True

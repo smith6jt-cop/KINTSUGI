@@ -69,76 +69,55 @@ jobs:
 
       - name: Install system dependencies (Windows)
         if: runner.os == 'Windows'
-        shell: powershell
+        shell: pwsh
         run: |
-          $success = $false
+          $zipPath = Join-Path $env:TEMP "vips-dev.zip"
+          $dest = "C:\vips"
 
-          # Try installing vips via Chocolatey first
+          Write-Output "Fetching latest libvips Windows build from build-win64-mxe..."
+
+          # Windows builds are in a separate repository
+          $apiUrl = "https://api.github.com/repos/libvips/build-win64-mxe/releases/latest"
+          $headers = @{ "User-Agent" = "GitHub-Actions" }
+          if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "token $env:GITHUB_TOKEN" }
+
           try {
-            choco install vips -y -r 2>$null
-            if ($LASTEXITCODE -eq 0) { $success = $true }
-          } catch { }
-
-          if (-not $success) {
-            Write-Output "Stable vips not found, trying prerelease..."
-            try {
-              choco install vips --pre -y -r 2>$null
-              if ($LASTEXITCODE -eq 0) { $success = $true }
-            } catch { }
+            $release = Invoke-RestMethod -Uri $apiUrl -Headers $headers -UseBasicParsing
+            Write-Output "Found release: $($release.tag_name)"
+          } catch {
+            Write-Error "Failed to query libvips releases: $($_.Exception.Message)"
+            throw
           }
 
-          # Check if Chocolatey succeeded
-          if ($success) {
-            $libRoot = 'C:\ProgramData\chocolatey\lib'
-            $vipsPkg = Get-ChildItem $libRoot -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^vips' } | Select-Object -First 1
-            if ($vipsPkg) {
-              $binDir = Get-ChildItem (Join-Path $vipsPkg.FullName 'tools') -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq 'bin' } | Select-Object -First 1
-              if ($binDir) {
-                Write-Output "Found vips bin at: $($binDir.FullName)"
-                $binDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-              } else {
-                $success = $false
-              }
-            } else {
-              $success = $false
-            }
+          # Find Windows w64 zip asset (vips-dev-w64-web-*.zip is smaller, vips-dev-w64-all-*.zip is complete)
+          $asset = $release.assets | Where-Object { $_.name -match 'vips-dev-w64-web.*\.zip$' } | Select-Object -First 1
+          if (-not $asset) {
+            # Fallback to any w64 zip
+            $asset = $release.assets | Where-Object { $_.name -match 'w64.*\.zip$' } | Select-Object -First 1
+          }
+          if (-not $asset) {
+            Write-Error "No Windows (w64 .zip) asset found"
+            Write-Output "Available assets: $($release.assets | ForEach-Object { $_.name })"
+            throw "libvips asset not found"
           }
 
-          # Fallback: download libvips from GitHub releases
-          if (-not $success) {
-            Write-Output "Chocolatey failed; downloading libvips from GitHub releases..."
-            try {
-              $api = "https://api.github.com/repos/libvips/build-win64-mxe/releases/latest"
-              $release = Invoke-RestMethod -Uri $api -UseBasicParsing
-              $asset = $release.assets | Where-Object { $_.name -match 'vips-dev-w64.*\.zip$' } | Select-Object -First 1
+          Write-Output "Downloading asset $($asset.name)..."
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -Headers $headers -UseBasicParsing
 
-              if ($asset) {
-                $zipPath = Join-Path $env:TEMP $asset.name
-                Write-Output "Downloading $($asset.name)..."
-                Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing
+          if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+          Expand-Archive -Path $zipPath -DestinationPath $dest -Force
 
-                $dest = 'C:\vips'
-                if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-                Expand-Archive -Path $zipPath -DestinationPath $dest -Force
-
-                $binDir = Get-ChildItem $dest -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq 'bin' } | Select-Object -First 1
-                if ($binDir) {
-                  Write-Output "Found vips bin at: $($binDir.FullName)"
-                  $binDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-                  $success = $true
-                }
-              }
-            } catch {
-              Write-Warning "Download failed: $($_.Exception.Message)"
-            }
+          $binDir = Get-ChildItem $dest -Recurse -Directory | Where-Object { $_.Name -eq 'bin' } | Select-Object -First 1
+          if ($binDir) {
+            Write-Output "Adding to PATH: $($binDir.FullName)"
+            $binDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            Write-Output "libvips installed successfully"
+          } else {
+            Write-Error "Could not find bin directory in extracted archive"
+            throw "libvips bin directory not found"
           }
-
-          if (-not $success) {
-            Write-Warning "libvips installation failed - pyvips tests may fail"
-          }
-
-          # Normalize exit code so previous native process failures don't fail the step
-          exit 0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Python dependencies
         run: |

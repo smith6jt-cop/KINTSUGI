@@ -42,6 +42,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r docs/requirements.txt
+          # Install the package itself so autodoc can import all modules
+          pip install -e . || echo "Package install failed, continuing with mocked imports"
+
+      - name: Clean Sphinx environment
+        run: |
+          # Remove cached Sphinx files to avoid WindowsPath/PosixPath issues
+          # when builds happen across different platforms
+          cd docs
+          rm -rf .doctrees .env .pytest_cache _build .cache
+          cd ..
 
       - name: Build documentation
         run: |

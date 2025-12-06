@@ -1,7 +1,6 @@
 """This module provides microscope image stitching with the algorithm by MIST."""
 import itertools
 import os
-from math import e
 import warnings
 from dataclasses import dataclass
 import concurrent.futures
@@ -13,17 +12,117 @@ from typing import Union
 import gc
 from multiprocessing import cpu_count
 
-try:
-    import cupy as cp
-    HAS_CUPY = True
-except (ImportError, ModuleNotFoundError):
-    import numpy as cp  # Fallback to numpy with same alias
-    HAS_CUPY = False
-
 import numpy as np
 import pandas as pd
 from sklearn.covariance import EllipticEnvelope
 from tqdm import tqdm
+
+# GPU availability detection with actual functionality test
+HAS_CUPY = False
+GPU_ERROR_MSG = None
+GPU_DEVICE_INFO = None
+
+def _test_gpu_availability(verbose=False):
+    """
+    Test if CuPy and cuFFT are actually functional, not just importable.
+
+    This performs a real cuFFT operation to verify the CUDA libraries are properly
+    installed and accessible. Common failure modes:
+    - cuFFT DLL not found (Windows): CUDA toolkit not installed or PATH issues
+    - CUDA driver mismatch: CuPy version doesn't match installed CUDA version
+    - No GPU available: System has no NVIDIA GPU or driver not installed
+
+    Returns:
+        bool: True if GPU is functional, False otherwise
+    """
+    global HAS_CUPY, GPU_ERROR_MSG, GPU_DEVICE_INFO
+    try:
+        import cupy as cp
+
+        # Get device info first
+        device_id = cp.cuda.runtime.getDevice()
+        device_props = cp.cuda.runtime.getDeviceProperties(device_id)
+        GPU_DEVICE_INFO = {
+            'name': device_props['name'].decode() if isinstance(device_props['name'], bytes) else device_props['name'],
+            'compute_capability': (device_props['major'], device_props['minor']),
+            'total_memory_gb': device_props['totalGlobalMem'] / (1024**3),
+        }
+
+        # Test that cuFFT actually works by running a small FFT
+        test_array = cp.zeros((4, 4), dtype=cp.float32)
+        _ = cp.fft.fft2(test_array)
+        cp.get_default_memory_pool().free_all_blocks()
+
+        HAS_CUPY = True
+        GPU_ERROR_MSG = None
+
+        if verbose:
+            print(f"GPU available: {GPU_DEVICE_INFO['name']}")
+            print(f"  Compute capability: {GPU_DEVICE_INFO['compute_capability']}")
+            print(f"  Memory: {GPU_DEVICE_INFO['total_memory_gb']:.1f} GB")
+
+        return True
+
+    except ImportError as e:
+        HAS_CUPY = False
+        GPU_ERROR_MSG = f"CuPy not installed: {e}"
+        GPU_DEVICE_INFO = None
+        return False
+
+    except Exception as e:
+        HAS_CUPY = False
+        GPU_DEVICE_INFO = None
+        error_str = str(e)
+
+        # Provide specific guidance based on error type
+        if "cufft" in error_str.lower() or "DLL load failed" in error_str:
+            GPU_ERROR_MSG = (
+                f"cuFFT library not found: {e}\n"
+                "TROUBLESHOOTING:\n"
+                "  1. Ensure CUDA Toolkit is installed (not just the driver)\n"
+                "  2. Verify CUDA bin directory is in PATH:\n"
+                "     Windows: C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v1x.x\\bin\n"
+                "  3. Ensure CuPy version matches CUDA version:\n"
+                "     - CUDA 11.x: pip install cupy-cuda11x\n"
+                "     - CUDA 12.x: pip install cupy-cuda12x\n"
+                "  4. Restart Python/Jupyter after PATH changes"
+            )
+        elif "out of memory" in error_str.lower():
+            GPU_ERROR_MSG = f"GPU out of memory: {e}"
+        elif "driver" in error_str.lower():
+            GPU_ERROR_MSG = (
+                f"CUDA driver issue: {e}\n"
+                "TROUBLESHOOTING:\n"
+                "  1. Update NVIDIA GPU driver\n"
+                "  2. Ensure driver version supports your CUDA toolkit version"
+            )
+        else:
+            GPU_ERROR_MSG = f"GPU/cuFFT not functional: {e}"
+
+        return False
+
+
+def check_gpu_status():
+    """Print detailed GPU status information for debugging."""
+    print("=" * 60)
+    print("GPU STATUS CHECK")
+    print("=" * 60)
+
+    if HAS_CUPY:
+        print(f"Status: AVAILABLE")
+        if GPU_DEVICE_INFO:
+            print(f"Device: {GPU_DEVICE_INFO['name']}")
+            print(f"Compute Capability: {GPU_DEVICE_INFO['compute_capability']}")
+            print(f"Total Memory: {GPU_DEVICE_INFO['total_memory_gb']:.1f} GB")
+    else:
+        print(f"Status: NOT AVAILABLE")
+        print(f"\nError Details:\n{GPU_ERROR_MSG}")
+
+    print("=" * 60)
+
+
+# Test GPU on module load
+_test_gpu_availability(verbose=False)
 
 from ._constrained_refinement import refine_translations
 from ._global_optimization import compute_final_position
@@ -66,9 +165,30 @@ class ElipticEnvelopPredictor:
         X = rng.normal(size=X.shape) * self.epsilon + X
         return ee.fit_predict(X) > 0
 
-def process_image_pair(i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX, use_gpu=True):
-    
-    # print("Processing", i2)
+def _compute_fft_gpu(image1, image2):
+    """Compute FFT on GPU using CuPy. Must be called from main process or thread pool."""
+    import cupy as cp
+    # Move data to GPU and compute FFT
+    F1 = cp.fft.fft2(cp.asarray(image1))
+    F2 = cp.fft.fft2(cp.asarray(image2))
+    # Move back to CPU for PCM computation
+    F1_cpu = cp.asnumpy(F1)
+    F2_cpu = cp.asnumpy(F2)
+    # Free GPU memory immediately
+    del F1, F2
+    cp.get_default_memory_pool().free_all_blocks()
+    return F1_cpu, F2_cpu
+
+
+def _compute_fft_cpu(image1, image2):
+    """Compute FFT on CPU using NumPy."""
+    F1 = np.fft.fft2(image1)
+    F2 = np.fft.fft2(image2)
+    return F1, F2
+
+
+def process_image_pair_cpu(i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX):
+    """Process image pair on CPU. Safe for ProcessPoolExecutor."""
     i1 = g[direction]
     if pd.isna(i1):
         return None
@@ -76,19 +196,44 @@ def process_image_pair(i2, g, direction, images, position_initial_guess, overlap
     image1 = images[i1]
     image2 = images[i2]
 
-    if use_gpu:
-        # Move data to GPU and compute FFT
-        F1 = cp.fft.fft2(cp.asarray(image1))
-        F2 = cp.fft.fft2(cp.asarray(image2))
-        # Compute PCM using Numba
-        PCM = pcm(cp.asnumpy(F1), cp.asnumpy(F2))
+    # Compute FFT on CPU
+    F1, F2 = _compute_fft_cpu(image1, image2)
+    PCM = pcm(F1, F2)
 
+    if position_initial_guess is not None:
+        def get_lims(dimension, size):
+            val = g[f"{direction}_{dimension}_init_guess"]
+            r = size * overlap_diff_threshold / 100.0
+            return np.round([val - r, val + r]).astype(np.int64)
+
+        lims = np.array(
+            [
+                get_lims(dimension, size)
+                for dimension, size in zip("yx", [sizeY, sizeX])
+            ]
+        )
     else:
-        # Compute FFT on CPU
-        F1 = np.fft.fft2(image1)
-        F2 = np.fft.fft2(image2)
-        # Compute PCM using Numba
-        PCM = pcm(F1, F2)
+        lims = np.array([[-sizeY, sizeY], [-sizeX, sizeX]])
+
+    yins, xins, _ = multi_peak_max(PCM)
+    max_peak = interpret_translation(
+        image1, image2, yins, xins, *lims[0], *lims[1]
+    )
+    return i2, direction, max_peak
+
+
+def process_image_pair_gpu(i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX):
+    """Process image pair on GPU. Must use ThreadPoolExecutor (not ProcessPoolExecutor)."""
+    i1 = g[direction]
+    if pd.isna(i1):
+        return None
+
+    image1 = images[i1]
+    image2 = images[i2]
+
+    # Compute FFT on GPU
+    F1, F2 = _compute_fft_gpu(image1, image2)
+    PCM = pcm(F1, F2)
 
     if position_initial_guess is not None:
         def get_lims(dimension, size):
@@ -127,7 +272,8 @@ def stitch_images(
     decrement_step: Float = -0.1,
     max_cores: int = NUM_THREADS//2,
     overlap_percentage: Optional[Float] = None,
-    use_gpu: bool = False
+    use_gpu: bool = False,
+    require_gpu: bool = False
 ) -> Tuple[pd.DataFrame, dict]:
     """Compute image positions for stitching.
 
@@ -170,7 +316,12 @@ def stitch_images(
         Should be the actual overlap percentage, e.g., 30 for 30% overlap.
 
     use_gpu : bool, default False
-        if True, use GPU acceleration for FFT computations.
+        if True, use GPU acceleration for FFT computations via CuPy.
+        Requires CuPy and CUDA toolkit to be properly installed.
+
+    require_gpu : bool, default False
+        if True, raise an error if GPU is not available instead of falling back to CPU.
+        Use this to ensure GPU issues are addressed rather than silently falling back.
 
     ncc_threshold : Float, default 0.5
         the threshold of the normalized cross correlation used to select the initial
@@ -246,21 +397,76 @@ def stitch_images(
                     g[f"{dimension}_pos_init_guess"] - g2[f"{dimension}_pos_init_guess"]
                 )
 
+    # Determine if GPU can actually be used
+    actual_use_gpu = use_gpu
     if use_gpu:
-        gpu_name = cp.cuda.runtime.getDeviceProperties(0)['name']
-        print(f"Using GPU: {gpu_name}")
-        cp.cuda.Device(0).use()
-    
+        if not HAS_CUPY:
+            error_msg = (
+                f"GPU requested but not available.\n"
+                f"Error: {GPU_ERROR_MSG}\n\n"
+                f"Run 'from Kstitch.stitching import check_gpu_status; check_gpu_status()' "
+                f"for detailed diagnostics."
+            )
+            if require_gpu:
+                raise RuntimeError(error_msg)
+            else:
+                warnings.warn(f"{error_msg}\n\nFalling back to CPU (this will be slower).")
+                actual_use_gpu = False
+        else:
+            try:
+                import cupy as cp
+                # Verify GPU is still functional (not just at import time)
+                device_id = cp.cuda.runtime.getDevice()
+                device_props = cp.cuda.runtime.getDeviceProperties(device_id)
+                gpu_name = device_props['name']
+                if isinstance(gpu_name, bytes):
+                    gpu_name = gpu_name.decode()
+                print(f"Using GPU: {gpu_name}")
+                cp.cuda.Device(device_id).use()
+            except Exception as e:
+                error_msg = (
+                    f"GPU initialization failed: {e}\n\n"
+                    f"Run 'from Kstitch.stitching import check_gpu_status; check_gpu_status()' "
+                    f"for detailed diagnostics."
+                )
+                if require_gpu:
+                    raise RuntimeError(error_msg)
+                else:
+                    warnings.warn(f"{error_msg}\n\nFalling back to CPU (this will be slower).")
+                    actual_use_gpu = False
+
     # Process all image pairs once to compute correlations
     print("Computing phase correlations for all image pairs...")
-    with concurrent.futures.ProcessPoolExecutor(max_workers=max_cores) as executor:
-        for direction in ["left", "top"]:
-            futures = [executor.submit(process_image_pair, i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX, use_gpu) for i2, g in grid.iterrows()]
 
-            for future in tqdm(concurrent.futures.as_completed(futures), desc=f"Processing {direction} pairs"):
-                # Free GPU memory after processing each image pair
-                if use_gpu:
-                    cp.get_default_memory_pool().free_all_blocks()
+    # CRITICAL: GPU operations CANNOT use ProcessPoolExecutor because CUDA contexts
+    # don't transfer across process boundaries. Use ThreadPoolExecutor for GPU
+    # (threads share the same CUDA context) or ProcessPoolExecutor for CPU
+    # (processes give better parallelism for CPU-bound work).
+
+    if actual_use_gpu:
+        # GPU mode: Use ThreadPoolExecutor (threads share CUDA context)
+        # Limit workers to avoid GPU memory contention
+        gpu_workers = min(max_cores, 4)  # GPU benefits less from many workers
+        ExecutorClass = concurrent.futures.ThreadPoolExecutor
+        process_fn = process_image_pair_gpu
+        print(f"GPU mode: using {gpu_workers} threads")
+    else:
+        # CPU mode: Use ProcessPoolExecutor (better parallelism)
+        ExecutorClass = concurrent.futures.ProcessPoolExecutor
+        process_fn = process_image_pair_cpu
+        print(f"CPU mode: using {max_cores} processes")
+
+    with ExecutorClass(max_workers=gpu_workers if actual_use_gpu else max_cores) as executor:
+        for direction in ["left", "top"]:
+            futures = [
+                executor.submit(
+                    process_fn, i2, g, direction, images,
+                    position_initial_guess, overlap_diff_threshold, sizeY, sizeX
+                )
+                for i2, g in grid.iterrows()
+            ]
+
+            for future in tqdm(concurrent.futures.as_completed(futures), desc=f"Processing {direction} pairs", total=len(futures)):
                 result = future.result()
                 if result is not None:
                     i2, direction, max_peak = result
@@ -360,9 +566,16 @@ def stitch_images(
 
     tree = compute_maximum_spanning_tree(grid)
     grid = compute_final_position(grid, tree)
-    if use_gpu:
-        cp.cuda.MemoryPool().free_all_blocks()
-   
+
+    # Clean up GPU memory if it was used
+    if actual_use_gpu:
+        try:
+            import cupy as cp
+            cp.get_default_memory_pool().free_all_blocks()
+            cp.get_default_pinned_memory_pool().free_all_blocks()
+        except Exception:
+            pass  # Ignore cleanup errors
+
     prop_dict = {
         "W": sizeY,
         "H": sizeX,
