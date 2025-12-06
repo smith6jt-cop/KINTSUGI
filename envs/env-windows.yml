@@ -116,6 +116,7 @@ dependencies:
 
     # GPU Support for Stitching (pip version bundles CUDA DLLs on Windows)
     - cupy-cuda12x>=12.0.0
+    - numpy>=1.24.0,<2.0.0  # Pin numpy<2 after cupy install
 
     # Core image processing extensions
     - valis-wsi==1.2.0

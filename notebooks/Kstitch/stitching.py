@@ -1,6 +1,7 @@
 """This module provides microscope image stitching with the algorithm by MIST."""
 import itertools
 import os
+import sys
 import warnings
 from dataclasses import dataclass
 import concurrent.futures
@@ -16,6 +17,29 @@ import numpy as np
 import pandas as pd
 from sklearn.covariance import EllipticEnvelope
 from tqdm import tqdm
+
+
+def _setup_cuda_path():
+    """
+    Ensure CUDA libraries are in PATH on Windows.
+
+    Conda installs CUDA libraries to Library/bin but doesn't add it to PATH.
+    This causes "DLL load failed" errors for nvrtc, cufft, etc.
+    """
+    if sys.platform != 'win32':
+        return
+
+    conda_prefix = os.environ.get('CONDA_PREFIX', '')
+    if not conda_prefix:
+        return
+
+    cuda_bin = os.path.join(conda_prefix, 'Library', 'bin')
+    if os.path.exists(cuda_bin) and cuda_bin not in os.environ.get('PATH', ''):
+        os.environ['PATH'] = cuda_bin + os.pathsep + os.environ['PATH']
+
+
+# Fix CUDA PATH before any CUDA imports
+_setup_cuda_path()
 
 # GPU availability detection with actual functionality test
 HAS_CUPY = False
