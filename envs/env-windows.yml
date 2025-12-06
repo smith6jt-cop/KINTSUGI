@@ -45,6 +45,7 @@ dependencies:
   # CUDA/GPU Support (PyTorch)
   - cudnn
   - cuda-runtime
+  - cuda-nvrtc  # Required for CuPy JIT compilation
   - cuda-libraries
   - pytorch-mutex=1.0
   - pytorch
