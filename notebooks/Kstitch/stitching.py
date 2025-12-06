@@ -273,7 +273,6 @@ def stitch_images(
     max_cores: int = NUM_THREADS//2,
     overlap_percentage: Optional[Float] = None,
     use_gpu: bool = False,
-    require_gpu: bool = False
 ) -> Tuple[pd.DataFrame, dict]:
     """Compute image positions for stitching.
 
@@ -318,10 +317,7 @@ def stitch_images(
     use_gpu : bool, default False
         if True, use GPU acceleration for FFT computations via CuPy.
         Requires CuPy and CUDA toolkit to be properly installed.
-
-    require_gpu : bool, default False
-        if True, raise an error if GPU is not available instead of falling back to CPU.
-        Use this to ensure GPU issues are addressed rather than silently falling back.
+        Raises RuntimeError if GPU is not available (no CPU fallback).
 
     ncc_threshold : Float, default 0.5
         the threshold of the normalized cross correlation used to select the initial
@@ -407,11 +403,7 @@ def stitch_images(
                 f"Run 'from Kstitch.stitching import check_gpu_status; check_gpu_status()' "
                 f"for detailed diagnostics."
             )
-            if require_gpu:
-                raise RuntimeError(error_msg)
-            else:
-                warnings.warn(f"{error_msg}\n\nFalling back to CPU (this will be slower).")
-                actual_use_gpu = False
+            raise RuntimeError(error_msg)
         else:
             try:
                 import cupy as cp
@@ -429,11 +421,7 @@ def stitch_images(
                     f"Run 'from Kstitch.stitching import check_gpu_status; check_gpu_status()' "
                     f"for detailed diagnostics."
                 )
-                if require_gpu:
-                    raise RuntimeError(error_msg)
-                else:
-                    warnings.warn(f"{error_msg}\n\nFalling back to CPU (this will be slower).")
-                    actual_use_gpu = False
+                raise RuntimeError(error_msg)
 
     # Process all image pairs once to compute correlations
     print("Computing phase correlations for all image pairs...")
