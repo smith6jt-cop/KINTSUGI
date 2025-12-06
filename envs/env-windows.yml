@@ -42,14 +42,14 @@ dependencies:
   - simpleitk
   # Note: libvips for Windows requires separate installation from Zenodo
 
-  # CUDA/GPU Support
+  # CUDA/GPU Support (PyTorch)
   - cudnn
   - cuda-runtime
   - cuda-libraries
   - pytorch-mutex=1.0
   - pytorch
   - torchvision
-  - cupy
+  # Note: cupy installed via pip below (bundles CUDA DLLs on Windows)
 
   # Napari Core
   - napari=0.4.19
@@ -113,6 +113,9 @@ dependencies:
   - pip:
     # Install KINTSUGI as editable package
     - -e ..
+
+    # GPU Support for Stitching (pip version bundles CUDA DLLs on Windows)
+    - cupy-cuda12x>=12.0.0
 
     # Core image processing extensions
     - valis-wsi==1.2.0

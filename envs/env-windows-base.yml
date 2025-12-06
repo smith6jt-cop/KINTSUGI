@@ -4,9 +4,8 @@ channels:
   - defaults
 
 # STREAMLINED BASE ENVIRONMENT
-# ~150-200 packages, ~2GB, no GPU/Java required
-# For full environment with GPU: use env-windows.yml
-# To add GPU later: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# Includes CuPy for GPU-accelerated stitching
+# For full environment with PyTorch, Napari, Java: use env-windows.yml
 
 dependencies:
   # Core Python Environment
@@ -59,6 +58,9 @@ dependencies:
     # Install KINTSUGI as editable package
     - -e ..
 
+    # GPU Support for Stitching (pip version bundles CUDA DLLs on Windows)
+    - cupy-cuda12x>=12.0.0
+
     # Core image processing
     - valis-wsi==1.2.0
     - basicpy==1.2.0
@@ -86,9 +88,8 @@ dependencies:
 # OPTIONAL FEATURES - Install separately as needed:
 # =============================================================================
 #
-# GPU Support (NVIDIA):
+# PyTorch GPU Support (NVIDIA):
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-#   pip install cupy-cuda12x
 #
 # Napari Visualization:
 #   conda install napari pyqt
