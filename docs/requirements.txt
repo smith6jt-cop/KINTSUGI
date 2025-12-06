@@ -14,3 +14,5 @@ tifffile>=2023.7.0
 networkx>=3.0
 tqdm>=4.65.0
 colour-science>=0.4.0
+matplotlib>=3.6.0
+cycler>=0.11

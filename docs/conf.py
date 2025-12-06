@@ -85,7 +85,6 @@ autodoc_mock_imports = [
     "rasterio",
     "fiona",
     "pyproj",
-    "matplotlib",
     "seaborn",
     "plotly",
     "bokeh",
