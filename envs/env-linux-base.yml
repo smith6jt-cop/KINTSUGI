@@ -1,0 +1,109 @@
+name: KINTSUGI
+channels:
+  - conda-forge
+  - defaults
+
+# STREAMLINED BASE ENVIRONMENT
+# ~150-200 packages, ~2GB, no GPU/Java required
+# For full environment with GPU: use env-linux.yml
+# To add GPU later: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+dependencies:
+  # Core Python Environment
+  - python=3.10
+  - pip
+  - setuptools
+  - wheel
+
+  # Core Scientific Computing
+  - numpy=1.26
+  - scipy
+  - pandas
+  - scikit-learn
+  - scikit-image
+  - matplotlib
+  - seaborn
+
+  # Image Processing Core
+  - tifffile
+  - imageio
+  - pillow
+  - libvips
+
+  # Jupyter Environment (minimal)
+  - jupyterlab
+  - ipywidgets
+
+  # Machine Learning/Analysis Core
+  - dask-core
+  - numba
+  - umap-learn
+  - anndata
+  - hdbscan
+
+  # File I/O and Data Handling
+  - h5py
+  - zarr
+  - tqdm
+  - pyyaml
+  - openpyxl
+
+  # Essential Utilities
+  - click
+  - packaging
+  - requests
+  - psutil
+  - natsort
+
+  # Pip packages
+  - pip:
+    # Install KINTSUGI as editable package
+    - -e ..
+
+    # Core image processing
+    - valis-wsi==1.2.0
+    - basicpy==1.2.0
+    - opencv-contrib-python-headless==4.9.0.80
+    - pyvips==2.2.3
+
+    # Bio formats (lightweight)
+    - tifffile
+    - ome-types==0.6.1
+
+    # Analysis tools
+    - phenograph==1.5.7
+    - fast-histogram==0.14
+    - fastremap==1.17.1
+
+    # Visualization
+    - stackview==0.18.0
+
+    # Utilities
+    - rich==13.9.4
+    - tenacity==9.1.2
+    - pqdm==0.2.0
+
+# =============================================================================
+# OPTIONAL FEATURES - Install separately as needed:
+# =============================================================================
+#
+# GPU Support (NVIDIA):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   pip install cupy-cuda12x
+#
+# Napari Visualization:
+#   conda install napari pyqt
+#
+# Java/ImageJ Integration:
+#   conda install openjdk=11 maven pyimagej jpype1
+#
+# Deep Learning Segmentation:
+#   pip install instanseg instanseg-torch kornia
+#
+# Spatial Analysis (scanpy):
+#   conda install scanpy
+#   pip install scimap
+#
+# Full Bio Formats:
+#   pip install aicsimageio bioio bioio-ome-tiff ome-zarr slideio readlif
+# =============================================================================
