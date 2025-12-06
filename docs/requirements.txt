@@ -17,3 +17,4 @@ colour-science>=0.4.0
 matplotlib>=3.6.0
 cycler>=0.11
 beautifulsoup4>=4.12.0
+ome-types>=0.5.0
