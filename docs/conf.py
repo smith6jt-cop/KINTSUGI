@@ -81,6 +81,10 @@ autodoc_mock_imports = [
     "sitk",
     "kornia",
     "imagecodecs",
+    "shapely",
+    "rasterio",
+    "fiona",
+    "pyproj",
 ]
 
 # Napoleon settings for Google/NumPy docstring support
