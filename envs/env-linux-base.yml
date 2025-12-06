@@ -1,12 +1,12 @@
 name: KINTSUGI
 channels:
+  - nvidia/label/cuda-12.4.0
   - conda-forge
   - defaults
 
 # STREAMLINED BASE ENVIRONMENT
-# ~150-200 packages, ~2GB, no GPU/Java required
-# For full environment with GPU: use env-linux.yml
-# To add GPU later: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# Includes CuPy for GPU-accelerated stitching
+# For full environment with PyTorch, Napari, Java: use env-linux.yml
 
 dependencies:
   # Core Python Environment
@@ -33,6 +33,10 @@ dependencies:
   # Jupyter Environment (minimal)
   - jupyterlab
   - ipywidgets
+
+  # GPU Support for Stitching (CuPy + CUDA runtime)
+  - cuda-runtime
+  - cupy
 
   # Machine Learning/Analysis Core
   - dask-core
@@ -87,9 +91,8 @@ dependencies:
 # OPTIONAL FEATURES - Install separately as needed:
 # =============================================================================
 #
-# GPU Support (NVIDIA):
+# PyTorch GPU Support (NVIDIA):
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-#   pip install cupy-cuda12x
 #
 # Napari Visualization:
 #   conda install napari pyqt
