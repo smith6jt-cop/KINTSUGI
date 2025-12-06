@@ -43,6 +43,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r docs/requirements.txt
 
+      - name: Clean Sphinx environment
+        run: |
+          # Remove cached Sphinx files to avoid WindowsPath/PosixPath issues
+          # when builds happen across different platforms
+          cd docs
+          rm -rf .doctrees .env .pytest_cache _build .cache
+          cd ..
+
       - name: Build documentation
         run: |
           cd docs
