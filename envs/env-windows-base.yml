@@ -1,5 +1,6 @@
 name: KINTSUGI
 channels:
+  - nvidia/label/cuda-12.4.0
   - conda-forge
   - defaults
 
@@ -13,6 +14,10 @@ dependencies:
   - pip
   - setuptools
   - wheel
+
+  # GPU Support for Stitching (CUDA runtime + NVRTC for CuPy)
+  - cuda-runtime
+  - cuda-nvrtc
 
   # Core Scientific Computing
   - numpy=1.26
