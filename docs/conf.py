@@ -77,6 +77,10 @@ autodoc_mock_imports = [
     "aicsimageio",
     "readlif",
     "numba",
+    "SimpleITK",
+    "sitk",
+    "kornia",
+    "imagecodecs",
 ]
 
 # Napoleon settings for Google/NumPy docstring support
