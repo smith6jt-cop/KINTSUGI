@@ -1,6 +1,5 @@
 name: KINTSUGI
 channels:
-  - nvidia/label/cuda-12.4.0
   - conda-forge
   - defaults
 
@@ -33,10 +32,6 @@ dependencies:
   - jupyterlab
   - ipywidgets
 
-  # GPU Support for Stitching (CuPy + CUDA runtime)
-  - cuda-runtime
-  - cupy
-
   # Machine Learning/Analysis Core
   - dask-core
   - numba
@@ -62,6 +57,9 @@ dependencies:
   - pip:
     # Install KINTSUGI as editable package
     - -e ..
+
+    # GPU Support for Stitching (pip version bundles CUDA DLLs on Windows)
+    - cupy-cuda12x>=12.0.0
 
     # Core image processing
     - valis-wsi==1.2.0
