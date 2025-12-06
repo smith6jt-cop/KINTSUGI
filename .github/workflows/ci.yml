@@ -71,40 +71,45 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Download libvips directly from GitHub releases
           $vipsVersion = "8.15.1"
-          $zipName = "vips-dev-w64-all-$vipsVersion.zip"
-          $downloadUrl = "https://github.com/libvips/libvips/releases/download/v$vipsVersion/$zipName"
-          $zipPath = Join-Path $env:TEMP $zipName
+          $zipPath = Join-Path $env:TEMP "vips-$vipsVersion.zip"
           $dest = "C:\vips"
 
-          Write-Output "Downloading libvips $vipsVersion..."
+          Write-Output "Resolving libvips release v$vipsVersion via GitHub API..."
 
-          # Use GitHub token for authenticated requests to avoid rate limits
-          $headers = @{}
-          if ($env:GITHUB_TOKEN) {
-            $headers["Authorization"] = "token $env:GITHUB_TOKEN"
-          }
+          $apiUrl = "https://api.github.com/repos/libvips/libvips/releases/tags/v$vipsVersion"
+          $headers = @{ "User-Agent" = "GitHub-Actions" }
+          if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "token $env:GITHUB_TOKEN" }
 
           try {
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $zipPath -Headers $headers -UseBasicParsing
-            Write-Output "Download complete. Extracting..."
-
-            if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-            Expand-Archive -Path $zipPath -DestinationPath $dest -Force
-
-            # Find and add bin directory to PATH
-            $binDir = Get-ChildItem $dest -Recurse -Directory | Where-Object { $_.Name -eq 'bin' } | Select-Object -First 1
-            if ($binDir) {
-              Write-Output "Adding to PATH: $($binDir.FullName)"
-              $binDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-              Write-Output "libvips installed successfully"
-            } else {
-              Write-Warning "Could not find bin directory in extracted archive"
-            }
+            $release = Invoke-RestMethod -Uri $apiUrl -Headers $headers -UseBasicParsing
           } catch {
-            Write-Warning "libvips download failed: $($_.Exception.Message)"
-            Write-Warning "pyvips tests may fail on Windows"
+            Write-Error "Failed to query libvips releases: $($_.Exception.Message)"
+            throw
+          }
+
+          # Find Windows w64 zip asset
+          $asset = $release.assets | Where-Object { $_.name -match 'w64' -and $_.name -match '\.zip$' } | Select-Object -First 1
+          if (-not $asset) {
+            Write-Error "No Windows (w64 .zip) asset found for libvips v$vipsVersion"
+            Write-Output "Available assets: $($release.assets | ForEach-Object { $_.name })"
+            throw "libvips asset not found"
+          }
+
+          Write-Output "Downloading asset $($asset.name)..."
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -Headers $headers -UseBasicParsing
+
+          if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+          Expand-Archive -Path $zipPath -DestinationPath $dest -Force
+
+          $binDir = Get-ChildItem $dest -Recurse -Directory | Where-Object { $_.Name -eq 'bin' } | Select-Object -First 1
+          if ($binDir) {
+            Write-Output "Adding to PATH: $($binDir.FullName)"
+            $binDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            Write-Output "libvips installed successfully"
+          } else {
+            Write-Error "Could not find bin directory in extracted archive"
+            throw "libvips bin directory not found"
           }
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
