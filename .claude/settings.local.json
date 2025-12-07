@@ -1,10 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git checkout:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(cat:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "mcp__pubmed__search_articles",
+      "WebFetch(domain:www.nature.com)"
     ],
     "deny": [],
     "ask": []

@@ -30,6 +30,9 @@ _SUBMODULE_MAPPING = {
     "Kstitch": "kstitch",
     "dl_refinement": "dl_refinement",
     "deps": "deps",
+    "edf": "edf",
+    "zarr_io": "zarr_io",
+    "kcorrect_gpu": "kcorrect_gpu",
 }
 
 
@@ -102,4 +105,7 @@ __all__ = [
     "Kstitch",
     "dl_refinement",
     "deps",
+    "edf",
+    "zarr_io",
+    "kcorrect_gpu",
 ]

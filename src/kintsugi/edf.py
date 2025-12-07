@@ -15,10 +15,7 @@ Supports:
 """
 
 import logging
-from typing import TYPE_CHECKING, Literal, Union
-
-if TYPE_CHECKING:
-    import cupy as cp
+from typing import Literal, Optional, Tuple, Union
 
 import numpy as np
 from scipy.ndimage import gaussian_filter, uniform_filter
@@ -45,8 +42,8 @@ def _check_cupy_available() -> bool:
 def _check_clij2_available() -> bool:
     """Check if PyImageJ/CLIJ2 is available."""
     try:
-        import imagej  # noqa: F401
-        import scyjava  # noqa: F401
+        import imagej
+        import scyjava
 
         return True
     except ImportError:
@@ -261,7 +258,7 @@ def extended_depth_of_focus_laplacian(
 
 def edf_tiled(
     stack: np.ndarray,
-    tile_size: tuple[int, int] = (3000, 3000),
+    tile_size: Tuple[int, int] = (3000, 3000),
     overlap: int = 50,
     method: Literal["variance", "laplacian"] = "variance",
     **kwargs,
@@ -466,10 +463,10 @@ class EDFProcessor:
         radius_x: int = 5,
         radius_y: int = 5,
         sigma: float = 20.0,
-        z_start: int | None = None,
-        z_end: int | None = None,
-        tiles: tuple[int, int] | None = None,
-        tile_size: tuple[int, int] | None = None,
+        z_start: Optional[int] = None,
+        z_end: Optional[int] = None,
+        tiles: Optional[Tuple[int, int]] = None,
+        tile_size: Optional[Tuple[int, int]] = None,
         ij_instance=None,
         device: str = None,
     ) -> np.ndarray:
@@ -553,14 +550,14 @@ class EDFProcessor:
         radius_x: int,
         radius_y: int,
         sigma: float,
-        tiles: tuple[int, int],
+        tiles: Tuple[int, int],
         ij_instance,
         device: str,
     ) -> np.ndarray:
         """Process using PyImageJ/CLIJ2 backend."""
         try:
             import imagej
-            import scyjava  # noqa: F401
+            import scyjava
         except ImportError:
             raise RuntimeError("PyImageJ not available for CLIJ2 backend")
 

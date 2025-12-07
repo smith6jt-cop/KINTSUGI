@@ -15,9 +15,10 @@ dependencies:
   - setuptools
   - wheel
 
-  # GPU Support for Stitching (CUDA runtime + NVRTC for CuPy)
+  # GPU Support for Stitching (CUDA runtime + NVRTC + CuPy)
   - cuda-runtime
   - cuda-nvrtc
+  - cupy  # Use conda cupy to match CUDA version automatically
 
   # Core Scientific Computing
   - numpy=1.26
@@ -63,9 +64,8 @@ dependencies:
     # Install KINTSUGI as editable package
     - -e ..
 
-    # GPU Support for Stitching (pip version bundles CUDA DLLs on Windows)
-    - cupy-cuda12x>=12.0.0
-    - numpy>=1.24.0,<2.0.0  # Pin numpy<2 after cupy install
+    # Note: CuPy installed via conda above to match CUDA version automatically
+    - numpy>=1.24.0,<2.0.0  # Pin numpy<2 for cupy compatibility
 
     # Core image processing
     - valis-wsi==1.2.0

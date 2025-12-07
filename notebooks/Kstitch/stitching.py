@@ -25,17 +25,65 @@ def _setup_cuda_path():
 
     Conda installs CUDA libraries to Library/bin but doesn't add it to PATH.
     This causes "DLL load failed" errors for nvrtc, cufft, etc.
+
+    This function searches multiple locations for CUDA DLLs:
+    1. Conda environment (Library/bin)
+    2. NVIDIA CUDA Toolkit installation
+    3. Common CUDA installation paths
     """
     if sys.platform != 'win32':
         return
 
-    conda_prefix = os.environ.get('CONDA_PREFIX', '')
-    if not conda_prefix:
-        return
+    import glob
 
-    cuda_bin = os.path.join(conda_prefix, 'Library', 'bin')
-    if os.path.exists(cuda_bin) and cuda_bin not in os.environ.get('PATH', ''):
-        os.environ['PATH'] = cuda_bin + os.pathsep + os.environ['PATH']
+    paths_to_add = []
+    current_path = os.environ.get('PATH', '')
+
+    # 1. Conda environment paths
+    conda_prefix = os.environ.get('CONDA_PREFIX', '')
+    if conda_prefix:
+        conda_paths = [
+            os.path.join(conda_prefix, 'Library', 'bin'),
+            os.path.join(conda_prefix, 'bin'),
+            # Some conda CUDA packages install to these locations
+            os.path.join(conda_prefix, 'Library', 'lib'),
+        ]
+        for p in conda_paths:
+            if os.path.exists(p) and p not in current_path:
+                paths_to_add.append(p)
+
+    # 2. CUDA_PATH environment variable (set by NVIDIA installer)
+    cuda_path = os.environ.get('CUDA_PATH', '')
+    if cuda_path:
+        cuda_bin = os.path.join(cuda_path, 'bin')
+        if os.path.exists(cuda_bin) and cuda_bin not in current_path:
+            paths_to_add.append(cuda_bin)
+
+    # 3. Common NVIDIA CUDA Toolkit locations
+    program_files = os.environ.get('ProgramFiles', 'C:\\Program Files')
+    cuda_base = os.path.join(program_files, 'NVIDIA GPU Computing Toolkit', 'CUDA')
+    if os.path.exists(cuda_base):
+        # Find all installed CUDA versions and prefer the highest
+        cuda_versions = glob.glob(os.path.join(cuda_base, 'v*', 'bin'))
+        cuda_versions.sort(reverse=True)  # Highest version first
+        for cuda_bin in cuda_versions:
+            if os.path.exists(cuda_bin) and cuda_bin not in current_path:
+                paths_to_add.append(cuda_bin)
+                break  # Only add the highest version
+
+    # 4. Check for nvrtc specifically and find its location
+    # This helps when CUDA is installed but not in standard locations
+    if conda_prefix:
+        nvrtc_files = glob.glob(os.path.join(conda_prefix, '**', 'nvrtc*.dll'), recursive=True)
+        for nvrtc_file in nvrtc_files:
+            nvrtc_dir = os.path.dirname(nvrtc_file)
+            if nvrtc_dir not in current_path and nvrtc_dir not in paths_to_add:
+                paths_to_add.append(nvrtc_dir)
+
+    # Add all found paths to PATH
+    if paths_to_add:
+        new_path = os.pathsep.join(paths_to_add) + os.pathsep + current_path
+        os.environ['PATH'] = new_path
 
 
 # Fix CUDA PATH before any CUDA imports
@@ -126,8 +174,14 @@ def _test_gpu_availability(verbose=False):
         return False
 
 
-def check_gpu_status():
-    """Print detailed GPU status information for debugging."""
+def check_gpu_status(verbose=True):
+    """Print detailed GPU status information for debugging.
+
+    Parameters
+    ----------
+    verbose : bool
+        If True, print additional diagnostic information about CUDA paths.
+    """
     print("=" * 60)
     print("GPU STATUS CHECK")
     print("=" * 60)
@@ -141,6 +195,53 @@ def check_gpu_status():
     else:
         print(f"Status: NOT AVAILABLE")
         print(f"\nError Details:\n{GPU_ERROR_MSG}")
+
+    if verbose:
+        print("\n" + "-" * 60)
+        print("CUDA PATH DIAGNOSTICS")
+        print("-" * 60)
+
+        # Show environment variables
+        conda_prefix = os.environ.get('CONDA_PREFIX', 'Not set')
+        cuda_path = os.environ.get('CUDA_PATH', 'Not set')
+        print(f"CONDA_PREFIX: {conda_prefix}")
+        print(f"CUDA_PATH: {cuda_path}")
+
+        # Search for nvrtc DLLs
+        if sys.platform == 'win32':
+            import glob
+            print("\nSearching for NVRTC DLLs...")
+
+            search_paths = []
+            if conda_prefix != 'Not set':
+                search_paths.append(conda_prefix)
+            if cuda_path != 'Not set':
+                search_paths.append(cuda_path)
+
+            # Also check common CUDA locations
+            program_files = os.environ.get('ProgramFiles', 'C:\\Program Files')
+            cuda_base = os.path.join(program_files, 'NVIDIA GPU Computing Toolkit', 'CUDA')
+            if os.path.exists(cuda_base):
+                search_paths.append(cuda_base)
+
+            nvrtc_found = []
+            for base_path in search_paths:
+                if os.path.exists(base_path):
+                    files = glob.glob(os.path.join(base_path, '**', 'nvrtc*.dll'), recursive=True)
+                    nvrtc_found.extend(files)
+
+            if nvrtc_found:
+                print(f"Found {len(nvrtc_found)} NVRTC DLL(s):")
+                for f in nvrtc_found[:5]:  # Show first 5
+                    print(f"  {f}")
+                if len(nvrtc_found) > 5:
+                    print(f"  ... and {len(nvrtc_found) - 5} more")
+            else:
+                print("No NVRTC DLLs found in searched paths!")
+                print("\nTo fix this, try one of:")
+                print("  1. Install CUDA Toolkit from nvidia.com")
+                print("  2. Run: conda install -c nvidia cuda-nvrtc")
+                print("  3. Reinstall cupy: conda install cupy")
 
     print("=" * 60)
 
