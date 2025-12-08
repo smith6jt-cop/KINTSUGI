@@ -215,14 +215,32 @@ class KCorrectGPU:
         else:
             weight = xp.ones_like(images_2d)
 
-        # SVD for initialization (partial SVD is sufficient)
-        # Only need largest singular value
+        # SVD for initialization - only need largest singular value
+        # Use power iteration for speed (avoid full SVD)
         if self.use_gpu:
-            _, svd_vals, _ = xp.linalg.svd(images_2d, full_matrices=False)
+            # Power iteration to get largest singular value (much faster than full SVD)
+            v = xp.random.randn(n).astype(images_2d.dtype)
+            for _ in range(10):  # 10 iterations usually sufficient
+                u = images_2d @ v
+                u = u / (xp.linalg.norm(u) + 1e-10)
+                v = images_2d.T @ u
+                v = v / (xp.linalg.norm(v) + 1e-10)
+            norm_two = float(xp.linalg.norm(images_2d @ v))
         else:
-            _, svd_vals, _ = np.linalg.svd(images_2d, full_matrices=False)
-
-        norm_two = float(svd_vals[0])
+            # For CPU, use scipy's sparse SVD which is faster for just top singular value
+            from scipy.sparse.linalg import svds
+            try:
+                _, svd_vals, _ = svds(images_2d, k=1)
+                norm_two = float(svd_vals[0])
+            except:
+                # Fallback to power iteration
+                v = np.random.randn(n).astype(images_2d.dtype)
+                for _ in range(10):
+                    u = images_2d @ v
+                    u = u / (np.linalg.norm(u) + 1e-10)
+                    v = images_2d.T @ u
+                    v = v / (np.linalg.norm(v) + 1e-10)
+                norm_two = float(np.linalg.norm(images_2d @ v))
         d_norm = float(xp.linalg.norm(images_2d, ord='fro'))
 
         # Optimization parameters

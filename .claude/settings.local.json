@@ -5,7 +5,8 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "mcp__pubmed__search_articles",
-      "WebFetch(domain:www.nature.com)"
+      "WebFetch(domain:www.nature.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ],
     "deny": [],
     "ask": []
