@@ -177,6 +177,9 @@ kintsugi template -o config.json
 # Run registration workflow
 kintsugi register config.json --dry-run
 kintsugi register config.json
+
+# Initialize a new project
+kintsugi init /path/to/project --name "My Project"
 ```
 
 ### Python API
@@ -204,7 +207,59 @@ registrar.register()
 
 # Visualization
 from kintsugi.kview2 import imshow, curtain, crop
+
+# Quality Control
+from kintsugi.qc import ImageQC, CellQC, MarkerQC
+qc = ImageQC()
+result = qc.assess(image)
+
+# Advanced Denoising
+from kintsugi.denoise import adaptive_denoise, denoise_n2v
+denoised = adaptive_denoise(image, strength="auto")
 ```
+
+### Claude Code Integration
+
+KINTSUGI includes an MCP (Model Context Protocol) server that enables Claude Code to act as an AI-powered image processing assistant.
+
+**Setup:**
+
+```bash
+# Install Claude Code dependencies
+pip install kintsugi[claude]
+
+# Generate configuration for your project
+kintsugi mcp config /path/to/your/project
+```
+
+Copy the output JSON to `.claude/settings.local.json` in your project directory.
+
+**Available Tools:**
+
+| Category | Tools |
+|----------|-------|
+| Signal Isolation | `load_channel`, `subtract_blank`, `denoise`, `denoise_advanced`, `apply_clahe`, `clean_background` |
+| Quality Assessment | `assess_quality`, `compute_snr` |
+| Workflow | `list_channels`, `save_processed`, `suggest_parameters` |
+| Parameter Learning | `get_learned_parameters`, `approve_and_learn`, `suggest_with_learning` |
+
+**Parameter Learning:**
+
+The system learns from successful parameter choices:
+- Parameters are stored in SQLite databases indexed by tissue type and marker name
+- Future recommendations are weighted by past success
+- Use `approve_and_learn` to record successful parameters
+
+**Example Claude Interaction:**
+
+```
+User: "Load the CD3 channel and suggest denoising parameters"
+Claude: [Uses load_channel and suggest_with_learning tools]
+Claude: "Based on the image analysis and learned history for tonsil tissue,
+         I recommend NLM denoising with patch_size=7, strength=0.15..."
+```
+
+See `notebooks/MIGRATION_GUIDE.md` for detailed migration instructions from legacy notebooks.
 
 ### Notebook Dependency Checking
 

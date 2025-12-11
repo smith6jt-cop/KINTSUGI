@@ -59,7 +59,64 @@ registrar.register()
 
 # Visualization
 from kintsugi.kview2 import imshow, curtain, crop
+
+# Quality Control
+from kintsugi.qc import ImageQC
+qc = ImageQC()
+result = qc.assess(image)
+
+# Denoising
+from kintsugi.denoise import adaptive_denoise
+denoised = adaptive_denoise(image, strength="auto")
+
+# Segmentation
+from kintsugi.segment import segment_nuclei_watershed
+nuclei = segment_nuclei_watershed(dapi_image)
 ```
+
+## Claude Code Integration
+
+KINTSUGI includes an MCP server for Claude Code integration, enabling AI-assisted image processing.
+
+### Setup
+
+```bash
+# Install Claude Code dependencies
+pip install kintsugi[claude]
+
+# Generate configuration
+kintsugi mcp config /path/to/your/project
+```
+
+Add the output to `.claude/settings.local.json`:
+
+```json
+{
+    "mcpServers": {
+        "kintsugi": {
+            "command": "kintsugi",
+            "args": ["mcp", "start"],
+            "cwd": "/path/to/your/project"
+        }
+    }
+}
+```
+
+### Usage
+
+Once configured, Claude Code can:
+- Load and analyze channels
+- Suggest optimal processing parameters
+- Apply denoising, CLAHE, and background subtraction
+- Learn from successful parameters for future recommendations
+
+Example interaction:
+```
+User: "Load the CD3 channel and suggest denoising parameters"
+Claude: [Analyzes image and provides recommendations based on learned history]
+```
+
+See `notebooks/MIGRATION_GUIDE.md` for transitioning from legacy notebooks.
 
 ## Jupyter Notebooks
 

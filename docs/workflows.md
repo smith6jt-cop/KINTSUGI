@@ -47,7 +47,48 @@ Batch process all channels across multiple cycles.
 
 Remove autofluorescence and isolate true signal.
 
-**Notebook**: `notebooks/3_Signal_Isolation.ipynb`
+> **Note:** The notebook-based approach (`3_Signal_Isolation.ipynb`) is deprecated.
+> Use the Claude-guided workflow or Python API instead.
+
+### Option A: Claude-Guided Workflow (Recommended)
+
+Use Claude Code with the KINTSUGI MCP server for interactive, AI-assisted signal isolation.
+
+**Setup:**
+```bash
+pip install kintsugi[claude]
+kintsugi mcp config /path/to/project
+# Add output to .claude/settings.local.json
+```
+
+**Usage:**
+Claude Code can:
+- Load and analyze channels
+- Suggest optimal parameters based on image characteristics
+- Apply processing with real-time feedback
+- Learn from successful parameters for future recommendations
+
+### Option B: Python API
+
+```python
+from kintsugi.denoise import adaptive_denoise, denoise_nlm
+from kintsugi.qc import ImageQC
+
+# Load and assess image quality
+qc = ImageQC()
+result = qc.assess(image)
+print(f"Quality: {result.quality_score}, Issues: {result.issues}")
+
+# Adaptive denoising (auto-selects best method)
+denoised = adaptive_denoise(image, strength="auto")
+
+# Or use specific methods
+denoised = denoise_nlm(image, patch_size=7, patch_distance=11)
+```
+
+### Option C: Legacy Notebook
+
+**Notebook**: `notebooks/3_Signal_Isolation.ipynb` (DEPRECATED)
 
 ### Steps:
 1. Load registered images
@@ -139,9 +180,172 @@ stitched = stitch_tiles(
 )
 ```
 
+## Workflow 5: Quality Control
+
+Assess and validate image quality at multiple levels.
+
+### Image-Level QC
+
+```python
+from kintsugi.qc import ImageQC
+
+qc = ImageQC()
+result = qc.assess(image, marker="CD3", tissue="tonsil")
+
+print(f"Passed: {result.passed}")
+print(f"Quality Score: {result.quality_score}")
+print(f"Issues: {result.issues}")
+print(f"Recommendations: {result.recommendations}")
+```
+
+### Cell-Level QC
+
+```python
+from kintsugi.qc import CellQC
+
+qc = CellQC()
+result = qc.assess(
+    cell_data,
+    marker_columns=["CD3", "CD20", "DAPI"],
+    morphology_columns=["area", "eccentricity"]
+)
+
+# Filter problematic cells
+filtered_data = result.filtered_data
+print(f"Removed {len(result.outliers)} outliers")
+```
+
+### Marker Validation
+
+```python
+from kintsugi.qc import MarkerQC
+
+qc = MarkerQC()
+result = qc.assess(intensities, marker_name="CD3", cell_types=cell_types)
+
+if result.crosstalk_detected:
+    print(f"Crosstalk with: {result.crosstalk_markers}")
+```
+
+### Batch Effects
+
+```python
+from kintsugi.qc import BatchQC
+
+qc = BatchQC()
+result = qc.assess(
+    data=combined_data,
+    batch_column="batch_id",
+    marker_columns=["CD3", "CD20", "DAPI"]
+)
+
+if result.batch_effects_detected:
+    normalized = qc.normalize_batches(data, method="quantile")
+```
+
+## Denoising Module
+
+KINTSUGI provides multiple denoising algorithms:
+
+### Traditional Filters
+
+```python
+from kintsugi.denoise import (
+    denoise_median,
+    denoise_gaussian,
+    denoise_bilateral,
+    denoise_nlm,
+)
+
+# Median filter
+result = denoise_median(image, size=3)
+
+# Non-local means
+result = denoise_nlm(image, patch_size=7, patch_distance=11)
+```
+
+### Deep Learning Denoising
+
+```python
+from kintsugi.denoise import denoise_n2v, denoise_care
+
+# Noise2Void (self-supervised, no clean targets needed)
+denoiser = N2VDenoiser()
+denoiser.train(noisy_images, n_epochs=50)
+result = denoiser.predict(image)
+
+# CARE (supervised, requires paired data)
+denoiser = CAREDenoiser()
+denoiser.train(noisy_images, clean_images)
+result = denoiser.predict(image)
+```
+
+### Adaptive Denoising
+
+```python
+from kintsugi.denoise import adaptive_denoise
+
+# Automatically selects best method and parameters
+result = adaptive_denoise(image, strength="auto")
+```
+
+## Segmentation Module
+
+### Classical Segmentation
+
+```python
+from kintsugi.segment import segment_nuclei_watershed, segment_cells_watershed
+
+# Nuclei segmentation
+nuclei = segment_nuclei_watershed(
+    dapi_image,
+    min_distance=10,
+    threshold_method="otsu"
+)
+
+# Cell segmentation with membrane expansion
+cells = segment_cells_watershed(
+    membrane_image,
+    nuclei_labels=nuclei,
+    expansion_distance=5
+)
+```
+
+### SAM Segmentation
+
+```python
+from kintsugi.segment import SAMSegmenter
+
+segmenter = SAMSegmenter(model_type="vit_b")
+masks = segmenter.segment(image)
+
+# With box prompts
+masks = segmenter.segment_boxes(image, boxes=[[x1, y1, x2, y2]])
+```
+
+### Post-Processing
+
+```python
+from kintsugi.segment import refine_masks, filter_masks_by_size
+
+# Filter by size
+filtered = filter_masks_by_size(labels, min_size=50, max_size=5000)
+
+# Comprehensive refinement
+refined = refine_masks(
+    labels,
+    min_size=50,
+    fill_holes=True,
+    smooth=True,
+    split_touching=True
+)
+```
+
 ## Tips for Large Datasets
 
 1. **Start small**: Test parameters on a subset before full batch processing
 2. **Monitor memory**: Use `kintsugi info` to check available resources
 3. **Use tiled processing**: Enable tiled output for very large images
 4. **GPU acceleration**: Enable CuPy for faster deconvolution
+5. **Parameter learning**: Use Claude Code to build a database of successful parameters
+6. **Batch QC**: Run BatchQC to detect and correct batch effects before analysis
