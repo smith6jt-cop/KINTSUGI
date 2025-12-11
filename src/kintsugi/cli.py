@@ -5,11 +5,14 @@ Provides CLI entry points for:
 - kintsugi: Main entry point
 - kintsugi-register: Registration workflow
 - kintsugi-check: Dependency checking
+- kintsugi install: Install optional dependencies
 """
 
 import json
+import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import Console
@@ -17,6 +20,41 @@ from rich.panel import Panel
 from rich.table import Table
 
 console = Console()
+
+# Optional dependency groups - use direct package names to avoid PyPI collision
+# (the 'kintsugi' package exists on PyPI as an unrelated project)
+OPTIONAL_GROUPS: dict[str, dict[str, Any]] = {
+    "gpu": {
+        "description": "GPU acceleration (CuPy for CUDA)",
+        "install_cmd": "pip install cupy-cuda12x",
+        "packages": ["cupy"],
+    },
+    "torch": {
+        "description": "PyTorch for deep learning models",
+        "install_cmd": "pip install torch torchvision",
+        "packages": ["torch", "torchvision"],
+    },
+    "bio": {
+        "description": "Spatial biology analysis (scanpy, scimap, squidpy)",
+        "install_cmd": "pip install scanpy scimap squidpy anndata",
+        "packages": ["scanpy", "scimap", "squidpy", "anndata"],
+    },
+    "viz": {
+        "description": "Napari visualization",
+        "install_cmd": "pip install napari[all]",
+        "packages": ["napari"],
+    },
+    "claude": {
+        "description": "Claude Code MCP integration",
+        "install_cmd": "pip install mcp anthropic",
+        "packages": ["mcp", "anthropic"],
+    },
+    "dev": {
+        "description": "Development tools (pytest, ruff, black, mypy)",
+        "install_cmd": "pip install pytest pytest-cov ruff black mypy",
+        "packages": ["pytest", "ruff", "black", "mypy"],
+    },
+}
 
 
 @click.group()
@@ -197,6 +235,72 @@ def info():
     table.add_row("GPU", gpu_info)
 
     console.print(table)
+
+
+# ============================================================================
+# Install Command for Optional Dependencies
+# ============================================================================
+
+
+@main.command()
+@click.argument("group", required=False)
+@click.option("--list", "-l", "list_groups", is_flag=True, help="List available groups")
+def install(group: str | None, list_groups: bool):
+    """
+    Install optional dependency groups.
+
+    GROUP is the name of the dependency group to install (gpu, torch, bio, viz, claude, dev).
+    Use 'all' to install all optional dependencies.
+
+    \b
+    Examples:
+        kintsugi install --list     # Show available groups
+        kintsugi install gpu        # Install GPU acceleration
+        kintsugi install bio        # Install spatial biology tools
+        kintsugi install all        # Install everything
+    """
+    if list_groups or group is None:
+        table = Table(title="Optional Dependency Groups")
+        table.add_column("Group", style="cyan")
+        table.add_column("Description", style="white")
+        table.add_column("Packages", style="dim")
+
+        for name, info in OPTIONAL_GROUPS.items():
+            table.add_row(name, info["description"], ", ".join(info["packages"]))
+
+        console.print(table)
+        console.print("\n[dim]Usage: kintsugi install <group>[/dim]")
+        console.print("[dim]       kintsugi install all[/dim]")
+        return
+
+    if group == "all":
+        groups_to_install = list(OPTIONAL_GROUPS.keys())
+    elif group in OPTIONAL_GROUPS:
+        groups_to_install = [group]
+    else:
+        console.print(f"[red]Unknown group: {group}[/red]")
+        console.print(f"Available groups: {', '.join(OPTIONAL_GROUPS.keys())}, all")
+        raise SystemExit(1)
+
+    for grp in groups_to_install:
+        info = OPTIONAL_GROUPS[grp]
+        console.print(f"\n[bold]Installing {grp}:[/bold] {info['description']}")
+        console.print(f"[dim]Running: {info['install_cmd']}[/dim]")
+
+        try:
+            subprocess.run(
+                info["install_cmd"],
+                shell=True,
+                check=True,
+                capture_output=False,
+            )
+            console.print(f"[green]✓ {grp} installed successfully[/green]")
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]✗ Failed to install {grp}: {e}[/red]")
+            if group != "all":
+                raise SystemExit(1)
+
+    console.print("\n[bold green]Installation complete![/bold green]")
 
 
 # ============================================================================
