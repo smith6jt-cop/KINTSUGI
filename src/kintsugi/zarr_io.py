@@ -862,3 +862,360 @@ def process_zarr_parallel(zarr_path: Union[str, Path],
         store.write_edf(cycle, channel, result_computed)
 
     store.close()
+
+
+# =============================================================================
+# Unified Output Interface
+# =============================================================================
+
+class OutputWriter:
+    """
+    Unified output writer supporting both TIFF and OME-Zarr formats.
+
+    This class provides a common interface for writing pipeline outputs,
+    allowing easy switching between formats without changing processing code.
+
+    TIFF is recommended for:
+    - Speed (fastest I/O)
+    - Compatibility with existing tools
+    - Small to medium datasets
+
+    OME-Zarr is recommended for:
+    - Large datasets (>4GB per image)
+    - Cloud storage
+    - Parallel/chunked access
+    - Multi-resolution pyramids
+
+    Parameters
+    ----------
+    output_dir : str or Path
+        Base output directory
+    format : str
+        Output format: 'tiff' (default) or 'zarr'
+    zarr_path : str or Path, optional
+        Path for zarr store (required if format='zarr')
+    compression : str, optional
+        TIFF compression: None, 'zlib', 'lzw' (default: None for speed)
+
+    Examples
+    --------
+    >>> # TIFF output (fast, compatible)
+    >>> writer = OutputWriter("/output/dir", format='tiff')
+    >>> writer.write_stitched(cycle=1, channel=2, zplane=5, data=img)
+    >>>
+    >>> # OME-Zarr output (scalable, cloud-ready)
+    >>> writer = OutputWriter("/output/dir", format='zarr', zarr_path="experiment.zarr")
+    >>> writer.write_stitched(cycle=1, channel=2, zplane=5, data=img)
+    """
+
+    def __init__(self,
+                 output_dir: Union[str, Path],
+                 format: str = 'tiff',
+                 zarr_path: Optional[Union[str, Path]] = None,
+                 compression: Optional[str] = None):
+        self.output_dir = Path(output_dir)
+        self.format = format.lower()
+        self.compression = compression
+
+        if self.format not in ('tiff', 'zarr'):
+            raise ValueError(f"Unknown format: {format}. Use 'tiff' or 'zarr'")
+
+        if self.format == 'zarr':
+            if zarr_path is None:
+                zarr_path = self.output_dir / "output.zarr"
+            self.zarr_store = KintsugiZarr(zarr_path, mode='a')
+        else:
+            self.zarr_store = None
+
+        # Create output directory
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+    def write_stitched(self,
+                       cycle: int,
+                       channel: int,
+                       zplane: int,
+                       data: np.ndarray,
+                       channel_name: Optional[str] = None) -> str:
+        """
+        Write stitched image.
+
+        Parameters
+        ----------
+        cycle : int
+            Cycle number
+        channel : int
+            Channel number
+        zplane : int
+            Z-plane number
+        data : np.ndarray
+            2D stitched image
+        channel_name : str, optional
+            Human-readable channel name
+
+        Returns
+        -------
+        str
+            Path to the written file/array
+        """
+        if self.format == 'tiff':
+            return self._write_tiff_stitched(cycle, channel, zplane, data)
+        else:
+            self.zarr_store.write_stitched(cycle, channel, zplane, data)
+            return str(self.zarr_store.path)
+
+    def _write_tiff_stitched(self,
+                              cycle: int,
+                              channel: int,
+                              zplane: int,
+                              data: np.ndarray) -> str:
+        """Write stitched image as TIFF."""
+        try:
+            import tifffile
+            use_tifffile = True
+        except ImportError:
+            from skimage.io import imsave
+            use_tifffile = False
+
+        # Create directory structure
+        dest_dir = self.output_dir / f"cyc{cycle:02d}" / f"CH{channel}"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        output_path = dest_dir / f"{zplane:02d}.tif"
+
+        if use_tifffile:
+            # tifffile is faster and supports more compression options
+            tifffile.imwrite(
+                str(output_path),
+                data,
+                compression=self.compression,
+                photometric='minisblack'
+            )
+        else:
+            imsave(str(output_path), data, check_contrast=False)
+
+        return str(output_path)
+
+    def write_deconvolved(self,
+                          cycle: int,
+                          channel: int,
+                          zplane: int,
+                          data: np.ndarray) -> str:
+        """Write deconvolved image."""
+        if self.format == 'tiff':
+            return self._write_tiff_deconvolved(cycle, channel, zplane, data)
+        else:
+            # For zarr, we typically write the whole stack at once
+            # This method writes individual z-planes for compatibility
+            cycle_name = f"cyc{cycle:02d}"
+            ch_name = f"CH{channel}"
+
+            if cycle_name not in self.zarr_store.root:
+                self.zarr_store.create_cycle(cycle)
+
+            decon_group = self.zarr_store.root[cycle_name]['deconvolved']
+            if ch_name not in decon_group:
+                decon_group.create_group(ch_name)
+
+            ch_group = decon_group[ch_name]
+            ch_group.create_dataset(
+                f"Z{zplane:02d}",
+                data=data,
+                chunks=(min(1024, data.shape[0]), min(1024, data.shape[1])),
+                compressor=DEFAULT_COMPRESSOR,
+                overwrite=True
+            )
+            return str(self.zarr_store.path)
+
+    def _write_tiff_deconvolved(self,
+                                 cycle: int,
+                                 channel: int,
+                                 zplane: int,
+                                 data: np.ndarray) -> str:
+        """Write deconvolved image as TIFF."""
+        try:
+            import tifffile
+            use_tifffile = True
+        except ImportError:
+            from skimage.io import imsave
+            use_tifffile = False
+
+        dest_dir = self.output_dir / f"cyc{cycle:02d}" / f"CH{channel}" / "deconvolved"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        output_path = dest_dir / f"{zplane:02d}.tif"
+
+        if use_tifffile:
+            tifffile.imwrite(str(output_path), data, compression=self.compression)
+        else:
+            imsave(str(output_path), data, check_contrast=False)
+
+        return str(output_path)
+
+    def write_edf(self,
+                  cycle: int,
+                  channel: int,
+                  data: np.ndarray,
+                  channel_name: Optional[str] = None) -> str:
+        """Write EDF (extended depth of focus) result."""
+        if self.format == 'tiff':
+            return self._write_tiff_edf(cycle, channel, data, channel_name)
+        else:
+            self.zarr_store.write_edf(cycle, channel, data, channel_name)
+            return str(self.zarr_store.path)
+
+    def _write_tiff_edf(self,
+                        cycle: int,
+                        channel: int,
+                        data: np.ndarray,
+                        channel_name: Optional[str] = None) -> str:
+        """Write EDF image as TIFF."""
+        try:
+            import tifffile
+            use_tifffile = True
+        except ImportError:
+            from skimage.io import imsave
+            use_tifffile = False
+
+        dest_dir = self.output_dir / f"cyc{cycle:02d}"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use channel name if provided, otherwise use CH number
+        filename = f"{channel_name}.tif" if channel_name else f"CH{channel}.tif"
+        output_path = dest_dir / filename
+
+        if use_tifffile:
+            tifffile.imwrite(str(output_path), data, compression=self.compression)
+        else:
+            imsave(str(output_path), data, check_contrast=False)
+
+        return str(output_path)
+
+    def close(self):
+        """Close any open resources."""
+        if self.zarr_store is not None:
+            self.zarr_store.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+
+def convert_tiff_to_ome_zarr(tiff_base_dir: Union[str, Path],
+                              zarr_path: Union[str, Path],
+                              cycles: List[int],
+                              channels: List[int],
+                              stage: str = 'stitched',
+                              channel_names: Optional[Dict[int, List[str]]] = None,
+                              pixel_size_um: float = 0.377,
+                              generate_pyramid: bool = True,
+                              pyramid_levels: int = 4,
+                              n_workers: int = 4) -> None:
+    """
+    Convert TIFF output directory to OME-Zarr format.
+
+    This is useful for post-processing conversion after fast TIFF-based
+    processing is complete.
+
+    Parameters
+    ----------
+    tiff_base_dir : str or Path
+        Base directory containing TIFF output (e.g., *_BaSiC_Stitched)
+    zarr_path : str or Path
+        Output OME-Zarr path
+    cycles : list of int
+        Cycle numbers to convert
+    channels : list of int
+        Channel numbers to convert
+    stage : str
+        Processing stage subdirectory name
+    channel_names : dict, optional
+        Mapping of cycle to list of channel names
+    pixel_size_um : float
+        Pixel size in micrometers
+    generate_pyramid : bool
+        Generate multi-resolution pyramid
+    pyramid_levels : int
+        Number of pyramid levels
+    n_workers : int
+        Number of parallel workers for loading TIFFs
+    """
+    from glob import glob
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        import tifffile
+        def read_tiff(path):
+            return tifffile.imread(path)
+    except ImportError:
+        from skimage.io import imread
+        def read_tiff(path):
+            return imread(path)
+
+    tiff_base_dir = Path(tiff_base_dir)
+    store = KintsugiZarr(zarr_path, mode='w')
+
+    print(f"Converting TIFF to OME-Zarr: {zarr_path}")
+
+    for cycle in cycles:
+        print(f"  Processing cycle {cycle}...")
+        store.create_cycle(
+            cycle,
+            n_channels=len(channels),
+            channel_names=channel_names.get(cycle) if channel_names else None
+        )
+
+        for channel in channels:
+            ch_dir = tiff_base_dir / f"cyc{cycle:02d}" / f"CH{channel}"
+
+            if stage == 'deconvolved':
+                ch_dir = ch_dir / "deconvolved"
+
+            tiff_files = sorted(glob(str(ch_dir / "*.tif")))
+
+            if not tiff_files:
+                print(f"    Warning: No TIFF files found in {ch_dir}")
+                continue
+
+            # Load TIFFs in parallel
+            with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                images = list(executor.map(read_tiff, tiff_files))
+
+            # Stack into 3D array
+            stack = np.stack(images, axis=0)
+
+            # Write to zarr
+            if stage == 'stitched':
+                for z, img in enumerate(images, start=1):
+                    store.write_stitched(cycle, channel, z, img)
+            elif stage == 'deconvolved':
+                store.write_deconvolved(cycle, channel, stack)
+
+            print(f"    CH{channel}: {len(images)} z-planes")
+
+            del images, stack
+
+    # Generate OME-NGFF compliant output with pyramids
+    if generate_pyramid:
+        print("  Generating multi-resolution pyramids...")
+        for cycle in cycles:
+            # Collect all channels for this cycle
+            edf_group = store.root[f"cyc{cycle:02d}"].get('edf')
+            if edf_group and len(edf_group.keys()) > 0:
+                # Stack EDF channels
+                ch_keys = sorted([k for k in edf_group.keys() if k.startswith('CH')])
+                if ch_keys:
+                    stack = np.stack([edf_group[k][:] for k in ch_keys], axis=0)
+                    ch_names = channel_names.get(cycle) if channel_names else None
+                    store.write_ome_zarr(
+                        cycle, stack, axes="cyx",
+                        channel_names=ch_names,
+                        pixel_size_um=pixel_size_um,
+                        generate_pyramid=True,
+                        pyramid_levels=pyramid_levels
+                    )
+
+    store.close()
+    print(f"Conversion complete: {zarr_path}")

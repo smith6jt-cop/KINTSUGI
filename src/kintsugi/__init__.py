@@ -33,6 +33,7 @@ _SUBMODULE_MAPPING = {
     "edf": "edf",
     "zarr_io": "zarr_io",
     "kcorrect_gpu": "kcorrect_gpu",
+    "parallel_io": "parallel_io",
 }
 
 
@@ -108,4 +109,5 @@ __all__ = [
     "edf",
     "zarr_io",
     "kcorrect_gpu",
+    "parallel_io",
 ]

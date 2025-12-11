@@ -26,14 +26,14 @@ import warnings
 # Try to import CuPy
 try:
     import cupy as cp
-    from cupyx.scipy.fft import dct as cp_dct, idct as cp_idct
+    from cupyx.scipy.fft import dctn as cp_dctn, idctn as cp_idctn
     CUPY_AVAILABLE = True
 except ImportError:
     CUPY_AVAILABLE = False
     cp = None
 
 # CPU fallback
-from scipy.fftpack import dct as sp_dct, idct as sp_idct
+from scipy.fft import dctn as sp_dctn, idctn as sp_idctn
 from skimage.transform import resize as skresize
 
 
@@ -118,34 +118,26 @@ class KCorrectGPU:
         return np.asarray(arr)
 
     def _dct2d(self, mtrx):
-        """2D Discrete Cosine Transform."""
-        xp = self.xp
-
+        """2D Discrete Cosine Transform (optimized with dctn)."""
         if mtrx.ndim != 2:
             raise ValueError("Input must be 2D")
 
         if self.use_gpu:
-            # CuPy DCT - apply along each axis
-            result = cp_dct(cp_dct(mtrx.T, type=2, norm='ortho').T, type=2, norm='ortho')
+            # Single call handles both axes - more efficient than separate calls
+            return cp_dctn(mtrx, type=2, norm='ortho', axes=(0, 1))
         else:
-            result = sp_dct(sp_dct(mtrx.T, norm='ortho').T, norm='ortho')
-
-        return result
+            return sp_dctn(mtrx, type=2, norm='ortho', axes=(0, 1))
 
     def _idct2d(self, mtrx):
-        """2D Inverse Discrete Cosine Transform."""
-        xp = self.xp
-
+        """2D Inverse Discrete Cosine Transform (optimized with idctn)."""
         if mtrx.ndim != 2:
             raise ValueError("Input must be 2D")
 
         if self.use_gpu:
-            # CuPy IDCT (type 3 is inverse of type 2)
-            result = cp_idct(cp_idct(mtrx.T, type=2, norm='ortho').T, type=2, norm='ortho')
+            # Single call handles both axes - more efficient than separate calls
+            return cp_idctn(mtrx, type=2, norm='ortho', axes=(0, 1))
         else:
-            result = sp_idct(sp_idct(mtrx.T, norm='ortho').T, norm='ortho')
-
-        return result
+            return sp_idctn(mtrx, type=2, norm='ortho', axes=(0, 1))
 
     def _shrinkage_operator(self, matrix, epsilon):
         """Soft thresholding operator for L1 regularization."""

@@ -260,6 +260,8 @@ from ._stage_model import replace_invalid_translations
 from ._translation_computation import interpret_translation
 from ._translation_computation import multi_peak_max
 from ._translation_computation import pcm
+from ._translation_computation import get_gpu_accelerator
+from ._translation_computation import reset_gpu_accelerator
 from ._typing_utils import BoolArray
 from ._typing_utils import Float
 from ._typing_utils import NumArray
@@ -347,8 +349,13 @@ def process_image_pair_cpu(i2, g, direction, images, position_initial_guess, ove
     return i2, direction, max_peak
 
 
-def process_image_pair_gpu(i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX):
-    """Process image pair on GPU. Must use ThreadPoolExecutor (not ProcessPoolExecutor)."""
+def process_image_pair_gpu(i2, g, direction, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX, accelerator=None):
+    """Process image pair on GPU. Must use ThreadPoolExecutor (not ProcessPoolExecutor).
+
+    Args:
+        accelerator: Optional GPUStitchingAccelerator for optimized processing.
+                    If None, falls back to legacy GPU processing.
+    """
     i1 = g[direction]
     if pd.isna(i1):
         return None
@@ -356,9 +363,13 @@ def process_image_pair_gpu(i2, g, direction, images, position_initial_guess, ove
     image1 = images[i1]
     image2 = images[i2]
 
-    # Compute FFT on GPU
-    F1, F2 = _compute_fft_gpu(image1, image2)
-    PCM = pcm(F1, F2)
+    # Use accelerator if available (keeps entire computation on GPU)
+    if accelerator is not None:
+        PCM = accelerator.compute_pcm_single(image1, image2)
+    else:
+        # Legacy path: FFT on GPU, PCM on CPU
+        F1, F2 = _compute_fft_gpu(image1, image2)
+        PCM = pcm(F1, F2)
 
     if position_initial_guess is not None:
         def get_lims(dimension, size):
@@ -380,6 +391,69 @@ def process_image_pair_gpu(i2, g, direction, images, position_initial_guess, ove
         image1, image2, yins, xins, *lims[0], *lims[1]
     )
     return i2, direction, max_peak
+
+
+def process_pairs_batch_gpu(pairs_info, images, position_initial_guess, overlap_diff_threshold, sizeY, sizeX, accelerator):
+    """Process multiple image pairs in a batch using GPU acceleration.
+
+    This function batches FFT and PCM computation for better GPU utilization.
+
+    Args:
+        pairs_info: List of (i2, g, direction) tuples
+        images: Array of all images
+        position_initial_guess: Initial position guess or None
+        overlap_diff_threshold: Overlap difference threshold
+        sizeY, sizeX: Image dimensions
+        accelerator: GPUStitchingAccelerator instance
+
+    Returns:
+        List of (i2, direction, max_peak) results
+    """
+    # Filter out invalid pairs and collect image data
+    valid_pairs = []
+    image_pairs = []
+
+    for i2, g, direction in pairs_info:
+        i1 = g[direction]
+        if pd.isna(i1):
+            continue
+        valid_pairs.append((i2, g, direction, i1))
+        image_pairs.append((images[i1], images[i2]))
+
+    if not image_pairs:
+        return []
+
+    # Batch compute PCMs on GPU
+    pcm_results = accelerator.compute_pcm_batch(image_pairs)
+
+    # Process results
+    results = []
+    for (i2, g, direction, i1), PCM in zip(valid_pairs, pcm_results):
+        image1 = images[i1]
+        image2 = images[i2]
+
+        if position_initial_guess is not None:
+            def get_lims(dimension, size):
+                val = g[f"{direction}_{dimension}_init_guess"]
+                r = size * overlap_diff_threshold / 100.0
+                return np.round([val - r, val + r]).astype(np.int64)
+
+            lims = np.array(
+                [
+                    get_lims(dimension, size)
+                    for dimension, size in zip("yx", [sizeY, sizeX])
+                ]
+            )
+        else:
+            lims = np.array([[-sizeY, sizeY], [-sizeX, sizeX]])
+
+        yins, xins, _ = multi_peak_max(PCM)
+        max_peak = interpret_translation(
+            image1, image2, yins, xins, *lims[0], *lims[1]
+        )
+        results.append((i2, direction, max_peak))
+
+    return results
 
 
 def stitch_images(
@@ -557,34 +631,60 @@ def stitch_images(
     # (processes give better parallelism for CPU-bound work).
 
     if actual_use_gpu:
-        # GPU mode: Use ThreadPoolExecutor (threads share CUDA context)
-        # Limit workers to avoid GPU memory contention
-        gpu_workers = min(max_cores, 4)  # GPU benefits less from many workers
-        ExecutorClass = concurrent.futures.ThreadPoolExecutor
-        process_fn = process_image_pair_gpu
-        print(f"GPU mode: using {gpu_workers} threads")
+        # GPU mode with optimized batch processing
+        # Initialize GPU accelerator with pre-allocated buffers
+        accelerator = get_gpu_accelerator((sizeY, sizeX), max_batch_size=16)
+        print(f"GPU mode: using batch processing with pre-allocated buffers")
+
+        for direction in ["left", "top"]:
+            # Collect all pairs for this direction
+            pairs_info = [(i2, g, direction) for i2, g in grid.iterrows()]
+
+            # Process in batches for better GPU utilization
+            batch_size = 32  # Process 32 pairs at a time
+            all_results = []
+
+            for batch_start in tqdm(range(0, len(pairs_info), batch_size),
+                                    desc=f"Processing {direction} pairs (batch)"):
+                batch_end = min(batch_start + batch_size, len(pairs_info))
+                batch = pairs_info[batch_start:batch_end]
+
+                # Batch process on GPU
+                batch_results = process_pairs_batch_gpu(
+                    batch, images, position_initial_guess,
+                    overlap_diff_threshold, sizeY, sizeX, accelerator
+                )
+                all_results.extend(batch_results)
+
+            # Store results
+            for result in all_results:
+                if result is not None:
+                    i2, dir_result, max_peak = result
+                    for j, key in enumerate(["ncc", "y", "x"]):
+                        grid.loc[i2, f"{dir_result}_{key}_first"] = max_peak[j]
+
     else:
         # CPU mode: Use ProcessPoolExecutor (better parallelism)
         ExecutorClass = concurrent.futures.ProcessPoolExecutor
         process_fn = process_image_pair_cpu
         print(f"CPU mode: using {max_cores} processes")
 
-    with ExecutorClass(max_workers=gpu_workers if actual_use_gpu else max_cores) as executor:
-        for direction in ["left", "top"]:
-            futures = [
-                executor.submit(
-                    process_fn, i2, g, direction, images,
-                    position_initial_guess, overlap_diff_threshold, sizeY, sizeX
-                )
-                for i2, g in grid.iterrows()
-            ]
+        with ExecutorClass(max_workers=max_cores) as executor:
+            for direction in ["left", "top"]:
+                futures = [
+                    executor.submit(
+                        process_fn, i2, g, direction, images,
+                        position_initial_guess, overlap_diff_threshold, sizeY, sizeX
+                    )
+                    for i2, g in grid.iterrows()
+                ]
 
-            for future in tqdm(concurrent.futures.as_completed(futures), desc=f"Processing {direction} pairs", total=len(futures)):
-                result = future.result()
-                if result is not None:
-                    i2, direction, max_peak = result
-                    for j, key in enumerate(["ncc", "y", "x"]):
-                        grid.loc[i2, f"{direction}_{key}_first"] = max_peak[j]
+                for future in tqdm(concurrent.futures.as_completed(futures), desc=f"Processing {direction} pairs", total=len(futures)):
+                    result = future.result()
+                    if result is not None:
+                        i2, direction, max_peak = result
+                        for j, key in enumerate(["ncc", "y", "x"]):
+                            grid.loc[i2, f"{direction}_{key}_first"] = max_peak[j]
 
     # Analyze actual NCC values to select appropriate threshold
     top_ncc_values = grid["top_ncc_first"].dropna()
@@ -683,6 +783,8 @@ def stitch_images(
     # Clean up GPU memory if it was used
     if actual_use_gpu:
         try:
+            # Reset the GPU accelerator to free pre-allocated buffers
+            reset_gpu_accelerator()
             import cupy as cp
             cp.get_default_memory_pool().free_all_blocks()
             cp.get_default_pinned_memory_pool().free_all_blocks()
