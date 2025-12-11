@@ -4,15 +4,20 @@ Dependency validation module for KINTSUGI.
 Provides runtime checking of all external dependencies including
 native libraries (libvips), CUDA/GPU, and Python packages.
 
+Key features:
+- `require()`: Use at the top of notebooks to ensure dependencies are installed
+- `check_dependencies()`: Full dependency check for CLI
+- `install_optional()`: Install optional dependency groups via pip
+
 Note: Java/Maven dependencies are deprecated and no longer required.
 The pipeline now uses pure Python implementations for all processing.
 """
 
-import os
-import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Literal
 
 
 class DependencyStatus(Enum):
@@ -38,6 +43,258 @@ class DependencyResult:
     details: dict = field(default_factory=dict)
 
 
+# =============================================================================
+# Optional Dependency Groups
+# =============================================================================
+# These map to pyproject.toml optional dependencies and define what each
+# notebook/feature requires.
+
+OPTIONAL_GROUPS = {
+    "gpu": {
+        "description": "GPU acceleration (PyTorch + CuPy for CUDA)",
+        "packages": ["torch", "torchvision", "cupy"],
+        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install cupy-cuda12x",
+        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.4 cupy -c pytorch -c nvidia -c conda-forge",
+    },
+    "viz": {
+        "description": "Napari interactive visualization",
+        "packages": ["napari", "magicgui"],
+        "install_cmd": "pip install 'kintsugi[viz]'",
+        "conda_cmd": "conda install napari pyqt -c conda-forge",
+    },
+    "dl": {
+        "description": "Deep learning segmentation (InstanSeg)",
+        "packages": ["torch", "instanseg", "kornia"],
+        "install_cmd": "pip install 'kintsugi[dl]'",
+    },
+    "analysis": {
+        "description": "Spatial analysis (scanpy, scimap)",
+        "packages": ["scanpy", "anndata", "phenograph", "scimap"],
+        "install_cmd": "pip install 'kintsugi[analysis]'",
+        "conda_cmd": "conda install scanpy anndata -c conda-forge && pip install scimap phenograph",
+    },
+    "bio": {
+        "description": "Bio formats I/O (OME-TIFF, LIF, etc.)",
+        "packages": ["aicsimageio", "bioio", "ome-zarr", "slideio"],
+        "install_cmd": "pip install 'kintsugi[bio]'",
+    },
+    "full": {
+        "description": "All optional features",
+        "packages": [],  # Composite group
+        "install_cmd": "pip install 'kintsugi[full]'",
+    },
+}
+
+# Mapping of notebooks to required optional groups
+NOTEBOOK_REQUIREMENTS = {
+    "1_Single_Channel_Eval": ["gpu"],
+    "2_Cycle_Processing": ["gpu"],
+    "3_Signal_Isolation": [],  # Core only
+    "4_Segmentation_Analysis": ["dl", "viz", "analysis"],
+    "5_Cluster_Analysis": ["analysis"],
+    "5_DL_Channel_Refinement": [],  # Core only
+    "Image_Registration_Workflow": [],  # Core only
+    "Vessel_Analysis": ["viz", "analysis"],
+}
+
+
+class MissingDependencyError(Exception):
+    """Raised when required dependencies are not installed."""
+
+    def __init__(self, missing: list[str], groups: list[str], install_hint: str):
+        self.missing = missing
+        self.groups = groups
+        self.install_hint = install_hint
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        lines = [
+            "",
+            "=" * 70,
+            "MISSING DEPENDENCIES",
+            "=" * 70,
+            "",
+            f"The following packages are required but not installed:",
+            "",
+        ]
+        for pkg in self.missing:
+            lines.append(f"  - {pkg}")
+        lines.extend([
+            "",
+            "To install, run:",
+            "",
+            f"  {self.install_hint}",
+            "",
+            "Or install all optional dependencies:",
+            "",
+            "  pip install 'kintsugi[full]'",
+            "",
+            "=" * 70,
+        ])
+        return "\n".join(lines)
+
+
+def _check_package(package: str) -> bool:
+    """Check if a package is importable."""
+    import_name = package.replace("-", "_")
+    # Handle special cases
+    if package == "scikit-image":
+        import_name = "skimage"
+    elif package == "scikit-learn":
+        import_name = "sklearn"
+    elif package == "opencv-contrib-python-headless":
+        import_name = "cv2"
+    elif package == "cupy-cuda12x":
+        import_name = "cupy"
+
+    try:
+        __import__(import_name)
+        return True
+    except ImportError:
+        return False
+
+
+def require(
+    *groups: str,
+    notebook: str | None = None,
+    strict: bool = True,
+) -> dict[str, bool]:
+    """
+    Check that required optional dependencies are installed.
+
+    Use this at the top of notebooks to ensure all required packages
+    are available before running. If dependencies are missing, raises
+    a clear error with installation instructions.
+
+    Parameters
+    ----------
+    *groups : str
+        Optional dependency groups to check: 'gpu', 'viz', 'dl', 'analysis', 'bio'
+    notebook : str, optional
+        Notebook name to auto-detect required groups (e.g., '4_Segmentation_Analysis')
+    strict : bool, default True
+        If True, raise MissingDependencyError when dependencies are missing.
+        If False, print a warning and return status dict.
+
+    Returns
+    -------
+    dict[str, bool]
+        Dictionary mapping package names to availability status.
+
+    Raises
+    ------
+    MissingDependencyError
+        If strict=True and any required packages are missing.
+
+    Examples
+    --------
+    At the top of a notebook:
+
+    >>> from kintsugi.deps import require
+    >>> require('gpu', 'viz')  # Check specific groups
+
+    Or auto-detect from notebook name:
+
+    >>> require(notebook='4_Segmentation_Analysis')  # Checks dl, viz, analysis
+    """
+    # Auto-detect groups from notebook name
+    if notebook:
+        detected_groups = NOTEBOOK_REQUIREMENTS.get(notebook, [])
+        groups = tuple(set(groups) | set(detected_groups))
+
+    if not groups:
+        return {}
+
+    # Expand 'full' group
+    if "full" in groups:
+        groups = tuple(set(groups) | {"gpu", "viz", "dl", "analysis", "bio"} - {"full"})
+
+    # Collect all packages to check
+    packages_to_check = set()
+    for group in groups:
+        if group in OPTIONAL_GROUPS:
+            packages_to_check.update(OPTIONAL_GROUPS[group]["packages"])
+
+    # Check each package
+    status = {}
+    missing = []
+    for pkg in packages_to_check:
+        available = _check_package(pkg)
+        status[pkg] = available
+        if not available:
+            missing.append(pkg)
+
+    if missing:
+        # Build install hint
+        install_cmds = []
+        for group in groups:
+            if group in OPTIONAL_GROUPS:
+                install_cmds.append(OPTIONAL_GROUPS[group]["install_cmd"])
+        install_hint = " && ".join(install_cmds) if install_cmds else "pip install 'kintsugi[full]'"
+
+        if strict:
+            raise MissingDependencyError(missing, list(groups), install_hint)
+        else:
+            print(f"\n⚠️  Warning: Missing optional dependencies: {', '.join(missing)}")
+            print(f"   Install with: {install_hint}\n")
+
+    return status
+
+
+def install_optional(
+    group: Literal["gpu", "viz", "dl", "analysis", "bio", "full"],
+    use_conda: bool = False,
+) -> bool:
+    """
+    Install optional dependency group.
+
+    Parameters
+    ----------
+    group : str
+        Group to install: 'gpu', 'viz', 'dl', 'analysis', 'bio', or 'full'
+    use_conda : bool, default False
+        Use conda instead of pip where available.
+
+    Returns
+    -------
+    bool
+        True if installation succeeded.
+
+    Examples
+    --------
+    >>> from kintsugi.deps import install_optional
+    >>> install_optional('gpu')  # Install GPU support
+    >>> install_optional('viz', use_conda=True)  # Install Napari via conda
+    """
+    if group not in OPTIONAL_GROUPS:
+        print(f"Unknown group: {group}")
+        print(f"Available groups: {', '.join(OPTIONAL_GROUPS.keys())}")
+        return False
+
+    info = OPTIONAL_GROUPS[group]
+    print(f"\nInstalling {group}: {info['description']}")
+    print("-" * 50)
+
+    if use_conda and "conda_cmd" in info:
+        cmd = info["conda_cmd"]
+    else:
+        cmd = info["install_cmd"]
+
+    print(f"Running: {cmd}\n")
+
+    try:
+        result = subprocess.run(cmd, shell=True, check=True)
+        print(f"\n✓ Successfully installed {group} dependencies")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"\n✗ Failed to install {group}: {e}")
+        return False
+
+
+# =============================================================================
+# Full Dependency Checker (for CLI)
+# =============================================================================
+
 class DependencyChecker:
     """
     Validates all KINTSUGI dependencies at runtime.
@@ -45,7 +302,6 @@ class DependencyChecker:
     Checks:
     - Python packages (core and optional)
     - Native libraries (libvips)
-    - Java runtime and Maven
     - CUDA/GPU availability
     """
 
@@ -79,9 +335,6 @@ class DependencyChecker:
         # Native libraries
         self._check_libvips(verbose)
 
-        # Java/Maven
-        self._check_java(verbose)
-
         # GPU/CUDA
         self._check_cuda(verbose)
 
@@ -104,7 +357,7 @@ class DependencyChecker:
             ("pandas", "2.0.0"),
             ("scikit-image", "0.21.0"),
             ("scikit-learn", "1.3.0"),
-            ("opencv-python", None),  # opencv-contrib-python-headless
+            ("opencv-python", None),
             ("tifffile", "2023.7.0"),
             ("matplotlib", "3.7.0"),
             ("zarr", "2.16.0"),
@@ -121,23 +374,16 @@ class DependencyChecker:
                 self._print_result(result)
 
     def _check_optional_packages(self, verbose: bool):
-        """Check optional Python package dependencies."""
+        """Check optional Python package dependencies by group."""
         if verbose:
             print("\n[Optional Packages]")
 
+        # Group packages with their group names
         optional_packages = [
-            # Image processing (require native libraries)
-            ("valis-wsi", "1.2.0", "registration"),
-            ("pyvips", "2.2.0", "imaging"),
-            ("stackview", "0.18.0", "viz"),
             # GPU
             ("torch", "2.0.0", "gpu"),
             ("torchvision", "0.15.0", "gpu"),
             ("cupy", None, "gpu"),
-            # Java (DEPRECATED - no longer required)
-            ("jpype1", "1.5.0", "java-deprecated"),
-            ("scyjava", "1.0.0", "java-deprecated"),
-            ("pyimagej", "1.4.0", "java-deprecated"),
             # Visualization
             ("napari", "0.4.19", "viz"),
             ("magicgui", "0.7.0", "viz"),
@@ -148,10 +394,15 @@ class DependencyChecker:
             ("scanpy", "1.9.0", "analysis"),
             ("anndata", "0.9.0", "analysis"),
             ("phenograph", "1.5.0", "analysis"),
+            ("scimap", None, "analysis"),
             # Bio formats
             ("aicsimageio", None, "bio"),
             ("ome-types", "0.5.0", "bio"),
-            ("slideio", "2.6.0", "bio"),
+            ("ome-zarr", None, "bio"),
+            # Image processing
+            ("valis-wsi", "1.2.0", "core"),
+            ("pyvips", "2.2.0", "core"),
+            ("stackview", "0.18.0", "viz"),
         ]
 
         for package, min_version, group in optional_packages:
@@ -165,7 +416,6 @@ class DependencyChecker:
         self, package: str, min_version: str | None, optional: bool = False
     ) -> DependencyResult:
         """Check if a Python package is installed and meets version requirements."""
-        # Handle package name variations
         import_name = package.replace("-", "_").replace("opencv_python", "cv2")
         if package == "scikit-image":
             import_name = "skimage"
@@ -179,10 +429,8 @@ class DependencyChecker:
             version = getattr(module, "__version__", None)
 
             if version is None:
-                # Try importlib.metadata
                 try:
                     from importlib.metadata import version as get_version
-
                     version = get_version(package)
                 except Exception:
                     version = "unknown"
@@ -190,7 +438,6 @@ class DependencyChecker:
             # Version comparison
             if min_version and version != "unknown":
                 from packaging.version import parse
-
                 if parse(version) < parse(min_version):
                     return DependencyResult(
                         name=package,
@@ -235,7 +482,6 @@ class DependencyChecker:
         try:
             import pyvips
 
-            # Try to get version (this validates the native library)
             version = pyvips.version(0)
             minor = pyvips.version(1)
             micro = pyvips.version(2)
@@ -257,174 +503,13 @@ class DependencyChecker:
                 message=str(e),
                 details={
                     "hint": "Install libvips: conda install -c conda-forge libvips "
-                    "or download from Zenodo"
+                    "or download from Zenodo (Windows)"
                 },
             )
 
         self.results.append(result)
         if verbose:
             self._print_result(result)
-
-    def _check_java(self, verbose: bool):
-        """Check Java runtime and Maven availability.
-
-        .. deprecated::
-            Java/Maven dependencies are no longer required. KINTSUGI now uses
-            pure Python implementations (CuPy/NumPy) for all processing.
-        """
-        if verbose:
-            print("\n[Java/Maven] (DEPRECATED - no longer required)")
-
-        # Check Java
-        java_result = self._check_java_runtime()
-        java_result.details["deprecated"] = True
-        java_result.message = "(deprecated) " + java_result.message if java_result.message else "(deprecated)"
-        self.results.append(java_result)
-        if verbose:
-            self._print_result(java_result)
-
-        # Check Maven
-        maven_result = self._check_maven()
-        maven_result.details["deprecated"] = True
-        maven_result.message = "(deprecated) " + maven_result.message if maven_result.message else "(deprecated)"
-        self.results.append(maven_result)
-        if verbose:
-            self._print_result(maven_result)
-
-        # Check JPype JVM
-        jpype_result = self._check_jpype()
-        jpype_result.details["deprecated"] = True
-        jpype_result.message = "(deprecated) " + jpype_result.message if jpype_result.message else "(deprecated)"
-        self.results.append(jpype_result)
-        if verbose:
-            self._print_result(jpype_result)
-
-    def _check_java_runtime(self) -> DependencyResult:
-        """Check if Java runtime is available."""
-        try:
-            # Check JAVA_HOME
-            java_home = os.environ.get("JAVA_HOME", "")
-
-            # Try to run java -version
-            java_cmd = shutil.which("java")
-            if java_cmd:
-                result = subprocess.run(
-                    [java_cmd, "-version"], capture_output=True, text=True, timeout=10
-                )
-                # Java version info goes to stderr
-                output = result.stderr or result.stdout
-                version_line = output.split("\n")[0] if output else ""
-
-                return DependencyResult(
-                    name="java",
-                    status=DependencyStatus.OK,
-                    version=version_line,
-                    message="",
-                    is_optional=True,
-                    details={"java_home": java_home, "path": java_cmd},
-                )
-
-            return DependencyResult(
-                name="java",
-                status=DependencyStatus.OPTIONAL_MISSING,
-                message="Java not found in PATH",
-                is_optional=True,
-                details={"java_home": java_home},
-            )
-
-        except Exception as e:
-            return DependencyResult(
-                name="java",
-                status=DependencyStatus.ERROR,
-                message=str(e),
-                is_optional=True,
-            )
-
-    def _check_maven(self) -> DependencyResult:
-        """Check if Maven is available."""
-        try:
-            mvn_cmd = shutil.which("mvn")
-            if mvn_cmd:
-                result = subprocess.run(
-                    [mvn_cmd, "--version"], capture_output=True, text=True, timeout=10
-                )
-                output = result.stdout or ""
-                version_line = output.split("\n")[0] if output else ""
-
-                return DependencyResult(
-                    name="maven",
-                    status=DependencyStatus.OK,
-                    version=version_line,
-                    message="",
-                    is_optional=True,
-                    details={"path": mvn_cmd},
-                )
-
-            return DependencyResult(
-                name="maven",
-                status=DependencyStatus.OPTIONAL_MISSING,
-                message="Maven not found in PATH",
-                is_optional=True,
-            )
-
-        except Exception as e:
-            return DependencyResult(
-                name="maven",
-                status=DependencyStatus.ERROR,
-                message=str(e),
-                is_optional=True,
-            )
-
-    def _check_jpype(self) -> DependencyResult:
-        """Check JPype JVM integration."""
-        try:
-            import jpype
-
-            if jpype.isJVMStarted():
-                jvm_path = jpype.getDefaultJVMPath()
-                return DependencyResult(
-                    name="jpype-jvm",
-                    status=DependencyStatus.OK,
-                    version=jpype.__version__,
-                    message="JVM running",
-                    is_optional=True,
-                    details={"jvm_path": jvm_path, "jvm_started": True},
-                )
-            else:
-                # Try to get default JVM path without starting
-                try:
-                    jvm_path = jpype.getDefaultJVMPath()
-                    return DependencyResult(
-                        name="jpype-jvm",
-                        status=DependencyStatus.OK,
-                        version=jpype.__version__,
-                        message="JVM available (not started)",
-                        is_optional=True,
-                        details={"jvm_path": jvm_path, "jvm_started": False},
-                    )
-                except Exception as e:
-                    return DependencyResult(
-                        name="jpype-jvm",
-                        status=DependencyStatus.OPTIONAL_MISSING,
-                        version=jpype.__version__,
-                        message=f"JVM not found: {e}",
-                        is_optional=True,
-                    )
-
-        except ImportError:
-            return DependencyResult(
-                name="jpype-jvm",
-                status=DependencyStatus.OPTIONAL_MISSING,
-                message="JPype not installed",
-                is_optional=True,
-            )
-        except Exception as e:
-            return DependencyResult(
-                name="jpype-jvm",
-                status=DependencyStatus.ERROR,
-                message=str(e),
-                is_optional=True,
-            )
 
     def _check_cuda(self, verbose: bool):
         """Check CUDA/GPU availability."""
@@ -464,6 +549,7 @@ class DependencyChecker:
                 status=DependencyStatus.OPTIONAL_MISSING,
                 message="PyTorch not installed",
                 is_optional=True,
+                details={"hint": "Install with: kintsugi install gpu"},
             )
         except Exception as e:
             result = DependencyResult(
@@ -477,9 +563,38 @@ class DependencyChecker:
         if verbose:
             self._print_result(result)
 
+        # Check CuPy
+        try:
+            import cupy
+            result = DependencyResult(
+                name="cupy",
+                status=DependencyStatus.OK,
+                version=cupy.__version__,
+                message="GPU acceleration available",
+                is_optional=True,
+            )
+        except ImportError:
+            result = DependencyResult(
+                name="cupy",
+                status=DependencyStatus.OPTIONAL_MISSING,
+                message="CuPy not installed (CPU fallback available)",
+                is_optional=True,
+                details={"hint": "Install with: kintsugi install gpu"},
+            )
+        except Exception as e:
+            result = DependencyResult(
+                name="cupy",
+                status=DependencyStatus.ERROR,
+                message=str(e),
+                is_optional=True,
+            )
+
+        self.results.append(result)
+        if verbose:
+            self._print_result(result)
+
     def _print_result(self, result: DependencyResult):
         """Print a single dependency check result."""
-        # Status symbols
         symbols = {
             DependencyStatus.OK: "[OK]",
             DependencyStatus.MISSING: "[MISSING]",
@@ -490,9 +605,10 @@ class DependencyChecker:
 
         symbol = symbols.get(result.status, "[?]")
         version_str = f" v{result.version}" if result.version else ""
+        group_str = f" ({result.details.get('group', '')})" if result.details.get('group') else ""
         optional_str = " (optional)" if result.is_optional else ""
 
-        print(f"  {symbol:10} {result.name}{version_str}{optional_str}")
+        print(f"  {symbol:10} {result.name}{version_str}{group_str}{optional_str}")
 
         if result.message and result.status not in (
             DependencyStatus.OK,
@@ -515,6 +631,17 @@ class DependencyChecker:
         )
         optional_total = sum(1 for r in self.results if r.is_optional)
 
+        # Group optional packages by group
+        groups_status = {}
+        for r in self.results:
+            if r.is_optional and "group" in r.details:
+                group = r.details["group"]
+                if group not in groups_status:
+                    groups_status[group] = {"ok": 0, "total": 0}
+                groups_status[group]["total"] += 1
+                if r.status == DependencyStatus.OK:
+                    groups_status[group]["ok"] += 1
+
         summary = {
             "required": {
                 "passed": required_ok,
@@ -525,6 +652,7 @@ class DependencyChecker:
                 "passed": optional_ok,
                 "total": optional_total,
             },
+            "groups": groups_status,
             "all_required_ok": required_ok == required_total,
             "results": [
                 {
@@ -532,6 +660,7 @@ class DependencyChecker:
                     "status": r.status.value,
                     "version": r.version,
                     "optional": r.is_optional,
+                    "group": r.details.get("group"),
                 }
                 for r in self.results
             ],
@@ -544,13 +673,25 @@ class DependencyChecker:
             print(f"  Required: {required_ok}/{required_total} passed")
             print(f"  Optional: {optional_ok}/{optional_total} available")
 
+            print("\n  Optional groups:")
+            for group, status in groups_status.items():
+                checkmark = "✓" if status["ok"] == status["total"] else "○"
+                print(f"    {checkmark} {group}: {status['ok']}/{status['total']}")
+
             if required_missing:
                 print("\n  Missing required dependencies:")
                 for name in required_missing:
                     print(f"    - {name}")
-                print("\n  Install with: pip install kintsugi[full]")
+                print("\n  Install with: pip install -e .")
             else:
-                print("\n  All required dependencies satisfied!")
+                print("\n  ✓ All required dependencies satisfied!")
+
+            print("\n  To install optional features:")
+            print("    kintsugi install gpu       # GPU acceleration")
+            print("    kintsugi install viz       # Napari visualization")
+            print("    kintsugi install analysis  # Spatial analysis")
+            print("    kintsugi install dl        # Deep learning")
+            print("    kintsugi install full      # All features")
 
         return summary
 

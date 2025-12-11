@@ -199,6 +199,35 @@ def info():
     console.print(table)
 
 
+@main.command()
+@click.argument("group", type=click.Choice(["gpu", "viz", "dl", "analysis", "bio", "full"]))
+@click.option("--conda", is_flag=True, help="Use conda instead of pip where available")
+def install(group: str, conda: bool):
+    """
+    Install optional dependency groups.
+
+    \b
+    Available groups:
+      gpu       GPU acceleration (PyTorch + CuPy for CUDA)
+      viz       Napari interactive visualization
+      dl        Deep learning segmentation (InstanSeg)
+      analysis  Spatial analysis (scanpy, scimap)
+      bio       Bio formats I/O (OME-TIFF, LIF, etc.)
+      full      All optional features
+
+    \b
+    Examples:
+      kintsugi install gpu        # Install GPU support
+      kintsugi install viz --conda  # Install Napari via conda
+      kintsugi install full       # Install all optional features
+    """
+    from kintsugi.deps import install_optional
+
+    success = install_optional(group, use_conda=conda)
+    if not success:
+        raise SystemExit(1)
+
+
 # Standalone entry points
 def check_dependencies():
     """Entry point for kintsugi-check command."""

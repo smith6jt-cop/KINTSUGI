@@ -1,154 +1,89 @@
 name: KINTSUGI
 channels:
-  - pytorch
-  - nvidia/label/cuda-12.4.0
   - conda-forge
   - defaults
 
+# =============================================================================
+# KINTSUGI Base Environment for Linux
+# =============================================================================
+# This is the ONLY environment file needed for Linux installation.
+# Optional features (GPU, Napari, Deep Learning) are installed via pip after
+# environment creation. See README.md for details.
+#
+# Installation:
+#   conda env create -f envs/env-linux.yml
+#   conda activate KINTSUGI
+#   pip install -e .
+#
+# Optional features (run after base install):
+#   kintsugi install gpu        # GPU acceleration (PyTorch + CuPy)
+#   kintsugi install viz        # Napari visualization
+#   kintsugi install analysis   # Spatial analysis (scanpy, scimap)
+#   kintsugi install dl         # Deep learning segmentation
+#   kintsugi install full       # All optional features
+# =============================================================================
+
 dependencies:
-  # Core Python Environment
+  # Core Python
   - python=3.10
   - pip
   - setuptools
   - wheel
 
-  # Essential System Libraries (Linux)
-  - ca-certificates
-  - certifi
-  - openssl
-  - libffi
-  - zlib
-  - libgcc-ng
-  - libstdcxx-ng
-
   # Core Scientific Computing
-  - numpy=1.26
+  - numpy>=1.24,<2.0
   - scipy
   - pandas
   - scikit-learn
   - scikit-image
   - matplotlib
   - seaborn
-  - networkx
-  - statsmodels
 
-  # Image Processing Core
-  - pyimagej
+  # Image Processing
   - tifffile
   - imageio
   - pillow
-  - simpleitk
-  - libvips  # Native library for Linux
-
-  # CUDA/GPU Support
-  - cudnn
-  - cuda-runtime
-  - cuda-libraries
-  - pytorch-mutex=1.0
-  - pytorch
-  - torchvision
-  - cupy
-
-  # Napari Core
-  - napari=0.4.19
-  - napari-plugin-engine
-  - vispy
-  - pyqt=5.15
-  - qt-main=5.15
-
-  # Essential Napari Plugins
-  - napari-console
-  - napari-crop
-  - napari-simpleitk-image-processing
-  - napari-skimage-regionprops
+  - libvips
 
   # Jupyter Environment
-  - jupyter
-  - jupyter_core
-  - jupyter_client
   - jupyterlab
-  - notebook
-  - ipykernel
-  - ipython
   - ipywidgets
+  - ipykernel
 
-  # Java/ImageJ Integration (DEPRECATED - no longer required)
-  # Uncomment if you need legacy CLIJ2 support:
-  # - openjdk=11
-  # - maven
-  # - jpype1
-
-  # Machine Learning/Analysis Core
-  - dask-core
-  - numba
-  - umap-learn
-  - scanpy
-  - anndata
-  - hdbscan
-
-  # File I/O and Data Handling
+  # Data Handling
   - h5py
   - zarr
-  - xarray
-  - fsspec
+  - dask-core
   - tqdm
   - pyyaml
-  - toml
   - openpyxl
 
-  # Essential Utilities
+  # Utilities
   - click
   - packaging
   - requests
   - psutil
-  - joblib
   - natsort
+  - numba
 
-  # OpenCL for GPU processing
-  - pyopencl
-  - opencl-headers
-  - ocl-icd
-
-  # Pip packages
+  # Pip packages (core only)
   - pip:
-    # Install KINTSUGI as editable package
+    # KINTSUGI package (editable install)
     - -e ..
 
-    # Core image processing extensions
-    - valis-wsi==1.2.0
-    - basicpy==1.2.0
-    - aicsimageio==3.3.1
-    - bioio==3.0.0
-    - bioio-ome-tiff==1.4.0
-    - ome-types==0.6.1
-    - ome-zarr==0.11.1
-    - slideio==2.7.1
-    - readlif==0.6.5
-    - opencv-contrib-python-headless==4.9.0.80
-    - pyvips==2.2.3
+    # Core image processing
+    - valis-wsi>=1.2.0
+    - basicpy>=1.2.0
+    - opencv-contrib-python-headless>=4.9.0
+    - pyvips>=2.2.3
 
-    # InstanSeg segmentation
-    - instanseg==0.0.2
-    - instanseg-torch==0.0.9
-    - kornia==0.8.1
-
-    # Napari plugin for segmentation
-    - napari-segment-blobs-and-things-with-membranes==0.3.11
-
-    # Analysis tools
-    - phenograph==1.5.7
-    - scimap==0.0.1
-    - combat==0.3.3
-    - fast-histogram==0.14
-    - fastremap==1.17.1
+    # Bio formats (lightweight)
+    - ome-types>=0.6.1
 
     # Visualization
-    - plotly==6.2.0
-    - stackview==0.18.0
-    - palettable==3.3.3
+    - stackview>=0.18.0
+    - rich>=13.9.4
 
     # Utilities
-    - rich==13.9.4
-    - tenacity==9.1.2
-    - pqdm==0.2.0
-    - weightedstats==0.4.1
+    - tenacity>=9.1.2
+    - pqdm>=0.2.0

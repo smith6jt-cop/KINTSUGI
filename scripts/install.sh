@@ -7,9 +7,7 @@
 #
 # Options:
 #   --env-name NAME     Environment name (default: KINTSUGI)
-#   --no-gpu            Skip GPU/CUDA installation
-#   --minimal           Use minimal environment (fewer dependencies)
-#   --dev               Include development dependencies
+#   --features LIST     Comma-separated features to install (gpu,viz,dl,analysis,bio,full)
 #   --skip-validate     Skip dependency validation after install
 #   --help              Show this help message
 #
@@ -18,9 +16,7 @@ set -e  # Exit on error
 
 # Default values
 ENV_NAME="KINTSUGI"
-USE_GPU=true
-MINIMAL=false
-DEV=false
+FEATURES=""
 SKIP_VALIDATE=false
 
 # Colors for output
@@ -55,7 +51,24 @@ print_info() {
 
 # Show help
 show_help() {
-    head -20 "$0" | tail -17 | sed 's/^# //'
+    cat << EOF
+KINTSUGI Installation Script
+
+Usage: ./scripts/install.sh [OPTIONS]
+
+Options:
+  --env-name NAME     Environment name (default: KINTSUGI)
+  --features LIST     Comma-separated features to install after base
+                      Available: gpu, viz, dl, analysis, bio, full
+  --skip-validate     Skip dependency validation after install
+  --help              Show this help message
+
+Examples:
+  ./scripts/install.sh                          # Base install only
+  ./scripts/install.sh --features gpu           # Base + GPU support
+  ./scripts/install.sh --features gpu,viz,dl    # Base + multiple features
+  ./scripts/install.sh --features full          # Base + all features
+EOF
     exit 0
 }
 
@@ -66,17 +79,9 @@ while [[ $# -gt 0 ]]; do
             ENV_NAME="$2"
             shift 2
             ;;
-        --no-gpu)
-            USE_GPU=false
-            shift
-            ;;
-        --minimal)
-            MINIMAL=true
-            shift
-            ;;
-        --dev)
-            DEV=true
-            shift
+        --features)
+            FEATURES="$2"
+            shift 2
             ;;
         --skip-validate)
             SKIP_VALIDATE=true
@@ -100,8 +105,7 @@ print_header "KINTSUGI Installation"
 echo ""
 print_info "Project directory: $PROJECT_DIR"
 print_info "Environment name: $ENV_NAME"
-print_info "GPU support: $USE_GPU"
-print_info "Minimal install: $MINIMAL"
+print_info "Features: ${FEATURES:-none (base only)}"
 echo ""
 
 # Detect OS
@@ -114,9 +118,21 @@ case "$OS" in
     Darwin*)
         PLATFORM="macos"
         ENV_FILE="envs/env-macos.yml"
+        # Check for libvips on macOS
+        if ! command -v vips &> /dev/null; then
+            print_warning "libvips not found. Installing via Homebrew..."
+            if command -v brew &> /dev/null; then
+                brew install vips
+            else
+                print_error "Homebrew not found. Please install libvips manually:"
+                print_error "  brew install vips"
+                exit 1
+            fi
+        fi
         ;;
     *)
         print_error "Unsupported operating system: $OS"
+        print_error "Use install.ps1 for Windows"
         exit 1
         ;;
 esac
@@ -124,8 +140,8 @@ print_info "Detected platform: $PLATFORM"
 
 # Check for conda
 if ! command -v conda &> /dev/null; then
-    print_error "Conda not found. Please install Miniconda or Anaconda first."
-    print_info "Download from: https://www.anaconda.com/download/success#miniconda"
+    print_error "Conda not found. Please install Miniconda or Miniforge first."
+    print_info "Download from: https://github.com/conda-forge/miniforge"
     exit 1
 fi
 print_success "Conda found: $(conda --version)"
@@ -147,11 +163,6 @@ if conda env list | grep -q "^$ENV_NAME "; then
     fi
 fi
 
-# Select environment file
-if [ "$MINIMAL" = true ]; then
-    ENV_FILE="env_streamlined.yml"
-fi
-
 print_header "Creating Conda Environment"
 cd "$PROJECT_DIR"
 
@@ -166,50 +177,35 @@ fi
 print_success "Conda environment created/updated"
 
 # Activate environment
-print_header "Installing KINTSUGI Package"
+print_header "Activating Environment"
 conda activate "$ENV_NAME"
 print_success "Environment activated: $ENV_NAME"
 
-# Install KINTSUGI as editable package
-print_info "Installing KINTSUGI package..."
-if [ "$DEV" = true ]; then
-    pip install -e ".[dev]"
-else
-    pip install -e .
+# Install optional features if specified
+if [ -n "$FEATURES" ]; then
+    print_header "Installing Optional Features"
+
+    # Split features by comma
+    IFS=',' read -ra FEATURE_ARRAY <<< "$FEATURES"
+
+    for feature in "${FEATURE_ARRAY[@]}"; do
+        feature=$(echo "$feature" | xargs)  # Trim whitespace
+        print_info "Installing feature: $feature"
+        kintsugi install "$feature" || {
+            print_warning "Failed to install $feature, continuing..."
+        }
+    done
 fi
-print_success "KINTSUGI package installed"
 
 # Validate installation
 if [ "$SKIP_VALIDATE" = false ]; then
     print_header "Validating Installation"
 
-    # Run dependency check
     print_info "Checking dependencies..."
-    python -c "from kintsugi import check_dependencies; check_dependencies()" || {
+    kintsugi check || {
         print_warning "Some optional dependencies may be missing."
-        print_info "This is normal for minimal installations."
+        print_info "Install them with: kintsugi install <feature>"
     }
-
-    # Test basic imports
-    print_info "Testing basic imports..."
-    python -c "
-import kintsugi
-print(f'KINTSUGI version: {kintsugi.__version__}')
-
-# Test pyvips
-try:
-    import pyvips
-    v = pyvips.version(0)
-    print(f'libvips version: {v}.{pyvips.version(1)}.{pyvips.version(2)}')
-except Exception as e:
-    print(f'libvips: Not available ({e})')
-
-# Test numpy
-import numpy as np
-print(f'NumPy version: {np.__version__}')
-
-print('Basic imports successful!')
-" && print_success "Import test passed" || print_warning "Some imports failed"
 fi
 
 print_header "Installation Complete!"
@@ -220,9 +216,10 @@ echo ""
 print_info "To verify installation:"
 echo "    kintsugi check"
 echo ""
-print_info "To see available commands:"
-echo "    kintsugi --help"
-echo ""
-print_info "For Windows users: Download additional dependencies from Zenodo:"
-echo "    https://zenodo.org/records/14969214"
+print_info "To install optional features:"
+echo "    kintsugi install gpu       # GPU acceleration"
+echo "    kintsugi install viz       # Napari visualization"
+echo "    kintsugi install analysis  # Spatial analysis"
+echo "    kintsugi install dl        # Deep learning"
+echo "    kintsugi install full      # All features"
 echo ""

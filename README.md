@@ -19,12 +19,11 @@ Smith, J. A. et al. Protocol for processing and analyzing multiplexed images imp
 ## Table of Contents
 
 - [Installation](#installation)
-  - [Quick Start (All Platforms)](#quick-start-all-platforms)
-  - [Windows Installation](#windows-installation)
-  - [Linux Installation](#linux-installation)
-  - [macOS Installation](#macos-installation)
-  - [Verify Installation](#verify-installation)
-- [External Dependencies](#external-dependencies)
+  - [Linux](#linux)
+  - [Windows](#windows)
+  - [macOS](#macos)
+  - [Optional Features](#optional-features)
+- [Verify Installation](#verify-installation)
 - [Usage](#usage)
   - [Command Line Interface](#command-line-interface)
   - [Python API](#python-api)
@@ -34,131 +33,101 @@ Smith, J. A. et al. Protocol for processing and analyzing multiplexed images imp
 
 ## Installation
 
-### Quick Start (All Platforms)
+KINTSUGI uses a streamlined base installation with optional feature groups that can be added as needed. This ensures fast environment creation and avoids dependency conflicts.
 
-1. **Install Miniconda** (if not already installed):
-   - Download from [Anaconda](https://www.anaconda.com/download/success#miniconda)
-   - Follow platform-specific installation instructions
+### Linux
 
-2. **Clone and Install KINTSUGI**:
 ```bash
-# Clone the repository
+# 1. Clone the repository
 git clone https://github.com/smith6jt-cop/KINTSUGI.git
 cd KINTSUGI
 
-# Create conda environment (choose your platform)
-# Linux:
+# 2. Create the base conda environment
 conda env create -f envs/env-linux.yml
 
-# Windows:
-conda env create -f envs/env-windows.yml
-
-# macOS:
-conda env create -f envs/env-macos.yml
-
-# Activate and install package
+# 3. Activate and verify
 conda activate KINTSUGI
-pip install -e .
-```
-
-3. **Verify Installation**:
-```bash
 kintsugi check
 ```
 
-### Windows Installation
+### Windows
 
-#### Option A: Using Installation Script (Recommended)
 ```powershell
-# Open PowerShell as Administrator
-cd C:\Users\[your username]
+# 1. Clone the repository
 git clone https://github.com/smith6jt-cop/KINTSUGI.git
 cd KINTSUGI
 
-# Run installation script
-.\scripts\install.ps1
-```
-
-#### Option B: Manual Installation
-```powershell
-# Open Anaconda Prompt
-conda update -n base conda
-conda install -n base conda-libmamba-solver
-conda config --set solver libmamba
-
-# Clone repository
-cd C:\Users\[your username]
-git clone https://github.com/smith6jt-cop/KINTSUGI.git
-cd KINTSUGI
-
-# Create environment
+# 2. Create the base conda environment
 conda env create -f envs/env-windows.yml
+
+# 3. Activate
 conda activate KINTSUGI
 
-# Install KINTSUGI package
-pip install -e .
+# 4. Download and install libvips (REQUIRED for Windows)
+#    Download PyVips-dev from: https://zenodo.org/records/14969214
+#    Extract to the KINTSUGI folder
+
+# 5. Verify installation
+kintsugi check
 ```
 
-#### Download Windows Dependencies
-Windows requires additional binary dependencies from Zenodo:
-- Download from: [https://zenodo.org/records/14969214](https://zenodo.org/records/14969214)
-- Extract to the KINTSUGI folder:
-  - `PyVips-dev-8.16` (required for image I/O)
-
-> **Note:** Java, Maven, and FIJI are no longer required. KINTSUGI now uses
-> pure Python implementations (CuPy/NumPy) for all processing including EDF.
-
-#### GPU Acceleration (Optional)
-For GPU-accelerated deconvolution, install CuPy for your CUDA version:
-```bash
-# For CUDA 11.x
-pip install cupy-cuda11x
-
-# For CUDA 12.x
-pip install cupy-cuda12x
-```
-
-### Linux Installation
-
-#### Option A: Using Installation Script (Recommended)
-```bash
-git clone https://github.com/smith6jt-cop/KINTSUGI.git
-cd KINTSUGI
-chmod +x scripts/install.sh
-./scripts/install.sh
-```
-
-#### Option B: Manual Installation
-```bash
-# Install system dependencies (Java/Maven no longer required)
-sudo apt-get update
-sudo apt-get install -y libvips-dev
-
-# Clone and setup
-git clone https://github.com/smith6jt-cop/KINTSUGI.git
-cd KINTSUGI
-
-conda env create -f envs/env-linux.yml
-conda activate KINTSUGI
-pip install -e .
-```
-
-### macOS Installation
+### macOS
 
 ```bash
-# Install system dependencies (Java/Maven no longer required)
+# 1. Install libvips (required)
 brew install vips
 
-# Clone and setup
+# 2. Clone the repository
 git clone https://github.com/smith6jt-cop/KINTSUGI.git
 cd KINTSUGI
 
+# 3. Create the base conda environment
 conda env create -f envs/env-macos.yml
+
+# 4. Activate and verify
 conda activate KINTSUGI
-pip install -e .
+kintsugi check
 ```
 
-### Verify Installation
+### Optional Features
+
+After installing the base environment, add optional features as needed using the `kintsugi install` command:
+
+```bash
+# GPU acceleration (PyTorch + CuPy for CUDA)
+kintsugi install gpu
+
+# Napari interactive visualization
+kintsugi install viz
+
+# Deep learning segmentation (InstanSeg)
+kintsugi install dl
+
+# Spatial analysis (scanpy, scimap)
+kintsugi install analysis
+
+# Bio formats I/O (OME-TIFF, LIF, etc.)
+kintsugi install bio
+
+# All optional features
+kintsugi install full
+```
+
+**Feature Requirements by Notebook:**
+
+| Notebook | Required Features |
+|----------|-------------------|
+| 1_Single_Channel_Eval | `gpu` |
+| 2_Cycle_Processing | `gpu` |
+| 3_Signal_Isolation | None (base) |
+| 4_Segmentation_Analysis | `dl`, `viz`, `analysis` |
+| 5_Cluster_Analysis | `analysis` |
+| Image_Registration_Workflow | None (base) |
+| Vessel_Analysis | `viz`, `analysis` |
+
+Each notebook will check for required dependencies at startup and provide installation instructions if anything is missing.
+
+## Verify Installation
 
 After installation, verify everything is working:
 
@@ -175,13 +144,12 @@ kintsugi template -o my_config.json
 
 ## External Dependencies
 
-KINTSUGI relies on several external dependencies:
-
 | Dependency | Purpose | Installation |
 |------------|---------|--------------|
-| **libvips** | High-performance image I/O | `conda install libvips` (Linux/macOS) or Zenodo (Windows) |
-| **VALIS** | Image registration | `pip install valis-wsi` (included) |
-| **CuPy** | GPU acceleration (optional) | `conda install cupy` or `pip install cupy-cuda12x` |
+| **libvips** | High-performance image I/O | `conda install libvips` (Linux), `brew install vips` (macOS), or Zenodo (Windows) |
+| **VALIS** | Image registration | Included in base install |
+| **CuPy** | GPU acceleration (optional) | `kintsugi install gpu` |
+| **PyTorch** | Deep learning (optional) | `kintsugi install gpu` or `kintsugi install dl` |
 
 > **Note:** Java, Maven, and FIJI/CLIJ2 are no longer required. KINTSUGI now uses pure Python
 > implementations (CuPy/NumPy) for all processing including Extended Depth of Focus (EDF).
@@ -198,6 +166,10 @@ kintsugi check
 
 # Show system info
 kintsugi info
+
+# Install optional features
+kintsugi install gpu
+kintsugi install viz --conda  # Use conda where available
 
 # Generate configuration template
 kintsugi template -o config.json
@@ -234,6 +206,23 @@ registrar.register()
 from kintsugi.kview2 import imshow, curtain, crop
 ```
 
+### Notebook Dependency Checking
+
+Each notebook that requires optional features should include a dependency check at the top:
+
+```python
+# At the top of your notebook
+from kintsugi.deps import require
+
+# Check specific feature groups
+require('gpu', 'viz')
+
+# Or auto-detect from notebook name
+require(notebook='4_Segmentation_Analysis')
+```
+
+If dependencies are missing, you'll see a clear error with installation instructions.
+
 ## Notebooks
 
 The following Jupyter notebooks provide step-by-step workflows:
@@ -241,22 +230,27 @@ The following Jupyter notebooks provide step-by-step workflows:
 ### 1. Parameter Tuning and Testing
 Test illumination correction, stitching, deconvolution, and EDoF.
 - [notebooks/1_Single_Channel_Eval.ipynb](notebooks/1_Single_Channel_Eval.ipynb)
+- **Requires:** `gpu`
 
 ### 2. Batch Processing
 Batch processing for illumination correction, stitching, deconvolution, EDoF, and registration.
 - [notebooks/2_Cycle_Processing.ipynb](notebooks/2_Cycle_Processing.ipynb)
+- **Requires:** `gpu`
 
 ### 3. Signal Isolation
 Autofluorescence subtraction, filtering, and final processing to isolate signal.
 - [notebooks/3_Signal_Isolation.ipynb](notebooks/3_Signal_Isolation.ipynb)
+- **Requires:** Base only
 
 ### 4. Segmentation Analysis
 InstanSeg segmentation, feature extraction, and spatial analysis.
 - [notebooks/4_Segmentation_Analysis.ipynb](notebooks/4_Segmentation_Analysis.ipynb)
+- **Requires:** `dl`, `viz`, `analysis`
 
 ### 5. Vessel Analysis
 Specialized analysis for vessel structures.
 - [notebooks/Vessel_Analysis.ipynb](notebooks/Vessel_Analysis.ipynb)
+- **Requires:** `viz`, `analysis`
 
 ### Running Notebooks
 
@@ -292,6 +286,27 @@ kintsugi check
 ```bash
 # Check CUDA availability
 python -c "import torch; print(torch.cuda.is_available())"
+
+# Install GPU support if missing
+kintsugi install gpu
+```
+
+**Missing optional dependencies in notebook**
+```python
+# Run at the top of the notebook to see what's needed
+from kintsugi.deps import require
+require('gpu', 'viz', strict=False)  # Shows warning instead of error
+```
+
+**Conda environment creation hangs**
+
+The base environment is designed to install quickly. If you experience hangs:
+```bash
+# Use libmamba solver (faster)
+conda config --set solver libmamba
+
+# Then retry
+conda env create -f envs/env-linux.yml
 ```
 
 ## Development
