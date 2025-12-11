@@ -311,6 +311,13 @@ class KintsugiProject:
         print("  +-- configs/          <- Processing configs")
         print("  +-- meta/             <- Metadata files")
         print("  +-- logs/             <- Processing logs")
+        print("  +-- .claude/          <- Claude Code config")
+        print("  +-- .vscode/          <- VS Code config")
+        print()
+        print("Next steps:")
+        print("  1. Copy raw images to data/raw/")
+        print("  2. Open folder in VS Code: code .")
+        print("  3. Start with notebooks/1_Single_Channel_Eval.ipynb")
 
         return project
 
@@ -390,9 +397,8 @@ class KintsugiProject:
         workflow_notebooks = [
             "1_Single_Channel_Eval.ipynb",
             "2_Cycle_Processing.ipynb",
-            "3_Signal_Isolation.ipynb",
+            "3_Signal_Isolation_QC.ipynb",
             "4_Segmentation_Analysis.ipynb",
-            "5_DL_Channel_Refinement.ipynb",
         ]
 
         copied = []
@@ -420,6 +426,16 @@ class KintsugiProject:
             if src_dir.exists() and not dst_dir.exists():
                 shutil.copytree(src_dir, dst_dir)
                 print(f"  Copied {dir_name}/")
+
+        # Copy supporting files
+        support_files = ["Kutils.py", "config_example.json", "MIGRATION_GUIDE.md"]
+        for file_name in support_files:
+            src_file = source_dir / file_name
+            dst_file = dest_dir / file_name
+
+            if src_file.exists() and not dst_file.exists():
+                shutil.copy2(src_file, dst_file)
+                print(f"  Copied {file_name}")
 
         return copied
 
@@ -449,6 +465,55 @@ class KintsugiProject:
         params_file = self.paths.configs / "default_parameters.json"
         with open(params_file, "w") as f:
             json.dump(default_params, f, indent=2)
+
+        # Create Claude Code configuration
+        self._create_claude_config()
+
+        # Create VS Code configuration
+        self._create_vscode_config()
+
+    def _create_claude_config(self) -> None:
+        """Create Claude Code MCP configuration."""
+        claude_dir = self.paths.root / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+
+        settings_file = claude_dir / "settings.local.json"
+        if not settings_file.exists():
+            claude_config = {
+                "mcpServers": {
+                    "kintsugi": {
+                        "command": "kintsugi",
+                        "args": ["mcp", "start"],
+                        "cwd": str(self.paths.root),
+                    }
+                }
+            }
+            with open(settings_file, "w") as f:
+                json.dump(claude_config, f, indent=2)
+            print(f"  Created .claude/settings.local.json")
+
+    def _create_vscode_config(self) -> None:
+        """Create VS Code configuration."""
+        vscode_dir = self.paths.root / ".vscode"
+        vscode_dir.mkdir(exist_ok=True)
+
+        settings_file = vscode_dir / "settings.json"
+        if not settings_file.exists():
+            vscode_config = {
+                "python.defaultInterpreterPath": "${env:CONDA_PREFIX}/python",
+                "jupyter.notebookFileRoot": "${workspaceFolder}/notebooks",
+                "files.exclude": {
+                    "**/__pycache__": True,
+                    "**/.ipynb_checkpoints": True,
+                    "**/*.pyc": True,
+                },
+                "python.analysis.extraPaths": [
+                    "${workspaceFolder}/notebooks",
+                ],
+            }
+            with open(settings_file, "w") as f:
+                json.dump(vscode_config, f, indent=2)
+            print(f"  Created .vscode/settings.json")
 
     # -------------------------------------------------------------------------
     # Convenience properties for common paths
