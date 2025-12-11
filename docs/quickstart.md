@@ -130,9 +130,10 @@ Test illumination correction, stitching, deconvolution, and EDoF.
 Batch processing for illumination correction, stitching, deconvolution, EDoF, and registration.
 - `notebooks/2_Cycle_Processing.ipynb`
 
-### 3. Signal Isolation
-Autofluorescence subtraction, filtering, and final processing to isolate signal.
-- `notebooks/3_Signal_Isolation.ipynb`
+### 3. Signal Isolation & Quality Control (NEW)
+Combined signal isolation and QC with Claude Code integration.
+- `notebooks/3_Signal_Isolation_QC.ipynb`
+- Features: Claude-guided workflow, parameter learning, integrated QC
 
 ### 4. Segmentation Analysis
 InstanSeg segmentation, feature extraction, and spatial analysis.
@@ -141,6 +142,8 @@ InstanSeg segmentation, feature extraction, and spatial analysis.
 ### 5. Vessel Analysis
 Specialized analysis for vessel structures.
 - `notebooks/Vessel_Analysis.ipynb`
+
+> **Note:** Old notebooks 3 and 5 are deprecated. Use `3_Signal_Isolation_QC.ipynb`.
 
 ### Running Notebooks
 

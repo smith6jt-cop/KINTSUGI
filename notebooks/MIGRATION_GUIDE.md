@@ -1,21 +1,39 @@
 # KINTSUGI Migration Guide
 
-## Transitioning from Notebooks 3 and 5 to Claude-Guided Workflow
+## Transitioning from Notebooks 3 and 5 to the New Unified Workflow
 
-This guide helps you transition from the deprecated Notebooks 3 (Signal Isolation) and 5 (DL Channel Refinement) to the new Claude-guided workflow.
+This guide helps you transition from the deprecated Notebooks 3 (Signal Isolation) and 5 (DL Channel Refinement) to the new unified `3_Signal_Isolation_QC.ipynb` notebook.
+
+## What Changed
+
+The old notebooks have been replaced with a single, more powerful notebook:
+
+- **Old:** `3_Signal_Isolation.ipynb` + `5_DL_Channel_Refinement.ipynb`
+- **New:** `3_Signal_Isolation_QC.ipynb`
+
+The deprecated notebooks are still available as `*_DEPRECATED.ipynb` for reference.
 
 ## Overview of Changes
 
 | Old Approach | New Approach |
 |--------------|--------------|
-| Notebook 3: Manual parameter tuning | MCP Server + Claude Code + Parameter Learning |
-| Notebook 5: DL quality assessment | QC Module + Claude recommendations |
-| Kutils.py functions | MCP tools + kintsugi.denoise/qc modules |
+| Notebook 3: Manual parameter tuning | Unified notebook with 3 workflow options |
+| Notebook 5: DL quality assessment | Integrated QC at each processing step |
+| Kutils.py functions | Same functions + new kintsugi.denoise/qc modules |
 | Manual review | Automated assessment with human-in-the-loop |
+| No parameter memory | Parameter learning by tissue/marker |
 
 ## Quick Start
 
-### Option 1: Claude Code Integration (Recommended)
+### Option 0: New Unified Notebook (Simplest)
+
+Open `notebooks/3_Signal_Isolation_QC.ipynb` and follow the step-by-step workflow. The notebook supports three approaches:
+
+1. **Claude-Guided**: AI recommends parameters, learns from success
+2. **Interactive Tuners**: Widget-based parameter adjustment
+3. **Python API**: Direct programmatic control
+
+### Option 1: Claude Code Integration (Recommended for AI-assisted workflow)
 
 1. **Install dependencies:**
    ```bash

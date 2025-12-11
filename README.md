@@ -292,10 +292,16 @@ Batch processing for illumination correction, stitching, deconvolution, EDoF, an
 - [notebooks/2_Cycle_Processing.ipynb](notebooks/2_Cycle_Processing.ipynb)
 - **Requires:** `gpu`
 
-### 3. Signal Isolation
-Autofluorescence subtraction, filtering, and final processing to isolate signal.
-- [notebooks/3_Signal_Isolation.ipynb](notebooks/3_Signal_Isolation.ipynb)
-- **Requires:** Base only
+### 3. Signal Isolation & Quality Control (NEW)
+Combined signal isolation and quality assessment with Claude Code integration.
+- [notebooks/3_Signal_Isolation_QC.ipynb](notebooks/3_Signal_Isolation_QC.ipynb)
+- **Requires:** Base only (optional: `claude` for AI-assisted workflow)
+- **Features:**
+  - Claude-guided parameter selection
+  - Interactive widget-based tuning
+  - Integrated quality assessment
+  - Parameter learning for future recommendations
+  - Advanced denoising (N2V, NLM, BM3D-lite)
 
 ### 4. Segmentation Analysis
 InstanSeg segmentation, feature extraction, and spatial analysis.
@@ -306,6 +312,9 @@ InstanSeg segmentation, feature extraction, and spatial analysis.
 Specialized analysis for vessel structures.
 - [notebooks/Vessel_Analysis.ipynb](notebooks/Vessel_Analysis.ipynb)
 - **Requires:** `viz`, `analysis`
+
+> **Note:** The old `3_Signal_Isolation.ipynb` and `5_DL_Channel_Refinement.ipynb` are deprecated.
+> Use the new `3_Signal_Isolation_QC.ipynb` which combines both workflows.
 
 ### Running Notebooks
 
