@@ -16,10 +16,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Union
 from urllib.request import urlretrieve
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import dask.array
 
 logger = logging.getLogger("kintsugi.denoise.care")
 
@@ -92,7 +95,7 @@ class CAREDenoiser:
     >>> denoised = denoiser.predict(noisy_image)
     """
 
-    def __init__(self, config: Optional[CAREConfig] = None):
+    def __init__(self, config: CAREConfig | None = None):
         """
         Initialize CARE denoiser.
 
@@ -112,8 +115,8 @@ class CAREDenoiser:
     def from_pretrained(
         cls,
         model_name: str,
-        cache_dir: Optional[Union[str, Path]] = None,
-    ) -> "CAREDenoiser":
+        cache_dir: str | Path | None = None,
+    ) -> CAREDenoiser:
         """
         Load a pre-trained CARE model.
 
@@ -131,8 +134,7 @@ class CAREDenoiser:
         """
         if model_name not in PRETRAINED_MODELS:
             raise ValueError(
-                f"Unknown model: {model_name}. "
-                f"Available: {list(PRETRAINED_MODELS.keys())}"
+                f"Unknown model: {model_name}. " f"Available: {list(PRETRAINED_MODELS.keys())}"
             )
 
         model_info = PRETRAINED_MODELS[model_name]
@@ -174,8 +176,7 @@ class CAREDenoiser:
 
         except ImportError:
             raise ImportError(
-                "PyTorch is required for CARE denoising. "
-                "Install with: pip install torch"
+                "PyTorch is required for CARE denoising. " "Install with: pip install torch"
             )
 
     def _build_model(self, n_channels: int = 1):
@@ -193,10 +194,12 @@ class CAREDenoiser:
                 ]
                 if batch_norm:
                     layers.insert(1, nn.BatchNorm2d(out_ch))
-                layers.extend([
-                    nn.Conv2d(out_ch, out_ch, kernel_size, padding=padding),
-                    nn.LeakyReLU(0.1, inplace=True),
-                ])
+                layers.extend(
+                    [
+                        nn.Conv2d(out_ch, out_ch, kernel_size, padding=padding),
+                        nn.LeakyReLU(0.1, inplace=True),
+                    ]
+                )
                 if batch_norm:
                     layers.insert(-1, nn.BatchNorm2d(out_ch))
                 self.block = nn.Sequential(*layers)
@@ -205,7 +208,9 @@ class CAREDenoiser:
                 return self.block(x)
 
         class CAREUNet(nn.Module):
-            def __init__(self, n_channels, n_filters_base, n_depth, kernel_size, batch_norm, residual):
+            def __init__(
+                self, n_channels, n_filters_base, n_depth, kernel_size, batch_norm, residual
+            ):
                 super().__init__()
                 self.residual = residual
                 self.n_depth = n_depth
@@ -215,7 +220,7 @@ class CAREDenoiser:
                 self.pools = nn.ModuleList()
                 in_ch = n_channels
                 out_ch = n_filters_base
-                for i in range(n_depth):
+                for _i in range(n_depth):
                     self.encoders.append(ConvBlock(in_ch, out_ch, kernel_size, batch_norm))
                     self.pools.append(nn.MaxPool2d(2))
                     in_ch = out_ch
@@ -230,8 +235,12 @@ class CAREDenoiser:
                 for i in range(n_depth):
                     self.upconvs.append(nn.ConvTranspose2d(out_ch, out_ch // 2, 2, stride=2))
                     # Concatenate with skip connection
-                    decoder_in_ch = out_ch // 2 + self.encoders[n_depth - 1 - i].block[0].out_channels
-                    self.decoders.append(ConvBlock(decoder_in_ch, out_ch // 2, kernel_size, batch_norm))
+                    decoder_in_ch = (
+                        out_ch // 2 + self.encoders[n_depth - 1 - i].block[0].out_channels
+                    )
+                    self.decoders.append(
+                        ConvBlock(decoder_in_ch, out_ch // 2, kernel_size, batch_norm)
+                    )
                     out_ch //= 2
 
                 # Output - predict either clean image or residual
@@ -242,7 +251,7 @@ class CAREDenoiser:
 
                 # Encoder path
                 enc_features = []
-                for encoder, pool in zip(self.encoders, self.pools):
+                for encoder, pool in zip(self.encoders, self.pools, strict=False):
                     x = encoder(x)
                     enc_features.append(x)
                     x = pool(x)
@@ -251,12 +260,16 @@ class CAREDenoiser:
                 x = self.bottleneck(x)
 
                 # Decoder path
-                for i, (upconv, decoder) in enumerate(zip(self.upconvs, self.decoders)):
+                for i, (upconv, decoder) in enumerate(
+                    zip(self.upconvs, self.decoders, strict=False)
+                ):
                     x = upconv(x)
                     enc_feat = enc_features[self.n_depth - 1 - i]
                     # Handle size mismatch
                     if x.shape[2:] != enc_feat.shape[2:]:
-                        x = nn.functional.interpolate(x, size=enc_feat.shape[2:], mode="bilinear", align_corners=False)
+                        x = nn.functional.interpolate(
+                            x, size=enc_feat.shape[2:], mode="bilinear", align_corners=False
+                        )
                     x = torch.cat([x, enc_feat], dim=1)
                     x = decoder(x)
 
@@ -281,7 +294,7 @@ class CAREDenoiser:
         self,
         noisy: np.ndarray,
         clean: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Apply random augmentations to training batch."""
         # Random flips
         if np.random.rand() > 0.5:
@@ -301,16 +314,16 @@ class CAREDenoiser:
 
     def _extract_paired_patches(
         self,
-        noisy_images: List[np.ndarray],
-        clean_images: List[np.ndarray],
+        noisy_images: list[np.ndarray],
+        clean_images: list[np.ndarray],
         n_patches_per_image: int = 128,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Extract paired patches from noisy and clean images."""
         noisy_patches = []
         clean_patches = []
         patch_size = self.config.patch_size
 
-        for noisy, clean in zip(noisy_images, clean_images):
+        for noisy, clean in zip(noisy_images, clean_images, strict=False):
             if noisy.ndim == 2:
                 noisy = noisy[np.newaxis, :, :]
                 clean = clean[np.newaxis, :, :]
@@ -321,8 +334,8 @@ class CAREDenoiser:
                 if h > patch_size and w > patch_size:
                     y = np.random.randint(0, h - patch_size)
                     x = np.random.randint(0, w - patch_size)
-                    noisy_patch = noisy[:, y:y + patch_size, x:x + patch_size]
-                    clean_patch = clean[:, y:y + patch_size, x:x + patch_size]
+                    noisy_patch = noisy[:, y : y + patch_size, x : x + patch_size]
+                    clean_patch = clean[:, y : y + patch_size, x : x + patch_size]
                 else:
                     # Pad if needed
                     pad_h = max(0, patch_size - h)
@@ -339,11 +352,11 @@ class CAREDenoiser:
 
     def train(
         self,
-        noisy_images: List[np.ndarray],
-        clean_images: List[np.ndarray],
-        epochs: Optional[int] = None,
+        noisy_images: list[np.ndarray],
+        clean_images: list[np.ndarray],
+        epochs: int | None = None,
         verbose: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Train the CARE model on paired noisy-clean images.
 
@@ -425,7 +438,7 @@ class CAREDenoiser:
             n_batches = 0
 
             for i in range(0, len(train_idx), self.config.batch_size):
-                batch_idx = train_idx[i:i + self.config.batch_size]
+                batch_idx = train_idx[i : i + self.config.batch_size]
                 noisy_batch = noisy_patches[batch_idx]
                 clean_batch = clean_patches[batch_idx]
 
@@ -474,12 +487,12 @@ class CAREDenoiser:
 
     def train_synthetic(
         self,
-        clean_images: List[np.ndarray],
+        clean_images: list[np.ndarray],
         noise_model: str = "gaussian",
         noise_level: float = 0.1,
-        epochs: Optional[int] = None,
+        epochs: int | None = None,
         verbose: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Train using synthetic noise added to clean images.
 
@@ -600,7 +613,7 @@ class CAREDenoiser:
                     pred = self.model(tile_tensor)[0].cpu().numpy()
 
                     # Remove padding
-                    pred = pred[:, :y_end - y, :x_end - x]
+                    pred = pred[:, : y_end - y, : x_end - x]
 
                     # Blend weights
                     tile_h, tile_w = pred.shape[1], pred.shape[2]
@@ -609,9 +622,9 @@ class CAREDenoiser:
 
                     weight = np.ones((tile_h, tile_w))
                     if y > 0:
-                        weight[:len(blend_y), :] *= blend_y[:, np.newaxis]
+                        weight[: len(blend_y), :] *= blend_y[:, np.newaxis]
                     if x > 0:
-                        weight[:, :len(blend_x)] *= blend_x[np.newaxis, :]
+                        weight[:, : len(blend_x)] *= blend_x[np.newaxis, :]
 
                     output[:, y:y_end, x:x_end] += pred * weight
                     weights[y:y_end, x:x_end] += weight
@@ -634,23 +647,26 @@ class CAREDenoiser:
 
         return output.astype(original_dtype)
 
-    def save(self, path: Union[str, Path]):
+    def save(self, path: str | Path):
         """Save trained model."""
         import torch
 
         if not self.trained:
             raise RuntimeError("Model not trained.")
 
-        torch.save({
-            "model_state": self.model.state_dict(),
-            "config": self.config,
-            "mean": self._mean,
-            "std": self._std,
-        }, path)
+        torch.save(
+            {
+                "model_state": self.model.state_dict(),
+                "config": self.config,
+                "mean": self._mean,
+                "std": self._std,
+            },
+            path,
+        )
 
         logger.info(f"Model saved to {path}")
 
-    def load(self, path: Union[str, Path]):
+    def load(self, path: str | Path):
         """Load trained model."""
         import torch
 
@@ -669,7 +685,7 @@ class CAREDenoiser:
 
 def denoise_care(
     image: ArrayLike,
-    model: Optional[Union[str, CAREDenoiser]] = None,
+    model: str | CAREDenoiser | None = None,
     **kwargs,
 ) -> np.ndarray:
     """
@@ -703,7 +719,7 @@ def denoise_care(
     return denoiser.predict(image, **kwargs)
 
 
-def list_pretrained_models() -> Dict[str, Dict[str, Any]]:
+def list_pretrained_models() -> dict[str, dict[str, Any]]:
     """
     List available pre-trained CARE models.
 

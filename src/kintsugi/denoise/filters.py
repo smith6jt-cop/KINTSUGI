@@ -8,11 +8,14 @@ optimized for fluorescence microscopy images.
 from __future__ import annotations
 
 import logging
-from typing import Optional, Tuple, Union
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 from scipy import ndimage
-from scipy.ndimage import median_filter, uniform_filter, gaussian_filter
+from scipy.ndimage import gaussian_filter, median_filter
+
+if TYPE_CHECKING:
+    import dask.array
 
 logger = logging.getLogger("kintsugi.denoise.filters")
 
@@ -29,6 +32,7 @@ def _to_numpy(arr: ArrayLike) -> np.ndarray:
 
 def _preserve_dtype(func):
     """Decorator to preserve input dtype in output."""
+
     def wrapper(image: ArrayLike, *args, **kwargs):
         original_dtype = image.dtype
         result = func(image, *args, **kwargs)
@@ -37,6 +41,7 @@ def _preserve_dtype(func):
             info = np.iinfo(original_dtype)
             result = np.clip(result, info.min, info.max)
         return result.astype(original_dtype)
+
     return wrapper
 
 
@@ -93,10 +98,20 @@ def estimate_noise_level(
         h_detail = img[:, 1:] - img[:, :-1]
         v_detail = img[1:, :] - img[:-1, :]
         # MAD of detail coefficients
-        noise_std = np.median(np.abs(np.concatenate([
-            h_detail.ravel(),
-            v_detail.ravel(),
-        ]))) * 1.4826 / np.sqrt(2)
+        noise_std = (
+            np.median(
+                np.abs(
+                    np.concatenate(
+                        [
+                            h_detail.ravel(),
+                            v_detail.ravel(),
+                        ]
+                    )
+                )
+            )
+            * 1.4826
+            / np.sqrt(2)
+        )
 
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -166,8 +181,8 @@ def denoise_gaussian(
 def denoise_bilateral(
     image: ArrayLike,
     sigma_spatial: float = 2.0,
-    sigma_range: Optional[float] = None,
-    win_size: Optional[int] = None,
+    sigma_range: float | None = None,
+    win_size: int | None = None,
 ) -> np.ndarray:
     """
     Apply bilateral filter denoising.
@@ -193,6 +208,7 @@ def denoise_bilateral(
     """
     try:
         from skimage.restoration import denoise_bilateral as skimage_bilateral
+
         img = _to_numpy(image).astype(np.float64)
 
         # Normalize to [0, 1] for skimage
@@ -229,7 +245,7 @@ def denoise_nlm(
     image: ArrayLike,
     patch_size: int = 5,
     patch_distance: int = 6,
-    h: Optional[float] = None,
+    h: float | None = None,
     fast_mode: bool = True,
 ) -> np.ndarray:
     """
@@ -336,7 +352,9 @@ def adaptive_denoise(
         else:
             strength = "strong"
 
-    logger.info(f"Adaptive denoise: noise={noise_std:.2f}, relative={relative_noise:.4f}, strength={strength}")
+    logger.info(
+        f"Adaptive denoise: noise={noise_std:.2f}, relative={relative_noise:.4f}, strength={strength}"
+    )
 
     # Apply denoising based on strength and edge preference
     if strength == "light":
@@ -369,11 +387,11 @@ def adaptive_denoise(
 
 
 def denoise_dask(
-    image: "dask.array.Array",
+    image: dask.array.Array,
     method: str = "median",
     overlap: int = 16,
     **kwargs,
-) -> "dask.array.Array":
+) -> dask.array.Array:
     """
     Apply denoising to a Dask array with proper overlap handling.
 

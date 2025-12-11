@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 from scipy import stats
@@ -26,14 +26,14 @@ class MarkerQCResult:
     quality_score: float
 
     # Metrics
-    metrics: Dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, float] = field(default_factory=dict)
 
     # Issues
-    issues: List[str] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)
 
     # Expected vs observed
-    expected_positive_rate: Optional[float] = None
-    observed_positive_rate: Optional[float] = None
+    expected_positive_rate: float | None = None
+    observed_positive_rate: float | None = None
 
 
 # Known marker characteristics for reference
@@ -41,24 +41,19 @@ MARKER_REFERENCE = {
     # Nuclear markers
     "dapi": {"location": "nuclear", "expected_positive": 0.95, "ubiquitous": True},
     "hoechst": {"location": "nuclear", "expected_positive": 0.95, "ubiquitous": True},
-
     # T-cell markers
     "cd3": {"location": "membrane", "expected_positive": (0.05, 0.40), "ubiquitous": False},
     "cd4": {"location": "membrane", "expected_positive": (0.02, 0.25), "ubiquitous": False},
     "cd8": {"location": "membrane", "expected_positive": (0.02, 0.20), "ubiquitous": False},
-
     # B-cell markers
     "cd20": {"location": "membrane", "expected_positive": (0.02, 0.30), "ubiquitous": False},
     "cd19": {"location": "membrane", "expected_positive": (0.02, 0.30), "ubiquitous": False},
-
     # Myeloid markers
     "cd68": {"location": "cytoplasm", "expected_positive": (0.01, 0.15), "ubiquitous": False},
     "cd163": {"location": "membrane", "expected_positive": (0.01, 0.10), "ubiquitous": False},
     "cd11c": {"location": "membrane", "expected_positive": (0.01, 0.10), "ubiquitous": False},
-
     # Proliferation
     "ki67": {"location": "nuclear", "expected_positive": (0.01, 0.30), "ubiquitous": False},
-
     # Structural
     "panck": {"location": "cytoplasm", "expected_positive": (0.1, 0.8), "ubiquitous": False},
     "cytokeratin": {"location": "cytoplasm", "expected_positive": (0.1, 0.8), "ubiquitous": False},
@@ -116,8 +111,8 @@ class MarkerQC:
         self,
         intensities: np.ndarray,
         marker_name: str,
-        tissue_type: Optional[str] = None,
-        background_intensities: Optional[np.ndarray] = None,
+        tissue_type: str | None = None,
+        background_intensities: np.ndarray | None = None,
     ) -> MarkerQCResult:
         """
         Assess marker quality.
@@ -189,7 +184,9 @@ class MarkerQC:
         distribution_quality = self._assess_distribution(intensities)
         metrics.update(distribution_quality)
 
-        if distribution_quality.get("bimodality_score", 0) < 0.1 and not reference.get("ubiquitous", False):
+        if distribution_quality.get("bimodality_score", 0) < 0.1 and not reference.get(
+            "ubiquitous", False
+        ):
             issues.append("Poor separation of positive/negative populations")
 
         # 5. Expected positive rate
@@ -201,9 +198,13 @@ class MarkerQC:
             if isinstance(expected, tuple):
                 expected_low, expected_high = expected
                 if observed < expected_low * (1 - self.positive_rate_tolerance):
-                    issues.append(f"Lower than expected positive rate ({observed*100:.1f}% < {expected_low*100:.0f}%)")
+                    issues.append(
+                        f"Lower than expected positive rate ({observed*100:.1f}% < {expected_low*100:.0f}%)"
+                    )
                 elif observed > expected_high * (1 + self.positive_rate_tolerance):
-                    issues.append(f"Higher than expected positive rate ({observed*100:.1f}% > {expected_high*100:.0f}%)")
+                    issues.append(
+                        f"Higher than expected positive rate ({observed*100:.1f}% > {expected_high*100:.0f}%)"
+                    )
             else:
                 metrics["expected_positive_rate"] = expected
 
@@ -228,7 +229,7 @@ class MarkerQC:
             observed_positive_rate=metrics.get("observed_positive_rate"),
         )
 
-    def _assess_distribution(self, intensities: np.ndarray) -> Dict[str, float]:
+    def _assess_distribution(self, intensities: np.ndarray) -> dict[str, float]:
         """Assess quality of intensity distribution."""
         metrics = {}
 
@@ -239,7 +240,7 @@ class MarkerQC:
         # Bimodality using Hartigan's dip statistic approximation
         # Use histogram-based approach for efficiency
         hist, edges = np.histogram(intensities, bins=50)
-        hist_norm = hist / (hist.sum() + 1e-8)
+        hist / (hist.sum() + 1e-8)
 
         # Find local minima as potential separation points
         peaks = []
@@ -250,7 +251,7 @@ class MarkerQC:
         # Bimodality score based on peak separation
         if len(peaks) >= 2:
             # Check if there's a clear valley between peaks
-            valley_min = min(hist[peaks[0]:peaks[1] + 1])
+            valley_min = min(hist[peaks[0] : peaks[1] + 1])
             peak_avg = (hist[peaks[0]] + hist[peaks[1]]) / 2
             bimodality = 1 - (valley_min / (peak_avg + 1e-8))
         else:
@@ -331,8 +332,8 @@ class MarkerQC:
 
     def _compute_quality_score(
         self,
-        metrics: Dict[str, float],
-        issues: List[str],
+        metrics: dict[str, float],
+        issues: list[str],
     ) -> float:
         """Compute overall marker quality score."""
         score = 1.0
@@ -340,18 +341,18 @@ class MarkerQC:
         # SNR contribution
         snr = metrics.get("snr", 0)
         snr_score = min(1.0, snr / 10.0)
-        score *= (0.7 + 0.3 * snr_score)
+        score *= 0.7 + 0.3 * snr_score
 
         # Bimodality contribution (for non-ubiquitous markers)
         bimodality = metrics.get("bimodality_score", 0)
-        score *= (0.7 + 0.3 * bimodality)
+        score *= 0.7 + 0.3 * bimodality
 
         # Artifact penalty
         artifact_score = metrics.get("artifact_score", 0)
-        score *= (1 - artifact_score * 0.5)
+        score *= 1 - artifact_score * 0.5
 
         # Issue penalties
-        score *= (1 - len(issues) * 0.15)
+        score *= 1 - len(issues) * 0.15
 
         return float(np.clip(score, 0, 1))
 
@@ -359,7 +360,7 @@ class MarkerQC:
 def validate_marker_expression(
     intensities: np.ndarray,
     marker_name: str,
-    tissue_type: Optional[str] = None,
+    tissue_type: str | None = None,
 ) -> MarkerQCResult:
     """
     Convenience function for marker validation.
@@ -388,7 +389,7 @@ def detect_crosstalk(
     marker_a: str,
     marker_b: str,
     correlation_threshold: float = 0.7,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Detect potential crosstalk between two markers.
 
@@ -419,13 +420,11 @@ def detect_crosstalk(
     # Known exclusive pairs
     exclusive_pairs = [
         {"cd3", "cd20"},  # T-cells vs B-cells
-        {"cd4", "cd8"},   # Helper vs cytotoxic T-cells
+        {"cd4", "cd8"},  # Helper vs cytotoxic T-cells
         {"panck", "cd45"},  # Epithelial vs immune
     ]
 
-    should_be_exclusive = any(
-        {marker_a_key, marker_b_key} == pair for pair in exclusive_pairs
-    )
+    should_be_exclusive = any({marker_a_key, marker_b_key} == pair for pair in exclusive_pairs)
 
     crosstalk_detected = correlation > correlation_threshold
 
@@ -435,7 +434,11 @@ def detect_crosstalk(
         "correlation": float(correlation),
         "crosstalk_detected": crosstalk_detected,
         "should_be_exclusive": should_be_exclusive,
-        "severity": "high" if crosstalk_detected and should_be_exclusive else ("medium" if crosstalk_detected else "low"),
+        "severity": (
+            "high"
+            if crosstalk_detected and should_be_exclusive
+            else ("medium" if crosstalk_detected else "low")
+        ),
     }
 
 
@@ -443,7 +446,7 @@ def assess_marker_specificity(
     marker_intensities: np.ndarray,
     nuclear_intensities: np.ndarray,
     marker_name: str,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Assess whether marker staining is specific or shows non-specific binding.
 
@@ -483,8 +486,7 @@ def assess_marker_specificity(
     below_median = marker_intensities <= p50
 
     separation = (
-        np.mean(marker_intensities[above_median]) -
-        np.mean(marker_intensities[below_median])
+        np.mean(marker_intensities[above_median]) - np.mean(marker_intensities[below_median])
     ) / (np.std(marker_intensities) + 1e-8)
 
     specificity_score = np.clip(separation / 3.0, 0, 1)

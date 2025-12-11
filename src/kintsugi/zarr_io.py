@@ -31,53 +31,54 @@ Data Structure:
         └── ...
 """
 
-import os
-import json
-import numpy as np
-from pathlib import Path
-from typing import Union, Optional, Tuple, List, Dict, Any, Callable
-from datetime import datetime
 import warnings
+from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 # Zarr imports
 try:
     import zarr
     from zarr.storage import DirectoryStore
+
     ZARR_AVAILABLE = True
 except ImportError:
     ZARR_AVAILABLE = False
-    warnings.warn("zarr not installed. Install with: pip install zarr")
+    warnings.warn("zarr not installed. Install with: pip install zarr", stacklevel=2)
 
 # OME-Zarr imports
 try:
     from ome_zarr.io import parse_url
     from ome_zarr.writer import write_image, write_multiscale
-    from ome_zarr.reader import Reader
+
     OME_ZARR_AVAILABLE = True
 except ImportError:
     OME_ZARR_AVAILABLE = False
-    warnings.warn("ome-zarr not installed. Install with: pip install ome-zarr")
+    warnings.warn("ome-zarr not installed. Install with: pip install ome-zarr", stacklevel=2)
 
 # Dask for lazy/parallel operations
 try:
-    import dask.array as da
-    from dask import delayed
+    import dask.array as da  # noqa: F401
+
     DASK_AVAILABLE = True
 except ImportError:
     DASK_AVAILABLE = False
-    warnings.warn("dask not installed. Install with: pip install dask[array]")
+    warnings.warn("dask not installed. Install with: pip install dask[array]", stacklevel=2)
 
 
 # Default chunking strategies for different data types
 DEFAULT_CHUNKS = {
-    'raw_tiles': (1, 1, 512, 512),      # (tile, z, y, x)
-    'stitched': (1, 1, 1024, 1024),     # (z, c, y, x)
-    'edf': (1, 2048, 2048),             # (c, y, x)
-    'registered': (1, 2048, 2048),      # (c, y, x)
+    "raw_tiles": (1, 1, 512, 512),  # (tile, z, y, x)
+    "stitched": (1, 1, 1024, 1024),  # (z, c, y, x)
+    "edf": (1, 2048, 2048),  # (c, y, x)
+    "registered": (1, 2048, 2048),  # (c, y, x)
 }
 
 # Compression settings
-DEFAULT_COMPRESSOR = zarr.Blosc(cname='zstd', clevel=3, shuffle=zarr.Blosc.BITSHUFFLE)
+DEFAULT_COMPRESSOR = zarr.Blosc(cname="zstd", clevel=3, shuffle=zarr.Blosc.BITSHUFFLE)
 
 
 class KintsugiZarr:
@@ -114,46 +115,48 @@ class KintsugiZarr:
     >>> lazy_stack = store.read_stitched_dask(cycle=1, channel=1)
     """
 
-    def __init__(self, path: Union[str, Path], mode: str = 'a'):
+    def __init__(self, path: str | Path, mode: str = "a"):
         if not ZARR_AVAILABLE:
             raise ImportError("zarr is required. Install with: pip install zarr")
 
         self.path = Path(path)
         self.mode = mode
 
-        if mode == 'w':
+        if mode == "w":
             # Create new store
             self.store = DirectoryStore(str(self.path))
             self.root = zarr.group(store=self.store, overwrite=True)
             self._init_metadata()
-        elif mode == 'r':
+        elif mode == "r":
             # Read-only
             if not self.path.exists():
                 raise FileNotFoundError(f"Zarr store not found: {self.path}")
             self.store = DirectoryStore(str(self.path))
-            self.root = zarr.open_group(store=self.store, mode='r')
+            self.root = zarr.open_group(store=self.store, mode="r")
         else:  # 'a' - append/modify
             self.store = DirectoryStore(str(self.path))
             if self.path.exists():
-                self.root = zarr.open_group(store=self.store, mode='a')
+                self.root = zarr.open_group(store=self.store, mode="a")
             else:
                 self.root = zarr.group(store=self.store)
                 self._init_metadata()
 
     def _init_metadata(self):
         """Initialize OME-NGFF metadata."""
-        self.root.attrs['kintsugi_version'] = '1.0'
-        self.root.attrs['created'] = datetime.now().isoformat()
-        self.root.attrs['ome_ngff_version'] = '0.4'
+        self.root.attrs["kintsugi_version"] = "1.0"
+        self.root.attrs["created"] = datetime.now().isoformat()
+        self.root.attrs["ome_ngff_version"] = "0.4"
 
-    def create_cycle(self,
-                     cycle: int,
-                     n_channels: int = 4,
-                     n_zplanes: int = 17,
-                     channel_names: Optional[List[str]] = None,
-                     tile_shape: Optional[Tuple[int, int]] = None,
-                     n_tiles: Optional[int] = None,
-                     dtype: np.dtype = np.uint16) -> zarr.Group:
+    def create_cycle(
+        self,
+        cycle: int,
+        n_channels: int = 4,
+        n_zplanes: int = 17,
+        channel_names: list[str] | None = None,
+        tile_shape: tuple[int, int] | None = None,
+        n_tiles: int | None = None,
+        dtype: np.dtype = np.uint16,
+    ) -> zarr.Group:
         """
         Create a cycle group with subgroups for each processing stage.
 
@@ -187,25 +190,27 @@ class KintsugiZarr:
         cycle_group = self.root.create_group(cycle_name)
 
         # Store cycle metadata
-        cycle_group.attrs['n_channels'] = n_channels
-        cycle_group.attrs['n_zplanes'] = n_zplanes
-        cycle_group.attrs['dtype'] = str(dtype)
+        cycle_group.attrs["n_channels"] = n_channels
+        cycle_group.attrs["n_zplanes"] = n_zplanes
+        cycle_group.attrs["dtype"] = str(dtype)
 
         if channel_names:
-            cycle_group.attrs['channel_names'] = channel_names
+            cycle_group.attrs["channel_names"] = channel_names
 
         # Create stage subgroups
-        for stage in ['raw', 'corrected', 'stitched', 'deconvolved', 'edf']:
+        for stage in ["raw", "corrected", "stitched", "deconvolved", "edf"]:
             cycle_group.create_group(stage)
 
         return cycle_group
 
-    def write_raw_tiles(self,
-                        cycle: int,
-                        channel: int,
-                        zplane: int,
-                        tiles: np.ndarray,
-                        tile_positions: Optional[np.ndarray] = None) -> zarr.Array:
+    def write_raw_tiles(
+        self,
+        cycle: int,
+        channel: int,
+        zplane: int,
+        tiles: np.ndarray,
+        tile_positions: np.ndarray | None = None,
+    ) -> zarr.Array:
         """
         Write raw tiles for a specific cycle/channel/z-plane.
 
@@ -235,7 +240,7 @@ class KintsugiZarr:
         if cycle_name not in self.root:
             self.create_cycle(cycle)
 
-        raw_group = self.root[cycle_name]['raw']
+        raw_group = self.root[cycle_name]["raw"]
 
         # Create channel group if needed
         if channel_name not in raw_group:
@@ -249,20 +254,22 @@ class KintsugiZarr:
             data=tiles,
             chunks=(1, tiles.shape[1], tiles.shape[2]),
             compressor=DEFAULT_COMPRESSOR,
-            overwrite=True
+            overwrite=True,
         )
 
         if tile_positions is not None:
-            arr.attrs['tile_positions'] = tile_positions.tolist()
+            arr.attrs["tile_positions"] = tile_positions.tolist()
 
         return arr
 
-    def write_stitched(self,
-                       cycle: int,
-                       channel: int,
-                       zplane: int,
-                       data: np.ndarray,
-                       chunks: Optional[Tuple[int, ...]] = None) -> zarr.Array:
+    def write_stitched(
+        self,
+        cycle: int,
+        channel: int,
+        zplane: int,
+        data: np.ndarray,
+        chunks: tuple[int, ...] | None = None,
+    ) -> zarr.Array:
         """
         Write stitched image for a specific cycle/channel/z-plane.
 
@@ -290,7 +297,7 @@ class KintsugiZarr:
         if cycle_name not in self.root:
             self.create_cycle(cycle)
 
-        stitched_group = self.root[cycle_name]['stitched']
+        stitched_group = self.root[cycle_name]["stitched"]
 
         if channel_name not in stitched_group:
             stitched_group.create_group(channel_name)
@@ -305,15 +312,14 @@ class KintsugiZarr:
             data=data,
             chunks=chunks,
             compressor=DEFAULT_COMPRESSOR,
-            overwrite=True
+            overwrite=True,
         )
 
         return arr
 
-    def read_stitched(self,
-                      cycle: int,
-                      channel: int,
-                      zplane: Optional[int] = None) -> Union[np.ndarray, zarr.Array]:
+    def read_stitched(
+        self, cycle: int, channel: int, zplane: int | None = None
+    ) -> np.ndarray | zarr.Array:
         """
         Read stitched data.
 
@@ -334,19 +340,17 @@ class KintsugiZarr:
         cycle_name = f"cyc{cycle:02d}"
         channel_name = f"CH{channel}"
 
-        ch_group = self.root[cycle_name]['stitched'][channel_name]
+        ch_group = self.root[cycle_name]["stitched"][channel_name]
 
         if zplane is not None:
             return ch_group[f"Z{zplane:02d}"][:]
         else:
             # Return all z-planes as 3D array
-            zplanes = sorted([k for k in ch_group.keys() if k.startswith('Z')])
+            zplanes = sorted([k for k in ch_group.keys() if k.startswith("Z")])
             stack = np.stack([ch_group[z][:] for z in zplanes], axis=0)
             return stack
 
-    def read_stitched_dask(self,
-                           cycle: int,
-                           channel: int) -> 'da.Array':
+    def read_stitched_dask(self, cycle: int, channel: int) -> "da.Array":
         """
         Read stitched data as a lazy dask array.
 
@@ -370,8 +374,8 @@ class KintsugiZarr:
         cycle_name = f"cyc{cycle:02d}"
         channel_name = f"CH{channel}"
 
-        ch_group = self.root[cycle_name]['stitched'][channel_name]
-        zplanes = sorted([k for k in ch_group.keys() if k.startswith('Z')])
+        ch_group = self.root[cycle_name]["stitched"][channel_name]
+        zplanes = sorted([k for k in ch_group.keys() if k.startswith("Z")])
 
         # Create lazy dask arrays for each z-plane
         arrays = []
@@ -383,11 +387,9 @@ class KintsugiZarr:
         # Stack along z axis
         return da.concatenate(arrays, axis=0)
 
-    def write_deconvolved(self,
-                          cycle: int,
-                          channel: int,
-                          data: np.ndarray,
-                          chunks: Optional[Tuple[int, ...]] = None) -> zarr.Array:
+    def write_deconvolved(
+        self, cycle: int, channel: int, data: np.ndarray, chunks: tuple[int, ...] | None = None
+    ) -> zarr.Array:
         """
         Write deconvolved z-stack.
 
@@ -413,24 +415,18 @@ class KintsugiZarr:
         if cycle_name not in self.root:
             self.create_cycle(cycle)
 
-        decon_group = self.root[cycle_name]['deconvolved']
+        decon_group = self.root[cycle_name]["deconvolved"]
 
         if chunks is None:
             chunks = (1, min(1024, data.shape[1]), min(1024, data.shape[2]))
 
         arr = decon_group.create_dataset(
-            channel_name,
-            data=data,
-            chunks=chunks,
-            compressor=DEFAULT_COMPRESSOR,
-            overwrite=True
+            channel_name, data=data, chunks=chunks, compressor=DEFAULT_COMPRESSOR, overwrite=True
         )
 
         return arr
 
-    def read_deconvolved_dask(self,
-                              cycle: int,
-                              channel: int) -> 'da.Array':
+    def read_deconvolved_dask(self, cycle: int, channel: int) -> "da.Array":
         """
         Read deconvolved stack as lazy dask array.
 
@@ -452,14 +448,12 @@ class KintsugiZarr:
         cycle_name = f"cyc{cycle:02d}"
         channel_name = f"CH{channel}"
 
-        zarr_arr = self.root[cycle_name]['deconvolved'][channel_name]
+        zarr_arr = self.root[cycle_name]["deconvolved"][channel_name]
         return da.from_zarr(zarr_arr)
 
-    def write_edf(self,
-                  cycle: int,
-                  channel: int,
-                  data: np.ndarray,
-                  channel_name: Optional[str] = None) -> zarr.Array:
+    def write_edf(
+        self, cycle: int, channel: int, data: np.ndarray, channel_name: str | None = None
+    ) -> zarr.Array:
         """
         Write EDF (2D projection) result.
 
@@ -485,29 +479,25 @@ class KintsugiZarr:
         if cycle_name not in self.root:
             self.create_cycle(cycle)
 
-        edf_group = self.root[cycle_name]['edf']
+        edf_group = self.root[cycle_name]["edf"]
 
         chunks = (min(2048, data.shape[0]), min(2048, data.shape[1]))
 
         arr = edf_group.create_dataset(
-            ch_key,
-            data=data,
-            chunks=chunks,
-            compressor=DEFAULT_COMPRESSOR,
-            overwrite=True
+            ch_key, data=data, chunks=chunks, compressor=DEFAULT_COMPRESSOR, overwrite=True
         )
 
         if channel_name:
-            arr.attrs['channel_name'] = channel_name
+            arr.attrs["channel_name"] = channel_name
 
         return arr
 
     def read_edf(self, cycle: int, channel: int) -> np.ndarray:
         """Read EDF result."""
         cycle_name = f"cyc{cycle:02d}"
-        return self.root[cycle_name]['edf'][f"CH{channel}"][:]
+        return self.root[cycle_name]["edf"][f"CH{channel}"][:]
 
-    def get_all_edf_dask(self, cycle: int) -> 'da.Array':
+    def get_all_edf_dask(self, cycle: int) -> "da.Array":
         """
         Get all EDF channels for a cycle as a lazy dask array.
 
@@ -525,9 +515,9 @@ class KintsugiZarr:
             raise ImportError("dask is required")
 
         cycle_name = f"cyc{cycle:02d}"
-        edf_group = self.root[cycle_name]['edf']
+        edf_group = self.root[cycle_name]["edf"]
 
-        channels = sorted([k for k in edf_group.keys() if k.startswith('CH')])
+        channels = sorted([k for k in edf_group.keys() if k.startswith("CH")])
 
         arrays = []
         for ch in channels:
@@ -536,9 +526,11 @@ class KintsugiZarr:
 
         return da.concatenate(arrays, axis=0)
 
-    def create_registered_group(self,
-                                pixel_size_um: float = 0.377,
-                                channel_names_per_cycle: Optional[Dict[int, List[str]]] = None):
+    def create_registered_group(
+        self,
+        pixel_size_um: float = 0.377,
+        channel_names_per_cycle: dict[int, list[str]] | None = None,
+    ):
         """
         Create the registered output group with OME-NGFF metadata.
 
@@ -549,23 +541,25 @@ class KintsugiZarr:
         channel_names_per_cycle : dict, optional
             Dict mapping cycle number to list of channel names
         """
-        if 'registered' not in self.root:
-            reg_group = self.root.create_group('registered')
+        if "registered" not in self.root:
+            reg_group = self.root.create_group("registered")
         else:
-            reg_group = self.root['registered']
+            reg_group = self.root["registered"]
 
-        reg_group.attrs['pixel_size_um'] = pixel_size_um
+        reg_group.attrs["pixel_size_um"] = pixel_size_um
 
         if channel_names_per_cycle:
-            reg_group.attrs['channel_names'] = channel_names_per_cycle
+            reg_group.attrs["channel_names"] = channel_names_per_cycle
 
         return reg_group
 
-    def write_registered(self,
-                         cycle: int,
-                         data: np.ndarray,
-                         channel_names: Optional[List[str]] = None,
-                         pixel_size_um: float = 0.377) -> zarr.Array:
+    def write_registered(
+        self,
+        cycle: int,
+        data: np.ndarray,
+        channel_names: list[str] | None = None,
+        pixel_size_um: float = 0.377,
+    ) -> zarr.Array:
         """
         Write registered multi-channel image.
 
@@ -585,35 +579,33 @@ class KintsugiZarr:
         zarr.Array
             The created array
         """
-        if 'registered' not in self.root:
+        if "registered" not in self.root:
             self.create_registered_group(pixel_size_um)
 
-        reg_group = self.root['registered']
+        reg_group = self.root["registered"]
         cycle_name = f"cyc{cycle:02d}"
 
         chunks = (1, min(2048, data.shape[1]), min(2048, data.shape[2]))
 
         arr = reg_group.create_dataset(
-            cycle_name,
-            data=data,
-            chunks=chunks,
-            compressor=DEFAULT_COMPRESSOR,
-            overwrite=True
+            cycle_name, data=data, chunks=chunks, compressor=DEFAULT_COMPRESSOR, overwrite=True
         )
 
         if channel_names:
-            arr.attrs['channel_names'] = channel_names
+            arr.attrs["channel_names"] = channel_names
 
         return arr
 
-    def write_ome_zarr(self,
-                       cycle: int,
-                       data: np.ndarray,
-                       axes: str = "cyx",
-                       channel_names: Optional[List[str]] = None,
-                       pixel_size_um: float = 0.377,
-                       generate_pyramid: bool = True,
-                       pyramid_levels: int = 4) -> None:
+    def write_ome_zarr(
+        self,
+        cycle: int,
+        data: np.ndarray,
+        axes: str = "cyx",
+        channel_names: list[str] | None = None,
+        pixel_size_um: float = 0.377,
+        generate_pyramid: bool = True,
+        pyramid_levels: int = 4,
+    ) -> None:
         """
         Write data in full OME-NGFF format with proper metadata.
 
@@ -640,39 +632,39 @@ class KintsugiZarr:
             raise ImportError("ome-zarr is required. Install with: pip install ome-zarr")
 
         cycle_name = f"cyc{cycle:02d}"
-        output_path = self.path / 'ome_ngff' / f"{cycle_name}.zarr"
+        output_path = self.path / "ome_ngff" / f"{cycle_name}.zarr"
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         store = parse_url(str(output_path), mode="w").store
 
         # Build coordinate transformations
-        transforms = [
-            [{"type": "scale", "scale": [pixel_size_um] * len(axes)}]
-        ]
+        transforms = [[{"type": "scale", "scale": [pixel_size_um] * len(axes)}]]
 
         # Generate pyramid if requested
         if generate_pyramid:
             pyramid = [data]
             for level in range(1, pyramid_levels):
-                factor = 2 ** level
-                if 'z' in axes:
+                factor = 2**level
+                if "z" in axes:
                     # Don't downsample z
-                    z_idx = axes.index('z')
-                    slices = [slice(None, None, factor if i != z_idx else 1)
-                             for i in range(len(axes))]
+                    z_idx = axes.index("z")
+                    slices = [
+                        slice(None, None, factor if i != z_idx else 1) for i in range(len(axes))
+                    ]
                 else:
                     slices = [slice(None, None, factor) for _ in range(len(axes))]
                 pyramid.append(data[tuple(slices)])
-                transforms.append([{"type": "scale",
-                                   "scale": [pixel_size_um * factor] * len(axes)}])
+                transforms.append(
+                    [{"type": "scale", "scale": [pixel_size_um * factor] * len(axes)}]
+                )
 
             write_multiscale(
                 pyramid=pyramid,
                 group=zarr.group(store),
                 axes=list(axes),
                 coordinate_transformations=transforms,
-                storage_options=dict(chunks=DEFAULT_CHUNKS.get('registered', (1, 2048, 2048))),
-                name=cycle_name
+                storage_options={"chunks": DEFAULT_CHUNKS.get("registered", (1, 2048, 2048))},
+                name=cycle_name,
             )
         else:
             write_image(
@@ -680,12 +672,12 @@ class KintsugiZarr:
                 group=zarr.group(store),
                 axes=list(axes),
                 coordinate_transformations=transforms[0],
-                storage_options=dict(chunks=DEFAULT_CHUNKS.get('registered', (1, 2048, 2048)))
+                storage_options={"chunks": DEFAULT_CHUNKS.get("registered", (1, 2048, 2048))},
             )
 
     def close(self):
         """Close the zarr store."""
-        if hasattr(self, 'store'):
+        if hasattr(self, "store"):
             self.store.close()
 
     def __enter__(self):
@@ -695,18 +687,18 @@ class KintsugiZarr:
         self.close()
         return False
 
-    def list_cycles(self) -> List[int]:
+    def list_cycles(self) -> list[int]:
         """List all cycle numbers in the store."""
         cycles = []
         for key in self.root.keys():
-            if key.startswith('cyc'):
+            if key.startswith("cyc"):
                 try:
                     cycles.append(int(key[3:]))
                 except ValueError:
                     pass
         return sorted(cycles)
 
-    def get_cycle_info(self, cycle: int) -> Dict[str, Any]:
+    def get_cycle_info(self, cycle: int) -> dict[str, Any]:
         """Get metadata about a cycle."""
         cycle_name = f"cyc{cycle:02d}"
         if cycle_name not in self.root:
@@ -715,25 +707,28 @@ class KintsugiZarr:
         cycle_group = self.root[cycle_name]
 
         info = dict(cycle_group.attrs)
-        info['stages'] = list(cycle_group.keys())
+        info["stages"] = list(cycle_group.keys())
 
         # Count data in each stage
-        for stage in info['stages']:
+        for stage in info["stages"]:
             stage_group = cycle_group[stage]
             if isinstance(stage_group, zarr.Group):
-                info[f'{stage}_contents'] = list(stage_group.keys())
+                info[f"{stage}_contents"] = list(stage_group.keys())
 
         return info
 
 
 # Convenience functions for common operations
 
-def convert_tiff_stack_to_zarr(tiff_dir: Union[str, Path],
-                                zarr_path: Union[str, Path],
-                                cycle: int,
-                                channel: int,
-                                stage: str = 'stitched',
-                                chunks: Optional[Tuple[int, ...]] = None) -> None:
+
+def convert_tiff_stack_to_zarr(
+    tiff_dir: str | Path,
+    zarr_path: str | Path,
+    cycle: int,
+    channel: int,
+    stage: str = "stitched",
+    chunks: tuple[int, ...] | None = None,
+) -> None:
     """
     Convert a directory of TIFF files to zarr format.
 
@@ -753,6 +748,7 @@ def convert_tiff_stack_to_zarr(tiff_dir: Union[str, Path],
         Chunk size for zarr arrays
     """
     from glob import glob
+
     from skimage.io import imread
 
     tiff_dir = Path(tiff_dir)
@@ -761,23 +757,22 @@ def convert_tiff_stack_to_zarr(tiff_dir: Union[str, Path],
     if not tiff_files:
         raise ValueError(f"No TIFF files found in {tiff_dir}")
 
-    store = KintsugiZarr(zarr_path, mode='a')
+    store = KintsugiZarr(zarr_path, mode="a")
 
     for i, tiff_file in enumerate(tiff_files):
         img = imread(tiff_file)
         zplane = i + 1
 
-        if stage == 'stitched':
+        if stage == "stitched":
             store.write_stitched(cycle, channel, zplane, img, chunks)
         # Add other stages as needed
 
     store.close()
 
 
-def zarr_to_dask_stack(zarr_path: Union[str, Path],
-                       cycle: int,
-                       channel: int,
-                       stage: str = 'stitched') -> 'da.Array':
+def zarr_to_dask_stack(
+    zarr_path: str | Path, cycle: int, channel: int, stage: str = "stitched"
+) -> "da.Array":
     """
     Load zarr data as a lazy dask array.
 
@@ -797,23 +792,25 @@ def zarr_to_dask_stack(zarr_path: Union[str, Path],
     dask.array.Array
         Lazy dask array
     """
-    store = KintsugiZarr(zarr_path, mode='r')
+    store = KintsugiZarr(zarr_path, mode="r")
 
-    if stage == 'stitched':
+    if stage == "stitched":
         return store.read_stitched_dask(cycle, channel)
-    elif stage == 'deconvolved':
+    elif stage == "deconvolved":
         return store.read_deconvolved_dask(cycle, channel)
     else:
         raise ValueError(f"Unknown stage: {stage}")
 
 
-def process_zarr_parallel(zarr_path: Union[str, Path],
-                          cycle: int,
-                          channel: int,
-                          process_func: Callable,
-                          output_stage: str,
-                          input_stage: str = 'stitched',
-                          **process_kwargs) -> None:
+def process_zarr_parallel(
+    zarr_path: str | Path,
+    cycle: int,
+    channel: int,
+    process_func: Callable,
+    output_stage: str,
+    input_stage: str = "stitched",
+    **process_kwargs,
+) -> None:
     """
     Process zarr data in parallel using dask.
 
@@ -837,28 +834,25 @@ def process_zarr_parallel(zarr_path: Union[str, Path],
     if not DASK_AVAILABLE:
         raise ImportError("dask is required for parallel processing")
 
-    store = KintsugiZarr(zarr_path, mode='a')
+    store = KintsugiZarr(zarr_path, mode="a")
 
     # Get input as dask array
-    if input_stage == 'stitched':
+    if input_stage == "stitched":
         data = store.read_stitched_dask(cycle, channel)
-    elif input_stage == 'deconvolved':
+    elif input_stage == "deconvolved":
         data = store.read_deconvolved_dask(cycle, channel)
     else:
         raise ValueError(f"Unknown input stage: {input_stage}")
 
     # Apply function to blocks
-    result = data.map_blocks(
-        lambda block: process_func(block, **process_kwargs),
-        dtype=data.dtype
-    )
+    result = data.map_blocks(lambda block: process_func(block, **process_kwargs), dtype=data.dtype)
 
     # Compute and store result
     result_computed = result.compute()
 
-    if output_stage == 'deconvolved':
+    if output_stage == "deconvolved":
         store.write_deconvolved(cycle, channel, result_computed)
-    elif output_stage == 'edf':
+    elif output_stage == "edf":
         store.write_edf(cycle, channel, result_computed)
 
     store.close()
@@ -867,6 +861,7 @@ def process_zarr_parallel(zarr_path: Union[str, Path],
 # =============================================================================
 # Unified Output Interface
 # =============================================================================
+
 
 class OutputWriter:
     """
@@ -908,34 +903,38 @@ class OutputWriter:
     >>> writer.write_stitched(cycle=1, channel=2, zplane=5, data=img)
     """
 
-    def __init__(self,
-                 output_dir: Union[str, Path],
-                 format: str = 'tiff',
-                 zarr_path: Optional[Union[str, Path]] = None,
-                 compression: Optional[str] = None):
+    def __init__(
+        self,
+        output_dir: str | Path,
+        format: str = "tiff",
+        zarr_path: str | Path | None = None,
+        compression: str | None = None,
+    ):
         self.output_dir = Path(output_dir)
         self.format = format.lower()
         self.compression = compression
 
-        if self.format not in ('tiff', 'zarr'):
+        if self.format not in ("tiff", "zarr"):
             raise ValueError(f"Unknown format: {format}. Use 'tiff' or 'zarr'")
 
-        if self.format == 'zarr':
+        if self.format == "zarr":
             if zarr_path is None:
                 zarr_path = self.output_dir / "output.zarr"
-            self.zarr_store = KintsugiZarr(zarr_path, mode='a')
+            self.zarr_store = KintsugiZarr(zarr_path, mode="a")
         else:
             self.zarr_store = None
 
         # Create output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def write_stitched(self,
-                       cycle: int,
-                       channel: int,
-                       zplane: int,
-                       data: np.ndarray,
-                       channel_name: Optional[str] = None) -> str:
+    def write_stitched(
+        self,
+        cycle: int,
+        channel: int,
+        zplane: int,
+        data: np.ndarray,
+        channel_name: str | None = None,
+    ) -> str:
         """
         Write stitched image.
 
@@ -957,23 +956,21 @@ class OutputWriter:
         str
             Path to the written file/array
         """
-        if self.format == 'tiff':
+        if self.format == "tiff":
             return self._write_tiff_stitched(cycle, channel, zplane, data)
         else:
             self.zarr_store.write_stitched(cycle, channel, zplane, data)
             return str(self.zarr_store.path)
 
-    def _write_tiff_stitched(self,
-                              cycle: int,
-                              channel: int,
-                              zplane: int,
-                              data: np.ndarray) -> str:
+    def _write_tiff_stitched(self, cycle: int, channel: int, zplane: int, data: np.ndarray) -> str:
         """Write stitched image as TIFF."""
         try:
             import tifffile
+
             use_tifffile = True
         except ImportError:
             from skimage.io import imsave
+
             use_tifffile = False
 
         # Create directory structure
@@ -985,23 +982,16 @@ class OutputWriter:
         if use_tifffile:
             # tifffile is faster and supports more compression options
             tifffile.imwrite(
-                str(output_path),
-                data,
-                compression=self.compression,
-                photometric='minisblack'
+                str(output_path), data, compression=self.compression, photometric="minisblack"
             )
         else:
             imsave(str(output_path), data, check_contrast=False)
 
         return str(output_path)
 
-    def write_deconvolved(self,
-                          cycle: int,
-                          channel: int,
-                          zplane: int,
-                          data: np.ndarray) -> str:
+    def write_deconvolved(self, cycle: int, channel: int, zplane: int, data: np.ndarray) -> str:
         """Write deconvolved image."""
-        if self.format == 'tiff':
+        if self.format == "tiff":
             return self._write_tiff_deconvolved(cycle, channel, zplane, data)
         else:
             # For zarr, we typically write the whole stack at once
@@ -1012,7 +1002,7 @@ class OutputWriter:
             if cycle_name not in self.zarr_store.root:
                 self.zarr_store.create_cycle(cycle)
 
-            decon_group = self.zarr_store.root[cycle_name]['deconvolved']
+            decon_group = self.zarr_store.root[cycle_name]["deconvolved"]
             if ch_name not in decon_group:
                 decon_group.create_group(ch_name)
 
@@ -1022,21 +1012,21 @@ class OutputWriter:
                 data=data,
                 chunks=(min(1024, data.shape[0]), min(1024, data.shape[1])),
                 compressor=DEFAULT_COMPRESSOR,
-                overwrite=True
+                overwrite=True,
             )
             return str(self.zarr_store.path)
 
-    def _write_tiff_deconvolved(self,
-                                 cycle: int,
-                                 channel: int,
-                                 zplane: int,
-                                 data: np.ndarray) -> str:
+    def _write_tiff_deconvolved(
+        self, cycle: int, channel: int, zplane: int, data: np.ndarray
+    ) -> str:
         """Write deconvolved image as TIFF."""
         try:
             import tifffile
+
             use_tifffile = True
         except ImportError:
             from skimage.io import imsave
+
             use_tifffile = False
 
         dest_dir = self.output_dir / f"cyc{cycle:02d}" / f"CH{channel}" / "deconvolved"
@@ -1051,29 +1041,27 @@ class OutputWriter:
 
         return str(output_path)
 
-    def write_edf(self,
-                  cycle: int,
-                  channel: int,
-                  data: np.ndarray,
-                  channel_name: Optional[str] = None) -> str:
+    def write_edf(
+        self, cycle: int, channel: int, data: np.ndarray, channel_name: str | None = None
+    ) -> str:
         """Write EDF (extended depth of focus) result."""
-        if self.format == 'tiff':
+        if self.format == "tiff":
             return self._write_tiff_edf(cycle, channel, data, channel_name)
         else:
             self.zarr_store.write_edf(cycle, channel, data, channel_name)
             return str(self.zarr_store.path)
 
-    def _write_tiff_edf(self,
-                        cycle: int,
-                        channel: int,
-                        data: np.ndarray,
-                        channel_name: Optional[str] = None) -> str:
+    def _write_tiff_edf(
+        self, cycle: int, channel: int, data: np.ndarray, channel_name: str | None = None
+    ) -> str:
         """Write EDF image as TIFF."""
         try:
             import tifffile
+
             use_tifffile = True
         except ImportError:
             from skimage.io import imsave
+
             use_tifffile = False
 
         dest_dir = self.output_dir / f"cyc{cycle:02d}"
@@ -1103,16 +1091,18 @@ class OutputWriter:
         return False
 
 
-def convert_tiff_to_ome_zarr(tiff_base_dir: Union[str, Path],
-                              zarr_path: Union[str, Path],
-                              cycles: List[int],
-                              channels: List[int],
-                              stage: str = 'stitched',
-                              channel_names: Optional[Dict[int, List[str]]] = None,
-                              pixel_size_um: float = 0.377,
-                              generate_pyramid: bool = True,
-                              pyramid_levels: int = 4,
-                              n_workers: int = 4) -> None:
+def convert_tiff_to_ome_zarr(
+    tiff_base_dir: str | Path,
+    zarr_path: str | Path,
+    cycles: list[int],
+    channels: list[int],
+    stage: str = "stitched",
+    channel_names: dict[int, list[str]] | None = None,
+    pixel_size_um: float = 0.377,
+    generate_pyramid: bool = True,
+    pyramid_levels: int = 4,
+    n_workers: int = 4,
+) -> None:
     """
     Convert TIFF output directory to OME-Zarr format.
 
@@ -1142,20 +1132,23 @@ def convert_tiff_to_ome_zarr(tiff_base_dir: Union[str, Path],
     n_workers : int
         Number of parallel workers for loading TIFFs
     """
-    from glob import glob
     from concurrent.futures import ThreadPoolExecutor
+    from glob import glob
 
     try:
         import tifffile
+
         def read_tiff(path):
             return tifffile.imread(path)
+
     except ImportError:
         from skimage.io import imread
+
         def read_tiff(path):
             return imread(path)
 
     tiff_base_dir = Path(tiff_base_dir)
-    store = KintsugiZarr(zarr_path, mode='w')
+    store = KintsugiZarr(zarr_path, mode="w")
 
     print(f"Converting TIFF to OME-Zarr: {zarr_path}")
 
@@ -1164,13 +1157,13 @@ def convert_tiff_to_ome_zarr(tiff_base_dir: Union[str, Path],
         store.create_cycle(
             cycle,
             n_channels=len(channels),
-            channel_names=channel_names.get(cycle) if channel_names else None
+            channel_names=channel_names.get(cycle) if channel_names else None,
         )
 
         for channel in channels:
             ch_dir = tiff_base_dir / f"cyc{cycle:02d}" / f"CH{channel}"
 
-            if stage == 'deconvolved':
+            if stage == "deconvolved":
                 ch_dir = ch_dir / "deconvolved"
 
             tiff_files = sorted(glob(str(ch_dir / "*.tif")))
@@ -1187,10 +1180,10 @@ def convert_tiff_to_ome_zarr(tiff_base_dir: Union[str, Path],
             stack = np.stack(images, axis=0)
 
             # Write to zarr
-            if stage == 'stitched':
+            if stage == "stitched":
                 for z, img in enumerate(images, start=1):
                     store.write_stitched(cycle, channel, z, img)
-            elif stage == 'deconvolved':
+            elif stage == "deconvolved":
                 store.write_deconvolved(cycle, channel, stack)
 
             print(f"    CH{channel}: {len(images)} z-planes")
@@ -1202,19 +1195,21 @@ def convert_tiff_to_ome_zarr(tiff_base_dir: Union[str, Path],
         print("  Generating multi-resolution pyramids...")
         for cycle in cycles:
             # Collect all channels for this cycle
-            edf_group = store.root[f"cyc{cycle:02d}"].get('edf')
+            edf_group = store.root[f"cyc{cycle:02d}"].get("edf")
             if edf_group and len(edf_group.keys()) > 0:
                 # Stack EDF channels
-                ch_keys = sorted([k for k in edf_group.keys() if k.startswith('CH')])
+                ch_keys = sorted([k for k in edf_group.keys() if k.startswith("CH")])
                 if ch_keys:
                     stack = np.stack([edf_group[k][:] for k in ch_keys], axis=0)
                     ch_names = channel_names.get(cycle) if channel_names else None
                     store.write_ome_zarr(
-                        cycle, stack, axes="cyx",
+                        cycle,
+                        stack,
+                        axes="cyx",
                         channel_names=ch_names,
                         pixel_size_um=pixel_size_um,
                         generate_pyramid=True,
-                        pyramid_levels=pyramid_levels
+                        pyramid_levels=pyramid_levels,
                     )
 
     store.close()

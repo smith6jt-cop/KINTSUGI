@@ -26,25 +26,23 @@ Usage:
     nuclei_masks = segment_nuclei(dapi_image)
 """
 
-from kintsugi.segment.sam_wrapper import (
-    SAMSegmenter,
-    SAMConfig,
-    segment_with_sam,
-)
-
 from kintsugi.segment.classical import (
-    segment_nuclei_watershed,
     segment_cells_watershed,
-    threshold_otsu,
+    segment_nuclei_watershed,
     threshold_adaptive,
+    threshold_otsu,
 )
-
 from kintsugi.segment.postprocess import (
-    refine_masks,
-    filter_masks_by_size,
-    split_touching_objects,
     fill_holes,
+    filter_masks_by_size,
+    refine_masks,
     smooth_boundaries,
+    split_touching_objects,
+)
+from kintsugi.segment.sam_wrapper import (
+    SAMConfig,
+    SAMSegmenter,
+    segment_with_sam,
 )
 
 __all__ = [
@@ -99,6 +97,7 @@ def segment_nuclei(
     elif method == "instanseg":
         try:
             from kintsugi.segment.instanseg_wrapper import segment_instanseg
+
             return segment_instanseg(image, model="nuclei", **kwargs)
         except ImportError:
             raise ImportError("InstanSeg not available. Install with: pip install instanseg")

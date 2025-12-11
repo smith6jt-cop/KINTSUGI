@@ -8,18 +8,21 @@ with visual feedback using Kview2 visualization tools.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Callable
+from typing import Any
+
 import numpy as np
 
 try:
     import ipywidgets as widgets
-    from IPython.display import display, clear_output
+    from IPython.display import clear_output, display
+
     WIDGETS_AVAILABLE = True
 except ImportError:
     WIDGETS_AVAILABLE = False
 
 try:
     import stackview
+
     STACKVIEW_AVAILABLE = True
 except ImportError:
     STACKVIEW_AVAILABLE = False
@@ -31,15 +34,15 @@ class TunerResult:
 
     operation: str
     channel: str
-    params: Dict[str, Any] = field(default_factory=dict)
-    processed_data: Optional[np.ndarray] = None
+    params: dict[str, Any] = field(default_factory=dict)
+    processed_data: np.ndarray | None = None
     approved: bool = False
 
-    def get_params(self) -> Dict[str, Any]:
+    def get_params(self) -> dict[str, Any]:
         """Get the tuned parameters."""
         return self.params.copy()
 
-    def get_data(self) -> Optional[np.ndarray]:
+    def get_data(self) -> np.ndarray | None:
         """Get the processed data array."""
         return self.processed_data
 
@@ -47,9 +50,7 @@ class TunerResult:
 def _check_widgets():
     """Check if Jupyter widgets are available."""
     if not WIDGETS_AVAILABLE:
-        raise ImportError(
-            "ipywidgets not installed. Install with: pip install ipywidgets"
-        )
+        raise ImportError("ipywidgets not installed. Install with: pip install ipywidgets")
 
 
 def _load_image(channel_name: str) -> np.ndarray:
@@ -71,7 +72,7 @@ def _load_image(channel_name: str) -> np.ndarray:
 def blank_subtraction_tuner(
     signal_channel: str,
     blank_channel: str,
-    initial_params: Optional[Dict[str, Any]] = None,
+    initial_params: dict[str, Any] | None = None,
     zoom_factor: float = 0.25,
 ) -> TunerResult:
     """
@@ -212,15 +213,17 @@ def blank_subtraction_tuner(
     approve_button.on_click(on_approve)
 
     # Layout
-    controls = widgets.VBox([
-        widgets.HTML("<h3>Blank Subtraction Parameters</h3>"),
-        clip_slider,
-        scale_slider,
-        smooth_low_check,
-        smooth_high_check,
-        erosion_slider,
-        approve_button,
-    ])
+    controls = widgets.VBox(
+        [
+            widgets.HTML("<h3>Blank Subtraction Parameters</h3>"),
+            clip_slider,
+            scale_slider,
+            smooth_low_check,
+            smooth_high_check,
+            erosion_slider,
+            approve_button,
+        ]
+    )
 
     display(widgets.HBox([controls, output]))
     update_preview()
@@ -230,7 +233,7 @@ def blank_subtraction_tuner(
 
 def denoise_tuner(
     channel: str,
-    initial_params: Optional[Dict[str, Any]] = None,
+    initial_params: dict[str, Any] | None = None,
     zoom_factor: float = 0.25,
 ) -> TunerResult:
     """Interactive denoising parameter tuner."""
@@ -280,7 +283,7 @@ def denoise_tuner(
     def update_preview(_=None):
         with output:
             clear_output(wait=True)
-            from scipy.ndimage import median_filter, uniform_filter, percentile_filter
+            from scipy.ndimage import median_filter, percentile_filter, uniform_filter
 
             method = method_dropdown.value
             size = size_slider.value
@@ -302,6 +305,7 @@ def denoise_tuner(
                 stackview.curtain(display_data, processed, colormap=["gray", "turbo"])
             else:
                 import matplotlib.pyplot as plt
+
                 fig, axes = plt.subplots(1, 2, figsize=(10, 5))
                 axes[0].imshow(display_data, cmap="gray")
                 axes[0].set_title("Original")
@@ -318,13 +322,15 @@ def denoise_tuner(
     percentile_slider.observe(update_preview, names="value")
     approve_button.on_click(on_approve)
 
-    controls = widgets.VBox([
-        widgets.HTML("<h3>Denoising Parameters</h3>"),
-        method_dropdown,
-        size_slider,
-        percentile_slider,
-        approve_button,
-    ])
+    controls = widgets.VBox(
+        [
+            widgets.HTML("<h3>Denoising Parameters</h3>"),
+            method_dropdown,
+            size_slider,
+            percentile_slider,
+            approve_button,
+        ]
+    )
 
     display(widgets.HBox([controls, output]))
     update_preview()
@@ -334,7 +340,7 @@ def denoise_tuner(
 
 def clahe_tuner(
     channel: str,
-    initial_params: Optional[Dict[str, Any]] = None,
+    initial_params: dict[str, Any] | None = None,
     zoom_factor: float = 0.25,
 ) -> TunerResult:
     """Interactive CLAHE parameter tuner."""
@@ -399,6 +405,7 @@ def clahe_tuner(
                 stackview.curtain(display_data, processed, colormap=["gray", "turbo"])
             else:
                 import matplotlib.pyplot as plt
+
                 fig, axes = plt.subplots(1, 2, figsize=(10, 5))
                 axes[0].imshow(display_data, cmap="gray")
                 axes[0].set_title("Original")
@@ -414,12 +421,14 @@ def clahe_tuner(
     tile_slider.observe(update_preview, names="value")
     approve_button.on_click(on_approve)
 
-    controls = widgets.VBox([
-        widgets.HTML("<h3>CLAHE Parameters</h3>"),
-        clip_slider,
-        tile_slider,
-        approve_button,
-    ])
+    controls = widgets.VBox(
+        [
+            widgets.HTML("<h3>CLAHE Parameters</h3>"),
+            clip_slider,
+            tile_slider,
+            approve_button,
+        ]
+    )
 
     display(widgets.HBox([controls, output]))
     update_preview()
@@ -429,7 +438,7 @@ def clahe_tuner(
 
 def clean_tuner(
     channel: str,
-    initial_params: Optional[Dict[str, Any]] = None,
+    initial_params: dict[str, Any] | None = None,
     zoom_factor: float = 0.25,
 ) -> TunerResult:
     """Interactive background cleaning parameter tuner."""
@@ -480,6 +489,7 @@ def clean_tuner(
 
             if remove_small_check.value:
                 from skimage.morphology import remove_small_objects
+
                 binary = processed > 0
                 binary = remove_small_objects(binary, min_size=min_size_slider.value)
                 processed = np.where(binary, processed, 0)
@@ -494,6 +504,7 @@ def clean_tuner(
                 stackview.curtain(display_data, processed, colormap=["gray", "turbo"])
             else:
                 import matplotlib.pyplot as plt
+
                 fig, axes = plt.subplots(1, 2, figsize=(10, 5))
                 axes[0].imshow(display_data, cmap="gray")
                 axes[1].imshow(processed, cmap="turbo")
@@ -508,13 +519,15 @@ def clean_tuner(
     min_size_slider.observe(update_preview, names="value")
     approve_button.on_click(on_approve)
 
-    controls = widgets.VBox([
-        widgets.HTML("<h3>Background Cleaning Parameters</h3>"),
-        threshold_slider,
-        remove_small_check,
-        min_size_slider,
-        approve_button,
-    ])
+    controls = widgets.VBox(
+        [
+            widgets.HTML("<h3>Background Cleaning Parameters</h3>"),
+            threshold_slider,
+            remove_small_check,
+            min_size_slider,
+            approve_button,
+        ]
+    )
 
     display(widgets.HBox([controls, output]))
     update_preview()
@@ -524,7 +537,7 @@ def clean_tuner(
 
 def gaussian_subtract_tuner(
     channel: str,
-    initial_params: Optional[Dict[str, Any]] = None,
+    initial_params: dict[str, Any] | None = None,
     zoom_factor: float = 0.25,
 ) -> TunerResult:
     """Interactive Gaussian subtraction parameter tuner."""
@@ -581,6 +594,7 @@ def gaussian_subtract_tuner(
                 stackview.curtain(display_data, processed, colormap=["gray", "turbo"])
             else:
                 import matplotlib.pyplot as plt
+
                 fig, axes = plt.subplots(1, 3, figsize=(15, 5))
                 axes[0].imshow(display_data, cmap="gray")
                 axes[0].set_title("Original")
@@ -598,12 +612,14 @@ def gaussian_subtract_tuner(
     scale_slider.observe(update_preview, names="value")
     approve_button.on_click(on_approve)
 
-    controls = widgets.VBox([
-        widgets.HTML("<h3>Gaussian Subtraction Parameters</h3>"),
-        sigma_slider,
-        scale_slider,
-        approve_button,
-    ])
+    controls = widgets.VBox(
+        [
+            widgets.HTML("<h3>Gaussian Subtraction Parameters</h3>"),
+            sigma_slider,
+            scale_slider,
+            approve_button,
+        ]
+    )
 
     display(widgets.HBox([controls, output]))
     update_preview()

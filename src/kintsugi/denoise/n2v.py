@@ -11,11 +11,14 @@ IEEE/CVF Conference on Computer Vision and Pattern Recognition, 2019.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Union
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import dask.array
 
 logger = logging.getLogger("kintsugi.denoise.n2v")
 
@@ -65,7 +68,7 @@ class N2VDenoiser:
     >>> denoised = denoiser.predict(noisy_image)
     """
 
-    def __init__(self, config: Optional[N2VConfig] = None):
+    def __init__(self, config: N2VConfig | None = None):
         """
         Initialize N2V denoiser.
 
@@ -95,8 +98,7 @@ class N2VDenoiser:
 
         except ImportError:
             raise ImportError(
-                "PyTorch is required for N2V denoising. "
-                "Install with: pip install torch"
+                "PyTorch is required for N2V denoising. " "Install with: pip install torch"
             )
 
     def _build_model(self, n_channels: int = 1):
@@ -114,10 +116,12 @@ class N2VDenoiser:
                 ]
                 if batch_norm:
                     layers.insert(1, nn.BatchNorm2d(out_ch))
-                layers.extend([
-                    nn.Conv2d(out_ch, out_ch, kernel_size, padding=padding),
-                    nn.ReLU(inplace=True),
-                ])
+                layers.extend(
+                    [
+                        nn.Conv2d(out_ch, out_ch, kernel_size, padding=padding),
+                        nn.ReLU(inplace=True),
+                    ]
+                )
                 if batch_norm:
                     layers.insert(-1, nn.BatchNorm2d(out_ch))
                 self.block = nn.Sequential(*layers)
@@ -158,7 +162,7 @@ class N2VDenoiser:
             def forward(self, x):
                 # Encoder path
                 enc_features = []
-                for encoder, pool in zip(self.encoders, self.pools):
+                for encoder, pool in zip(self.encoders, self.pools, strict=False):
                     x = encoder(x)
                     enc_features.append(x)
                     x = pool(x)
@@ -168,7 +172,7 @@ class N2VDenoiser:
 
                 # Decoder path
                 for upconv, decoder, enc_feat in zip(
-                    self.upconvs, self.decoders, reversed(enc_features)
+                    self.upconvs, self.decoders, reversed(enc_features), strict=False
                 ):
                     x = upconv(x)
                     # Handle size mismatch
@@ -191,7 +195,7 @@ class N2VDenoiser:
 
     def _extract_patches(
         self,
-        images: List[np.ndarray],
+        images: list[np.ndarray],
     ) -> np.ndarray:
         """Extract random patches from images for training."""
         patches = []
@@ -208,7 +212,7 @@ class N2VDenoiser:
                 if h > patch_size and w > patch_size:
                     y = np.random.randint(0, h - patch_size)
                     x = np.random.randint(0, w - patch_size)
-                    patch = img[:, y:y + patch_size, x:x + patch_size]
+                    patch = img[:, y : y + patch_size, x : x + patch_size]
                 else:
                     # Pad if image smaller than patch
                     pad_h = max(0, patch_size - h)
@@ -223,7 +227,7 @@ class N2VDenoiser:
     def _create_n2v_mask(
         self,
         patches: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Create N2V blind-spot masks.
 
@@ -246,7 +250,7 @@ class N2VDenoiser:
             y_coords = np.random.randint(radius, h - radius, size=n_masked)
             x_coords = np.random.randint(radius, w - radius, size=n_masked)
 
-            for i, (y, x) in enumerate(zip(y_coords, x_coords)):
+            for i, (y, x) in enumerate(zip(y_coords, x_coords, strict=False)):
                 # Store original value as target
                 target_values[b, :, i] = patches[b, :, y, x]
                 mask_coords[b, 0, i] = y
@@ -263,23 +267,21 @@ class N2VDenoiser:
                 elif self.config.masking_method == "median":
                     # Median of neighborhood
                     neighborhood = patches[
-                        b, :,
-                        y - radius:y + radius + 1,
-                        x - radius:x + radius + 1
+                        b, :, y - radius : y + radius + 1, x - radius : x + radius + 1
                     ]
                     replacement = np.median(neighborhood, axis=(1, 2))
 
                 else:  # gaussian
                     # Gaussian-weighted average of neighborhood
                     neighborhood = patches[
-                        b, :,
-                        y - radius:y + radius + 1,
-                        x - radius:x + radius + 1
+                        b, :, y - radius : y + radius + 1, x - radius : x + radius + 1
                     ]
                     size = 2 * radius + 1
                     y_grid, x_grid = np.mgrid[:size, :size]
                     center = radius
-                    weights = np.exp(-((y_grid - center) ** 2 + (x_grid - center) ** 2) / (2 * radius ** 2))
+                    weights = np.exp(
+                        -((y_grid - center) ** 2 + (x_grid - center) ** 2) / (2 * radius**2)
+                    )
                     weights[center, center] = 0
                     weights /= weights.sum()
                     replacement = np.sum(neighborhood * weights, axis=(1, 2))
@@ -290,10 +292,10 @@ class N2VDenoiser:
 
     def train(
         self,
-        images: List[np.ndarray],
-        epochs: Optional[int] = None,
+        images: list[np.ndarray],
+        epochs: int | None = None,
         verbose: bool = True,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Train the N2V model on noisy images.
 
@@ -312,7 +314,6 @@ class N2VDenoiser:
             Training history with loss values
         """
         import torch
-        from torch.utils.data import DataLoader, TensorDataset
 
         self._setup_device()
 
@@ -359,7 +360,7 @@ class N2VDenoiser:
             n_batches = 0
 
             for i in range(0, len(patches), self.config.batch_size):
-                batch = patches[i:i + self.config.batch_size]
+                batch = patches[i : i + self.config.batch_size]
 
                 # Create N2V masks
                 masked, targets, coords = self._create_n2v_mask(batch)
@@ -477,7 +478,7 @@ class N2VDenoiser:
                     pred = self.model(tile_tensor)[0].cpu().numpy()
 
                     # Remove padding
-                    pred = pred[:, :y_end - y, :x_end - x]
+                    pred = pred[:, : y_end - y, : x_end - x]
 
                     # Blend with existing output using linear ramp
                     tile_h, tile_w = pred.shape[1], pred.shape[2]
@@ -486,9 +487,9 @@ class N2VDenoiser:
 
                     weight = np.ones((tile_h, tile_w))
                     if y > 0:
-                        weight[:len(blend_y), :] *= blend_y[:, np.newaxis]
+                        weight[: len(blend_y), :] *= blend_y[:, np.newaxis]
                     if x > 0:
-                        weight[:, :len(blend_x)] *= blend_x[np.newaxis, :]
+                        weight[:, : len(blend_x)] *= blend_x[np.newaxis, :]
 
                     output[:, y:y_end, x:x_end] += pred * weight
                     weights[y:y_end, x:x_end] += weight
@@ -511,7 +512,7 @@ class N2VDenoiser:
 
         return output.astype(original_dtype)
 
-    def save(self, path: Union[str, Path]):
+    def save(self, path: str | Path):
         """Save trained model to file."""
         import torch
 
@@ -519,16 +520,19 @@ class N2VDenoiser:
             raise RuntimeError("Model not trained.")
 
         path = Path(path)
-        torch.save({
-            "model_state": self.model.state_dict(),
-            "config": self.config,
-            "mean": self._mean,
-            "std": self._std,
-        }, path)
+        torch.save(
+            {
+                "model_state": self.model.state_dict(),
+                "config": self.config,
+                "mean": self._mean,
+                "std": self._std,
+            },
+            path,
+        )
 
         logger.info(f"Model saved to {path}")
 
-    def load(self, path: Union[str, Path]):
+    def load(self, path: str | Path):
         """Load trained model from file."""
         import torch
 
@@ -552,7 +556,7 @@ def denoise_n2v(
     patch_size: int = 64,
     n_epochs: int = 50,
     device: str = "auto",
-    model_path: Optional[Union[str, Path]] = None,
+    model_path: str | Path | None = None,
     save_model: bool = False,
     **kwargs,
 ) -> np.ndarray:
@@ -611,8 +615,8 @@ def denoise_n2v(
 
 
 def train_n2v(
-    images: List[np.ndarray],
-    output_path: Union[str, Path],
+    images: list[np.ndarray],
+    output_path: str | Path,
     patch_size: int = 64,
     n_epochs: int = 100,
     device: str = "auto",

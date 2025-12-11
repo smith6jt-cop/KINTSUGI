@@ -7,14 +7,14 @@ Wraps dl_refinement functionality for channel quality assessment.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
-logger = logging.getLogger("kintsugi.mcp.quality_assessment")
-
 # Import session state from signal_isolation
-from kintsugi.mcp.tools.signal_isolation import _loaded_images, _add_history
+from kintsugi.mcp.tools.signal_isolation import _add_history, _loaded_images
+
+logger = logging.getLogger("kintsugi.mcp.quality_assessment")
 
 
 def _get_image(name: str) -> Any:
@@ -27,10 +27,10 @@ def _get_image(name: str) -> Any:
 async def assess_quality(
     channel: str,
     use_dl_model: bool = False,
-    model_path: Optional[str] = None,
+    model_path: str | None = None,
     confidence_threshold: float = 0.85,
     tile_size: int = 512,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Assess channel quality using heuristic and/or deep learning metrics.
 
@@ -92,10 +92,14 @@ async def assess_quality(
     # Generate recommendations
     recommendations = _generate_recommendations(metrics, final_score)
 
-    _add_history(channel, "assess_quality", {
-        "confidence_threshold": confidence_threshold,
-        "use_dl_model": use_dl_model,
-    })
+    _add_history(
+        channel,
+        "assess_quality",
+        {
+            "confidence_threshold": confidence_threshold,
+            "use_dl_model": use_dl_model,
+        },
+    )
 
     return {
         "status": "success",
@@ -108,7 +112,7 @@ async def assess_quality(
     }
 
 
-def _calculate_heuristic_metrics(data: np.ndarray) -> Dict[str, float]:
+def _calculate_heuristic_metrics(data: np.ndarray) -> dict[str, float]:
     """Calculate heuristic quality metrics for an image."""
     metrics = {}
 
@@ -169,7 +173,7 @@ def _calculate_heuristic_metrics(data: np.ndarray) -> Dict[str, float]:
     return metrics
 
 
-def _calculate_heuristic_score(metrics: Dict[str, float]) -> float:
+def _calculate_heuristic_score(metrics: dict[str, float]) -> float:
     """Calculate overall heuristic quality score from metrics."""
     scores = []
 
@@ -197,21 +201,27 @@ def _calculate_heuristic_score(metrics: Dict[str, float]) -> float:
     return sum(scores)
 
 
-def _generate_recommendations(metrics: Dict[str, float], score: float) -> List[str]:
+def _generate_recommendations(metrics: dict[str, float], score: float) -> list[str]:
     """Generate processing recommendations based on metrics."""
     recommendations = []
 
     # SNR issues
     if metrics.get("snr", 0) < 5:
-        recommendations.append("Low SNR detected. Consider denoising (median filter) or longer exposure.")
+        recommendations.append(
+            "Low SNR detected. Consider denoising (median filter) or longer exposure."
+        )
 
     # High autofluorescence
     if metrics.get("autofluorescence_score", 0) > 0.3:
-        recommendations.append("High background detected. Recommend blank subtraction with scale_factor=0.8-1.0.")
+        recommendations.append(
+            "High background detected. Recommend blank subtraction with scale_factor=0.8-1.0."
+        )
 
     # Saturation issues
     if metrics.get("saturation_ratio", 0) > 0.05:
-        recommendations.append("Saturation detected. Consider reducing exposure or checking sample preparation.")
+        recommendations.append(
+            "Saturation detected. Consider reducing exposure or checking sample preparation."
+        )
 
     # Low dynamic range
     if metrics.get("dynamic_range", 0) < 5000:
@@ -232,7 +242,7 @@ def _generate_recommendations(metrics: Dict[str, float], score: float) -> List[s
     return recommendations
 
 
-async def compute_snr(channel: str) -> Dict[str, Any]:
+async def compute_snr(channel: str) -> dict[str, Any]:
     """
     Compute Signal-to-Noise Ratio for a channel.
 
@@ -300,9 +310,9 @@ def _interpret_snr(snr: float) -> str:
 
 
 async def batch_assess_quality(
-    channels: List[str],
+    channels: list[str],
     confidence_threshold: float = 0.85,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Assess quality for multiple channels at once.
 
@@ -316,17 +326,21 @@ async def batch_assess_quality(
             confidence_threshold=confidence_threshold,
         )
         if result.get("status") == "success":
-            results.append({
-                "channel": channel,
-                "score": result["quality_score"],
-                "requires_review": result["requires_review"],
-                "snr": result["metrics"].get("snr", 0),
-            })
+            results.append(
+                {
+                    "channel": channel,
+                    "score": result["quality_score"],
+                    "requires_review": result["requires_review"],
+                    "snr": result["metrics"].get("snr", 0),
+                }
+            )
         else:
-            results.append({
-                "channel": channel,
-                "error": result.get("error", "Unknown error"),
-            })
+            results.append(
+                {
+                    "channel": channel,
+                    "error": result.get("error", "Unknown error"),
+                }
+            )
 
     # Sort by score (lowest first - needs attention)
     valid_results = [r for r in results if "score" in r]

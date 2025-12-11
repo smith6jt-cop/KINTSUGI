@@ -231,8 +231,9 @@ def start():
     }
     """
     try:
-        from kintsugi.mcp import run_server
         import asyncio
+
+        from kintsugi.mcp import run_server
 
         console.print("[bold green]Starting KINTSUGI MCP server...[/bold green]")
         asyncio.run(run_server())
@@ -309,11 +310,13 @@ def config(project_path: str):
         }
     }
 
-    console.print(Panel.fit(
-        json_mod.dumps(config_json, indent=2),
-        title="Claude Code MCP Configuration",
-        subtitle="Add to .claude/settings.local.json",
-    ))
+    console.print(
+        Panel.fit(
+            json_mod.dumps(config_json, indent=2),
+            title="Claude Code MCP Configuration",
+            subtitle="Add to .claude/settings.local.json",
+        )
+    )
 
     console.print("\n[bold]To configure Claude Code:[/bold]")
     console.print("1. Copy the JSON above")
@@ -339,12 +342,12 @@ def init(project_path: str, name: str | None, description: str):
     from kintsugi.project import KintsugiProject
 
     try:
-        project = KintsugiProject.create(
+        KintsugiProject.create(
             project_path,
             name=name,
             description=description,
         )
-        console.print(f"\n[green]Project created successfully![/green]")
+        console.print("\n[green]Project created successfully![/green]")
 
     except Exception as e:
         console.print(f"[red]Failed to create project: {e}[/red]")

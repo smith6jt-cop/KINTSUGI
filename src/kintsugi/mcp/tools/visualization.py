@@ -9,14 +9,14 @@ from __future__ import annotations
 import base64
 import io
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
-logger = logging.getLogger("kintsugi.mcp.visualization")
-
 # Import session state from signal_isolation
 from kintsugi.mcp.tools.signal_isolation import _loaded_images
+
+logger = logging.getLogger("kintsugi.mcp.visualization")
 
 
 def _get_image(name: str) -> Any:
@@ -26,7 +26,7 @@ def _get_image(name: str) -> Any:
     return _loaded_images[name]["data"]
 
 
-async def get_image_stats(channel: str) -> Dict[str, Any]:
+async def get_image_stats(channel: str) -> dict[str, Any]:
     """
     Get comprehensive statistics for a loaded image.
 
@@ -58,9 +58,7 @@ async def get_image_stats(channel: str) -> Dict[str, Any]:
 
     # Percentiles
     percentiles = [1, 5, 10, 25, 50, 75, 90, 95, 99]
-    stats["percentiles"] = {
-        f"p{p}": float(np.percentile(data_sample, p)) for p in percentiles
-    }
+    stats["percentiles"] = {f"p{p}": float(np.percentile(data_sample, p)) for p in percentiles}
 
     # Histogram (for understanding intensity distribution)
     hist, bin_edges = np.histogram(data_sample.ravel(), bins=50)
@@ -104,7 +102,7 @@ async def get_thumbnail(
     max_size: int = 512,
     normalize: bool = True,
     format: str = "png",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get a downsampled thumbnail of the image.
 
@@ -188,7 +186,7 @@ async def get_thumbnail(
 async def compare_channels(
     channel1: str,
     channel2: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Compare two channels statistically.
 
@@ -280,8 +278,8 @@ async def compare_channels(
 async def get_intensity_profile(
     channel: str,
     axis: str = "horizontal",
-    position: Optional[float] = None,
-) -> Dict[str, Any]:
+    position: float | None = None,
+) -> dict[str, Any]:
     """
     Get intensity profile along a line through the image.
 

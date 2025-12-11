@@ -15,15 +15,14 @@ Architecture:
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-import re
+from typing import Any
 
 import numpy as np
-
 
 # Common tissue type aliases for normalization
 TISSUE_ALIASES = {
@@ -32,32 +31,26 @@ TISSUE_ALIASES = {
     "lymph_node": ["lymph node", "ln", "lymphnode", "lymph"],
     "spleen": ["spleen", "splenic"],
     "thymus": ["thymus", "thymic"],
-
     # GI tract
     "colon": ["colon", "colonic", "large intestine", "large bowel"],
     "small_intestine": ["small intestine", "small bowel", "ileum", "jejunum", "duodenum"],
     "stomach": ["stomach", "gastric"],
     "esophagus": ["esophagus", "esophageal"],
-
     # Solid organs
     "liver": ["liver", "hepatic"],
     "kidney": ["kidney", "renal"],
     "pancreas": ["pancreas", "pancreatic"],
     "lung": ["lung", "pulmonary"],
     "heart": ["heart", "cardiac", "myocardium"],
-
     # Skin
     "skin": ["skin", "dermis", "epidermis", "cutaneous"],
-
     # Brain
     "brain": ["brain", "cerebral", "cerebrum", "cortex", "hippocampus"],
-
     # Reproductive
     "breast": ["breast", "mammary"],
     "prostate": ["prostate", "prostatic"],
     "ovary": ["ovary", "ovarian"],
     "uterus": ["uterus", "uterine", "endometrium"],
-
     # Tumors
     "tumor": ["tumor", "tumour", "cancer", "carcinoma", "adenocarcinoma", "malignant"],
     "metastasis": ["metastasis", "metastatic", "met", "mets"],
@@ -67,42 +60,34 @@ TISSUE_ALIASES = {
 MARKER_ALIASES = {
     # Nuclear
     "dapi": ["dapi", "hoechst", "nuclear", "nuclei"],
-
     # T cells
     "cd3": ["cd3", "cd3e", "t cell", "t-cell", "pan-t"],
     "cd4": ["cd4", "helper t", "th"],
     "cd8": ["cd8", "cd8a", "cytotoxic t", "ctl"],
     "foxp3": ["foxp3", "treg", "regulatory t"],
-
     # B cells
     "cd20": ["cd20", "b cell", "b-cell", "pan-b"],
     "cd19": ["cd19", "b cell", "b-cell"],
-
     # Myeloid
     "cd68": ["cd68", "macrophage", "mac"],
     "cd163": ["cd163", "m2 macrophage"],
     "cd11c": ["cd11c", "dendritic", "dc"],
     "cd14": ["cd14", "monocyte"],
-
     # Other immune
     "cd45": ["cd45", "lca", "leukocyte common", "pan-leukocyte"],
     "pd1": ["pd1", "pd-1", "pdcd1"],
     "pdl1": ["pdl1", "pd-l1", "cd274"],
-
     # Structural
     "panck": ["panck", "pan-ck", "pan-cytokeratin", "cytokeratin", "ck", "epithelial"],
     "ecad": ["ecad", "e-cadherin", "cdh1"],
     "vimentin": ["vimentin", "vim", "mesenchymal"],
     "sma": ["sma", "α-sma", "alpha-sma", "smooth muscle actin", "acta2"],
     "cd31": ["cd31", "pecam", "endothelial"],
-
     # Proliferation
     "ki67": ["ki67", "ki-67", "mki67", "proliferation"],
-
     # Functional
     "granzyme_b": ["granzyme b", "gzmb", "grb"],
     "perforin": ["perforin", "prf1"],
-
     # Autofluorescence/blank
     "blank": ["blank", "af", "autofluorescence", "auto", "empty"],
 }
@@ -118,7 +103,7 @@ def normalize_tissue_type(tissue: str) -> str:
                 return canonical
 
     # Return cleaned version if no match
-    return re.sub(r'[^a-z0-9]', '_', tissue_lower)
+    return re.sub(r"[^a-z0-9]", "_", tissue_lower)
 
 
 def normalize_marker_name(marker: str) -> str:
@@ -131,7 +116,7 @@ def normalize_marker_name(marker: str) -> str:
                 return canonical
 
     # Return cleaned version if no match
-    return re.sub(r'[^a-z0-9]', '_', marker_lower)
+    return re.sub(r"[^a-z0-9]", "_", marker_lower)
 
 
 @dataclass
@@ -145,15 +130,15 @@ class ImageCharacteristics:
     saturation_ratio: float = 0.0
     sparsity: float = 0.0  # Ratio of non-zero pixels
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ImageCharacteristics":
+    def from_dict(cls, data: dict[str, Any]) -> ImageCharacteristics:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
     @classmethod
-    def from_image(cls, image: np.ndarray) -> "ImageCharacteristics":
+    def from_image(cls, image: np.ndarray) -> ImageCharacteristics:
         """Compute characteristics from an image array."""
         # Sample for large images
         if image.size > 4_000_000:
@@ -193,7 +178,7 @@ class ImageCharacteristics:
             sparsity=sparsity,
         )
 
-    def similarity_score(self, other: "ImageCharacteristics") -> float:
+    def similarity_score(self, other: ImageCharacteristics) -> float:
         """Compute similarity score between two image characteristics (0-1)."""
         scores = []
 
@@ -204,7 +189,9 @@ class ImageCharacteristics:
 
         # Dynamic range similarity (normalized)
         if self.dynamic_range > 0 and other.dynamic_range > 0:
-            dr_ratio = min(self.dynamic_range, other.dynamic_range) / max(self.dynamic_range, other.dynamic_range)
+            dr_ratio = min(self.dynamic_range, other.dynamic_range) / max(
+                self.dynamic_range, other.dynamic_range
+            )
             scores.append(dr_ratio)
 
         # Sparsity similarity
@@ -218,7 +205,7 @@ class ImageCharacteristics:
 class ParameterRecord:
     """A record of parameters used for processing."""
 
-    id: Optional[int] = None
+    id: int | None = None
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
     # Context
@@ -232,7 +219,7 @@ class ParameterRecord:
 
     # Processing parameters
     operation: str = ""  # e.g., "blank_subtraction", "denoise", "full_pipeline"
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
 
     # Outcome
     quality_before: float = 0.0
@@ -245,7 +232,7 @@ class ParameterRecord:
     project_path: str = ""
     channel_name: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["characteristics"] = self.characteristics.to_dict()
         return d
@@ -276,7 +263,7 @@ class ParameterLearningEngine:
         )
     """
 
-    def __init__(self, project_path: Optional[str] = None, global_db: bool = True):
+    def __init__(self, project_path: str | None = None, global_db: bool = True):
         """
         Initialize the learning engine.
 
@@ -308,7 +295,8 @@ class ParameterLearningEngine:
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
 
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS parameter_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -332,18 +320,23 @@ class ParameterLearningEngine:
                 project_path TEXT,
                 channel_name TEXT
             )
-        """)
+        """
+        )
 
         # Index for fast lookups
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_tissue_marker
             ON parameter_records(tissue_type_normalized, marker_name_normalized, operation)
-        """)
+        """
+        )
 
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_approved
             ON parameter_records(user_approved, quality_improvement)
-        """)
+        """
+        )
 
         conn.commit()
         conn.close()
@@ -353,12 +346,12 @@ class ParameterLearningEngine:
         tissue_type: str,
         marker_name: str,
         operation: str,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         quality_before: float = 0.0,
         quality_after: float = 0.0,
         user_approved: bool = False,
         user_notes: str = "",
-        characteristics: Optional[ImageCharacteristics] = None,
+        characteristics: ImageCharacteristics | None = None,
         channel_name: str = "",
         to_global: bool = True,
     ) -> int:
@@ -415,7 +408,8 @@ class ParameterLearningEngine:
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
 
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO parameter_records (
                 timestamp, tissue_type, tissue_type_normalized,
                 marker_name, marker_name_normalized,
@@ -423,23 +417,25 @@ class ParameterLearningEngine:
                 quality_before, quality_after, quality_improvement,
                 user_approved, user_notes, project_path, channel_name
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            record.timestamp,
-            record.tissue_type,
-            record.tissue_type_normalized,
-            record.marker_name,
-            record.marker_name_normalized,
-            json.dumps(record.characteristics.to_dict()),
-            record.operation,
-            json.dumps(record.parameters),
-            record.quality_before,
-            record.quality_after,
-            record.quality_improvement,
-            1 if record.user_approved else 0,
-            record.user_notes,
-            record.project_path,
-            record.channel_name,
-        ))
+        """,
+            (
+                record.timestamp,
+                record.tissue_type,
+                record.tissue_type_normalized,
+                record.marker_name,
+                record.marker_name_normalized,
+                json.dumps(record.characteristics.to_dict()),
+                record.operation,
+                json.dumps(record.parameters),
+                record.quality_before,
+                record.quality_after,
+                record.quality_improvement,
+                1 if record.user_approved else 0,
+                record.user_notes,
+                record.project_path,
+                record.channel_name,
+            ),
+        )
 
         record_id = cursor.lastrowid
         conn.commit()
@@ -452,11 +448,11 @@ class ParameterLearningEngine:
         tissue_type: str,
         marker_name: str,
         operation: str,
-        characteristics: Optional[ImageCharacteristics] = None,
+        characteristics: ImageCharacteristics | None = None,
         min_quality_improvement: float = 0.0,
         approved_only: bool = True,
         max_results: int = 5,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Recommend parameters based on similar tissue/marker combinations.
 
@@ -564,7 +560,7 @@ class ParameterLearningEngine:
         operation: str,
         min_improvement: float,
         approved_only: bool,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Query records similar to the target tissue/marker."""
         conn = sqlite3.connect(str(db_path))
         conn.row_factory = sqlite3.Row
@@ -602,30 +598,36 @@ class ParameterLearningEngine:
 
         records = []
         for row in rows:
-            records.append({
-                "id": row["id"],
-                "timestamp": row["timestamp"],
-                "tissue_type": row["tissue_type"],
-                "tissue_type_normalized": row["tissue_type_normalized"],
-                "marker_name": row["marker_name"],
-                "marker_name_normalized": row["marker_name_normalized"],
-                "characteristics": json.loads(row["characteristics_json"]) if row["characteristics_json"] else {},
-                "parameters": json.loads(row["parameters_json"]),
-                "quality_before": row["quality_before"],
-                "quality_after": row["quality_after"],
-                "quality_improvement": row["quality_improvement"],
-                "user_approved": bool(row["user_approved"]),
-            })
+            records.append(
+                {
+                    "id": row["id"],
+                    "timestamp": row["timestamp"],
+                    "tissue_type": row["tissue_type"],
+                    "tissue_type_normalized": row["tissue_type_normalized"],
+                    "marker_name": row["marker_name"],
+                    "marker_name_normalized": row["marker_name_normalized"],
+                    "characteristics": (
+                        json.loads(row["characteristics_json"])
+                        if row["characteristics_json"]
+                        else {}
+                    ),
+                    "parameters": json.loads(row["parameters_json"]),
+                    "quality_before": row["quality_before"],
+                    "quality_after": row["quality_after"],
+                    "quality_improvement": row["quality_improvement"],
+                    "user_approved": bool(row["user_approved"]),
+                }
+            )
 
         return records
 
     def _score_records(
         self,
-        records: List[Dict[str, Any]],
+        records: list[dict[str, Any]],
         tissue_norm: str,
         marker_norm: str,
-        characteristics: Optional[ImageCharacteristics],
-    ) -> List[Dict[str, Any]]:
+        characteristics: ImageCharacteristics | None,
+    ) -> list[dict[str, Any]]:
         """Score records based on similarity to target."""
         for record in records:
             score = 0.0
@@ -682,7 +684,7 @@ class ParameterLearningEngine:
             "neural": ["brain"],
         }
 
-        for family, members in families.items():
+        for _family, members in families.items():
             if tissue1 in members and tissue2 in members:
                 return True
         return False
@@ -697,18 +699,18 @@ class ParameterLearningEngine:
             "checkpoint": ["pd1", "pdl1"],
         }
 
-        for family, members in families.items():
+        for _family, members in families.items():
             if marker1 in members and marker2 in members:
                 return True
         return False
 
-    def _aggregate_parameters(self, records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _aggregate_parameters(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         """Aggregate parameters from multiple records with weighted voting."""
         if not records:
             return {}
 
         # Collect all parameter values with weights
-        param_values: Dict[str, List[Tuple[Any, float]]] = {}
+        param_values: dict[str, list[tuple[Any, float]]] = {}
 
         for record in records:
             weight = record.get("score", 1.0)
@@ -747,13 +749,13 @@ class ParameterLearningEngine:
 
             else:
                 # Other types: take most common weighted
-                value_weights: Dict[Any, float] = {}
+                value_weights: dict[Any, float] = {}
                 for v, w in values_weights:
                     v_key = str(v)  # Convert to string for dict key
                     value_weights[v_key] = value_weights.get(v_key, 0) + w
                 best_value_str = max(value_weights, key=value_weights.get)
                 # Find original value
-                for v, w in values_weights:
+                for v, _w in values_weights:
                     if str(v) == best_value_str:
                         aggregated[key] = v
                         break
@@ -762,7 +764,7 @@ class ParameterLearningEngine:
 
     def _calculate_confidence(
         self,
-        records: List[Dict[str, Any]],
+        records: list[dict[str, Any]],
         tissue_norm: str,
         marker_norm: str,
     ) -> float:
@@ -778,7 +780,8 @@ class ParameterLearningEngine:
 
         # Exact matches
         exact_matches = sum(
-            1 for r in records
+            1
+            for r in records
             if r["tissue_type_normalized"] == tissue_norm
             and r["marker_name_normalized"] == marker_norm
         )
@@ -817,7 +820,7 @@ class ParameterLearningEngine:
         else:
             return "very_low"
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get statistics about the learning database."""
         stats = {
             "project_records": 0,
@@ -841,11 +844,13 @@ class ParameterLearningEngine:
                 cursor.execute("SELECT DISTINCT marker_name_normalized FROM parameter_records")
                 stats["unique_markers"].update(r[0] for r in cursor.fetchall() if r[0])
 
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT operation, COUNT(*), AVG(quality_improvement)
                     FROM parameter_records
                     GROUP BY operation
-                """)
+                """
+                )
                 for op, count, avg_improvement in cursor.fetchall():
                     if op not in stats["operations"]:
                         stats["operations"][op] = {"count": 0, "avg_improvement": 0}
@@ -859,7 +864,7 @@ class ParameterLearningEngine:
 
         return stats
 
-    def export_learned_parameters(self, output_path: Optional[Path] = None) -> Path:
+    def export_learned_parameters(self, output_path: Path | None = None) -> Path:
         """Export all learned parameters to a JSON file."""
         if output_path is None:
             output_path = (self.project_path or Path.cwd()) / "learned_parameters.json"
@@ -874,15 +879,17 @@ class ParameterLearningEngine:
 
                 cursor.execute("SELECT * FROM parameter_records WHERE user_approved = 1")
                 for row in cursor.fetchall():
-                    all_records.append({
-                        "source": source,
-                        "tissue_type": row["tissue_type"],
-                        "marker_name": row["marker_name"],
-                        "operation": row["operation"],
-                        "parameters": json.loads(row["parameters_json"]),
-                        "quality_improvement": row["quality_improvement"],
-                        "timestamp": row["timestamp"],
-                    })
+                    all_records.append(
+                        {
+                            "source": source,
+                            "tissue_type": row["tissue_type"],
+                            "marker_name": row["marker_name"],
+                            "operation": row["operation"],
+                            "parameters": json.loads(row["parameters_json"]),
+                            "quality_improvement": row["quality_improvement"],
+                            "timestamp": row["timestamp"],
+                        }
+                    )
 
                 conn.close()
 

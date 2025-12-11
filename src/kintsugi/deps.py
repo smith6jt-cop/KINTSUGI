@@ -14,7 +14,6 @@ The pipeline now uses pure Python implementations for all processing.
 """
 
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
@@ -115,23 +114,25 @@ class MissingDependencyError(Exception):
             "MISSING DEPENDENCIES",
             "=" * 70,
             "",
-            f"The following packages are required but not installed:",
+            "The following packages are required but not installed:",
             "",
         ]
         for pkg in self.missing:
             lines.append(f"  - {pkg}")
-        lines.extend([
-            "",
-            "To install, run:",
-            "",
-            f"  {self.install_hint}",
-            "",
-            "Or install all optional dependencies:",
-            "",
-            "  pip install 'kintsugi[full]'",
-            "",
-            "=" * 70,
-        ])
+        lines.extend(
+            [
+                "",
+                "To install, run:",
+                "",
+                f"  {self.install_hint}",
+                "",
+                "Or install all optional dependencies:",
+                "",
+                "  pip install 'kintsugi[full]'",
+                "",
+                "=" * 70,
+            ]
+        )
         return "\n".join(lines)
 
 
@@ -284,7 +285,7 @@ def install_optional(
     print(f"Running: {cmd}\n")
 
     try:
-        result = subprocess.run(cmd, shell=True, check=True)
+        subprocess.run(cmd, shell=True, check=True)
         print(f"\n✓ Successfully installed {group} dependencies")
         return True
     except subprocess.CalledProcessError as e:
@@ -295,6 +296,7 @@ def install_optional(
 # =============================================================================
 # Full Dependency Checker (for CLI)
 # =============================================================================
+
 
 class DependencyChecker:
     """
@@ -432,6 +434,7 @@ class DependencyChecker:
             if version is None:
                 try:
                     from importlib.metadata import version as get_version
+
                     version = get_version(package)
                 except Exception:
                     version = "unknown"
@@ -439,6 +442,7 @@ class DependencyChecker:
             # Version comparison
             if min_version and version != "unknown":
                 from packaging.version import parse
+
                 if parse(version) < parse(min_version):
                     return DependencyResult(
                         name=package,
@@ -567,6 +571,7 @@ class DependencyChecker:
         # Check CuPy
         try:
             import cupy
+
             result = DependencyResult(
                 name="cupy",
                 status=DependencyStatus.OK,
@@ -606,7 +611,7 @@ class DependencyChecker:
 
         symbol = symbols.get(result.status, "[?]")
         version_str = f" v{result.version}" if result.version else ""
-        group_str = f" ({result.details.get('group', '')})" if result.details.get('group') else ""
+        group_str = f" ({result.details.get('group', '')})" if result.details.get("group") else ""
         optional_str = " (optional)" if result.is_optional else ""
 
         print(f"  {symbol:10} {result.name}{version_str}{group_str}{optional_str}")

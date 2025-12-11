@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 from scipy import ndimage
-from scipy.stats import entropy
+
+if TYPE_CHECKING:
+    import dask.array
 
 logger = logging.getLogger("kintsugi.qc.image_qc")
 
@@ -28,16 +30,16 @@ class ImageQCResult:
     # Overall assessment
     passed: bool
     quality_score: float
-    issues: List[str] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)
 
     # Detailed metrics
-    metrics: Dict[str, float] = field(default_factory=dict)
+    metrics: dict[str, float] = field(default_factory=dict)
 
     # Artifact regions (x, y, w, h)
-    artifact_regions: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    artifact_regions: list[tuple[int, int, int, int]] = field(default_factory=list)
 
     # Recommendations
-    recommendations: List[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
 
 
 def _to_numpy(arr: ArrayLike) -> np.ndarray:
@@ -101,8 +103,8 @@ class ImageQC:
     def assess(
         self,
         image: ArrayLike,
-        marker: Optional[str] = None,
-        tissue: Optional[str] = None,
+        marker: str | None = None,
+        tissue: str | None = None,
     ) -> ImageQCResult:
         """
         Perform comprehensive quality assessment on an image.
@@ -151,7 +153,9 @@ class ImageQC:
         dr_metrics = self._check_dynamic_range(img)
         metrics.update(dr_metrics)
         if dr_metrics["dynamic_range_utilization"] < self.min_dynamic_range_pct:
-            issues.append(f"Poor dynamic range utilization ({dr_metrics['dynamic_range_utilization']*100:.1f}%)")
+            issues.append(
+                f"Poor dynamic range utilization ({dr_metrics['dynamic_range_utilization']*100:.1f}%)"
+            )
             recommendations.append("Increase exposure or check staining quality")
 
         # 5. Artifacts
@@ -193,7 +197,7 @@ class ImageQC:
             recommendations=recommendations,
         )
 
-    def _check_saturation(self, image: np.ndarray) -> Dict[str, float]:
+    def _check_saturation(self, image: np.ndarray) -> dict[str, float]:
         """Check for saturated pixels."""
         if image.dtype == np.uint16:
             max_val = 65535
@@ -212,7 +216,7 @@ class ImageQC:
             "saturated_count": int(saturated),
         }
 
-    def _check_dynamic_range(self, image: np.ndarray) -> Dict[str, float]:
+    def _check_dynamic_range(self, image: np.ndarray) -> dict[str, float]:
         """Check dynamic range utilization."""
         if image.dtype == np.uint16:
             max_possible = 65535
@@ -253,10 +257,7 @@ class ImageQC:
         means = []
         for i in range(grid_size):
             for j in range(grid_size):
-                tile = small[
-                    i * tile_h:(i + 1) * tile_h,
-                    j * tile_w:(j + 1) * tile_w
-                ]
+                tile = small[i * tile_h : (i + 1) * tile_h, j * tile_w : (j + 1) * tile_w]
                 means.append(np.mean(tile))
 
         means = np.array(means)
@@ -284,7 +285,7 @@ class ImageQC:
             return float(signal / noise_std)
         return 0.0
 
-    def _compute_overall_score(self, metrics: Dict[str, float]) -> float:
+    def _compute_overall_score(self, metrics: dict[str, float]) -> float:
         """Compute weighted overall quality score."""
         weights = {
             "focus_score": 0.25,
@@ -300,7 +301,9 @@ class ImageQC:
         scores = {
             "focus_score": metrics.get("focus_score", 0),
             "tissue_coverage": min(1.0, metrics.get("tissue_coverage", 0) / 0.5),
-            "dynamic_range_utilization": min(1.0, metrics.get("dynamic_range_utilization", 0) / 0.3),
+            "dynamic_range_utilization": min(
+                1.0, metrics.get("dynamic_range_utilization", 0) / 0.3
+            ),
             "illumination_uniformity": metrics.get("illumination_uniformity", 0),
             "snr": snr_norm,
         }
@@ -316,8 +319,8 @@ class ImageQC:
 
 def assess_image_quality(
     image: ArrayLike,
-    marker: Optional[str] = None,
-    tissue: Optional[str] = None,
+    marker: str | None = None,
+    tissue: str | None = None,
 ) -> ImageQCResult:
     """
     Convenience function for quick image quality assessment.
@@ -407,7 +410,7 @@ def detect_artifacts(
     image: ArrayLike,
     hot_pixel_threshold: float = 5.0,
     band_detection: bool = True,
-) -> Tuple[List[Tuple[int, int, int, int]], Dict[str, float]]:
+) -> tuple[list[tuple[int, int, int, int]], dict[str, float]]:
     """
     Detect various artifacts in the image.
 
@@ -481,7 +484,7 @@ def detect_artifacts(
     return artifact_regions, metrics
 
 
-def _detect_banding(image: np.ndarray) -> Tuple[float, float]:
+def _detect_banding(image: np.ndarray) -> tuple[float, float]:
     """Detect horizontal and vertical banding artifacts."""
     # Row means variation
     row_means = np.mean(image, axis=1)

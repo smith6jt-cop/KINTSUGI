@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy import stats
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 logger = logging.getLogger("kintsugi.qc.batch_qc")
 
@@ -26,16 +29,16 @@ class BatchQCResult:
     severity: str  # "none", "mild", "moderate", "severe"
 
     # Batch statistics
-    batch_stats: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    batch_stats: dict[str, dict[str, float]] = field(default_factory=dict)
 
     # Statistical tests
-    statistical_tests: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    statistical_tests: dict[str, dict[str, float]] = field(default_factory=dict)
 
     # Affected markers
-    affected_markers: List[str] = field(default_factory=list)
+    affected_markers: list[str] = field(default_factory=list)
 
     # Recommendations
-    recommendations: List[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
 
 
 class BatchQC:
@@ -84,9 +87,9 @@ class BatchQC:
 
     def assess(
         self,
-        data: Union[np.ndarray, "pd.DataFrame"],
-        batch_column: Union[str, int],
-        marker_columns: List[Union[str, int]],
+        data: np.ndarray | pd.DataFrame,
+        batch_column: str | int,
+        marker_columns: list[str | int],
     ) -> BatchQCResult:
         """
         Assess batch effects in the data.
@@ -109,16 +112,12 @@ class BatchQC:
         if hasattr(data, "values"):
             df = data
             batch_col_idx = (
-                df.columns.get_loc(batch_column)
-                if isinstance(batch_column, str) else batch_column
+                df.columns.get_loc(batch_column) if isinstance(batch_column, str) else batch_column
             )
             marker_col_indices = [
-                df.columns.get_loc(c) if isinstance(c, str) else c
-                for c in marker_columns
+                df.columns.get_loc(c) if isinstance(c, str) else c for c in marker_columns
             ]
-            marker_names = [
-                str(c) for c in marker_columns
-            ]
+            marker_names = [str(c) for c in marker_columns]
             values = df.values
         else:
             df = None
@@ -144,7 +143,7 @@ class BatchQC:
         recommendations = []
 
         # Analyze each marker
-        for marker_idx, marker_name in zip(marker_col_indices, marker_names):
+        for marker_idx, marker_name in zip(marker_col_indices, marker_names, strict=False):
             marker_values = values[:, marker_idx].astype(float)
 
             # Compute per-batch statistics
@@ -165,9 +164,7 @@ class BatchQC:
             batch_stats[marker_name] = batch_data
 
             # Statistical tests for batch effects
-            marker_tests = self._test_batch_effects(
-                marker_values, batch_labels, unique_batches
-            )
+            marker_tests = self._test_batch_effects(marker_values, batch_labels, unique_batches)
             statistical_tests[marker_name] = marker_tests
 
             # Check if marker is affected
@@ -218,7 +215,7 @@ class BatchQC:
         values: np.ndarray,
         batch_labels: np.ndarray,
         unique_batches: np.ndarray,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run statistical tests for batch effects on a single marker."""
         results = {}
 
@@ -290,9 +287,9 @@ class BatchQC:
 
 
 def detect_batch_effects(
-    data: Union[np.ndarray, "pd.DataFrame"],
-    batch_column: Union[str, int],
-    marker_columns: List[Union[str, int]],
+    data: np.ndarray | pd.DataFrame,
+    batch_column: str | int,
+    marker_columns: list[str | int],
 ) -> BatchQCResult:
     """
     Convenience function for batch effect detection.
@@ -316,10 +313,10 @@ def detect_batch_effects(
 
 
 def compute_batch_statistics(
-    data: Union[np.ndarray, "pd.DataFrame"],
-    batch_column: Union[str, int],
-    value_column: Union[str, int],
-) -> Dict[str, Dict[str, float]]:
+    data: np.ndarray | pd.DataFrame,
+    batch_column: str | int,
+    value_column: str | int,
+) -> dict[str, dict[str, float]]:
     """
     Compute per-batch statistics for a single variable.
 
@@ -340,12 +337,10 @@ def compute_batch_statistics(
     if hasattr(data, "values"):
         df = data
         batch_col_idx = (
-            df.columns.get_loc(batch_column)
-            if isinstance(batch_column, str) else batch_column
+            df.columns.get_loc(batch_column) if isinstance(batch_column, str) else batch_column
         )
         value_col_idx = (
-            df.columns.get_loc(value_column)
-            if isinstance(value_column, str) else value_column
+            df.columns.get_loc(value_column) if isinstance(value_column, str) else value_column
         )
         values = df.values
     else:
@@ -382,7 +377,7 @@ def normalize_batches(
     data: np.ndarray,
     batch_labels: np.ndarray,
     method: str = "quantile",
-    reference_batch: Optional[str] = None,
+    reference_batch: str | None = None,
 ) -> np.ndarray:
     """
     Normalize data to reduce batch effects.

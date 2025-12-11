@@ -10,18 +10,13 @@ import asyncio
 import json
 import logging
 import sys
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp.types import (
-        Tool,
-        TextContent,
-        ImageContent,
-        EmbeddedResource,
-    )
+    from mcp.types import TextContent, Tool
+
     MCP_AVAILABLE = True
 except ImportError:
     MCP_AVAILABLE = False
@@ -36,7 +31,7 @@ logger = logging.getLogger("kintsugi.mcp")
 
 
 # Global state for the current project/session
-_session_state: Dict[str, Any] = {
+_session_state: dict[str, Any] = {
     "project_path": None,
     "current_channel": None,
     "loaded_images": {},
@@ -44,32 +39,28 @@ _session_state: Dict[str, Any] = {
 }
 
 
-def create_server() -> "Server":
+def create_server() -> Server:
     """Create and configure the KINTSUGI MCP server."""
     if not MCP_AVAILABLE:
-        raise ImportError(
-            "MCP package not installed. Install with: pip install kintsugi[claude]"
-        )
+        raise ImportError("MCP package not installed. Install with: pip install kintsugi[claude]")
 
     server = Server("kintsugi")
 
-    # Import tool modules
-    from kintsugi.mcp.tools import signal_isolation, quality_assessment, visualization, workflow
-
-    # Register tools from each module
+    # Register tools
     _register_signal_isolation_tools(server)
-    _register_quality_assessment_tools(server)
-    _register_visualization_tools(server)
-    _register_workflow_tools(server)
+    # TODO: Implement these registration functions
+    # _register_quality_assessment_tools(server)
+    # _register_visualization_tools(server)
+    # _register_workflow_tools(server)
 
     return server
 
 
-def _register_signal_isolation_tools(server: "Server"):
+def _register_signal_isolation_tools(server: Server):
     """Register signal isolation tools."""
 
     @server.list_tools()
-    async def list_tools() -> List[Tool]:
+    async def list_tools() -> list[Tool]:
         """List available tools."""
         return [
             # Signal Isolation Tools
@@ -621,7 +612,14 @@ def _register_signal_isolation_tools(server: "Server"):
                             "description": "Project path",
                         },
                     },
-                    "required": ["channel", "tissue_type", "marker_name", "operations_params", "quality_before", "quality_after"],
+                    "required": [
+                        "channel",
+                        "tissue_type",
+                        "marker_name",
+                        "operations_params",
+                        "quality_before",
+                        "quality_after",
+                    ],
                 },
             ),
             Tool(
@@ -641,11 +639,17 @@ def _register_signal_isolation_tools(server: "Server"):
         ]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle tool calls."""
         try:
             # Import tool implementations
-            from kintsugi.mcp.tools import signal_isolation, quality_assessment, visualization, workflow, learning
+            from kintsugi.mcp.tools import (
+                learning,
+                quality_assessment,
+                signal_isolation,
+                visualization,
+                workflow,
+            )
 
             # Route to appropriate handler
             if name == "load_channel":

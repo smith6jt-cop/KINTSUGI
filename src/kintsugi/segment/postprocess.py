@@ -7,7 +7,6 @@ Utilities for refining and cleaning up segmentation masks.
 from __future__ import annotations
 
 import logging
-from typing import Optional, Tuple, Union
 
 import numpy as np
 from scipy import ndimage
@@ -121,9 +120,9 @@ def split_touching_objects(
     np.ndarray
         Labels with touching objects split
     """
+    from scipy.ndimage import distance_transform_edt
     from skimage.feature import peak_local_max
     from skimage.segmentation import watershed
-    from scipy.ndimage import distance_transform_edt
 
     output = np.zeros_like(labels)
     unique_labels = np.unique(labels)

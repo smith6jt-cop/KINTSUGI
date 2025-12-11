@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
-from scipy import stats
 from scipy.spatial.distance import cdist
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 logger = logging.getLogger("kintsugi.qc.cell_qc")
 
@@ -31,14 +33,14 @@ class CellQCResult:
     filtered_cells: int
 
     # Filter breakdown
-    filter_counts: Dict[str, int] = field(default_factory=dict)
+    filter_counts: dict[str, int] = field(default_factory=dict)
 
     # Indices
     passed_indices: np.ndarray = field(default_factory=lambda: np.array([]))
     filtered_indices: np.ndarray = field(default_factory=lambda: np.array([]))
 
     # Reasons for filtering
-    filter_reasons: Dict[int, List[str]] = field(default_factory=dict)
+    filter_reasons: dict[int, list[str]] = field(default_factory=dict)
 
     @property
     def pass_rate(self) -> float:
@@ -105,12 +107,12 @@ class CellQC:
     def filter(
         self,
         cell_data: ArrayLike,
-        intensity_columns: Optional[List[str]] = None,
-        area_column: Optional[str] = None,
-        eccentricity_column: Optional[str] = None,
-        x_column: Optional[str] = None,
-        y_column: Optional[str] = None,
-        image_shape: Optional[Tuple[int, int]] = None,
+        intensity_columns: list[str] | None = None,
+        area_column: str | None = None,
+        eccentricity_column: str | None = None,
+        x_column: str | None = None,
+        y_column: str | None = None,
+        image_shape: tuple[int, int] | None = None,
     ) -> CellQCResult:
         """
         Apply all QC filters to cell data.
@@ -217,10 +219,10 @@ class CellQC:
                 h, w = image_shape
 
                 on_edge = (
-                    (x_coords < self.edge_margin) |
-                    (x_coords > w - self.edge_margin) |
-                    (y_coords < self.edge_margin) |
-                    (y_coords > h - self.edge_margin)
+                    (x_coords < self.edge_margin)
+                    | (x_coords > w - self.edge_margin)
+                    | (y_coords < self.edge_margin)
+                    | (y_coords > h - self.edge_margin)
                 )
                 filter_counts["on_edge"] = np.sum(on_edge)
 
@@ -235,7 +237,8 @@ class CellQC:
 
         # Only include cells that were actually filtered
         filter_reasons = {
-            idx: reasons for idx, reasons in filter_reasons.items()
+            idx: reasons
+            for idx, reasons in filter_reasons.items()
             if reasons and idx in filtered_indices
         }
 
@@ -345,10 +348,10 @@ def _detect_outliers_1d(
 
 def filter_by_intensity(
     intensities: np.ndarray,
-    min_intensity: Optional[float] = None,
-    max_intensity: Optional[float] = None,
-    min_percentile: Optional[float] = None,
-    max_percentile: Optional[float] = None,
+    min_intensity: float | None = None,
+    max_intensity: float | None = None,
+    min_percentile: float | None = None,
+    max_percentile: float | None = None,
 ) -> np.ndarray:
     """
     Filter cells by intensity thresholds.
@@ -387,8 +390,8 @@ def filter_by_intensity(
 
 
 def filter_by_morphology(
-    areas: Optional[np.ndarray] = None,
-    eccentricities: Optional[np.ndarray] = None,
+    areas: np.ndarray | None = None,
+    eccentricities: np.ndarray | None = None,
     min_area: float = 50,
     max_area: float = 5000,
     max_eccentricity: float = 0.95,
@@ -426,7 +429,7 @@ def filter_by_morphology(
 
 def detect_doublets(
     areas: np.ndarray,
-    intensities: Optional[np.ndarray] = None,
+    intensities: np.ndarray | None = None,
     area_factor: float = 1.8,
     intensity_factor: float = 1.5,
 ) -> np.ndarray:
@@ -498,7 +501,7 @@ def detect_spatial_outliers(
 
     for i in range(n_cells):
         # Get nearest neighbors
-        neighbor_indices = np.argsort(distances[i])[1:n_neighbors + 1]
+        neighbor_indices = np.argsort(distances[i])[1 : n_neighbors + 1]
 
         # Compare value to neighbors
         neighbor_values = values[neighbor_indices]

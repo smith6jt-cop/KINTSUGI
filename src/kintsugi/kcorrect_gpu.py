@@ -19,21 +19,24 @@ Usage:
     corrected = corrector.transform(images, flatfield, darkfield)
 """
 
-import numpy as np
-from typing import List, Tuple, Optional, Union
 import warnings
+
+import numpy as np
 
 # Try to import CuPy
 try:
     import cupy as cp
-    from cupyx.scipy.fft import dctn as cp_dctn, idctn as cp_idctn
+    from cupyx.scipy.fft import dctn as cp_dctn
+    from cupyx.scipy.fft import idctn as cp_idctn
+
     CUPY_AVAILABLE = True
 except ImportError:
     CUPY_AVAILABLE = False
     cp = None
 
 # CPU fallback
-from scipy.fft import dctn as sp_dctn, idctn as sp_idctn
+from scipy.fft import dctn as sp_dctn
+from scipy.fft import idctn as sp_idctn
 from skimage.transform import resize as skresize
 
 
@@ -76,36 +79,35 @@ class KCorrectGPU:
     RESIZE_MODE = "symmetric"
     PRESERVE_RANGE = True
 
-    def __init__(self,
-                 use_gpu: Union[bool, str] = 'auto',
-                 working_size: int = 128,
-                 verbose: bool = False):
+    def __init__(
+        self, use_gpu: bool | str = "auto", working_size: int = 128, verbose: bool = False
+    ):
 
         self.working_size = working_size
         self.verbose = verbose
 
         # Determine device
-        if use_gpu == 'auto':
+        if use_gpu == "auto":
             use_gpu = CUPY_AVAILABLE
         elif use_gpu and not CUPY_AVAILABLE:
-            warnings.warn("CuPy not available, falling back to CPU")
+            warnings.warn("CuPy not available, falling back to CPU", stacklevel=2)
             use_gpu = False
 
         self.use_gpu = use_gpu
 
         if use_gpu:
             self.xp = cp
-            self.device = 'gpu'
+            self.device = "gpu"
             if verbose:
                 device = cp.cuda.Device()
                 print(f"KCorrectGPU using GPU: {device.id}")
         else:
             self.xp = np
-            self.device = 'cpu'
+            self.device = "cpu"
             if verbose:
                 print("KCorrectGPU using CPU")
 
-    def _to_device(self, arr: np.ndarray) -> 'cp.ndarray':
+    def _to_device(self, arr: np.ndarray) -> "cp.ndarray":
         """Move array to GPU if using GPU."""
         if self.use_gpu:
             return cp.asarray(arr)
@@ -113,7 +115,7 @@ class KCorrectGPU:
 
     def _to_host(self, arr) -> np.ndarray:
         """Move array to CPU."""
-        if self.use_gpu and hasattr(arr, 'get'):
+        if self.use_gpu and hasattr(arr, "get"):
             return arr.get()
         return np.asarray(arr)
 
@@ -124,9 +126,9 @@ class KCorrectGPU:
 
         if self.use_gpu:
             # Single call handles both axes - more efficient than separate calls
-            return cp_dctn(mtrx, type=2, norm='ortho', axes=(0, 1))
+            return cp_dctn(mtrx, type=2, norm="ortho", axes=(0, 1))
         else:
-            return sp_dctn(mtrx, type=2, norm='ortho', axes=(0, 1))
+            return sp_dctn(mtrx, type=2, norm="ortho", axes=(0, 1))
 
     def _idct2d(self, mtrx):
         """2D Inverse Discrete Cosine Transform (optimized with idctn)."""
@@ -135,9 +137,9 @@ class KCorrectGPU:
 
         if self.use_gpu:
             # Single call handles both axes - more efficient than separate calls
-            return cp_idctn(mtrx, type=2, norm='ortho', axes=(0, 1))
+            return cp_idctn(mtrx, type=2, norm="ortho", axes=(0, 1))
         else:
-            return sp_idctn(mtrx, type=2, norm='ortho', axes=(0, 1))
+            return sp_idctn(mtrx, type=2, norm="ortho", axes=(0, 1))
 
     def _shrinkage_operator(self, matrix, epsilon):
         """Soft thresholding operator for L1 regularization."""
@@ -164,11 +166,11 @@ class KCorrectGPU:
                 (target_size, target_size),
                 order=self.RESIZE_ORDER,
                 mode=self.RESIZE_MODE,
-                preserve_range=self.PRESERVE_RANGE
+                preserve_range=self.PRESERVE_RANGE,
             )
         return resized
 
-    def _resize_single(self, image: np.ndarray, target_shape: Tuple[int, int]) -> np.ndarray:
+    def _resize_single(self, image: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray:
         """Resize single image to target shape."""
         if image.shape == target_shape:
             return image
@@ -177,17 +179,19 @@ class KCorrectGPU:
             target_shape,
             order=self.RESIZE_ORDER,
             mode=self.RESIZE_MODE,
-            preserve_range=self.PRESERVE_RANGE
+            preserve_range=self.PRESERVE_RANGE,
         )
 
-    def _inexact_alm_rspca_l1(self,
-                              images,
-                              lambda_flatfield: float,
-                              if_darkfield: bool,
-                              lambda_darkfield: float,
-                              optimization_tolerance: float,
-                              max_iterations: int,
-                              weight=None):
+    def _inexact_alm_rspca_l1(
+        self,
+        images,
+        lambda_flatfield: float,
+        if_darkfield: bool,
+        lambda_darkfield: float,
+        optimization_tolerance: float,
+        max_iterations: int,
+        weight=None,
+    ):
         """
         Inexact ALM for Robust Sparse PCA with L1 regularization.
 
@@ -200,10 +204,10 @@ class KCorrectGPU:
         m = p * q  # Total pixels per image
 
         # Reshape to 2D: (pixels, images)
-        images_2d = xp.reshape(images, (m, n), order='F')
+        images_2d = xp.reshape(images, (m, n), order="F")
 
         if weight is not None:
-            weight = xp.reshape(weight, (m, n), order='F')
+            weight = xp.reshape(weight, (m, n), order="F")
         else:
             weight = xp.ones_like(images_2d)
 
@@ -221,10 +225,11 @@ class KCorrectGPU:
         else:
             # For CPU, use scipy's sparse SVD which is faster for just top singular value
             from scipy.sparse.linalg import svds
+
             try:
                 _, svd_vals, _ = svds(images_2d, k=1)
                 norm_two = float(svd_vals[0])
-            except:
+            except Exception:
                 # Fallback to power iteration
                 v = np.random.randn(n).astype(images_2d.dtype)
                 for _ in range(10):
@@ -233,7 +238,7 @@ class KCorrectGPU:
                     v = images_2d.T @ u
                     v = v / (np.linalg.norm(v) + 1e-10)
                 norm_two = float(np.linalg.norm(images_2d @ v))
-        d_norm = float(xp.linalg.norm(images_2d, ord='fro'))
+        d_norm = float(xp.linalg.norm(images_2d, ord="fro"))
 
         # Optimization parameters
         dual_var = xp.zeros_like(images_2d)
@@ -264,11 +269,11 @@ class KCorrectGPU:
 
             # Update W (flatfield DCT coefficients)
             W_idct = self._idct2d(W_hat.T)
-            W_idct_flat = xp.reshape(W_idct, (-1, 1), order='F')
+            W_idct_flat = xp.reshape(W_idct, (-1, 1), order="F")
             A1_hat = xp.dot(W_idct_flat, A1_coeff) + A_offset
 
             temp_W = (images_2d - A1_hat - E1_hat + dual_var / penalty) / lagrange_mult1
-            temp_W = xp.reshape(temp_W, (p, q, n), order='F')
+            temp_W = xp.reshape(temp_W, (p, q, n), order="F")
             temp_W = xp.mean(temp_W, axis=2)
 
             W_hat = W_hat + self._dct2d(temp_W.T)
@@ -285,7 +290,7 @@ class KCorrectGPU:
             if A_offset.ndim == 1:
                 A_offset = A_offset.reshape(-1, 1)
 
-            W_idct_flat = xp.reshape(W_idct, (-1, 1), order='F')
+            W_idct_flat = xp.reshape(W_idct, (-1, 1), order="F")
             A1_hat = xp.dot(W_idct_flat, A1_coeff) + A_offset
 
             # Update E1_hat (sparse component)
@@ -304,7 +309,7 @@ class KCorrectGPU:
                 valid_idx = xp.where(A1_coeff.flatten() < 1)[0]
 
                 if len(valid_idx) > 0:
-                    W_idct_flat_1d = xp.reshape(W_idct, -1, order='F')
+                    W_idct_flat_1d = xp.reshape(W_idct, -1, order="F")
                     mean_W = float(xp.mean(W_idct))
 
                     high_mask = W_idct_flat_1d > (mean_W - 1e-6)
@@ -312,15 +317,23 @@ class KCorrectGPU:
 
                     R1_valid = R1[:, valid_idx]
 
-                    high_mean = xp.mean(R1_valid[high_mask][:, :], axis=0) if xp.any(high_mask) else xp.zeros(len(valid_idx))
-                    low_mean = xp.mean(R1_valid[low_mask][:, :], axis=0) if xp.any(low_mask) else xp.zeros(len(valid_idx))
+                    high_mean = (
+                        xp.mean(R1_valid[high_mask][:, :], axis=0)
+                        if xp.any(high_mask)
+                        else xp.zeros(len(valid_idx))
+                    )
+                    low_mean = (
+                        xp.mean(R1_valid[low_mask][:, :], axis=0)
+                        if xp.any(low_mask)
+                        else xp.zeros(len(valid_idx))
+                    )
 
                     B1_coeff = (high_mean - low_mean) / (mean_R1 + 1e-10)
 
                     A1_coeff_valid = A1_coeff.flatten()[valid_idx]
                     k = len(valid_idx)
 
-                    temp1 = float(xp.sum(A1_coeff_valid ** 2))
+                    temp1 = float(xp.sum(A1_coeff_valid**2))
                     temp2 = float(xp.sum(A1_coeff_valid))
                     temp3 = float(xp.sum(B1_coeff))
                     temp4 = float(xp.sum(A1_coeff_valid * B1_coeff))
@@ -335,16 +348,18 @@ class KCorrectGPU:
 
                     B_offset = -B1_offset * W_idct_flat_1d + B1_offset * mean_W
 
-                    A1_offset_temp = xp.mean(R1_valid, axis=1) - float(xp.mean(A1_coeff_valid)) * W_idct_flat_1d
+                    A1_offset_temp = (
+                        xp.mean(R1_valid, axis=1) - float(xp.mean(A1_coeff_valid)) * W_idct_flat_1d
+                    )
                     A1_offset_temp = A1_offset_temp - xp.mean(A1_offset_temp)
                     A_offset = A1_offset_temp - xp.mean(A1_offset_temp) - B_offset
 
                     # Smooth A_offset with DCT
-                    W_offset = self._dct2d(xp.reshape(A_offset, (p, q), order='F').T)
+                    W_offset = self._dct2d(xp.reshape(A_offset, (p, q), order="F").T)
                     threshold2 = lambda_darkfield / (lagrange_mult2 * penalty)
                     W_offset = self._shrinkage_operator(W_offset, threshold2)
                     A_offset = self._idct2d(W_offset.T)
-                    A_offset = xp.reshape(A_offset, -1, order='F')
+                    A_offset = xp.reshape(A_offset, -1, order="F")
 
                     # Sparse thresholding
                     A_offset = self._shrinkage_operator(A_offset, threshold2)
@@ -356,27 +371,31 @@ class KCorrectGPU:
             penalty = min(penalty * scale_ratio, penalty_bar)
 
             # Check convergence
-            stop_criterion = float(xp.linalg.norm(Z1, ord='fro')) / d_norm
+            stop_criterion = float(xp.linalg.norm(Z1, ord="fro")) / d_norm
 
             if stop_criterion < optimization_tolerance:
                 if self.verbose:
-                    print(f"  Converged at iteration {iteration + 1}, criterion: {stop_criterion:.2e}")
+                    print(
+                        f"  Converged at iteration {iteration + 1}, criterion: {stop_criterion:.2e}"
+                    )
                 break
 
         # Finalize A_offset
         A_offset = xp.squeeze(A_offset)
-        W_idct_flat_1d = xp.reshape(W_idct, -1, order='F')
+        W_idct_flat_1d = xp.reshape(W_idct, -1, order="F")
         A_offset = A_offset + B1_offset * W_idct_flat_1d
 
         return A1_hat, E1_hat, A_offset
 
-    def fit(self,
-            images: np.ndarray,
-            if_darkfield: bool = True,
-            max_iterations: int = 500,
-            optimization_tolerance: float = 1e-6,
-            max_reweight_iterations: int = 25,
-            reweight_tolerance: float = 1e-3) -> Tuple[np.ndarray, np.ndarray]:
+    def fit(
+        self,
+        images: np.ndarray,
+        if_darkfield: bool = True,
+        max_iterations: int = 500,
+        optimization_tolerance: float = 1e-6,
+        max_reweight_iterations: int = 25,
+        reweight_tolerance: float = 1e-3,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Compute flatfield and darkfield corrections.
 
@@ -453,13 +472,13 @@ class KCorrectGPU:
                 lambda_darkfield,
                 optimization_tolerance,
                 max_iterations,
-                weight
+                weight,
             )
 
             # Reshape results
-            XA = xp.reshape(X_k_A, (working_size, working_size, -1), order='F')
-            XE = xp.reshape(X_k_E, (working_size, working_size, -1), order='F')
-            XAoffset = xp.reshape(X_k_Aoffset, (working_size, working_size), order='F')
+            XA = xp.reshape(X_k_A, (working_size, working_size, -1), order="F")
+            XE = xp.reshape(X_k_E, (working_size, working_size, -1), order="F")
+            XAoffset = xp.reshape(X_k_Aoffset, (working_size, working_size), order="F")
 
             # Update weights
             XE_norm = XE / (xp.mean(XA, axis=(0, 1)) + 1e-10)
@@ -472,8 +491,9 @@ class KCorrectGPU:
             darkfield_current = XAoffset
 
             # Check convergence
-            mad_flatfield = float(xp.sum(xp.abs(flatfield_current - flatfield_last))) / \
-                           (float(xp.sum(xp.abs(flatfield_last))) + 1e-10)
+            mad_flatfield = float(xp.sum(xp.abs(flatfield_current - flatfield_last))) / (
+                float(xp.sum(xp.abs(flatfield_last))) + 1e-10
+            )
 
             temp_diff = float(xp.sum(xp.abs(darkfield_current - darkfield_last)))
             if temp_diff < 1e-7:
@@ -513,10 +533,9 @@ class KCorrectGPU:
 
         return flatfield.astype(np.float64), darkfield.astype(np.float64)
 
-    def transform(self,
-                  images: np.ndarray,
-                  flatfield: np.ndarray,
-                  darkfield: np.ndarray) -> np.ndarray:
+    def transform(
+        self, images: np.ndarray, flatfield: np.ndarray, darkfield: np.ndarray
+    ) -> np.ndarray:
         """
         Apply flatfield and darkfield correction to images.
 
@@ -560,15 +579,15 @@ class KCorrectGPU:
 
 
 def KCorrectGPUFunc(
-    images_list: Union[List[np.ndarray], np.ndarray],
+    images_list: list[np.ndarray] | np.ndarray,
     if_darkfield: bool = True,
     max_iterations: int = 500,
     optimization_tolerance: float = 1e-6,
     max_reweight_iterations: int = 25,
     reweight_tolerance: float = 1e-3,
     use_gpu: bool = True,
-    verbose: bool = False
-) -> Tuple[np.ndarray, np.ndarray]:
+    verbose: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Functional interface to GPU-accelerated BaSiC correction.
 
@@ -619,18 +638,19 @@ def KCorrectGPUFunc(
         max_iterations=max_iterations,
         optimization_tolerance=optimization_tolerance,
         max_reweight_iterations=max_reweight_iterations,
-        reweight_tolerance=reweight_tolerance
+        reweight_tolerance=reweight_tolerance,
     )
 
 
 # Convenience function for checking GPU availability
-def check_gpu() -> Tuple[bool, str]:
+def check_gpu() -> tuple[bool, str]:
     """Check if GPU is available for KCorrect."""
     if not CUPY_AVAILABLE:
         return False, "CuPy not installed"
 
     try:
         import cupy as cp
+
         device = cp.cuda.Device()
         mem = device.mem_info
         return True, f"GPU available: Device {device.id} with {mem[1]/1e9:.1f} GB"

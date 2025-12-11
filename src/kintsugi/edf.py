@@ -17,11 +17,16 @@ Note: The PyImageJ/CLIJ2 backend is deprecated and will be removed in a
 future version. Use the CuPy or NumPy backends instead.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Literal, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Literal, Union
 
 import numpy as np
 from scipy.ndimage import gaussian_filter, uniform_filter
+
+if TYPE_CHECKING:
+    import cupy as cp
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +54,16 @@ def _check_clij2_available() -> bool:
         CLIJ2 backend is deprecated. Use CuPy or NumPy backends instead.
     """
     try:
-        import imagej
-        import scyjava
         import warnings
+        from importlib.util import find_spec
+
+        if find_spec("imagej") is None or find_spec("scyjava") is None:
+            return False
         warnings.warn(
             "CLIJ2 backend is deprecated and will be removed in a future version. "
             "Use backend='cupy' or backend='numpy' instead.",
             DeprecationWarning,
-            stacklevel=2
+            stacklevel=2,
         )
         return True
     except ImportError:
@@ -271,7 +278,7 @@ def extended_depth_of_focus_laplacian(
 
 def edf_tiled(
     stack: np.ndarray,
-    tile_size: Tuple[int, int] = (3000, 3000),
+    tile_size: tuple[int, int] = (3000, 3000),
     overlap: int = 50,
     method: Literal["variance", "laplacian"] = "variance",
     **kwargs,
@@ -479,10 +486,10 @@ class EDFProcessor:
         radius_x: int = 5,
         radius_y: int = 5,
         sigma: float = 20.0,
-        z_start: Optional[int] = None,
-        z_end: Optional[int] = None,
-        tiles: Optional[Tuple[int, int]] = None,
-        tile_size: Optional[Tuple[int, int]] = None,
+        z_start: int | None = None,
+        z_end: int | None = None,
+        tiles: tuple[int, int] | None = None,
+        tile_size: tuple[int, int] | None = None,
         ij_instance=None,
         device: str = None,
     ) -> np.ndarray:
@@ -566,14 +573,13 @@ class EDFProcessor:
         radius_x: int,
         radius_y: int,
         sigma: float,
-        tiles: Tuple[int, int],
+        tiles: tuple[int, int],
         ij_instance,
         device: str,
     ) -> np.ndarray:
         """Process using PyImageJ/CLIJ2 backend."""
         try:
-            import imagej
-            import scyjava
+            import imagej  # noqa: F401
         except ImportError:
             raise RuntimeError("PyImageJ not available for CLIJ2 backend")
 

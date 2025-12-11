@@ -10,24 +10,23 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
-
-logger = logging.getLogger("kintsugi.mcp.workflow")
 
 # Import session state from signal_isolation
 from kintsugi.mcp.tools.signal_isolation import (
     _loaded_images,
     _processing_history,
-    _store_image,
 )
+
+logger = logging.getLogger("kintsugi.mcp.workflow")
 
 
 async def list_channels(
     project_path: str,
-    cycle: Optional[str] = None,
-) -> Dict[str, Any]:
+    cycle: str | None = None,
+) -> dict[str, Any]:
     """
     List all available channels in the current project.
 
@@ -38,6 +37,7 @@ async def list_channels(
     # Try to load project configuration
     try:
         from kintsugi.project import KintsugiProject
+
         project = KintsugiProject.load(project_path)
         raw_dir = project.paths.raw
         processed_dir = project.paths.processed
@@ -126,10 +126,10 @@ def _extract_channel_name(filename: str) -> str:
 
 async def save_processed(
     channel: str,
-    output_name: Optional[str] = None,
+    output_name: str | None = None,
     format: str = "tiff",
-    project_path: Optional[str] = None,
-) -> Dict[str, Any]:
+    project_path: str | None = None,
+) -> dict[str, Any]:
     """
     Save the processed channel to the project output directory.
     """
@@ -145,6 +145,7 @@ async def save_processed(
         project_path = Path(project_path)
         try:
             from kintsugi.project import KintsugiProject
+
             project = KintsugiProject.load(project_path)
             output_dir = project.paths.processed / "signal_isolated"
         except Exception:
@@ -172,11 +173,13 @@ async def save_processed(
     try:
         if format == "tiff" or format == "tif":
             import tifffile
+
             output_path = output_dir / f"{output_name}.tiff"
             tifffile.imwrite(str(output_path), data.astype(np.uint16))
 
         elif format == "ome-tiff":
             import tifffile
+
             output_path = output_dir / f"{output_name}.ome.tiff"
             # Create basic OME-XML
             tifffile.imwrite(
@@ -188,6 +191,7 @@ async def save_processed(
 
         elif format == "zarr":
             import zarr
+
             output_path = output_dir / f"{output_name}.zarr"
             z = zarr.open(
                 str(output_path),
@@ -227,7 +231,7 @@ async def save_processed(
         return {"error": f"Failed to save: {e}"}
 
 
-async def get_processing_history(channel: str) -> Dict[str, Any]:
+async def get_processing_history(channel: str) -> dict[str, Any]:
     """
     Get the processing history for a channel.
 
@@ -251,8 +255,8 @@ async def get_processing_history(channel: str) -> Dict[str, Any]:
 
 async def suggest_parameters(
     channel: str,
-    blank_channel: Optional[str] = None,
-) -> Dict[str, Any]:
+    blank_channel: str | None = None,
+) -> dict[str, Any]:
     """
     Analyze channel and suggest processing parameters.
 
@@ -288,8 +292,8 @@ async def suggest_parameters(
     }
 
     # Background estimation
-    background = float(p10)
-    signal = float(p90)
+    float(p10)
+    float(p90)
 
     # Blank subtraction parameters
     if blank_channel and blank_channel in _loaded_images:
@@ -361,8 +365,8 @@ async def suggest_parameters(
 async def generate_jupyter_cell(
     operation: str,
     channel: str,
-    initial_params: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    initial_params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Generate a Jupyter notebook cell for interactive parameter tuning.
 
@@ -371,13 +375,13 @@ async def generate_jupyter_cell(
     if channel not in _loaded_images:
         return {"error": f"Channel not loaded: {channel}"}
 
-    metadata = _loaded_images[channel].get("metadata", {})
+    _loaded_images[channel].get("metadata", {})
     initial_params = initial_params or {}
 
     # Generate code based on operation
     if operation == "blank_subtraction":
         blank_channel = initial_params.get("blank_channel", "")
-        code = f'''# Interactive Blank Subtraction Parameter Tuning
+        code = f"""# Interactive Blank Subtraction Parameter Tuning
 from kintsugi.claude.param_tuner import blank_subtraction_tuner
 
 # Load your channels first if not already loaded
@@ -399,10 +403,10 @@ result = blank_subtraction_tuner(
 
 # After tuning, print final parameters
 print("Final parameters:", result.get_params())
-'''
+"""
 
     elif operation == "denoise":
-        code = f'''# Interactive Denoising Parameter Tuning
+        code = f"""# Interactive Denoising Parameter Tuning
 from kintsugi.claude.param_tuner import denoise_tuner
 
 channel = "{channel}"
@@ -418,10 +422,10 @@ result = denoise_tuner(
 )
 
 print("Final parameters:", result.get_params())
-'''
+"""
 
     elif operation == "clahe":
-        code = f'''# Interactive CLAHE Parameter Tuning
+        code = f"""# Interactive CLAHE Parameter Tuning
 from kintsugi.claude.param_tuner import clahe_tuner
 
 channel = "{channel}"
@@ -437,10 +441,10 @@ result = clahe_tuner(
 )
 
 print("Final parameters:", result.get_params())
-'''
+"""
 
     elif operation == "clean":
-        code = f'''# Interactive Background Cleaning
+        code = f"""# Interactive Background Cleaning
 from kintsugi.claude.param_tuner import clean_tuner
 
 channel = "{channel}"
@@ -456,10 +460,10 @@ result = clean_tuner(
 )
 
 print("Final parameters:", result.get_params())
-'''
+"""
 
     elif operation == "gaussian_subtract":
-        code = f'''# Interactive Gaussian Subtraction
+        code = f"""# Interactive Gaussian Subtraction
 from kintsugi.claude.param_tuner import gaussian_subtract_tuner
 
 channel = "{channel}"
@@ -474,10 +478,10 @@ result = gaussian_subtract_tuner(
 )
 
 print("Final parameters:", result.get_params())
-'''
+"""
 
     elif operation == "full_pipeline":
-        code = f'''# Full Signal Isolation Pipeline with Interactive Review
+        code = f"""# Full Signal Isolation Pipeline with Interactive Review
 from kintsugi.claude.pipeline import SignalIsolationPipeline
 from kintsugi.claude.param_tuner import pipeline_tuner
 
@@ -500,7 +504,7 @@ print("All parameters:", result.get_all_params())
 
 # Save if satisfied
 # result.save("output_name")
-'''
+"""
 
     else:
         return {"error": f"Unknown operation: {operation}"}
@@ -519,7 +523,7 @@ print("All parameters:", result.get_all_params())
     }
 
 
-async def set_project_context(project_path: str) -> Dict[str, Any]:
+async def set_project_context(project_path: str) -> dict[str, Any]:
     """
     Set the current project context for the session.
 
@@ -529,6 +533,7 @@ async def set_project_context(project_path: str) -> Dict[str, Any]:
 
     try:
         from kintsugi.project import KintsugiProject
+
         project = KintsugiProject.load(project_path)
 
         return {
@@ -553,7 +558,7 @@ async def set_project_context(project_path: str) -> Dict[str, Any]:
         return {"error": str(e)}
 
 
-async def get_session_state() -> Dict[str, Any]:
+async def get_session_state() -> dict[str, Any]:
     """
     Get the current session state.
 
@@ -568,9 +573,7 @@ async def get_session_state() -> Dict[str, Any]:
         for name, info in _loaded_images.items()
     }
 
-    history_summary = {
-        channel: len(steps) for channel, steps in _processing_history.items()
-    }
+    history_summary = {channel: len(steps) for channel, steps in _processing_history.items()}
 
     return {
         "status": "success",
@@ -581,11 +584,11 @@ async def get_session_state() -> Dict[str, Any]:
     }
 
 
-def _estimate_memory_usage() -> Dict[str, float]:
+def _estimate_memory_usage() -> dict[str, float]:
     """Estimate memory usage of loaded images."""
     total_bytes = 0
 
-    for name, info in _loaded_images.items():
+    for _name, info in _loaded_images.items():
         data = info["data"]
         if hasattr(data, "nbytes"):
             total_bytes += data.nbytes

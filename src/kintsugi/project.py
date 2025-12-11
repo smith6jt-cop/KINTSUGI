@@ -27,12 +27,11 @@ import os
 import platform
 import shutil
 import sys
-from dataclasses import dataclass, field, asdict
+import warnings
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
-import warnings
-
+from typing import Any
 
 # Project configuration filename
 PROJECT_CONFIG_FILE = "kintsugi_project.json"
@@ -47,27 +46,27 @@ class ProjectPaths:
     root: Path
 
     # Input data
-    raw: Path              # Raw images from microscope
+    raw: Path  # Raw images from microscope
 
     # Processing outputs
-    processed: Path        # Base processed directory
-    stitched: Path         # Stitched images
-    corrected: Path        # Illumination-corrected images
-    registered: Path       # Registered multi-cycle images
-    segmented: Path        # Segmentation masks
-    analysis: Path         # Analysis outputs (tables, plots)
+    processed: Path  # Base processed directory
+    stitched: Path  # Stitched images
+    corrected: Path  # Illumination-corrected images
+    registered: Path  # Registered multi-cycle images
+    segmented: Path  # Segmentation masks
+    analysis: Path  # Analysis outputs (tables, plots)
 
     # Working files
-    notebooks: Path        # Working copies of notebooks
-    configs: Path          # Project-specific configurations
-    logs: Path             # Processing logs
-    cache: Path            # Temporary/cache files
+    notebooks: Path  # Working copies of notebooks
+    configs: Path  # Project-specific configurations
+    logs: Path  # Processing logs
+    cache: Path  # Temporary/cache files
 
     # Metadata
-    meta: Path             # Metadata files
+    meta: Path  # Metadata files
 
     @classmethod
-    def from_root(cls, root: Union[str, Path]) -> "ProjectPaths":
+    def from_root(cls, root: str | Path) -> ProjectPaths:
         """Create ProjectPaths from a root directory."""
         root = Path(root).resolve()
 
@@ -93,7 +92,7 @@ class ProjectPaths:
             if isinstance(path, Path) and name != "root":
                 path.mkdir(parents=True, exist_ok=True)
 
-    def to_dict(self) -> Dict[str, str]:
+    def to_dict(self) -> dict[str, str]:
         """Convert to dictionary of string paths."""
         return {k: str(v) for k, v in self.__dict__.items()}
 
@@ -118,20 +117,20 @@ class ProjectConfig:
     platform: str = field(default_factory=platform.platform)
 
     # Processing parameters (defaults)
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
 
     # Cycle information
-    cycles: List[Dict[str, Any]] = field(default_factory=list)
+    cycles: list[dict[str, Any]] = field(default_factory=list)
 
     # Channel metadata
-    channels: List[Dict[str, str]] = field(default_factory=list)
+    channels: list[dict[str, str]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ProjectConfig":
+    def from_dict(cls, data: dict[str, Any]) -> ProjectConfig:
         """Create from dictionary."""
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
@@ -171,9 +170,9 @@ class KintsugiProject:
 
     def __init__(
         self,
-        root: Union[str, Path],
-        config: Optional[ProjectConfig] = None,
-        kintsugi_path: Optional[Union[str, Path]] = None,
+        root: str | Path,
+        config: ProjectConfig | None = None,
+        kintsugi_path: str | Path | None = None,
     ):
         """
         Initialize a project.
@@ -202,6 +201,7 @@ class KintsugiProject:
         # Get KINTSUGI version
         try:
             import kintsugi
+
             self.config.kintsugi_version = getattr(kintsugi, "__version__", "unknown")
         except ImportError:
             self.config.kintsugi_version = "not installed"
@@ -212,6 +212,7 @@ class KintsugiProject:
         # Try to find from package location
         try:
             import kintsugi
+
             pkg_path = Path(kintsugi.__file__).parent
             # Go up from src/kintsugi to repo root
             repo_path = pkg_path.parent.parent
@@ -237,12 +238,12 @@ class KintsugiProject:
     @classmethod
     def create(
         cls,
-        root: Union[str, Path],
-        name: Optional[str] = None,
+        root: str | Path,
+        name: str | None = None,
         description: str = "",
-        kintsugi_path: Optional[Union[str, Path]] = None,
+        kintsugi_path: str | Path | None = None,
         setup_notebooks: bool = True,
-    ) -> "KintsugiProject":
+    ) -> KintsugiProject:
         """
         Create a new KINTSUGI project.
 
@@ -271,7 +272,8 @@ class KintsugiProject:
         if config_file.exists():
             warnings.warn(
                 f"Project already exists at {root}. Use load() to open it.",
-                UserWarning
+                UserWarning,
+                stacklevel=2,
             )
             return cls.load(root)
 
@@ -302,18 +304,18 @@ class KintsugiProject:
         print()
         print("Directory structure:")
         print(f"  {root}/")
-        print(f"  +-- data/")
-        print(f"  |   +-- raw/          <- Put raw images here")
-        print(f"  |   +-- processed/    <- Outputs go here")
-        print(f"  +-- notebooks/        <- Working notebooks")
-        print(f"  +-- configs/          <- Processing configs")
-        print(f"  +-- meta/             <- Metadata files")
-        print(f"  +-- logs/             <- Processing logs")
+        print("  +-- data/")
+        print("  |   +-- raw/          <- Put raw images here")
+        print("  |   +-- processed/    <- Outputs go here")
+        print("  +-- notebooks/        <- Working notebooks")
+        print("  +-- configs/          <- Processing configs")
+        print("  +-- meta/             <- Metadata files")
+        print("  +-- logs/             <- Processing logs")
 
         return project
 
     @classmethod
-    def load(cls, root: Union[str, Path]) -> "KintsugiProject":
+    def load(cls, root: str | Path) -> KintsugiProject:
         """
         Load an existing KINTSUGI project.
 
@@ -332,11 +334,10 @@ class KintsugiProject:
 
         if not config_file.exists():
             raise FileNotFoundError(
-                f"No KINTSUGI project found at {root}. "
-                f"Use create() to create a new project."
+                f"No KINTSUGI project found at {root}. " f"Use create() to create a new project."
             )
 
-        with open(config_file, "r") as f:
+        with open(config_file) as f:
             data = json.load(f)
 
         config = ProjectConfig.from_dict(data.get("config", {}))
@@ -365,7 +366,7 @@ class KintsugiProject:
         with open(config_file, "w") as f:
             json.dump(data, f, indent=2)
 
-    def setup_notebooks(self, overwrite: bool = False) -> List[Path]:
+    def setup_notebooks(self, overwrite: bool = False) -> list[Path]:
         """
         Copy notebook templates to project directory.
 
@@ -490,9 +491,9 @@ class KintsugiProject:
     def add_cycle(
         self,
         name: str,
-        path: Optional[Union[str, Path]] = None,
-        channels: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        path: str | Path | None = None,
+        channels: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Add a cycle to the project.
@@ -524,7 +525,7 @@ class KintsugiProject:
         self.config.cycles.append(cycle_info)
         self.save()
 
-    def list_cycles(self) -> List[str]:
+    def list_cycles(self) -> list[str]:
         """List all cycles in the project."""
         return [c["name"] for c in self.config.cycles]
 
@@ -575,20 +576,22 @@ class KintsugiProject:
             f"Location: {self.root}",
             f"Created: {self.config.created[:10]}",
             f"Modified: {self.config.modified[:10]}",
-            f"",
+            "",
             f"Cycles: {len(self.config.cycles)}",
         ]
 
         for cyc in self.config.cycles:
             lines.append(f"  - {cyc['name']}: {len(cyc.get('channels', []))} channels")
 
-        lines.extend([
-            f"",
-            f"Directories:",
-            f"  Raw data: {self.paths.raw}",
-            f"  Processed: {self.paths.processed}",
-            f"  Notebooks: {self.paths.notebooks}",
-        ])
+        lines.extend(
+            [
+                "",
+                "Directories:",
+                f"  Raw data: {self.paths.raw}",
+                f"  Processed: {self.paths.processed}",
+                f"  Notebooks: {self.paths.notebooks}",
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -600,9 +603,10 @@ class KintsugiProject:
 # Convenience functions for notebook use
 # -----------------------------------------------------------------------------
 
+
 def init_project(
-    project_dir: Union[str, Path],
-    name: Optional[str] = None,
+    project_dir: str | Path,
+    name: str | None = None,
     description: str = "",
 ) -> KintsugiProject:
     """
@@ -655,7 +659,7 @@ def init_project(
     return project
 
 
-def find_raw_cycles(raw_dir: Union[str, Path]) -> List[Path]:
+def find_raw_cycles(raw_dir: str | Path) -> list[Path]:
     """
     Find cycle directories in raw data folder.
 
@@ -684,15 +688,18 @@ def find_raw_cycles(raw_dir: Union[str, Path]) -> List[Path]:
         if item.is_dir():
             name = item.name.lower()
             # Match common cycle naming patterns
-            if (name.startswith("cyc") or
-                name.startswith("cycle") or
-                name.isdigit() or
-                (len(name) >= 3 and name[:3].isdigit())):
+            if (
+                name.startswith("cyc")
+                or name.startswith("cycle")
+                or name.isdigit()
+                or (len(name) >= 3 and name[:3].isdigit())
+            ):
                 cycles.append(item)
 
     # Sort naturally
     try:
         from natsort import natsorted
+
         return natsorted(cycles, key=lambda p: p.name)
     except ImportError:
         return sorted(cycles, key=lambda p: p.name)

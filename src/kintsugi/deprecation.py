@@ -8,12 +8,13 @@ deprecated notebooks and functionality.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable, Optional
 
 
 class KintsugiDeprecationWarning(UserWarning):
     """Custom warning for KINTSUGI deprecations."""
+
     pass
 
 
@@ -21,7 +22,7 @@ def deprecated_notebook(
     notebook_name: str,
     replacement: str,
     version: str = "2.0.0",
-    details: Optional[str] = None,
+    details: str | None = None,
 ):
     """
     Decorator to mark notebook functions as deprecated.
@@ -37,6 +38,7 @@ def deprecated_notebook(
     details : str, optional
         Additional details about the transition
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -64,7 +66,9 @@ def deprecated_notebook(
 
             warnings.warn(message, KintsugiDeprecationWarning, stacklevel=2)
             return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
@@ -191,7 +195,6 @@ DEPRECATION_MAP = {
         "replacement": "kintsugi.qc.image_qc.assess_image_quality",
         "message": "Use QC module for SNR computation",
     },
-
     # Notebook 5 functions
     "ChannelAssessor": {
         "replacement": "kintsugi.qc.ImageQC",
@@ -204,6 +207,6 @@ DEPRECATION_MAP = {
 }
 
 
-def get_replacement_info(func_name: str) -> Optional[dict]:
+def get_replacement_info(func_name: str) -> dict | None:
     """Get replacement information for a deprecated function."""
     return DEPRECATION_MAP.get(func_name)

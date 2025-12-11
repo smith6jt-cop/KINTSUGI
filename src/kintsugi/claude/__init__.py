@@ -35,21 +35,19 @@ Parameter Learning:
 
 from kintsugi.claude.param_tuner import (
     blank_subtraction_tuner,
-    denoise_tuner,
     clahe_tuner,
     clean_tuner,
+    denoise_tuner,
     gaussian_subtract_tuner,
 )
-
-from kintsugi.claude.workflow_state import WorkflowState
-
 from kintsugi.claude.parameter_learning import (
-    ParameterLearningEngine,
     ImageCharacteristics,
+    ParameterLearningEngine,
     ParameterRecord,
-    normalize_tissue_type,
     normalize_marker_name,
+    normalize_tissue_type,
 )
+from kintsugi.claude.workflow_state import WorkflowState
 
 __all__ = [
     # Parameter tuners

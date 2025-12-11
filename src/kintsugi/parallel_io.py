@@ -12,16 +12,17 @@ Key features:
 """
 
 import os
-import numpy as np
-from glob import glob
-from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Union, Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from glob import glob
+
+import numpy as np
 
 # Try to import tifffile for memory-mapped reading
 try:
     import tifffile
+
     HAS_TIFFFILE = True
 except ImportError:
     HAS_TIFFFILE = False
@@ -51,17 +52,14 @@ class TileLoader:
         Number of parallel workers for loading
     """
 
-    def __init__(self,
-                 use_mmap: bool = True,
-                 cache_size: int = 0,
-                 n_workers: int = 4):
+    def __init__(self, use_mmap: bool = True, cache_size: int = 0, n_workers: int = 4):
         self.use_mmap = use_mmap and HAS_TIFFFILE
         self.cache_size = cache_size
         self.n_workers = n_workers
 
         # Thread-safe cache
-        self._cache: Dict[str, np.ndarray] = {}
-        self._cache_order: List[str] = []
+        self._cache: dict[str, np.ndarray] = {}
+        self._cache_order: list[str] = []
         self._cache_lock = threading.Lock()
 
     def load_tile(self, filepath: str, copy: bool = True) -> np.ndarray:
@@ -112,9 +110,7 @@ class TileLoader:
 
         return data
 
-    def load_tiles_parallel(self,
-                           filepaths: List[str],
-                           copy: bool = True) -> List[np.ndarray]:
+    def load_tiles_parallel(self, filepaths: list[str], copy: bool = True) -> list[np.ndarray]:
         """
         Load multiple tiles in parallel.
 
@@ -142,8 +138,7 @@ class TileLoader:
 
         with ThreadPoolExecutor(max_workers=self.n_workers) as executor:
             futures = {
-                executor.submit(self.load_tile, fp, copy): i
-                for i, fp in enumerate(filepaths)
+                executor.submit(self.load_tile, fp, copy): i for i, fp in enumerate(filepaths)
             }
 
             for future in as_completed(futures):
@@ -152,12 +147,9 @@ class TileLoader:
 
         return results
 
-    def load_zplane_tiles(self,
-                         image_dir: str,
-                         cycle: int,
-                         channel: int,
-                         zplane: int,
-                         as_stack: bool = True) -> Union[np.ndarray, List[np.ndarray]]:
+    def load_zplane_tiles(
+        self, image_dir: str, cycle: int, channel: int, zplane: int, as_stack: bool = True
+    ) -> np.ndarray | list[np.ndarray]:
         """
         Load all tiles for a specific z-plane.
 
@@ -179,14 +171,16 @@ class TileLoader:
         np.ndarray or list
             Loaded tiles as stack or list
         """
-        pattern = f'1_000??_Z0{str(zplane).zfill(2)}_CH{str(channel)}.tif'
+        pattern = f"1_000??_Z0{str(zplane).zfill(2)}_CH{str(channel)}.tif"
         files = sorted(
-            glob(os.path.join(image_dir, f'cyc{str(cycle).zfill(3)}', pattern)),
-            key=alphanumeric_key
+            glob(os.path.join(image_dir, f"cyc{str(cycle).zfill(3)}", pattern)),
+            key=alphanumeric_key,
         )
 
         if not files:
-            raise FileNotFoundError(f"No tiles found for cycle {cycle}, channel {channel}, z-plane {zplane}")
+            raise FileNotFoundError(
+                f"No tiles found for cycle {cycle}, channel {channel}, z-plane {zplane}"
+            )
 
         tiles = self.load_tiles_parallel(files, copy=True)
 
@@ -194,11 +188,9 @@ class TileLoader:
             return np.stack(tiles, axis=0)
         return tiles
 
-    def preload_channel(self,
-                       image_dir: str,
-                       cycle: int,
-                       channel: int,
-                       zplanes: List[int]) -> Dict[int, np.ndarray]:
+    def preload_channel(
+        self, image_dir: str, cycle: int, channel: int, zplanes: list[int]
+    ) -> dict[int, np.ndarray]:
         """
         Pre-load all tiles for multiple z-planes of a channel.
 
@@ -225,10 +217,7 @@ class TileLoader:
         # Load in parallel across z-planes
         with ThreadPoolExecutor(max_workers=self.n_workers) as executor:
             futures = {
-                executor.submit(
-                    self.load_zplane_tiles,
-                    image_dir, cycle, channel, z
-                ): z
+                executor.submit(self.load_zplane_tiles, image_dir, cycle, channel, z): z
                 for z in zplanes
             }
 
@@ -262,23 +251,19 @@ class ChannelProcessor:
         Pre-load all tiles before processing (uses more memory but faster)
     """
 
-    def __init__(self,
-                 n_workers: int = 8,
-                 use_gpu_basic: bool = False,
-                 preload_tiles: bool = False):
+    def __init__(
+        self, n_workers: int = 8, use_gpu_basic: bool = False, preload_tiles: bool = False
+    ):
         self.n_workers = n_workers
         self.use_gpu_basic = use_gpu_basic
         self.preload_tiles = preload_tiles
         self.tile_loader = TileLoader(
-            use_mmap=True,
-            cache_size=0,  # Don't cache between z-planes
-            n_workers=4
+            use_mmap=True, cache_size=0, n_workers=4  # Don't cache between z-planes
         )
 
-    def process_zplane(self,
-                      tiles: np.ndarray,
-                      basic_func: Callable,
-                      basic_params: dict) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def process_zplane(
+        self, tiles: np.ndarray, basic_func: Callable, basic_params: dict
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Process a single z-plane: normalize and apply BaSiC correction.
 
@@ -301,7 +286,7 @@ class ChannelProcessor:
             Computed darkfield
         """
         # Normalize
-        dtype_max = np.iinfo(tiles.dtype).max if tiles.dtype.kind in 'ui' else 1.0
+        dtype_max = np.iinfo(tiles.dtype).max if tiles.dtype.kind in "ui" else 1.0
         tiles_norm = tiles.astype(np.float64) / dtype_max
 
         # BaSiC correction
@@ -315,8 +300,7 @@ class ChannelProcessor:
         return corrected, flatfield, darkfield
 
 
-def create_optimized_loader(use_mmap: bool = True,
-                           n_workers: int = 4) -> TileLoader:
+def create_optimized_loader(use_mmap: bool = True, n_workers: int = 4) -> TileLoader:
     """
     Create an optimized tile loader with recommended settings.
 
@@ -335,14 +319,11 @@ def create_optimized_loader(use_mmap: bool = True,
     return TileLoader(
         use_mmap=use_mmap,
         cache_size=0,  # Caching not beneficial for sequential z-plane processing
-        n_workers=n_workers
+        n_workers=n_workers,
     )
 
 
-def load_tiles_optimized(image_dir: str,
-                        cycle: int,
-                        channel: int,
-                        zplane: int) -> np.ndarray:
+def load_tiles_optimized(image_dir: str, cycle: int, channel: int, zplane: int) -> np.ndarray:
     """
     Convenience function to load tiles with optimized settings.
 

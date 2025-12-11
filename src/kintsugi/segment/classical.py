@@ -8,7 +8,6 @@ for fluorescence microscopy when deep learning is not available.
 from __future__ import annotations
 
 import logging
-from typing import Optional, Tuple, Union
 
 import numpy as np
 from scipy import ndimage
@@ -97,7 +96,7 @@ def threshold_adaptive(
 def segment_nuclei_watershed(
     image: np.ndarray,
     min_distance: int = 10,
-    threshold: Optional[float] = None,
+    threshold: float | None = None,
     min_size: int = 50,
     max_size: int = 5000,
 ) -> np.ndarray:
@@ -122,9 +121,9 @@ def segment_nuclei_watershed(
     np.ndarray
         Labeled segmentation mask
     """
+    from skimage import morphology
     from skimage.feature import peak_local_max
     from skimage.segmentation import watershed
-    from skimage import morphology
 
     img = image.astype(np.float64)
 
@@ -172,7 +171,7 @@ def segment_nuclei_watershed(
 
 def segment_cells_watershed(
     membrane_image: np.ndarray,
-    nuclei_mask: Optional[np.ndarray] = None,
+    nuclei_mask: np.ndarray | None = None,
     expansion: int = 20,
     min_size: int = 100,
     max_size: int = 10000,
@@ -198,8 +197,8 @@ def segment_cells_watershed(
     np.ndarray
         Labeled cell segmentation mask
     """
-    from skimage.segmentation import watershed
     from skimage import morphology
+    from skimage.segmentation import watershed
 
     membrane = membrane_image.astype(np.float64)
 
@@ -260,8 +259,8 @@ def _filter_labels_by_size(
 
 def segment_by_intensity(
     image: np.ndarray,
-    low_threshold: Optional[float] = None,
-    high_threshold: Optional[float] = None,
+    low_threshold: float | None = None,
+    high_threshold: float | None = None,
     min_size: int = 50,
 ) -> np.ndarray:
     """
@@ -305,7 +304,7 @@ def segment_by_intensity(
 
 def voronoi_expand(
     seeds: np.ndarray,
-    boundary_image: Optional[np.ndarray] = None,
+    boundary_image: np.ndarray | None = None,
     max_distance: int = 50,
 ) -> np.ndarray:
     """
@@ -325,8 +324,8 @@ def voronoi_expand(
     np.ndarray
         Expanded labels
     """
-    from skimage.segmentation import watershed
     from skimage import morphology
+    from skimage.segmentation import watershed
 
     if seeds.max() == 0:
         return seeds

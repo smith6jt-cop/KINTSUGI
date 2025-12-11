@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 from urllib.request import urlretrieve
 
 import numpy as np
@@ -77,8 +77,8 @@ class SAMSegmenter:
 
     def __init__(
         self,
-        config: Optional[SAMConfig] = None,
-        model_path: Optional[Union[str, Path]] = None,
+        config: SAMConfig | None = None,
+        model_path: str | Path | None = None,
     ):
         """
         Initialize SAM segmenter.
@@ -110,14 +110,12 @@ class SAMSegmenter:
             logger.info(f"SAM using device: {self.device}")
 
         except ImportError:
-            raise ImportError(
-                "PyTorch is required for SAM. Install with: pip install torch"
-            )
+            raise ImportError("PyTorch is required for SAM. Install with: pip install torch")
 
     def _load_model(self):
         """Load SAM model."""
         try:
-            from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
+            from segment_anything import SamAutomaticMaskGenerator, SamPredictor, sam_model_registry
         except ImportError:
             raise ImportError(
                 "segment_anything is required. Install with: pip install segment-anything"
@@ -183,7 +181,7 @@ class SAMSegmenter:
         # Enhance contrast if needed
         if self.config.enhance_contrast:
             # Simple contrast stretching
-            img = img ** 0.8  # Gamma correction
+            img = img**0.8  # Gamma correction
 
         # Invert if needed
         if self.config.invert_image:
@@ -202,10 +200,10 @@ class SAMSegmenter:
         self,
         image: np.ndarray,
         prompt_type: str = "auto",
-        point_coords: Optional[np.ndarray] = None,
-        point_labels: Optional[np.ndarray] = None,
-        box: Optional[np.ndarray] = None,
-    ) -> List[Dict[str, Any]]:
+        point_coords: np.ndarray | None = None,
+        point_labels: np.ndarray | None = None,
+        box: np.ndarray | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Segment image using SAM.
 
@@ -241,8 +239,7 @@ class SAMSegmenter:
         img_rgb = self._preprocess_image(image)
 
         # Handle large images with tiling
-        if (image.shape[0] > self.config.tile_size or
-            image.shape[1] > self.config.tile_size):
+        if image.shape[0] > self.config.tile_size or image.shape[1] > self.config.tile_size:
             return self._segment_tiled(img_rgb, prompt_type)
 
         if prompt_type == "auto":
@@ -284,7 +281,7 @@ class SAMSegmenter:
         self,
         image: np.ndarray,
         prompt_type: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Segment large image using tiling."""
         h, w = image.shape[:2]
         tile_size = self.config.tile_size
@@ -303,7 +300,7 @@ class SAMSegmenter:
                 # Pad if needed
                 if tile.shape[0] < tile_size or tile.shape[1] < tile_size:
                     padded = np.zeros((tile_size, tile_size, 3), dtype=tile.dtype)
-                    padded[:tile.shape[0], :tile.shape[1]] = tile
+                    padded[: tile.shape[0], : tile.shape[1]] = tile
                     tile = padded
 
                 # Segment tile
@@ -316,7 +313,7 @@ class SAMSegmenter:
                 for mask in tile_masks:
                     # Create full-size mask
                     full_mask = np.zeros((h, w), dtype=bool)
-                    seg = mask["segmentation"][:y_end - y, :x_end - x]
+                    seg = mask["segmentation"][: y_end - y, : x_end - x]
                     full_mask[y:y_end, x:x_end] = seg
 
                     mask["segmentation"] = full_mask
@@ -336,9 +333,9 @@ class SAMSegmenter:
 
     def _merge_overlapping_masks(
         self,
-        masks: List[Dict[str, Any]],
+        masks: list[dict[str, Any]],
         iou_threshold: float = 0.5,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Merge overlapping masks from different tiles."""
         if len(masks) <= 1:
             return masks
@@ -357,7 +354,7 @@ class SAMSegmenter:
             current_area = mask1["area"]
 
             # Find overlapping masks
-            for j, mask2 in enumerate(masks[i + 1:], start=i + 1):
+            for j, mask2 in enumerate(masks[i + 1 :], start=i + 1):
                 if j in used:
                     continue
 
@@ -371,12 +368,14 @@ class SAMSegmenter:
                     current_area = np.sum(current_mask)
                     used.add(j)
 
-            merged.append({
-                "segmentation": current_mask,
-                "area": int(current_area),
-                "predicted_iou": mask1["predicted_iou"],
-                "bbox": self._compute_bbox(current_mask),
-            })
+            merged.append(
+                {
+                    "segmentation": current_mask,
+                    "area": int(current_area),
+                    "predicted_iou": mask1["predicted_iou"],
+                    "bbox": self._compute_bbox(current_mask),
+                }
+            )
 
         return merged
 
@@ -384,20 +383,22 @@ class SAMSegmenter:
         self,
         masks: np.ndarray,
         scores: np.ndarray,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Convert mask array to list of dicts."""
         results = []
         for i in range(len(masks)):
             mask = masks[i]
-            results.append({
-                "segmentation": mask,
-                "area": int(np.sum(mask)),
-                "predicted_iou": float(scores[i]),
-                "bbox": self._compute_bbox(mask),
-            })
+            results.append(
+                {
+                    "segmentation": mask,
+                    "area": int(np.sum(mask)),
+                    "predicted_iou": float(scores[i]),
+                    "bbox": self._compute_bbox(mask),
+                }
+            )
         return results
 
-    def _compute_bbox(self, mask: np.ndarray) -> List[int]:
+    def _compute_bbox(self, mask: np.ndarray) -> list[int]:
         """Compute bounding box from mask."""
         rows = np.any(mask, axis=1)
         cols = np.any(mask, axis=0)
@@ -412,8 +413,8 @@ class SAMSegmenter:
 
     def masks_to_labels(
         self,
-        masks: List[Dict[str, Any]],
-        image_shape: Optional[Tuple[int, int]] = None,
+        masks: list[dict[str, Any]],
+        image_shape: tuple[int, int] | None = None,
     ) -> np.ndarray:
         """
         Convert list of masks to labeled image.
@@ -464,7 +465,7 @@ def segment_with_sam(
     model_type: str = "vit_b",
     return_labels: bool = True,
     **kwargs,
-) -> Union[np.ndarray, List[Dict[str, Any]]]:
+) -> np.ndarray | list[dict[str, Any]]:
     """
     Convenience function for SAM segmentation.
 

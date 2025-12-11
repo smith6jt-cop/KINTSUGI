@@ -30,33 +30,30 @@ Usage:
     filtered_cells = cell_qc.filter_outliers(cell_data)
 """
 
-from kintsugi.qc.image_qc import (
-    ImageQC,
-    assess_image_quality,
-    detect_artifacts,
-    compute_focus_score,
-    compute_tissue_coverage,
+from kintsugi.qc.batch_qc import (
+    BatchQC,
+    compute_batch_statistics,
+    detect_batch_effects,
 )
-
 from kintsugi.qc.cell_qc import (
     CellQC,
+    detect_doublets,
     detect_outliers,
     filter_by_intensity,
     filter_by_morphology,
-    detect_doublets,
 )
-
+from kintsugi.qc.image_qc import (
+    ImageQC,
+    assess_image_quality,
+    compute_focus_score,
+    compute_tissue_coverage,
+    detect_artifacts,
+)
 from kintsugi.qc.marker_qc import (
     MarkerQC,
-    validate_marker_expression,
-    detect_crosstalk,
     assess_marker_specificity,
-)
-
-from kintsugi.qc.batch_qc import (
-    BatchQC,
-    detect_batch_effects,
-    compute_batch_statistics,
+    detect_crosstalk,
+    validate_marker_expression,
 )
 
 __all__ = [

@@ -8,15 +8,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 
 logger = logging.getLogger("kintsugi.mcp.signal_isolation")
 
 # Session state - shared with server
-_loaded_images: Dict[str, Any] = {}
-_processing_history: Dict[str, list] = {}
+_loaded_images: dict[str, Any] = {}
+_processing_history: dict[str, list] = {}
 
 
 def _get_image(name: str) -> Any:
@@ -26,7 +26,7 @@ def _get_image(name: str) -> Any:
     return _loaded_images[name]["data"]
 
 
-def _store_image(name: str, data: Any, metadata: Dict[str, Any] = None):
+def _store_image(name: str, data: Any, metadata: dict[str, Any] = None):
     """Store an image with metadata."""
     _loaded_images[name] = {
         "data": data,
@@ -38,33 +38,33 @@ def _store_image(name: str, data: Any, metadata: Dict[str, Any] = None):
         _processing_history[name] = []
 
 
-def _add_history(name: str, operation: str, params: Dict[str, Any]):
+def _add_history(name: str, operation: str, params: dict[str, Any]):
     """Add an operation to processing history."""
     if name not in _processing_history:
         _processing_history[name] = []
-    _processing_history[name].append({
-        "operation": operation,
-        "params": params,
-    })
+    _processing_history[name].append(
+        {
+            "operation": operation,
+            "params": params,
+        }
+    )
 
 
 async def load_channel(
     project_path: str,
     cycle: str,
     channel: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Load a channel image from a KINTSUGI project.
 
     Returns image metadata and prepares it for processing.
     """
-    from pathlib import Path
 
     try:
-        import dask.array as da
-        import zarr
-        from skimage import io as skio
-        import tifffile
+        import dask.array as da  # noqa: F401
+        import tifffile  # noqa: F401
+        import zarr  # noqa: F401
     except ImportError as e:
         return {"error": f"Missing dependency: {e}"}
 
@@ -73,6 +73,7 @@ async def load_channel(
     # Try to load from KINTSUGI project structure
     try:
         from kintsugi.project import KintsugiProject
+
         project = KintsugiProject.load(project_path)
         raw_dir = project.paths.raw
         processed_dir = project.paths.processed
@@ -151,12 +152,16 @@ async def load_channel(
     image_name = f"{cycle_name}_{channel}"
 
     # Store the image
-    _store_image(image_name, data, {
-        "source_path": str(image_path),
-        "cycle": cycle_name,
-        "channel": channel,
-        "project": str(project_path),
-    })
+    _store_image(
+        image_name,
+        data,
+        {
+            "source_path": str(image_path),
+            "cycle": cycle_name,
+            "channel": channel,
+            "project": str(project_path),
+        },
+    )
 
     # Compute basic stats (sample for large images)
     try:
@@ -197,7 +202,7 @@ async def subtract_blank(
     high_size: int = 1,
     high_percentile: int = 90,
     erosion: int = 0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Subtract autofluorescence/blank channel from signal.
 
@@ -229,9 +234,7 @@ async def subtract_blank(
 
     # Low intensity smoothing
     if smooth_low:
-        low_mask = da.where(
-            signal_copy < da.percentile(signal_copy.ravel(), low_percentile), 1, 0
-        )
+        low_mask = da.where(signal_copy < da.percentile(signal_copy.ravel(), low_percentile), 1, 0)
         low_mask = dask_image.ndmorph.binary_dilation(low_mask, morphology.disk(1))
         result = da.where(
             low_mask,
@@ -261,22 +264,30 @@ async def subtract_blank(
 
     # Store result with new name
     output_name = f"{signal_channel}_subtracted"
-    _store_image(output_name, result, {
-        "source": signal_channel,
-        "blank": blank_channel,
-        "operation": "subtract_blank",
-    })
+    _store_image(
+        output_name,
+        result,
+        {
+            "source": signal_channel,
+            "blank": blank_channel,
+            "operation": "subtract_blank",
+        },
+    )
 
     # Record history
-    _add_history(output_name, "subtract_blank", {
-        "signal_channel": signal_channel,
-        "blank_channel": blank_channel,
-        "blank_clip_factor": blank_clip_factor,
-        "blank_scale_factor": blank_scale_factor,
-        "smooth_low": smooth_low,
-        "smooth_high": smooth_high,
-        "erosion": erosion,
-    })
+    _add_history(
+        output_name,
+        "subtract_blank",
+        {
+            "signal_channel": signal_channel,
+            "blank_channel": blank_channel,
+            "blank_clip_factor": blank_clip_factor,
+            "blank_scale_factor": blank_scale_factor,
+            "smooth_low": smooth_low,
+            "smooth_high": smooth_high,
+            "erosion": erosion,
+        },
+    )
 
     # Compute stats for result
     try:
@@ -311,7 +322,7 @@ async def denoise(
     filter_size: int = 3,
     percentile: int = 10,
     upper: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Apply denoising filters to reduce noise.
 
@@ -345,17 +356,25 @@ async def denoise(
 
     # Store result
     output_name = f"{channel}_denoised"
-    _store_image(output_name, result, {
-        "source": channel,
-        "operation": "denoise",
-        "method": method,
-    })
+    _store_image(
+        output_name,
+        result,
+        {
+            "source": channel,
+            "operation": "denoise",
+            "method": method,
+        },
+    )
 
-    _add_history(output_name, "denoise", {
-        "method": method,
-        "filter_size": filter_size,
-        "percentile": percentile if method == "percentile" else None,
-    })
+    _add_history(
+        output_name,
+        "denoise",
+        {
+            "method": method,
+            "filter_size": filter_size,
+            "percentile": percentile if method == "percentile" else None,
+        },
+    )
 
     return {
         "status": "success",
@@ -370,7 +389,7 @@ async def apply_clahe(
     clip_limit: float = 0.01,
     tile_grid_size: int = 70,
     nbins: int = 128,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Apply Contrast Limited Adaptive Histogram Equalization.
 
@@ -409,17 +428,25 @@ async def apply_clahe(
 
     # Store result
     output_name = f"{channel}_clahe"
-    _store_image(output_name, result, {
-        "source": channel,
-        "operation": "clahe",
-    })
+    _store_image(
+        output_name,
+        result,
+        {
+            "source": channel,
+            "operation": "clahe",
+        },
+    )
 
-    _add_history(output_name, "clahe", {
-        "clip_limit": clip_limit,
-        "tile_grid_size": tile_grid_size,
-        "nbins": nbins,
-        "actual_kernel_size": kernel_size,
-    })
+    _add_history(
+        output_name,
+        "clahe",
+        {
+            "clip_limit": clip_limit,
+            "tile_grid_size": tile_grid_size,
+            "nbins": nbins,
+            "actual_kernel_size": kernel_size,
+        },
+    )
 
     return {
         "status": "success",
@@ -436,7 +463,7 @@ async def clean_background(
     smooth_threshold: int = 100,
     remove_small_objects: bool = False,
     min_object_size: int = 30,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Remove background and small objects from the image.
     """
@@ -480,17 +507,25 @@ async def clean_background(
 
     # Store result
     output_name = f"{channel}_cleaned"
-    _store_image(output_name, result, {
-        "source": channel,
-        "operation": "clean_background",
-    })
+    _store_image(
+        output_name,
+        result,
+        {
+            "source": channel,
+            "operation": "clean_background",
+        },
+    )
 
-    _add_history(output_name, "clean_background", {
-        "background_threshold": background_threshold,
-        "smooth": smooth,
-        "remove_small_objects": remove_small_objects,
-        "min_object_size": min_object_size,
-    })
+    _add_history(
+        output_name,
+        "clean_background",
+        {
+            "background_threshold": background_threshold,
+            "smooth": smooth,
+            "remove_small_objects": remove_small_objects,
+            "min_object_size": min_object_size,
+        },
+    )
 
     return {
         "status": "success",
@@ -506,7 +541,7 @@ async def gaussian_subtract(
     scale_factor: float = 0.1,
     low_clip: int = 0,
     high_clip: int = 65535,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Subtract Gaussian-blurred version to remove structured background.
     """
@@ -533,17 +568,25 @@ async def gaussian_subtract(
 
     # Store result
     output_name = f"{channel}_gaussub"
-    _store_image(output_name, result, {
-        "source": channel,
-        "operation": "gaussian_subtract",
-    })
+    _store_image(
+        output_name,
+        result,
+        {
+            "source": channel,
+            "operation": "gaussian_subtract",
+        },
+    )
 
-    _add_history(output_name, "gaussian_subtract", {
-        "sigma": sigma,
-        "scale_factor": scale_factor,
-        "low_clip": low_clip,
-        "high_clip": high_clip,
-    })
+    _add_history(
+        output_name,
+        "gaussian_subtract",
+        {
+            "sigma": sigma,
+            "scale_factor": scale_factor,
+            "low_clip": low_clip,
+            "high_clip": high_clip,
+        },
+    )
 
     return {
         "status": "success",
@@ -559,8 +602,8 @@ async def denoise_advanced(
     strength: str = "auto",
     preserve_edges: bool = True,
     n2v_epochs: int = 50,
-    model_path: Optional[str] = None,
-) -> Dict[str, Any]:
+    model_path: str | None = None,
+) -> dict[str, Any]:
     """
     Apply advanced denoising using N2V, CARE, or adaptive methods.
 
@@ -597,11 +640,10 @@ async def denoise_advanced(
     else:
         img = np.array(data)
 
-    original_dtype = img.dtype
-
     # Estimate noise level before denoising
     try:
         from kintsugi.denoise.filters import estimate_noise_level
+
         noise_before = estimate_noise_level(img, method="mad")
     except ImportError:
         noise_before = float(np.std(img[img < np.percentile(img, 20)]))
@@ -610,24 +652,29 @@ async def denoise_advanced(
     try:
         if method == "adaptive":
             from kintsugi.denoise.filters import adaptive_denoise
+
             result = adaptive_denoise(img, strength=strength, preserve_edges=preserve_edges)
 
         elif method == "bilateral":
             from kintsugi.denoise.filters import denoise_bilateral
+
             sigma_spatial = 1.0 if strength == "light" else (2.0 if strength == "medium" else 3.0)
             result = denoise_bilateral(img, sigma_spatial=sigma_spatial)
 
         elif method == "nlm":
             from kintsugi.denoise.filters import denoise_nlm
+
             patch_size = 5 if strength in ("light", "auto") else 7
             result = denoise_nlm(img, patch_size=patch_size)
 
         elif method == "bm3d":
             from kintsugi.denoise.patch_based import denoise_bm3d_lite
+
             result = denoise_bm3d_lite(img, sigma=noise_before if strength == "auto" else None)
 
         elif method == "n2v":
             from kintsugi.denoise.n2v import denoise_n2v
+
             result = denoise_n2v(
                 img,
                 n_epochs=n2v_epochs,
@@ -636,6 +683,7 @@ async def denoise_advanced(
 
         elif method == "patch_svd":
             from kintsugi.denoise.patch_based import denoise_svd_patch
+
             rank = None if strength == "auto" else (5 if strength == "light" else 10)
             result = denoise_svd_patch(img, rank=rank)
 
@@ -657,19 +705,28 @@ async def denoise_advanced(
     # Store result
     output_name = f"{channel}_{method}_denoised"
     import dask.array as da
-    result_dask = da.from_array(result, chunks=(1000, 1000))
-    _store_image(output_name, result_dask, {
-        "source": channel,
-        "operation": f"denoise_advanced_{method}",
-    })
 
-    _add_history(output_name, "denoise_advanced", {
-        "method": method,
-        "strength": strength,
-        "preserve_edges": preserve_edges,
-        "noise_before": noise_before,
-        "noise_after": noise_after,
-    })
+    result_dask = da.from_array(result, chunks=(1000, 1000))
+    _store_image(
+        output_name,
+        result_dask,
+        {
+            "source": channel,
+            "operation": f"denoise_advanced_{method}",
+        },
+    )
+
+    _add_history(
+        output_name,
+        "denoise_advanced",
+        {
+            "method": method,
+            "strength": strength,
+            "preserve_edges": preserve_edges,
+            "noise_before": noise_before,
+            "noise_after": noise_after,
+        },
+    )
 
     return {
         "status": "success",
@@ -678,7 +735,9 @@ async def denoise_advanced(
         "noise_reduction": {
             "before": round(noise_before, 2),
             "after": round(noise_after, 2),
-            "reduction_pct": round((1 - noise_after / noise_before) * 100, 1) if noise_before > 0 else 0,
+            "reduction_pct": (
+                round((1 - noise_after / noise_before) * 100, 1) if noise_before > 0 else 0
+            ),
         },
         "parameters": {
             "strength": strength,
@@ -688,7 +747,7 @@ async def denoise_advanced(
 
 
 # Utility functions for state management
-def get_loaded_images() -> Dict[str, Any]:
+def get_loaded_images() -> dict[str, Any]:
     """Get all loaded images and their metadata."""
     return {
         name: {

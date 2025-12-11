@@ -8,11 +8,14 @@ including a lightweight BM3D-inspired algorithm and patch similarity methods.
 from __future__ import annotations
 
 import logging
-from typing import Optional, Tuple, Union
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 from scipy import ndimage
 from scipy.fft import dct, idct
+
+if TYPE_CHECKING:
+    import dask.array
 
 logger = logging.getLogger("kintsugi.denoise.patch_based")
 
@@ -31,7 +34,7 @@ def _extract_patches(
     image: np.ndarray,
     patch_size: int,
     step: int,
-) -> Tuple[np.ndarray, list]:
+) -> tuple[np.ndarray, list]:
     """Extract overlapping patches from image."""
     h, w = image.shape
     patches = []
@@ -39,7 +42,7 @@ def _extract_patches(
 
     for y in range(0, h - patch_size + 1, step):
         for x in range(0, w - patch_size + 1, step):
-            patch = image[y:y + patch_size, x:x + patch_size]
+            patch = image[y : y + patch_size, x : x + patch_size]
             patches.append(patch)
             positions.append((y, x))
 
@@ -49,7 +52,7 @@ def _extract_patches(
 def _reconstruct_from_patches(
     patches: np.ndarray,
     positions: list,
-    image_shape: Tuple[int, int],
+    image_shape: tuple[int, int],
     patch_size: int,
 ) -> np.ndarray:
     """Reconstruct image from overlapping patches with averaging."""
@@ -57,9 +60,9 @@ def _reconstruct_from_patches(
     output = np.zeros((h, w), dtype=np.float64)
     weights = np.zeros((h, w), dtype=np.float64)
 
-    for patch, (y, x) in zip(patches, positions):
-        output[y:y + patch_size, x:x + patch_size] += patch
-        weights[y:y + patch_size, x:x + patch_size] += 1
+    for patch, (y, x) in zip(patches, positions, strict=False):
+        output[y : y + patch_size, x : x + patch_size] += patch
+        weights[y : y + patch_size, x : x + patch_size] += 1
 
     weights = np.maximum(weights, 1)
     return output / weights
@@ -86,14 +89,14 @@ def _wiener_threshold(
     noise_var: float,
 ) -> np.ndarray:
     """Apply Wiener filtering to coefficients."""
-    signal_var = np.maximum(estimate_coeffs ** 2 - noise_var, 0)
+    signal_var = np.maximum(estimate_coeffs**2 - noise_var, 0)
     wiener_weights = signal_var / (signal_var + noise_var + 1e-8)
     return coeffs * wiener_weights
 
 
 def denoise_bm3d_lite(
     image: ArrayLike,
-    sigma: Optional[float] = None,
+    sigma: float | None = None,
     patch_size: int = 8,
     search_window: int = 21,
     max_matches: int = 16,
@@ -142,6 +145,7 @@ def denoise_bm3d_lite(
     # Estimate noise if not provided
     if sigma is None:
         from kintsugi.denoise.filters import estimate_noise_level
+
         sigma = estimate_noise_level(img, method="mad")
         logger.info(f"Estimated noise sigma: {sigma:.2f}")
 
@@ -160,22 +164,23 @@ def denoise_bm3d_lite(
     output_patches = np.zeros_like(patches)
     patch_weights = np.zeros(n_patches)
 
-    for i, (ref_patch, (ref_y, ref_x)) in enumerate(zip(patches, positions)):
+    for i, (ref_patch, (ref_y, ref_x)) in enumerate(zip(patches, positions, strict=False)):
         # Find similar patches within search window
         similar_indices = [i]
         ref_dct = patch_dcts[i]
 
-        for j, (other_patch, (other_y, other_x)) in enumerate(zip(patches, positions)):
+        for j, (_other_patch, (other_y, other_x)) in enumerate(
+            zip(patches, positions, strict=False)
+        ):
             if i == j:
                 continue
 
             # Check if within search window
-            if (abs(other_y - ref_y) <= half_window and
-                abs(other_x - ref_x) <= half_window):
+            if abs(other_y - ref_y) <= half_window and abs(other_x - ref_x) <= half_window:
 
                 # Compute similarity in DCT domain (faster than spatial)
                 diff = np.sum((patch_dcts[j] - ref_dct) ** 2)
-                if diff < (patch_size ** 2) * (sigma ** 2) * 2:
+                if diff < (patch_size**2) * (sigma**2) * 2:
                     similar_indices.append(j)
 
                     if len(similar_indices) >= max_matches:
@@ -199,7 +204,7 @@ def denoise_bm3d_lite(
         # 1D Haar transform along stack dimension (simplified)
         group_3d = np.zeros_like(group_dct)
         for level in range(int(np.log2(n_group)) + 1):
-            step_size = 2 ** level
+            step_size = 2**level
             if step_size >= n_group:
                 break
             for k in range(0, n_group - step_size, 2 * step_size):
@@ -214,7 +219,7 @@ def denoise_bm3d_lite(
         # Inverse 1D Haar transform
         group_ihaar = group_filtered.copy()
         for level in range(int(np.log2(n_group)), -1, -1):
-            step_size = 2 ** level
+            step_size = 2**level
             if step_size >= n_group:
                 continue
             for k in range(0, n_group - step_size, 2 * step_size):
@@ -229,7 +234,7 @@ def denoise_bm3d_lite(
 
         # Weight by number of non-zero coefficients (sparsity)
         n_nonzero = np.sum(group_filtered != 0)
-        weight = 1.0 / (1.0 + n_nonzero / (n_group * patch_size ** 2))
+        weight = 1.0 / (1.0 + n_nonzero / (n_group * patch_size**2))
 
         # Accumulate to output patches
         for idx, patch_idx in enumerate(similar_indices):
@@ -255,7 +260,7 @@ def denoise_patch_similarity(
     image: ArrayLike,
     patch_size: int = 7,
     search_radius: int = 10,
-    h_param: Optional[float] = None,
+    h_param: float | None = None,
     fast_mode: bool = True,
 ) -> np.ndarray:
     """
@@ -291,6 +296,7 @@ def denoise_patch_similarity(
     # Estimate h from noise if not provided
     if h_param is None:
         from kintsugi.denoise.filters import estimate_noise_level
+
         sigma = estimate_noise_level(img, method="mad")
         h_param = sigma * 1.2
 
@@ -303,8 +309,8 @@ def denoise_patch_similarity(
     if fast_mode:
         # Faster version using vectorized operations
         # Pre-compute patch sums of squares for efficiency
-        patch_sq_sum = ndimage.uniform_filter(padded ** 2, size=patch_size) * (patch_size ** 2)
-        patch_sum = ndimage.uniform_filter(padded, size=patch_size) * (patch_size ** 2)
+        patch_sq_sum = ndimage.uniform_filter(padded**2, size=patch_size) * (patch_size**2)
+        patch_sum = ndimage.uniform_filter(padded, size=patch_size) * (patch_size**2)
 
         offset = half_patch + search_radius
 
@@ -329,16 +335,17 @@ def denoise_patch_similarity(
                 # Approximate distance using sum statistics
                 # d^2 = sum((a-b)^2) = sum(a^2) + sum(b^2) - 2*sum(a*b)
                 # Approximated as: ref_sq_sum + window_sq_sum - 2 * ref_sum * window_sum / n
-                distances = (ref_sq_sum + window_sq_sum -
-                            2 * ref_sum * window_sum / (patch_size ** 2))
+                distances = ref_sq_sum + window_sq_sum - 2 * ref_sum * window_sum / (patch_size**2)
                 distances = np.maximum(distances, 0)
 
                 # Compute weights
-                weights = np.exp(-distances / (h_param ** 2 * patch_size ** 2))
+                weights = np.exp(-distances / (h_param**2 * patch_size**2))
 
                 # Weighted average of center pixels in search window
-                center_values = padded[y_start + half_patch:y_end + half_patch,
-                                      x_start + half_patch:x_end + half_patch]
+                center_values = padded[
+                    y_start + half_patch : y_end + half_patch,
+                    x_start + half_patch : x_end + half_patch,
+                ]
 
                 output[y, x] = np.sum(weights * center_values) / np.sum(weights)
 
@@ -352,8 +359,7 @@ def denoise_patch_similarity(
 
                 # Extract reference patch
                 ref_patch = padded[
-                    py - half_patch:py + half_patch + 1,
-                    px - half_patch:px + half_patch + 1
+                    py - half_patch : py + half_patch + 1, px - half_patch : px + half_patch + 1
                 ]
 
                 weighted_sum = 0.0
@@ -366,15 +372,15 @@ def denoise_patch_similarity(
 
                         # Extract comparison patch
                         comp_patch = padded[
-                            ny - half_patch:ny + half_patch + 1,
-                            nx - half_patch:nx + half_patch + 1
+                            ny - half_patch : ny + half_patch + 1,
+                            nx - half_patch : nx + half_patch + 1,
                         ]
 
                         # Compute distance
                         dist = np.sum((ref_patch - comp_patch) ** 2)
 
                         # Weight
-                        weight = np.exp(-dist / (h_param ** 2 * patch_size ** 2))
+                        weight = np.exp(-dist / (h_param**2 * patch_size**2))
 
                         weighted_sum += weight * padded[ny, nx]
                         weight_sum += weight
@@ -392,7 +398,7 @@ def denoise_patch_similarity(
 def denoise_svd_patch(
     image: ArrayLike,
     patch_size: int = 8,
-    rank: Optional[int] = None,
+    rank: int | None = None,
     stride: int = 4,
 ) -> np.ndarray:
     """
@@ -438,7 +444,7 @@ def denoise_svd_patch(
     # Determine rank if not specified
     if rank is None:
         # Use energy-based selection
-        energy = np.cumsum(S ** 2) / np.sum(S ** 2)
+        energy = np.cumsum(S**2) / np.sum(S**2)
         rank = np.argmax(energy > 0.95) + 1
         rank = max(rank, 3)  # Keep at least 3 components
 

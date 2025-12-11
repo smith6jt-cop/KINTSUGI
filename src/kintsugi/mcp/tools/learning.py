@@ -8,20 +8,23 @@ based on tissue type and marker name.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-logger = logging.getLogger("kintsugi.mcp.learning")
-
 # Import session state from signal_isolation
 from kintsugi.mcp.tools.signal_isolation import _loaded_images
+
+if TYPE_CHECKING:
+    from kintsugi.claude.parameter_learning import ImageCharacteristics
+
+logger = logging.getLogger("kintsugi.mcp.learning")
 
 # Global learning engine instance
 _learning_engine = None
 
 
-def _get_learning_engine(project_path: Optional[str] = None):
+def _get_learning_engine(project_path: str | None = None):
     """Get or create the learning engine."""
     global _learning_engine
 
@@ -29,6 +32,7 @@ def _get_learning_engine(project_path: Optional[str] = None):
         project_path and str(_learning_engine.project_path) != project_path
     ):
         from kintsugi.claude.parameter_learning import ParameterLearningEngine
+
         _learning_engine = ParameterLearningEngine(project_path)
 
     return _learning_engine
@@ -38,9 +42,9 @@ async def get_learned_parameters(
     tissue_type: str,
     marker_name: str,
     operation: str,
-    project_path: Optional[str] = None,
-    channel: Optional[str] = None,
-) -> Dict[str, Any]:
+    project_path: str | None = None,
+    channel: str | None = None,
+) -> dict[str, Any]:
     """
     Get recommended parameters based on learned history.
 
@@ -58,10 +62,7 @@ async def get_learned_parameters(
         Recommendation with parameters and confidence
     """
     try:
-        from kintsugi.claude.parameter_learning import (
-            ParameterLearningEngine,
-            ImageCharacteristics,
-        )
+        from kintsugi.claude.parameter_learning import ImageCharacteristics
     except ImportError as e:
         return {"error": f"Learning module not available: {e}"}
 
@@ -97,14 +98,14 @@ async def record_successful_parameters(
     tissue_type: str,
     marker_name: str,
     operation: str,
-    parameters: Dict[str, Any],
+    parameters: dict[str, Any],
     quality_before: float = 0.0,
     quality_after: float = 0.0,
     user_approved: bool = True,
     user_notes: str = "",
-    channel: Optional[str] = None,
-    project_path: Optional[str] = None,
-) -> Dict[str, Any]:
+    channel: str | None = None,
+    project_path: str | None = None,
+) -> dict[str, Any]:
     """
     Record a successful parameter set for future learning.
 
@@ -126,10 +127,7 @@ async def record_successful_parameters(
         Confirmation with record ID
     """
     try:
-        from kintsugi.claude.parameter_learning import (
-            ParameterLearningEngine,
-            ImageCharacteristics,
-        )
+        from kintsugi.claude.parameter_learning import ImageCharacteristics
     except ImportError as e:
         return {"error": f"Learning module not available: {e}"}
 
@@ -173,15 +171,15 @@ async def record_successful_parameters(
 
 
 async def get_learning_statistics(
-    project_path: Optional[str] = None,
-) -> Dict[str, Any]:
+    project_path: str | None = None,
+) -> dict[str, Any]:
     """
     Get statistics about the parameter learning database.
 
     Returns counts of records, unique tissues/markers, and operation stats.
     """
     try:
-        from kintsugi.claude.parameter_learning import ParameterLearningEngine
+        from kintsugi.claude.parameter_learning import ParameterLearningEngine  # noqa: F401
     except ImportError as e:
         return {"error": f"Learning module not available: {e}"}
 
@@ -198,9 +196,9 @@ async def suggest_with_learning(
     channel: str,
     tissue_type: str,
     marker_name: str,
-    blank_channel: Optional[str] = None,
-    project_path: Optional[str] = None,
-) -> Dict[str, Any]:
+    blank_channel: str | None = None,
+    project_path: str | None = None,
+) -> dict[str, Any]:
     """
     Suggest processing parameters combining image analysis and learned history.
 
@@ -224,10 +222,9 @@ async def suggest_with_learning(
 
     try:
         from kintsugi.claude.parameter_learning import (
-            ParameterLearningEngine,
             ImageCharacteristics,
-            normalize_tissue_type,
             normalize_marker_name,
+            normalize_tissue_type,
         )
     except ImportError as e:
         return {"error": f"Learning module not available: {e}"}
@@ -359,8 +356,8 @@ def _get_heuristic_suggestion(
     p90: float,
     dynamic_range: float,
     noise_estimate: float,
-    blank_channel: Optional[str],
-) -> Dict[str, Any]:
+    blank_channel: str | None,
+) -> dict[str, Any]:
     """Get heuristic suggestion for an operation based on image analysis."""
 
     if operation == "blank_subtraction":
@@ -457,9 +454,9 @@ def _get_heuristic_suggestion(
 
 
 def _suggest_processing_order(
-    characteristics: "ImageCharacteristics",
-    operations: Dict[str, Any],
-) -> List[str]:
+    characteristics: ImageCharacteristics,
+    operations: dict[str, Any],
+) -> list[str]:
     """Suggest optimal processing order based on image characteristics."""
     order = []
 
@@ -495,12 +492,12 @@ async def approve_and_learn(
     channel: str,
     tissue_type: str,
     marker_name: str,
-    operations_params: Dict[str, Dict[str, Any]],
+    operations_params: dict[str, dict[str, Any]],
     quality_before: float,
     quality_after: float,
     notes: str = "",
-    project_path: Optional[str] = None,
-) -> Dict[str, Any]:
+    project_path: str | None = None,
+) -> dict[str, Any]:
     """
     Approve processing results and record all parameters for learning.
 
@@ -534,10 +531,12 @@ async def approve_and_learn(
             channel=channel,
             project_path=project_path,
         )
-        results.append({
-            "operation": operation,
-            "recorded": result.get("status") == "success",
-        })
+        results.append(
+            {
+                "operation": operation,
+                "recorded": result.get("status") == "success",
+            }
+        )
 
     return {
         "status": "success",

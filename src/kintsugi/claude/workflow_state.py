@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 
 @dataclass
@@ -21,18 +21,18 @@ class ChannelState:
     channel_name: str
     cycle: str
     status: str = "pending"  # pending, processing, review, approved, rejected
-    quality_score: Optional[float] = None
-    processing_steps: List[Dict[str, Any]] = field(default_factory=list)
-    final_params: Dict[str, Any] = field(default_factory=dict)
+    quality_score: float | None = None
+    processing_steps: list[dict[str, Any]] = field(default_factory=list)
+    final_params: dict[str, Any] = field(default_factory=dict)
     review_notes: str = ""
     created: str = field(default_factory=lambda: datetime.now().isoformat())
     modified: str = field(default_factory=lambda: datetime.now().isoformat())
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ChannelState":
+    def from_dict(cls, data: dict[str, Any]) -> ChannelState:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
@@ -43,11 +43,11 @@ class WorkflowSession:
     session_id: str
     project_path: str
     created: str = field(default_factory=lambda: datetime.now().isoformat())
-    channels: Dict[str, ChannelState] = field(default_factory=dict)
-    current_channel: Optional[str] = None
+    channels: dict[str, ChannelState] = field(default_factory=dict)
+    current_channel: str | None = None
     status: str = "active"  # active, paused, completed
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
             "project_path": self.project_path,
@@ -85,7 +85,7 @@ class WorkflowState:
 
     def __init__(
         self,
-        project_path: Union[str, Path],
+        project_path: str | Path,
         use_sqlite: bool = True,
     ):
         """
@@ -103,19 +103,19 @@ class WorkflowState:
         self.db_path = self.state_dir / "workflow_audit.db" if use_sqlite else None
 
         # Load or create state
-        self._state: Dict[str, Any] = self._load_state()
+        self._state: dict[str, Any] = self._load_state()
 
         # Initialize SQLite if needed
         if use_sqlite:
             self._init_db()
 
         # Current session
-        self._session: Optional[WorkflowSession] = None
+        self._session: WorkflowSession | None = None
 
-    def _load_state(self) -> Dict[str, Any]:
+    def _load_state(self) -> dict[str, Any]:
         """Load state from JSON file."""
         if self.json_path.exists():
-            with open(self.json_path, "r") as f:
+            with open(self.json_path) as f:
                 return json.load(f)
         return {"sessions": {}, "current_session_id": None}
 
@@ -129,7 +129,8 @@ class WorkflowState:
         conn = sqlite3.connect(str(self.db_path))
         cursor = conn.cursor()
 
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -139,9 +140,11 @@ class WorkflowState:
                 details TEXT,
                 user_decision TEXT
             )
-        """)
+        """
+        )
 
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS channel_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -152,7 +155,8 @@ class WorkflowState:
                 quality_before REAL,
                 quality_after REAL
             )
-        """)
+        """
+        )
 
         conn.commit()
         conn.close()
@@ -160,9 +164,9 @@ class WorkflowState:
     def _log_audit(
         self,
         action: str,
-        channel: Optional[str] = None,
-        details: Optional[Dict] = None,
-        user_decision: Optional[str] = None,
+        channel: str | None = None,
+        details: dict | None = None,
+        user_decision: str | None = None,
     ):
         """Log an action to the audit trail."""
         if self.db_path is None:
@@ -189,7 +193,7 @@ class WorkflowState:
         conn.commit()
         conn.close()
 
-    def new_session(self, session_id: Optional[str] = None) -> WorkflowSession:
+    def new_session(self, session_id: str | None = None) -> WorkflowSession:
         """
         Create a new workflow session.
 
@@ -216,7 +220,7 @@ class WorkflowState:
 
         return session
 
-    def load_session(self, session_id: Optional[str] = None) -> Optional[WorkflowSession]:
+    def load_session(self, session_id: str | None = None) -> WorkflowSession | None:
         """
         Load an existing session.
 
@@ -280,7 +284,7 @@ class WorkflowState:
         self,
         channel_name: str,
         **kwargs,
-    ) -> Optional[ChannelState]:
+    ) -> ChannelState | None:
         """
         Update a channel's state.
 
@@ -316,9 +320,9 @@ class WorkflowState:
         self,
         channel_name: str,
         operation: str,
-        params: Dict[str, Any],
-        quality_before: Optional[float] = None,
-        quality_after: Optional[float] = None,
+        params: dict[str, Any],
+        quality_before: float | None = None,
+        quality_after: float | None = None,
     ):
         """
         Record a processing step for a channel.
@@ -398,26 +402,24 @@ class WorkflowState:
             details={"notes": notes},
         )
 
-    def get_channels_by_status(self, status: str) -> List[ChannelState]:
+    def get_channels_by_status(self, status: str) -> list[ChannelState]:
         """Get all channels with a specific status."""
         if self._session is None:
             return []
 
-        return [
-            ch for ch in self._session.channels.values() if ch.status == status
-        ]
+        return [ch for ch in self._session.channels.values() if ch.status == status]
 
-    def get_processing_queue(self) -> List[str]:
+    def get_processing_queue(self) -> list[str]:
         """Get ordered list of channels pending processing."""
         pending = self.get_channels_by_status("pending")
         return [ch.channel_name for ch in pending]
 
-    def get_review_queue(self) -> List[str]:
+    def get_review_queue(self) -> list[str]:
         """Get ordered list of channels awaiting review."""
         review = self.get_channels_by_status("review")
         return [ch.channel_name for ch in review]
 
-    def get_session_summary(self) -> Dict[str, Any]:
+    def get_session_summary(self) -> dict[str, Any]:
         """Get summary of current session."""
         if self._session is None:
             return {"error": "No active session"}
@@ -439,7 +441,7 @@ class WorkflowState:
             ],
         }
 
-    def export_parameters(self, output_path: Optional[Path] = None) -> Path:
+    def export_parameters(self, output_path: Path | None = None) -> Path:
         """
         Export all approved parameters to a JSON file.
 
@@ -449,10 +451,7 @@ class WorkflowState:
             raise ValueError("No active session")
 
         if output_path is None:
-            output_path = (
-                self.state_dir
-                / f"approved_params_{self._session.session_id}.json"
-            )
+            output_path = self.state_dir / f"approved_params_{self._session.session_id}.json"
 
         approved = self.get_channels_by_status("approved")
         params = {
