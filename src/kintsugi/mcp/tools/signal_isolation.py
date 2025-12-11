@@ -190,23 +190,215 @@ async def load_channel(
     }
 
 
+async def suggest_subtraction_parameters(
+    signal_channel: str,
+    blank_channel: str,
+    tissue_type: str = "unknown",
+    marker_name: str | None = None,
+    use_learning: bool = True,
+    project_path: str | None = None,
+) -> dict[str, Any]:
+    """
+    Analyze images and suggest optimal autofluorescence subtraction parameters.
+
+    This uses intelligent analysis of the signal and blank images combined
+    with learned parameters from previous successful runs (if available).
+
+    Parameters:
+    - signal_channel: Name of loaded signal channel
+    - blank_channel: Name of loaded blank channel
+    - tissue_type: Type of tissue (e.g., 'tonsil', 'skin', 'lymph_node')
+    - marker_name: Name of the marker (e.g., 'CD3', 'CD20')
+    - use_learning: Whether to use learned parameters from history
+    - project_path: Path to project for parameter learning
+
+    Returns:
+    - Suggested parameters with confidence scores and analysis details
+    """
+    try:
+        signal_data = _get_image(signal_channel)
+        blank_data = _get_image(blank_channel)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    # Convert to numpy for analysis
+    if hasattr(signal_data, "compute"):
+        # Sample for large images
+        if signal_data.shape[0] > 2000 or signal_data.shape[1] > 2000:
+            signal_np = signal_data[::2, ::2].compute()
+            blank_np = blank_data[::2, ::2].compute()
+        else:
+            signal_np = signal_data.compute()
+            blank_np = blank_data.compute()
+    else:
+        signal_np = np.array(signal_data)
+        blank_np = np.array(blank_data)
+
+    # Use the intelligent analysis
+    try:
+        from kintsugi.signal import analyze_for_subtraction, compute_subtraction_quality
+    except ImportError:
+        # Fallback to basic analysis
+        logger.warning("kintsugi.signal module not available, using basic analysis")
+        return _basic_parameter_suggestion(signal_np, blank_np)
+
+    # Get analysis-based suggestions
+    analysis = analyze_for_subtraction(
+        signal_np, blank_np,
+        tissue_type=tissue_type,
+        marker_name=marker_name,
+    )
+
+    # Try to get learned parameters
+    learned_params = None
+    learned_confidence = 0
+    if use_learning and project_path and marker_name:
+        try:
+            from kintsugi.mcp.tools.learning import ParameterLearningEngine
+            engine = ParameterLearningEngine(project_path)
+            recommendation = engine.recommend_parameters(
+                operation='blank_subtraction',
+                tissue_type=tissue_type,
+                marker_name=marker_name,
+            )
+            if recommendation.get('found'):
+                learned_params = recommendation.get('recommended_parameters', {})
+                learned_confidence = recommendation.get('confidence', 0)
+        except Exception as e:
+            logger.warning(f"Failed to get learned parameters: {e}")
+
+    # Combine analysis and learned parameters
+    if learned_params and learned_confidence > 0.5:
+        # Weighted merge
+        weight = learned_confidence * 0.6  # learned params get up to 60% weight
+        suggested = {
+            'blank_clip_factor': int(
+                analysis['blank_clip_factor'] * (1 - weight) +
+                learned_params.get('blank_clip_factor', analysis['blank_clip_factor']) * weight
+            ),
+            'blank_scale_factor': round(
+                analysis['blank_scale_factor'] * (1 - weight) +
+                learned_params.get('blank_scale_factor', analysis['blank_scale_factor']) * weight,
+                2
+            ),
+            'smooth_low': learned_params.get('smooth_low', analysis['smooth_low']),
+            'low_size': learned_params.get('low_size', analysis['low_size']),
+            'low_percentile': learned_params.get('low_percentile', analysis['low_percentile']),
+            'smooth_high': learned_params.get('smooth_high', analysis['smooth_high']),
+            'high_size': learned_params.get('high_size', analysis['high_size']),
+            'high_percentile': learned_params.get('high_percentile', analysis['high_percentile']),
+            'erosion': learned_params.get('erosion', analysis['erosion']),
+        }
+        source = "analysis+learned"
+    else:
+        suggested = {
+            'blank_clip_factor': analysis['blank_clip_factor'],
+            'blank_scale_factor': analysis['blank_scale_factor'],
+            'smooth_low': analysis['smooth_low'],
+            'low_size': analysis['low_size'],
+            'low_percentile': analysis['low_percentile'],
+            'smooth_high': analysis['smooth_high'],
+            'high_size': analysis['high_size'],
+            'high_percentile': analysis['high_percentile'],
+            'erosion': analysis['erosion'],
+        }
+        source = "analysis"
+
+    return {
+        "status": "success",
+        "suggested_parameters": suggested,
+        "confidence": analysis['confidence'],
+        "source": source,
+        "analysis": {
+            "signal_blank_correlation": analysis['analysis']['correlation'],
+            "autofluorescence_contribution": analysis['analysis']['af_contribution'],
+            "signal_noise_ratio": analysis['analysis']['signal_noise_ratio'],
+        },
+        "learned_parameters": {
+            "available": learned_params is not None,
+            "confidence": learned_confidence,
+        } if use_learning else None,
+        "tissue_type": tissue_type,
+        "marker_name": marker_name,
+    }
+
+
+def _basic_parameter_suggestion(signal: np.ndarray, blank: np.ndarray) -> dict:
+    """Fallback basic parameter suggestion without the signal module."""
+    # Simple correlation
+    flat_s = signal.ravel().astype(np.float64)
+    flat_b = blank.ravel().astype(np.float64)
+    mask = (flat_s > 0) | (flat_b > 0)
+    corr = np.corrcoef(flat_s[mask], flat_b[mask])[0, 1] if np.sum(mask) > 100 else 0
+
+    # Basic suggestions
+    clip = int(np.percentile(blank, 10))
+    scale = 1.0 + max(0, corr - 0.5) * 0.8
+
+    return {
+        "status": "success",
+        "suggested_parameters": {
+            "blank_clip_factor": clip,
+            "blank_scale_factor": round(scale, 2),
+            "smooth_low": False,
+            "low_size": 2,
+            "low_percentile": 60,
+            "smooth_high": False,
+            "high_size": 2,
+            "high_percentile": 90,
+            "erosion": 1 if corr > 0.6 else 0,
+        },
+        "confidence": 0.4,
+        "source": "basic_analysis",
+        "analysis": {"correlation": round(corr, 4)},
+    }
+
+
 async def subtract_blank(
     signal_channel: str,
     blank_channel: str,
-    blank_clip_factor: int = 0,
-    blank_scale_factor: float = 1.0,
-    smooth_low: bool = False,
-    low_size: int = 1,
-    low_percentile: int = 60,
-    smooth_high: bool = False,
-    high_size: int = 1,
-    high_percentile: int = 90,
-    erosion: int = 0,
+    blank_clip_factor: int | None = None,
+    blank_scale_factor: float | None = None,
+    smooth_low: bool | None = None,
+    low_size: int | None = None,
+    low_percentile: int | None = None,
+    smooth_high: bool | None = None,
+    high_size: int | None = None,
+    high_percentile: int | None = None,
+    erosion: int | None = None,
+    auto_suggest: bool = True,
+    tissue_type: str = "unknown",
+    marker_name: str | None = None,
+    project_path: str | None = None,
+    record_success: bool = True,
+    quality_threshold: float = 0.5,
 ) -> dict[str, Any]:
     """
     Subtract autofluorescence/blank channel from signal.
 
-    Uses the ini_params function from Kutils.
+    Uses the KINTSUGI autofluorescence subtraction algorithm (ini_params).
+
+    If auto_suggest=True or clip/scale factors are None, parameters will be
+    automatically suggested based on image analysis.
+
+    Parameters:
+    - signal_channel: Name of loaded signal channel
+    - blank_channel: Name of loaded blank channel
+    - blank_clip_factor: Clip blank values below this (None = auto-suggest)
+    - blank_scale_factor: Scale blank before subtraction (None = auto-suggest)
+    - smooth_low: Smooth low-intensity regions (None = auto-suggest)
+    - low_size: Filter size for low smoothing
+    - low_percentile: Percentile threshold for low regions
+    - smooth_high: Smooth high-intensity regions (None = auto-suggest)
+    - high_size: Filter size for high smoothing
+    - high_percentile: Percentile threshold for high regions
+    - erosion: Erosion radius for edge cleanup (None = auto-suggest)
+    - auto_suggest: Use intelligent parameter suggestion for None params
+    - tissue_type: Tissue type for parameter suggestion
+    - marker_name: Marker name for parameter suggestion
+    - project_path: Project path for parameter learning
+    - record_success: Record successful parameters to learning database
+    - quality_threshold: Minimum quality score to consider successful
     """
     try:
         import dask.array as da
@@ -222,6 +414,53 @@ async def subtract_blank(
         blank_data = _get_image(blank_channel)
     except ValueError as e:
         return {"error": str(e)}
+
+    # Auto-suggest parameters if needed
+    suggested_params = None
+    if auto_suggest and (blank_clip_factor is None or blank_scale_factor is None):
+        suggestion_result = await suggest_subtraction_parameters(
+            signal_channel=signal_channel,
+            blank_channel=blank_channel,
+            tissue_type=tissue_type,
+            marker_name=marker_name,
+            use_learning=True,
+            project_path=project_path,
+        )
+        if suggestion_result.get("status") == "success":
+            suggested_params = suggestion_result.get("suggested_parameters", {})
+            logger.info(f"Using suggested parameters: {suggested_params}")
+
+    # Apply suggested or default parameters
+    if suggested_params:
+        if blank_clip_factor is None:
+            blank_clip_factor = suggested_params.get("blank_clip_factor", 0)
+        if blank_scale_factor is None:
+            blank_scale_factor = suggested_params.get("blank_scale_factor", 1.0)
+        if smooth_low is None:
+            smooth_low = suggested_params.get("smooth_low", False)
+        if low_size is None:
+            low_size = suggested_params.get("low_size", 2)
+        if low_percentile is None:
+            low_percentile = suggested_params.get("low_percentile", 60)
+        if smooth_high is None:
+            smooth_high = suggested_params.get("smooth_high", False)
+        if high_size is None:
+            high_size = suggested_params.get("high_size", 2)
+        if high_percentile is None:
+            high_percentile = suggested_params.get("high_percentile", 90)
+        if erosion is None:
+            erosion = suggested_params.get("erosion", 0)
+    else:
+        # Use defaults if no suggestion available
+        blank_clip_factor = blank_clip_factor if blank_clip_factor is not None else 0
+        blank_scale_factor = blank_scale_factor if blank_scale_factor is not None else 1.0
+        smooth_low = smooth_low if smooth_low is not None else False
+        low_size = low_size if low_size is not None else 2
+        low_percentile = low_percentile if low_percentile is not None else 60
+        smooth_high = smooth_high if smooth_high is not None else False
+        high_size = high_size if high_size is not None else 2
+        high_percentile = high_percentile if high_percentile is not None else 90
+        erosion = erosion if erosion is not None else 0
 
     # Ensure compatible types
     blank_copy = da.Array.copy(blank_data)
