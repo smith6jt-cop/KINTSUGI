@@ -59,29 +59,30 @@ OPTIONAL_GROUPS = {
     "viz": {
         "description": "Napari interactive visualization",
         "packages": ["napari", "magicgui"],
-        "install_cmd": "pip install 'kintsugi[viz]'",
+        # Install packages directly to avoid PyPI 'kintsugi' name collision
+        "install_cmd": "pip install napari magicgui napari-console napari-crop napari-simpleitk-image-processing napari-skimage-regionprops",
         "conda_cmd": "conda install napari pyqt -c conda-forge",
     },
     "dl": {
         "description": "Deep learning segmentation (InstanSeg)",
         "packages": ["torch", "instanseg", "kornia"],
-        "install_cmd": "pip install 'kintsugi[dl]'",
+        "install_cmd": "pip install torch torchvision instanseg instanseg-torch kornia",
     },
     "analysis": {
         "description": "Spatial analysis (scanpy, scimap)",
         "packages": ["scanpy", "anndata", "phenograph", "scimap"],
-        "install_cmd": "pip install 'kintsugi[analysis]'",
+        "install_cmd": "pip install scanpy anndata phenograph scimap umap-learn hdbscan",
         "conda_cmd": "conda install scanpy anndata -c conda-forge && pip install scimap phenograph",
     },
     "bio": {
         "description": "Bio formats I/O (OME-TIFF, LIF, etc.)",
         "packages": ["aicsimageio", "bioio", "ome-zarr", "slideio"],
-        "install_cmd": "pip install 'kintsugi[bio]'",
+        "install_cmd": "pip install aicsimageio bioio bioio-ome-tiff ome-zarr slideio readlif",
     },
     "full": {
         "description": "All optional features",
         "packages": [],  # Composite group
-        "install_cmd": "pip install 'kintsugi[full]'",
+        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install cupy-cuda12x napari magicgui instanseg instanseg-torch kornia scanpy anndata phenograph scimap aicsimageio bioio bioio-ome-tiff ome-zarr slideio readlif",
     },
 }
 
