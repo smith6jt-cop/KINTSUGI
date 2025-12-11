@@ -23,7 +23,14 @@
       "Bash(cmd /c \"set PATH=C:\\Users\\smith6jt\\anaconda3\\envs\\KINTSUGI;C:\\Users\\smith6jt\\anaconda3\\envs\\KINTSUGI\\Scripts;%PATH% && C:\\Users\\smith6jt\\anaconda3\\envs\\KINTSUGI\\python.exe -c \"\"from kintsugi.deps import check_dependencies; check_dependencies(verbose=True)\"\"\")",
       "Bash(cmd /c \"C:\\Users\\smith6jt\\anaconda3\\envs\\KINTSUGI\\python.exe -c \"\"import sys; print(sys.executable); from kintsugi.deps import check_dependencies; check_dependencies(verbose=True)\"\" 2>&1\")",
       "Bash(python:*)",
-      "SlashCommand(/advise)"
+      "SlashCommand(/advise)",
+      "SlashCommand(/retrospective)",
+      "SlashCommand(/skills)",
+      "Bash(gh run list:*)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(source /home/smith6jt/.use_conda_maigan.sh)",
+      "Bash(ruff check:*)",
+      "Bash(black:*)"
     ],
     "deny": [],
     "ask": []

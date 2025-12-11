@@ -1,3 +1,8 @@
+---
+description: Search the Skills Registry for relevant learnings before starting new work
+allowed-tools: Glob, Grep, Read
+---
+
 # Skills Registry Advisor
 
 Search the Skills Registry for relevant learnings before starting new work.

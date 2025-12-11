@@ -1,3 +1,8 @@
+---
+description: List all skills in the Skills Registry with their descriptions and trigger conditions
+allowed-tools: Glob, Grep, Read
+---
+
 # List Skills Registry
 
 List all skills in the Skills Registry with their descriptions and trigger conditions.
