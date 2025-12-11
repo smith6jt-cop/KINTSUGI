@@ -128,6 +128,17 @@ bio = [
     "readlif>=0.6.0",
 ]
 
+# Claude Code MCP integration
+claude = [
+    "mcp>=1.0.0",
+    "httpx>=0.27.0",
+]
+
+# Advanced denoising (N2V, CARE require PyTorch)
+denoise = [
+    "torch>=2.0.0",
+]
+
 # Development and testing
 dev = [
     "pytest>=7.4.0",

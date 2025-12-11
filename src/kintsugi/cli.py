@@ -199,32 +199,155 @@ def info():
     console.print(table)
 
 
+# ============================================================================
+# MCP Server Commands for Claude Code Integration
+# ============================================================================
+
+
+@main.group()
+def mcp():
+    """Claude Code MCP server commands."""
+    pass
+
+
+@mcp.command()
+def start():
+    """
+    Start the KINTSUGI MCP server for Claude Code integration.
+
+    The MCP server exposes image processing tools that Claude can use
+    for signal isolation and quality assessment.
+
+    Configure in Claude Code settings:
+
+    \b
+    {
+        "mcpServers": {
+            "kintsugi": {
+                "command": "kintsugi",
+                "args": ["mcp", "start"]
+            }
+        }
+    }
+    """
+    try:
+        from kintsugi.mcp import run_server
+        import asyncio
+
+        console.print("[bold green]Starting KINTSUGI MCP server...[/bold green]")
+        asyncio.run(run_server())
+
+    except ImportError as e:
+        console.print(f"[red]MCP dependencies not installed: {e}[/red]")
+        console.print("Install with: [bold]pip install kintsugi[claude][/bold]")
+        raise SystemExit(1)
+
+
+@mcp.command()
+def tools():
+    """List available MCP tools."""
+    table = Table(title="KINTSUGI MCP Tools")
+    table.add_column("Tool", style="cyan")
+    table.add_column("Description", style="white")
+
+    tool_list = [
+        # Signal Isolation
+        ("load_channel", "Load a channel image from a KINTSUGI project"),
+        ("subtract_blank", "Subtract autofluorescence/blank channel from signal"),
+        ("denoise", "Apply denoising filters (percentile, uniform, median)"),
+        ("denoise_advanced", "Advanced denoising (N2V, NLM, BM3D, bilateral, adaptive)"),
+        ("apply_clahe", "Apply Contrast Limited Adaptive Histogram Equalization"),
+        ("clean_background", "Remove background and small objects"),
+        ("gaussian_subtract", "Subtract Gaussian-blurred version for background removal"),
+        # Quality Assessment
+        ("assess_quality", "Assess channel quality using DL/heuristic metrics"),
+        ("compute_snr", "Compute Signal-to-Noise Ratio"),
+        # Visualization
+        ("get_image_stats", "Get statistics for a loaded image"),
+        ("get_thumbnail", "Get a downsampled thumbnail for preview"),
+        # Workflow
+        ("list_channels", "List available channels in the project"),
+        ("save_processed", "Save processed channel to output directory"),
+        ("suggest_parameters", "Analyze channel and suggest processing parameters"),
+        ("generate_jupyter_cell", "Generate Jupyter cell for interactive tuning"),
+        # Parameter Learning
+        ("get_learned_parameters", "Get recommended params from tissue/marker history"),
+        ("record_successful_parameters", "Record approved params for future learning"),
+        ("suggest_with_learning", "Get suggestions combining analysis + learned history"),
+        ("approve_and_learn", "Approve results and record all params for learning"),
+        ("get_learning_statistics", "Get statistics about the learning database"),
+    ]
+
+    for name, desc in tool_list:
+        table.add_row(name, desc)
+
+    console.print(table)
+    console.print("\n[dim]Use 'kintsugi mcp start' to start the server[/dim]")
+    console.print("[dim]Learning tools remember successful parameters by tissue/marker[/dim]")
+
+
+@mcp.command()
+@click.argument("project_path", type=click.Path(exists=True))
+def config(project_path: str):
+    """
+    Generate Claude Code MCP configuration for a project.
+
+    PROJECT_PATH is the path to your KINTSUGI project directory.
+    """
+    import json as json_mod
+    from pathlib import Path
+
+    project_path = Path(project_path).resolve()
+
+    config_json = {
+        "mcpServers": {
+            "kintsugi": {
+                "command": "kintsugi",
+                "args": ["mcp", "start"],
+                "cwd": str(project_path),
+            }
+        }
+    }
+
+    console.print(Panel.fit(
+        json_mod.dumps(config_json, indent=2),
+        title="Claude Code MCP Configuration",
+        subtitle="Add to .claude/settings.local.json",
+    ))
+
+    console.print("\n[bold]To configure Claude Code:[/bold]")
+    console.print("1. Copy the JSON above")
+    console.print("2. Add to your project's .claude/settings.local.json")
+    console.print("3. Restart Claude Code")
+
+
+# ============================================================================
+# Project Commands
+# ============================================================================
+
+
 @main.command()
-@click.argument("group", type=click.Choice(["gpu", "viz", "dl", "analysis", "bio", "full"]))
-@click.option("--conda", is_flag=True, help="Use conda instead of pip where available")
-def install(group: str, conda: bool):
+@click.argument("project_path", type=click.Path())
+@click.option("--name", "-n", help="Project name")
+@click.option("--description", "-d", default="", help="Project description")
+def init(project_path: str, name: str | None, description: str):
     """
-    Install optional dependency groups.
+    Initialize a new KINTSUGI project.
 
-    \b
-    Available groups:
-      gpu       GPU acceleration (PyTorch + CuPy for CUDA)
-      viz       Napari interactive visualization
-      dl        Deep learning segmentation (InstanSeg)
-      analysis  Spatial analysis (scanpy, scimap)
-      bio       Bio formats I/O (OME-TIFF, LIF, etc.)
-      full      All optional features
-
-    \b
-    Examples:
-      kintsugi install gpu        # Install GPU support
-      kintsugi install viz --conda  # Install Napari via conda
-      kintsugi install full       # Install all optional features
+    Creates the project directory structure and configuration.
     """
-    from kintsugi.deps import install_optional
+    from kintsugi.project import KintsugiProject
 
-    success = install_optional(group, use_conda=conda)
-    if not success:
+    try:
+        project = KintsugiProject.create(
+            project_path,
+            name=name,
+            description=description,
+        )
+        console.print(f"\n[green]Project created successfully![/green]")
+
+    except Exception as e:
+        console.print(f"[red]Failed to create project: {e}[/red]")
         raise SystemExit(1)
 
 

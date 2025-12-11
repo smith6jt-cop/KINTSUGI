@@ -22,7 +22,8 @@
       "Bash(cmd /c \"C:\\Users\\smith6jt\\anaconda3\\Scripts\\activate.bat KINTSUGI && python -c \"\"from kintsugi.deps import check_dependencies; check_dependencies(verbose=True)\"\"\")",
       "Bash(cmd /c \"set PATH=C:\\Users\\smith6jt\\anaconda3\\envs\\KINTSUGI;C:\\Users\\smith6jt\\anaconda3\\envs\\KINTSUGI\\Scripts;%PATH% && C:\\Users\\smith6jt\\anaconda3\\envs\\KINTSUGI\\python.exe -c \"\"from kintsugi.deps import check_dependencies; check_dependencies(verbose=True)\"\"\")",
       "Bash(cmd /c \"C:\\Users\\smith6jt\\anaconda3\\envs\\KINTSUGI\\python.exe -c \"\"import sys; print(sys.executable); from kintsugi.deps import check_dependencies; check_dependencies(verbose=True)\"\" 2>&1\")",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "SlashCommand(/advise)"
     ],
     "deny": [],
     "ask": []
