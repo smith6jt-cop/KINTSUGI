@@ -116,13 +116,38 @@ from kintsugi import Kstitch
 
 Provides tile stitching functionality for large tiled images.
 
-## dl_refinement Module
+## signal Module
 
 ```python
-from kintsugi import dl_refinement
+from kintsugi.signal import (
+    subtract_autofluorescence,
+    analyze_for_subtraction,
+    AutofluorescenceSubtractor,
+)
 ```
 
-Provides deep learning-based refinement tools for image processing.
+Provides autofluorescence subtraction with intelligent parameter suggestion and learning capabilities.
+
+## qc Module
+
+```python
+from kintsugi.qc import ImageQC, CellQC, MarkerQC, BatchQC
+```
+
+Quality control and assessment tools for image processing pipelines.
+
+## denoise Module
+
+```python
+from kintsugi.denoise import (
+    adaptive_denoise,
+    denoise_median,
+    denoise_nlm,
+    denoise_bilateral,
+)
+```
+
+Advanced denoising algorithms including adaptive, NLM, bilateral, and N2V methods.
 
 ## deps Module
 

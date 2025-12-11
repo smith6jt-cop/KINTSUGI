@@ -119,11 +119,8 @@ kintsugi install full
 |----------|-------------------|
 | 1_Single_Channel_Eval | `gpu` |
 | 2_Cycle_Processing | `gpu` |
-| 3_Signal_Isolation | None (base) |
+| 3_Signal_Isolation_QC | `claude` (optional) |
 | 4_Segmentation_Analysis | `dl`, `viz`, `analysis` |
-| 5_Cluster_Analysis | `analysis` |
-| Image_Registration_Workflow | None (base) |
-| Vessel_Analysis | `viz`, `analysis` |
 
 Each notebook will check for required dependencies at startup and provide installation instructions if anything is missing.
 
@@ -308,13 +305,7 @@ InstanSeg segmentation, feature extraction, and spatial analysis.
 - [notebooks/4_Segmentation_Analysis.ipynb](notebooks/4_Segmentation_Analysis.ipynb)
 - **Requires:** `dl`, `viz`, `analysis`
 
-### 5. Vessel Analysis
-Specialized analysis for vessel structures.
-- [notebooks/Vessel_Analysis.ipynb](notebooks/Vessel_Analysis.ipynb)
-- **Requires:** `viz`, `analysis`
-
-> **Note:** The old `3_Signal_Isolation.ipynb` and `5_DL_Channel_Refinement.ipynb` are deprecated.
-> Use the new `3_Signal_Isolation_QC.ipynb` which combines both workflows.
+> **Note:** See [notebooks/MIGRATION_GUIDE.md](notebooks/MIGRATION_GUIDE.md) for migration guidance from older workflows.
 
 ### Running Notebooks
 

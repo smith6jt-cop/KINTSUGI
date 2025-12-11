@@ -11,8 +11,6 @@ The old notebooks have been replaced with a single, more powerful notebook:
 - **Old:** `3_Signal_Isolation.ipynb` + `5_DL_Channel_Refinement.ipynb`
 - **New:** `3_Signal_Isolation_QC.ipynb`
 
-The deprecated notebooks are still available as `*_DEPRECATED.ipynb` for reference.
-
 ## Overview of Changes
 
 | Old Approach | New Approach |
@@ -289,17 +287,17 @@ When using Claude Code, this happens automatically through the MCP tools.
 
 ## FAQ
 
-**Q: Can I still use the old notebooks?**
-A: Yes, but they will emit deprecation warnings. Plan to migrate before v2.0.0.
-
 **Q: What if I don't use Claude Code?**
-A: You can use the Jupyter tuners or direct Python API. The MCP server is optional.
+A: You can use the Jupyter interactive tuners (Kview2 + Kutils) or direct Python API. The MCP server is optional.
 
 **Q: Will my existing parameters work?**
 A: Yes, the parameters are similar. See the mapping tables above.
 
 **Q: How does parameter learning work?**
 A: Successful parameters are stored in a SQLite database, indexed by tissue type and marker name. Future recommendations are weighted by past success.
+
+**Q: Can I still use Kutils.py functions?**
+A: Yes, `Kutils.py` is still available in the notebooks folder and is used by the interactive tuners in `3_Signal_Isolation_QC.ipynb`.
 
 ---
 

@@ -1,7 +1,7 @@
 """
 Quality Assessment Tools for KINTSUGI MCP Server
 
-Wraps dl_refinement functionality for channel quality assessment.
+Provides channel quality assessment using the kintsugi.qc module.
 """
 
 from __future__ import annotations
@@ -56,33 +56,26 @@ async def assess_quality(
     # Calculate overall score
     heuristic_score = _calculate_heuristic_score(metrics)
 
-    # DL model assessment (optional)
-    dl_score = None
+    # QC module assessment (optional)
+    qc_score = None
     if use_dl_model:
         try:
-            from kintsugi.dl_refinement import ChannelAssessor
+            from kintsugi.qc import ImageQC
 
-            assessor = ChannelAssessor(
-                model_path=model_path,
-                tile_size=tile_size,
-                confidence_threshold=confidence_threshold,
-                use_heuristics=True,
-            )
-
-            # Get full assessment
-            result = assessor.process_image(data, channel)
-            dl_score = result.confidence_score
-            metrics["dl_confidence"] = dl_score
-            metrics["problem_regions"] = len(result.problem_regions)
+            qc = ImageQC()
+            qc_result = qc.assess(data_sample, marker=channel)
+            qc_score = qc_result.quality_score
+            metrics["qc_confidence"] = qc_score
+            metrics["issues"] = len(qc_result.issues) if qc_result.issues else 0
 
         except ImportError:
-            logger.warning("DL refinement module not available, using heuristics only")
+            logger.warning("QC module not available, using heuristics only")
         except Exception as e:
-            logger.warning(f"DL assessment failed: {e}")
+            logger.warning(f"QC assessment failed: {e}")
 
     # Combined score
-    if dl_score is not None:
-        final_score = 0.7 * dl_score + 0.3 * heuristic_score
+    if qc_score is not None:
+        final_score = 0.7 * qc_score + 0.3 * heuristic_score
     else:
         final_score = heuristic_score
 

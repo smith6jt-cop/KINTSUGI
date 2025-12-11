@@ -28,13 +28,16 @@ _SUBMODULE_MAPPING = {
     "Kreg": "kreg",
     "Kview2": "kview2",
     "Kstitch": "kstitch",
-    "dl_refinement": "dl_refinement",
     "deps": "deps",
     "edf": "edf",
     "zarr_io": "zarr_io",
     "kcorrect_gpu": "kcorrect_gpu",
     "parallel_io": "parallel_io",
     "project": "project",
+    "signal": "signal",
+    "qc": "qc",
+    "denoise": "denoise",
+    "segment": "segment",
 }
 
 
@@ -102,14 +105,20 @@ __all__ = [
     "__email__",
     "check_dependencies",
     "get_config_template",
+    # Notebook module bridges
     "Kreg",
     "Kview2",
     "Kstitch",
-    "dl_refinement",
+    # Core modules
     "deps",
     "edf",
     "zarr_io",
     "kcorrect_gpu",
     "parallel_io",
     "project",
+    # New processing modules
+    "signal",
+    "qc",
+    "denoise",
+    "segment",
 ]

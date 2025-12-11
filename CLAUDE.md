@@ -118,6 +118,7 @@ python -m build
 - `tools/learning.py` - Parameter learning with SQLite storage
 
 **Pure Python Modules** (`src/kintsugi/`):
+- `signal/` - Autofluorescence subtraction with intelligent parameter suggestion
 - `denoise/` - Denoising algorithms (median, Gaussian, bilateral, NLM, N2V, CARE, BM3D-lite)
 - `qc/` - Quality control (ImageQC, CellQC, MarkerQC, BatchQC)
 - `segment/` - Segmentation (SAM wrapper, watershed, postprocessing)
@@ -127,14 +128,14 @@ python -m build
 - `Kstitch/` - GPU-accelerated image stitching with CuPy
 - `Kview2/` - 20+ interactive visualization functions for Jupyter
 - `KDecon/` - Deconvolution utilities
-- `instanseg/` - Instance segmentation models
+- `instanseg/` - Instance segmentation models (local customized version)
+- `Kutils.py` - Signal isolation utilities (legacy, used by interactive tuners)
 
 **Processing Notebooks** (sequential workflow):
-1. `1_Single_Channel_Eval.ipynb` - Parameter tuning
-2. `2_Cycle_Processing.ipynb` - Batch processing
-3. `3_Signal_Isolation.ipynb` - Autofluorescence removal (DEPRECATED - use MCP/Claude workflow)
+1. `1_Single_Channel_Eval.ipynb` - Parameter tuning and setup
+2. `2_Cycle_Processing.ipynb` - Batch cycle processing
+3. `3_Signal_Isolation_QC.ipynb` - Signal isolation with integrated QC (Claude-guided or interactive)
 4. `4_Segmentation_Analysis.ipynb` - Segmentation & spatial analysis
-5. `5_DL_Channel_Refinement.ipynb` - ML-based quality assessment (DEPRECATED - use QC module)
 
 ## Key Patterns
 
@@ -175,6 +176,6 @@ CI runs on Windows/Linux/macOS with Python 3.10-3.12.
 - Linter: Ruff (with isort, pyupgrade, flake8-bugbear)
 - Python 3.10+ required
 
-## Migration from Notebooks 3 and 5
+## Migration Notes
 
-Notebooks 3 (Signal Isolation) and 5 (DL Channel Refinement) are deprecated. See `notebooks/MIGRATION_GUIDE.md` for transition guidance to the Claude-guided workflow or pure Python modules.
+The old Notebooks 3 (Signal Isolation) and 5 (DL Channel Refinement) have been replaced with a unified `3_Signal_Isolation_QC.ipynb` that supports both Claude-guided and interactive workflows. See `notebooks/MIGRATION_GUIDE.md` for detailed transition guidance.
