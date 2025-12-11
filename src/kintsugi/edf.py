@@ -2,16 +2,19 @@
 Extended Depth of Field (EDF) Processing Module
 
 This module provides pure Python implementations of Extended Depth of Field
-algorithms, offering an alternative to the PyImageJ/CLIJ2 implementation.
+algorithms for multiplex immunofluorescence z-stack projection.
 
 The primary algorithm is variance-based projection, matching CLIJ2's
-`extendedDepthOfFocusVarianceProjection` function.
+`extendedDepthOfFocusVarianceProjection` function behavior.
 
 Supports:
-- CPU processing via NumPy/SciPy
-- GPU acceleration via CuPy (optional)
+- GPU acceleration via CuPy (recommended, ~10x faster than CPU)
+- CPU processing via NumPy/SciPy (fallback)
 - Tiled processing for large images
 - Unified interface with automatic backend selection
+
+Note: The PyImageJ/CLIJ2 backend is deprecated and will be removed in a
+future version. Use the CuPy or NumPy backends instead.
 """
 
 import logging
@@ -40,11 +43,21 @@ def _check_cupy_available() -> bool:
 
 
 def _check_clij2_available() -> bool:
-    """Check if PyImageJ/CLIJ2 is available."""
+    """Check if PyImageJ/CLIJ2 is available.
+
+    .. deprecated::
+        CLIJ2 backend is deprecated. Use CuPy or NumPy backends instead.
+    """
     try:
         import imagej
         import scyjava
-
+        import warnings
+        warnings.warn(
+            "CLIJ2 backend is deprecated and will be removed in a future version. "
+            "Use backend='cupy' or backend='numpy' instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         return True
     except ImportError:
         return False
@@ -431,15 +444,18 @@ class EDFProcessor:
     def _detect_backend(self, requested: BackendType) -> str:
         """Detect and validate the processing backend."""
         if requested == "auto":
-            # Priority: CLIJ2 > CuPy > NumPy
-            if _check_clij2_available():
-                return "clij2"
-            elif _check_cupy_available():
+            # Priority: CuPy > NumPy (CLIJ2 deprecated)
+            if _check_cupy_available():
                 return "cupy"
             else:
                 return "numpy"
 
         elif requested == "clij2":
+            # CLIJ2 is deprecated but still supported for backwards compatibility
+            logger.warning(
+                "CLIJ2 backend is deprecated and will be removed in a future version. "
+                "Consider using backend='cupy' or backend='auto' instead."
+            )
             if not _check_clij2_available():
                 logger.warning("CLIJ2 not available, falling back to auto-detection")
                 return self._detect_backend("auto")

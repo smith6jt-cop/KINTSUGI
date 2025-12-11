@@ -70,5 +70,4 @@ The configuration file is a JSON file with the following structure:
 | Variable | Description |
 |----------|-------------|
 | `KINTSUGI_DATA_DIR` | Default data directory |
-| `JAVA_HOME` | Java installation directory |
 | `VIPS_PATH` | libvips binary directory (Windows) |

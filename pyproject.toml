@@ -80,7 +80,8 @@ gpu = [
     "cupy-cuda12x>=12.0.0",
 ]
 
-# Java/ImageJ integration
+# Java/ImageJ integration (DEPRECATED - no longer required for core functionality)
+# Kept for backwards compatibility only. Will be removed in a future version.
 java = [
     "JPype1>=1.5.0",
     "scyjava>=1.0.0",
@@ -146,8 +147,9 @@ docs = [
 ]
 
 # Full installation (all optional dependencies)
+# Note: java is excluded as it is deprecated
 full = [
-    "kintsugi[gpu,java,viz,dl,analysis,bio]",
+    "kintsugi[gpu,viz,dl,analysis,bio]",
 ]
 
 [project.scripts]

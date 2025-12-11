@@ -1,5 +1,10 @@
 # KINTSUGI Dependency Analysis Report
 
+> **⚠️ DEPRECATION NOTICE (2025):** This document is historical. Java, Maven, FIJI, and CLIJ2
+> dependencies have been removed from KINTSUGI. The project now uses pure Python implementations
+> (CuPy/NumPy) for all processing including Extended Depth of Focus (EDF). Only libvips and VALIS
+> remain as external dependencies.
+
 ## Executive Summary
 
 This document analyzes the current dependency structure of the KINTSUGI project, focusing on how external dependencies (libvips, maven, java-jdk, VALIS, Stackview) are integrated and managed. It identifies gaps in the current setup and proposes improvements for proper package management.

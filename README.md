@@ -103,10 +103,10 @@ pip install -e .
 Windows requires additional binary dependencies from Zenodo:
 - Download from: [https://zenodo.org/records/14969214](https://zenodo.org/records/14969214)
 - Extract to the KINTSUGI folder:
-  - `maven-3.9.9`
-  - `java-jdk21`
-  - `PyVips-dev-8.16`
-  - `FIJI` with Clij2 plugin
+  - `PyVips-dev-8.16` (required for image I/O)
+
+> **Note:** Java, Maven, and FIJI are no longer required. KINTSUGI now uses
+> pure Python implementations (CuPy/NumPy) for all processing including EDF.
 
 #### GPU Acceleration (Optional)
 For GPU-accelerated deconvolution, install CuPy for your CUDA version:
@@ -130,9 +130,9 @@ chmod +x scripts/install.sh
 
 #### Option B: Manual Installation
 ```bash
-# Install system dependencies
+# Install system dependencies (Java/Maven no longer required)
 sudo apt-get update
-sudo apt-get install -y libvips-dev openjdk-11-jdk maven
+sudo apt-get install -y libvips-dev
 
 # Clone and setup
 git clone https://github.com/smith6jt-cop/KINTSUGI.git
@@ -146,8 +146,8 @@ pip install -e .
 ### macOS Installation
 
 ```bash
-# Install system dependencies
-brew install vips openjdk@11 maven
+# Install system dependencies (Java/Maven no longer required)
+brew install vips
 
 # Clone and setup
 git clone https://github.com/smith6jt-cop/KINTSUGI.git
@@ -180,11 +180,11 @@ KINTSUGI relies on several external dependencies:
 | Dependency | Purpose | Installation |
 |------------|---------|--------------|
 | **libvips** | High-performance image I/O | `conda install libvips` (Linux/macOS) or Zenodo (Windows) |
-| **Java 11+** | BioFormats support | `conda install openjdk=11` or Zenodo |
-| **Maven** | Java dependency management | `conda install maven` or Zenodo |
 | **VALIS** | Image registration | `pip install valis-wsi` (included) |
-| **FIJI + Clij2** | ImageJ integration | Download from Zenodo |
-| **CuPy** | GPU acceleration for deconvolution (optional) | `pip install cupy-cuda11x` |
+| **CuPy** | GPU acceleration (optional) | `conda install cupy` or `pip install cupy-cuda12x` |
+
+> **Note:** Java, Maven, and FIJI/CLIJ2 are no longer required. KINTSUGI now uses pure Python
+> implementations (CuPy/NumPy) for all processing including Extended Depth of Focus (EDF).
 
 ## Usage
 
@@ -277,15 +277,6 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for detailed troubleshoot
 **libvips not found (Windows)**
 ```
 Download PyVips-dev from Zenodo and extract to KINTSUGI folder
-```
-
-**Java not found**
-```bash
-# Check Java installation
-java -version
-
-# If missing, install via conda
-conda install openjdk=11
 ```
 
 **Import errors**

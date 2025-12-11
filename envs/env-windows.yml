@@ -75,10 +75,11 @@ dependencies:
   - ipython
   - ipywidgets
 
-  # Java/ImageJ Integration
-  - openjdk=11
-  - maven
-  - jpype1
+  # Java/ImageJ Integration (DEPRECATED - no longer required)
+  # Uncomment if you need legacy CLIJ2 support:
+  # - openjdk=11
+  # - maven
+  # - jpype1
 
   # Machine Learning/Analysis Core
   - dask

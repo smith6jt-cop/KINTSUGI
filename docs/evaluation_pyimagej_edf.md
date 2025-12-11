@@ -1,12 +1,20 @@
 # Evaluation: PyImageJ/CLIJ2 vs Pure Python for Extended Depth of Field (EDF)
 
+> **⚠️ DEPRECATION NOTICE (2025):** This evaluation document is historical. Based on this analysis,
+> KINTSUGI has **adopted the pure Python approach** (CuPy/NumPy) as the default implementation.
+> PyImageJ/CLIJ2 has been deprecated and removed as a required dependency. See `src/kintsugi/edf.py`
+> for the current implementation.
+
 ## Executive Summary
 
 This document evaluates the current PyImageJ/CLIJ2 implementation for 3D to 2D Extended Depth of Field (EDF) conversion and assesses pure Python alternatives for both notebook testing and batch processing workflows.
 
-**Recommendation**: A **hybrid approach** is recommended:
-1. **Keep PyImageJ/CLIJ2** for production batch processing (GPU-accelerated, proven performance)
-2. **Implement a pure Python fallback** for environments without Java/GPU or for testing
+**UPDATE (2025)**: The pure Python implementation using CuPy (GPU) or NumPy (CPU) has been adopted
+as the default. PyImageJ/CLIJ2 is now deprecated and no longer required.
+
+~~**Recommendation**: A **hybrid approach** is recommended:~~
+~~1. **Keep PyImageJ/CLIJ2** for production batch processing (GPU-accelerated, proven performance)~~
+~~2. **Implement a pure Python fallback** for environments without Java/GPU or for testing~~
 
 ---
 

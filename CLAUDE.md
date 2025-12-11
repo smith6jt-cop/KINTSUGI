@@ -36,7 +36,7 @@ python -m build
 **Core Package** (`src/kintsugi/`):
 - `cli.py` - Click-based CLI with subcommands: check, register, template, info
 - `kreg.py`, `kstitch.py`, `kview2.py` - Bridge modules to notebook implementations
-- `deps.py` - Runtime dependency validation (Python packages, libvips, Java, CUDA)
+- `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA)
 - `edf.py` - Extended depth of focus processing
 - `dl_refinement.py` - Deep learning quality assessment
 
@@ -67,12 +67,12 @@ Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, py
 
 Optional groups in pyproject.toml:
 - `[gpu]` - PyTorch + CuPy for GPU acceleration
-- `[java]` - JPype + PyImageJ for BioFormats
+- `[java]` - JPype + PyImageJ for BioFormats (DEPRECATED - no longer required)
 - `[viz]` - Napari visualization
 - `[analysis]` - scanpy, scimap for spatial analysis
-- `[full]` - All optional dependencies
+- `[full]` - All optional dependencies (excludes deprecated java)
 
-**External requirements**: libvips (native library), Java 11+, Maven (for BioFormats)
+**External requirements**: libvips (native library). Java/Maven no longer required.
 
 ## Testing
 

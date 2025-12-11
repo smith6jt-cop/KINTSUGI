@@ -2,7 +2,10 @@
 Dependency validation module for KINTSUGI.
 
 Provides runtime checking of all external dependencies including
-native libraries (libvips), Java/Maven, and Python packages.
+native libraries (libvips), CUDA/GPU, and Python packages.
+
+Note: Java/Maven dependencies are deprecated and no longer required.
+The pipeline now uses pure Python implementations for all processing.
 """
 
 import os
@@ -131,10 +134,10 @@ class DependencyChecker:
             ("torch", "2.0.0", "gpu"),
             ("torchvision", "0.15.0", "gpu"),
             ("cupy", None, "gpu"),
-            # Java
-            ("jpype1", "1.5.0", "java"),
-            ("scyjava", "1.0.0", "java"),
-            ("pyimagej", "1.4.0", "java"),
+            # Java (DEPRECATED - no longer required)
+            ("jpype1", "1.5.0", "java-deprecated"),
+            ("scyjava", "1.0.0", "java-deprecated"),
+            ("pyimagej", "1.4.0", "java-deprecated"),
             # Visualization
             ("napari", "0.4.19", "viz"),
             ("magicgui", "0.7.0", "viz"),
@@ -263,24 +266,35 @@ class DependencyChecker:
             self._print_result(result)
 
     def _check_java(self, verbose: bool):
-        """Check Java runtime and Maven availability."""
+        """Check Java runtime and Maven availability.
+
+        .. deprecated::
+            Java/Maven dependencies are no longer required. KINTSUGI now uses
+            pure Python implementations (CuPy/NumPy) for all processing.
+        """
         if verbose:
-            print("\n[Java/Maven]")
+            print("\n[Java/Maven] (DEPRECATED - no longer required)")
 
         # Check Java
         java_result = self._check_java_runtime()
+        java_result.details["deprecated"] = True
+        java_result.message = "(deprecated) " + java_result.message if java_result.message else "(deprecated)"
         self.results.append(java_result)
         if verbose:
             self._print_result(java_result)
 
         # Check Maven
         maven_result = self._check_maven()
+        maven_result.details["deprecated"] = True
+        maven_result.message = "(deprecated) " + maven_result.message if maven_result.message else "(deprecated)"
         self.results.append(maven_result)
         if verbose:
             self._print_result(maven_result)
 
         # Check JPype JVM
         jpype_result = self._check_jpype()
+        jpype_result.details["deprecated"] = True
+        jpype_result.message = "(deprecated) " + jpype_result.message if jpype_result.message else "(deprecated)"
         self.results.append(jpype_result)
         if verbose:
             self._print_result(jpype_result)
