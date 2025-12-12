@@ -74,22 +74,32 @@ async def list_channels(
 
             cycle_name = cycle_dir.name
 
-            # Find image files
-            patterns = ["*.tif", "*.tiff", "*.zarr", "*.ome.tif", "*.ome.tiff"]
-            for pattern in patterns:
-                for f in cycle_dir.glob(pattern):
-                    # Extract channel name from filename
-                    channel_name = _extract_channel_name(f.stem)
+            # Find image files - single directory scan instead of multiple glob calls
+            valid_extensions = {".tif", ".tiff", ".zarr"}
+            valid_suffixes = {".ome.tif", ".ome.tiff"}
+            for f in cycle_dir.iterdir():
+                # Check if file matches our patterns
+                name_lower = f.name.lower()
+                suffix_lower = f.suffix.lower()
+                is_valid = (
+                    suffix_lower in valid_extensions
+                    or any(name_lower.endswith(s) for s in valid_suffixes)
+                )
+                if not is_valid:
+                    continue
 
-                    key = f"{cycle_name}/{channel_name}"
-                    if key not in channels:
-                        channels[key] = {
-                            "cycle": cycle_name,
-                            "channel": channel_name,
-                            "source": source_name,
-                            "path": str(f),
-                            "size_mb": f.stat().st_size / (1024 * 1024) if f.is_file() else 0,
-                        }
+                # Extract channel name from filename
+                channel_name = _extract_channel_name(f.stem)
+
+                key = f"{cycle_name}/{channel_name}"
+                if key not in channels:
+                    channels[key] = {
+                        "cycle": cycle_name,
+                        "channel": channel_name,
+                        "source": source_name,
+                        "path": str(f),
+                        "size_mb": f.stat().st_size / (1024 * 1024) if f.is_file() else 0,
+                    }
 
     # Also list currently loaded images
     loaded = list(_loaded_images.keys())

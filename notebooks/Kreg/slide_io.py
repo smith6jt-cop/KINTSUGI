@@ -3,6 +3,7 @@
 """
 
 import os
+from functools import lru_cache
 from skimage import io, transform
 import pyvips
 import numpy as np
@@ -426,6 +427,7 @@ def check_czi_jpegxr(src_f):
     return is_czi_jpgxr
 
 
+@lru_cache(maxsize=256)
 def check_to_use_openslide(src_f):
     """Determine if OpenSlide can be used to read the slide
 
@@ -509,6 +511,7 @@ def get_ome_obj(x):
     return ome_obj
 
 
+@lru_cache(maxsize=256)
 def check_is_ome(src_f):
     is_ome = re.search(".ome", src_f) is not None and re.search(".tif*", src_f) is not None
     if is_ome:
@@ -520,6 +523,7 @@ def check_is_ome(src_f):
     return is_ome
 
 
+@lru_cache(maxsize=256)
 def check_to_use_vips(src_f):
 
     f_extension = slide_tools.get_slide_extension(src_f)

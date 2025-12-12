@@ -500,8 +500,8 @@ def detect_spatial_outliers(
     outliers = np.zeros(n_cells, dtype=bool)
 
     for i in range(n_cells):
-        # Get nearest neighbors
-        neighbor_indices = np.argsort(distances[i])[1 : n_neighbors + 1]
+        # Get nearest neighbors - use argpartition for O(n) vs O(n log n) argsort
+        neighbor_indices = np.argpartition(distances[i], n_neighbors + 1)[1 : n_neighbors + 1]
 
         # Compare value to neighbors
         neighbor_values = values[neighbor_indices]

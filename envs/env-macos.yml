@@ -43,6 +43,7 @@ dependencies:
 
   # Image Processing
   - tifffile
+  - imagecodecs
   - imageio
   - pillow
   # Note: libvips should be installed via brew on macOS

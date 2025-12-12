@@ -41,6 +41,7 @@ dependencies:
 
   # Image Processing
   - tifffile
+  - imagecodecs
   - imageio
   - pillow
   - libvips

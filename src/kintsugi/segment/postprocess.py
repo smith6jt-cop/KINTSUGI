@@ -405,13 +405,10 @@ def compute_overlap(
     max_label1 = labels1.max()
     max_label2 = labels2.max()
 
-    overlap = np.zeros((max_label1 + 1, max_label2 + 1), dtype=np.int32)
+    overlap = np.zeros((max_label1 + 1, max_label2 + 1), dtype=np.int64)
 
-    for i in range(labels1.shape[0]):
-        for j in range(labels1.shape[1]):
-            l1 = labels1[i, j]
-            l2 = labels2[i, j]
-            overlap[l1, l2] += 1
+    # Vectorized: use np.add.at for O(n) instead of O(n²) nested loops
+    np.add.at(overlap, (labels1.ravel(), labels2.ravel()), 1)
 
     return overlap
 

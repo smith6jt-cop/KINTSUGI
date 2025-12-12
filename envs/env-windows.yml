@@ -44,6 +44,7 @@ dependencies:
 
   # Image Processing
   - tifffile
+  - imagecodecs
   - imageio
   - pillow
   # Note: libvips must be installed separately on Windows (see README)

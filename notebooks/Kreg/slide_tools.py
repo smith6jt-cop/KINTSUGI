@@ -4,6 +4,7 @@ Methods to work with slides, after being opened using slide_io
 """
 
 import os
+from functools import lru_cache
 import pyvips
 import numpy as np
 import colour
@@ -173,6 +174,7 @@ def get_level_idx(dims_wh, max_dim):
     return level
 
 
+@lru_cache(maxsize=256)
 def get_img_type(img_f):
     """Determine if file is a slide or an image
 
