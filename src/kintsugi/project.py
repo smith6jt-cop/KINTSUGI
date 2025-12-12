@@ -326,7 +326,7 @@ def extract_image_metadata(path: str | Path) -> ImageMetadata | None:
         shape = metadata.dimensions
         if len(shape) >= 3:
             # Assume smallest dim < 10 is channels
-            for i, dim in enumerate(shape):
+            for _i, dim in enumerate(shape):
                 if dim < 10 and dim > 1:
                     metadata.channels = dim
                     break
