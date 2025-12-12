@@ -319,7 +319,7 @@ def analyze_for_subtraction(
 
     # Analyze noise characteristics for smoothing recommendations
     signal_noise = _estimate_noise_level(signal)
-    _blank_noise = _estimate_noise_level(blank)  # Reserved for future use
+    _blank_noise = _estimate_noise_level(blank)  # noqa: F841
 
     # Recommend smoothing if noise is high
     noise_ratio = signal_noise / max(signal_stats["mean"], 1)
