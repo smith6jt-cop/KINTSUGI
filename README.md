@@ -1,8 +1,5 @@
 # KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing
 
-<p align="center">
-  <img src="/docs/CD3e.gif" alt="CD31 Autofluorescence Removal" style="float: right; margin-left: 20px;">
-
 ## Multiplex image processing for challenging datasets with a focus on user integration rather than automation.  This pipeline includes 2D/3D GPU/CPU illumination correction, stitching, deconvolution, extended depth of focus, registration, autofluorescence removal, segmentation, clustering, and spatial analysis.
 
 Citation Information:
@@ -425,3 +422,5 @@ See [License.txt](License.txt) for license information.
   year={2025}
 }
 ```
+<p align="center">
+  <img src="/docs/CD3e.gif" alt="CD31 Autofluorescence Removal" style="float: right; margin-left: 20px;">
