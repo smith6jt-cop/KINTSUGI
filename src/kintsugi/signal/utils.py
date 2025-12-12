@@ -45,7 +45,7 @@ def apply_percentile_smoothing(
     reference: np.ndarray,
     percentile: int,
     filter_size: int,
-    mode: str = 'low',
+    mode: str = "low",
 ) -> np.ndarray:
     """
     Apply smoothing to pixels below/above a percentile threshold.
@@ -70,7 +70,7 @@ def apply_percentile_smoothing(
     """
     threshold = np.percentile(reference.ravel(), percentile)
 
-    if mode == 'low':
+    if mode == "low":
         mask = reference < threshold
     else:
         mask = reference > threshold
@@ -116,7 +116,7 @@ def apply_erosion_mask(
 def estimate_autofluorescence_level(
     signal: np.ndarray,
     blank: np.ndarray,
-    method: str = 'correlation',
+    method: str = "correlation",
 ) -> tuple[float, dict]:
     """
     Estimate the level of autofluorescence in signal channel.
@@ -149,11 +149,11 @@ def estimate_autofluorescence_level(
     blank_masked = blank_flat[mask]
 
     if len(signal_masked) < 100:
-        return 0.0, {'method': method, 'error': 'insufficient_data'}
+        return 0.0, {"method": method, "error": "insufficient_data"}
 
-    details = {'method': method}
+    details = {"method": method}
 
-    if method == 'correlation':
+    if method == "correlation":
         # Pearson correlation
         mean_s, mean_b = np.mean(signal_masked), np.mean(blank_masked)
         std_s, std_b = np.std(signal_masked), np.std(blank_masked)
@@ -163,9 +163,9 @@ def estimate_autofluorescence_level(
 
         corr = np.mean((signal_masked - mean_s) * (blank_masked - mean_b)) / (std_s * std_b)
         af_level = max(0, corr)
-        details['correlation'] = float(corr)
+        details["correlation"] = float(corr)
 
-    elif method == 'ratio':
+    elif method == "ratio":
         # Ratio of blank contribution
         high_blank_mask = blank_flat[mask] > np.percentile(blank_masked, 75)
 
@@ -177,20 +177,21 @@ def estimate_autofluorescence_level(
 
         af_level = (signal_in_high_blank - signal_overall) / signal_in_high_blank
         af_level = max(0, min(1, af_level))
-        details['signal_in_high_blank'] = float(signal_in_high_blank)
-        details['signal_overall'] = float(signal_overall)
+        details["signal_in_high_blank"] = float(signal_in_high_blank)
+        details["signal_overall"] = float(signal_overall)
 
-    elif method == 'regression':
+    elif method == "regression":
         # Linear regression slope
         try:
             from scipy.stats import linregress
+
             slope, intercept, r_value, p_value, std_err = linregress(blank_masked, signal_masked)
             af_level = max(0, min(1, slope * np.mean(blank_masked) / np.mean(signal_masked)))
-            details['slope'] = float(slope)
-            details['r_squared'] = float(r_value ** 2)
+            details["slope"] = float(slope)
+            details["r_squared"] = float(r_value**2)
         except Exception:
             af_level = 0.0
-            details['error'] = 'regression_failed'
+            details["error"] = "regression_failed"
 
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -268,7 +269,7 @@ def compute_optimal_scale_factor(
     # Test a range of scale factors
     test_scales = np.arange(0.5, 2.1, 0.1)
     best_scale = 1.0
-    best_score = float('inf')
+    best_score = float("inf")
 
     signal_float = signal.astype(np.float32)
     blank_float = blank.astype(np.float32)
