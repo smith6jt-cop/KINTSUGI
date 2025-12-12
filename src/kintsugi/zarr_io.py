@@ -78,7 +78,10 @@ DEFAULT_CHUNKS = {
 }
 
 # Compression settings
-DEFAULT_COMPRESSOR = zarr.Blosc(cname="zstd", clevel=3, shuffle=zarr.Blosc.BITSHUFFLE)
+if ZARR_AVAILABLE:
+    DEFAULT_COMPRESSOR = zarr.Blosc(cname="zstd", clevel=3, shuffle=zarr.Blosc.BITSHUFFLE)
+else:
+    DEFAULT_COMPRESSOR = None
 
 
 class KintsugiZarr:

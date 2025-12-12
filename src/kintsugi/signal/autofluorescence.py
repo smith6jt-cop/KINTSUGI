@@ -19,14 +19,10 @@ over-subtraction in regions where signal > autofluorescence.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from scipy import ndimage
 from skimage import morphology
-from skimage.filters import threshold_otsu
-from skimage.measure import label, regionprops
 
 logger = logging.getLogger("kintsugi.signal.autofluorescence")
 
@@ -162,7 +158,7 @@ def subtract_autofluorescence(
 
 def subtract_autofluorescence_dask(
     signal,  # dask array
-    blank,   # dask array
+    blank,  # dask array
     blank_clip_factor: int = 0,
     blank_scale_factor: float = 1.0,
     smooth_low: bool = False,
@@ -197,6 +193,7 @@ def subtract_autofluorescence_dask(
     try:
         import dask_image.ndfilters
         import dask_image.ndmorph
+
         HAS_DASK_IMAGE = True
     except ImportError:
         HAS_DASK_IMAGE = False
@@ -244,9 +241,9 @@ def subtract_autofluorescence_dask(
 def analyze_for_subtraction(
     signal: np.ndarray,
     blank: np.ndarray,
-    tissue_type: Optional[str] = None,
-    marker_name: Optional[str] = None,
-) -> Dict:
+    tissue_type: str | None = None,
+    marker_name: str | None = None,
+) -> dict:
     """
     Analyze signal and blank images to suggest optimal subtraction parameters.
 
@@ -322,12 +319,12 @@ def analyze_for_subtraction(
 
     # Analyze noise characteristics for smoothing recommendations
     signal_noise = _estimate_noise_level(signal)
-    blank_noise = _estimate_noise_level(blank)
+    _blank_noise = _estimate_noise_level(blank)  # noqa: F841
 
     # Recommend smoothing if noise is high
-    noise_ratio = signal_noise / max(signal_stats['mean'], 1)
+    noise_ratio = signal_noise / max(signal_stats["mean"], 1)
     suggest_smooth_low = noise_ratio > 0.15
-    suggest_smooth_high = blank_stats['max'] > signal_stats['p95']
+    suggest_smooth_high = blank_stats["max"] > signal_stats["p95"]
 
     # Determine erosion based on edge characteristics
     suggest_erosion = 1 if correlation > 0.6 else 0
@@ -344,30 +341,30 @@ def analyze_for_subtraction(
         )
 
     return {
-        'blank_clip_factor': max(0, suggested_clip),
-        'blank_scale_factor': round(max(0.1, min(3.0, suggested_scale)), 2),
-        'smooth_low': suggest_smooth_low,
-        'low_size': 2 if suggest_smooth_low else 1,
-        'low_percentile': 60,
-        'smooth_high': suggest_smooth_high,
-        'high_size': 2 if suggest_smooth_high else 1,
-        'high_percentile': 90,
-        'erosion': suggest_erosion,
-        'confidence': round(confidence, 3),
-        'analysis': {
-            'signal_stats': signal_stats,
-            'blank_stats': blank_stats,
-            'correlation': round(correlation, 4),
-            'af_contribution': round(af_contribution, 4),
-            'signal_noise_ratio': round(noise_ratio, 4),
-        }
+        "blank_clip_factor": max(0, suggested_clip),
+        "blank_scale_factor": round(max(0.1, min(3.0, suggested_scale)), 2),
+        "smooth_low": suggest_smooth_low,
+        "low_size": 2 if suggest_smooth_low else 1,
+        "low_percentile": 60,
+        "smooth_high": suggest_smooth_high,
+        "high_size": 2 if suggest_smooth_high else 1,
+        "high_percentile": 90,
+        "erosion": suggest_erosion,
+        "confidence": round(confidence, 3),
+        "analysis": {
+            "signal_stats": signal_stats,
+            "blank_stats": blank_stats,
+            "correlation": round(correlation, 4),
+            "af_contribution": round(af_contribution, 4),
+            "signal_noise_ratio": round(noise_ratio, 4),
+        },
     }
 
 
 def suggest_blank_channel(
     signal: np.ndarray,
-    blank_channels: Dict[str, np.ndarray],
-) -> Tuple[str, float]:
+    blank_channels: dict[str, np.ndarray],
+) -> tuple[str, float]:
     """
     Suggest the best blank channel for a given signal channel.
 
@@ -414,7 +411,7 @@ def compute_subtraction_quality(
     original_signal: np.ndarray,
     subtracted_signal: np.ndarray,
     blank: np.ndarray,
-) -> Dict:
+) -> dict:
     """
     Compute quality metrics for a subtraction result.
 
@@ -460,18 +457,18 @@ def compute_subtraction_quality(
 
     # Overall quality score
     quality_score = (
-        0.3 * min(1, max(0, snr_improvement + 1) / 2) +  # SNR improvement
-        0.3 * af_removal +  # AF removal
-        0.2 * signal_preservation +  # Signal preservation
-        0.2 * (1 - residual_corr)  # Low residual correlation
+        0.3 * min(1, max(0, snr_improvement + 1) / 2)  # SNR improvement
+        + 0.3 * af_removal  # AF removal
+        + 0.2 * signal_preservation  # Signal preservation
+        + 0.2 * (1 - residual_corr)  # Low residual correlation
     )
 
     return {
-        'snr_improvement': round(snr_improvement, 4),
-        'af_removal': round(af_removal, 4),
-        'signal_preservation': round(signal_preservation, 4),
-        'residual_correlation': round(residual_corr, 4),
-        'quality_score': round(quality_score, 4),
+        "snr_improvement": round(snr_improvement, 4),
+        "af_removal": round(af_removal, 4),
+        "signal_preservation": round(signal_preservation, 4),
+        "residual_correlation": round(residual_corr, 4),
+        "quality_score": round(quality_score, 4),
     }
 
 
@@ -479,20 +476,21 @@ def compute_subtraction_quality(
 # Internal helper functions
 # ============================================================================
 
-def _compute_image_stats(image: np.ndarray) -> Dict:
+
+def _compute_image_stats(image: np.ndarray) -> dict:
     """Compute basic statistics for an image."""
     flat = image.ravel()
     return {
-        'min': float(np.min(flat)),
-        'max': float(np.max(flat)),
-        'mean': float(np.mean(flat)),
-        'std': float(np.std(flat)),
-        'p5': float(np.percentile(flat, 5)),
-        'p25': float(np.percentile(flat, 25)),
-        'p50': float(np.percentile(flat, 50)),
-        'p75': float(np.percentile(flat, 75)),
-        'p95': float(np.percentile(flat, 95)),
-        'nonzero_fraction': float(np.sum(flat > 0) / len(flat)),
+        "min": float(np.min(flat)),
+        "max": float(np.max(flat)),
+        "mean": float(np.mean(flat)),
+        "std": float(np.std(flat)),
+        "p5": float(np.percentile(flat, 5)),
+        "p25": float(np.percentile(flat, 25)),
+        "p50": float(np.percentile(flat, 50)),
+        "p75": float(np.percentile(flat, 75)),
+        "p95": float(np.percentile(flat, 95)),
+        "nonzero_fraction": float(np.sum(flat > 0) / len(flat)),
     }
 
 
@@ -556,10 +554,10 @@ def _estimate_noise_level(image: np.ndarray) -> float:
 def _compute_snr(image: np.ndarray) -> float:
     """Compute signal-to-noise ratio."""
     # Signal: mean of top 10% pixels
-    signal = np.mean(np.sort(image.ravel())[-int(image.size * 0.1):])
+    signal = np.mean(np.sort(image.ravel())[-int(image.size * 0.1) :])
 
     # Noise: std of bottom 50% pixels
-    noise = np.std(np.sort(image.ravel())[:int(image.size * 0.5)])
+    noise = np.std(np.sort(image.ravel())[: int(image.size * 0.5)])
 
     if noise < 1:
         return signal
@@ -567,8 +565,8 @@ def _compute_snr(image: np.ndarray) -> float:
 
 
 def _calculate_suggestion_confidence(
-    signal_stats: Dict,
-    blank_stats: Dict,
+    signal_stats: dict,
+    blank_stats: dict,
     correlation: float,
     af_contribution: float,
 ) -> float:
@@ -582,13 +580,13 @@ def _calculate_suggestion_confidence(
         confidence += 0.15
 
     # Higher confidence if good signal range
-    if signal_stats['nonzero_fraction'] > 0.1:
+    if signal_stats["nonzero_fraction"] > 0.1:
         confidence += 0.1
 
     # Lower confidence for edge cases
-    if signal_stats['max'] < 1000:
+    if signal_stats["max"] < 1000:
         confidence -= 0.1
-    if blank_stats['max'] < 500:
+    if blank_stats["max"] < 500:
         confidence -= 0.1
 
     return max(0.1, min(1.0, confidence))
@@ -599,30 +597,30 @@ def _apply_tissue_marker_adjustments(
     scale: float,
     tissue_type: str,
     marker_name: str,
-) -> Tuple[int, float]:
+) -> tuple[int, float]:
     """Apply tissue and marker-specific adjustments."""
     tissue_type = tissue_type.lower()
     marker_name = marker_name.upper()
 
     # Tissue-specific adjustments
-    if 'tonsil' in tissue_type or 'lymph' in tissue_type:
+    if "tonsil" in tissue_type or "lymph" in tissue_type:
         # Lymphoid tissue often has high autofluorescence
         scale *= 1.1
-    elif 'skin' in tissue_type:
+    elif "skin" in tissue_type:
         # Skin has collagen autofluorescence
         scale *= 1.2
-    elif 'liver' in tissue_type or 'kidney' in tissue_type:
+    elif "liver" in tissue_type or "kidney" in tissue_type:
         # These tissues have lipofuscin
         clip = int(clip * 1.2)
 
     # Marker-specific adjustments
     # Dim markers need gentler subtraction
-    dim_markers = {'FOXP3', 'CD163', 'CD11C', 'CD1C'}
+    dim_markers = {"FOXP3", "CD163", "CD11C", "CD1C"}
     if marker_name in dim_markers:
         scale *= 0.9
 
     # Bright markers can tolerate more aggressive subtraction
-    bright_markers = {'CD3E', 'CD3', 'CD20', 'DAPI', 'PANCK'}
+    bright_markers = {"CD3E", "CD3", "CD20", "DAPI", "PANCK"}
     if marker_name in bright_markers:
         scale *= 1.05
 

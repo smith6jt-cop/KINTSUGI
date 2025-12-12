@@ -326,7 +326,7 @@ def extract_image_metadata(path: str | Path) -> ImageMetadata | None:
         shape = metadata.dimensions
         if len(shape) >= 3:
             # Assume smallest dim < 10 is channels
-            for i, dim in enumerate(shape):
+            for _i, dim in enumerate(shape):
                 if dim < 10 and dim > 1:
                     metadata.channels = dim
                     break
@@ -925,7 +925,7 @@ class KintsugiProject:
             }
             with open(settings_file, "w") as f:
                 json.dump(claude_config, f, indent=2)
-            print(f"  Created .claude/settings.local.json")
+            print("  Created .claude/settings.local.json")
 
     def _create_vscode_config(self) -> None:
         """Create VS Code configuration."""
@@ -948,7 +948,7 @@ class KintsugiProject:
             }
             with open(settings_file, "w") as f:
                 json.dump(vscode_config, f, indent=2)
-            print(f"  Created .vscode/settings.json")
+            print("  Created .vscode/settings.json")
 
     # -------------------------------------------------------------------------
     # Convenience properties for common paths

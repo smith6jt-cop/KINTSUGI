@@ -43,12 +43,40 @@ _SUBMODULE_MAPPING = {
 
 # Lazy imports to avoid loading heavy dependencies at startup
 def __getattr__(name: str):
-    """Lazy loading of submodules."""
+    """Lazy loading of submodules.
+
+    If the real submodule fails to import (optional deps missing), return a
+    light proxy so attribute checks (e.g. hasattr) succeed while any actual
+    use raises an informative ImportError.
+    """
     if name in _SUBMODULE_MAPPING:
         submodule_name = _SUBMODULE_MAPPING[name]
-        mod = importlib.import_module(f"{__name__}.{submodule_name}")
-        globals()[name] = mod  # Cache the loaded module
-        return mod
+        try:
+            mod = importlib.import_module(f"{__name__}.{submodule_name}")
+            globals()[name] = mod  # Cache the loaded module
+            return mod
+        except Exception as e:
+            # Provide a proxy so the attribute exists (hasattr returns True)
+            # but using it raises a helpful error about the missing dependency.
+            class _OptionalModuleProxy:
+                def __init__(self, mod_name, err):
+                    self.__name__ = f"kintsugi.{mod_name}"
+                    self._import_error = err
+
+                def __getattr__(self, attr):
+                    raise ImportError(
+                        f"Optional submodule {submodule_name!r} could not be imported: "
+                        f"{self._import_error!s}. Install its optional dependencies to "
+                        "enable this functionality."
+                    )
+
+                def __repr__(self):
+                    return f"<kintsugi optional submodule {submodule_name!r} (failed import)>"
+
+            proxy = _OptionalModuleProxy(submodule_name, e)
+            globals()[name] = proxy
+            return proxy
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

@@ -236,7 +236,7 @@ async def suggest_subtraction_parameters(
 
     # Use the intelligent analysis
     try:
-        from kintsugi.signal import analyze_for_subtraction, compute_subtraction_quality
+        from kintsugi.signal import analyze_for_subtraction
     except ImportError:
         # Fallback to basic analysis
         logger.warning("kintsugi.signal module not available, using basic analysis")
@@ -244,7 +244,8 @@ async def suggest_subtraction_parameters(
 
     # Get analysis-based suggestions
     analysis = analyze_for_subtraction(
-        signal_np, blank_np,
+        signal_np,
+        blank_np,
         tissue_type=tissue_type,
         marker_name=marker_name,
     )
@@ -255,15 +256,16 @@ async def suggest_subtraction_parameters(
     if use_learning and project_path and marker_name:
         try:
             from kintsugi.mcp.tools.learning import ParameterLearningEngine
+
             engine = ParameterLearningEngine(project_path)
             recommendation = engine.recommend_parameters(
-                operation='blank_subtraction',
+                operation="blank_subtraction",
                 tissue_type=tissue_type,
                 marker_name=marker_name,
             )
-            if recommendation.get('found'):
-                learned_params = recommendation.get('recommended_parameters', {})
-                learned_confidence = recommendation.get('confidence', 0)
+            if recommendation.get("found"):
+                learned_params = recommendation.get("recommended_parameters", {})
+                learned_confidence = recommendation.get("confidence", 0)
         except Exception as e:
             logger.warning(f"Failed to get learned parameters: {e}")
 
@@ -272,52 +274,56 @@ async def suggest_subtraction_parameters(
         # Weighted merge
         weight = learned_confidence * 0.6  # learned params get up to 60% weight
         suggested = {
-            'blank_clip_factor': int(
-                analysis['blank_clip_factor'] * (1 - weight) +
-                learned_params.get('blank_clip_factor', analysis['blank_clip_factor']) * weight
+            "blank_clip_factor": int(
+                analysis["blank_clip_factor"] * (1 - weight)
+                + learned_params.get("blank_clip_factor", analysis["blank_clip_factor"]) * weight
             ),
-            'blank_scale_factor': round(
-                analysis['blank_scale_factor'] * (1 - weight) +
-                learned_params.get('blank_scale_factor', analysis['blank_scale_factor']) * weight,
-                2
+            "blank_scale_factor": round(
+                analysis["blank_scale_factor"] * (1 - weight)
+                + learned_params.get("blank_scale_factor", analysis["blank_scale_factor"]) * weight,
+                2,
             ),
-            'smooth_low': learned_params.get('smooth_low', analysis['smooth_low']),
-            'low_size': learned_params.get('low_size', analysis['low_size']),
-            'low_percentile': learned_params.get('low_percentile', analysis['low_percentile']),
-            'smooth_high': learned_params.get('smooth_high', analysis['smooth_high']),
-            'high_size': learned_params.get('high_size', analysis['high_size']),
-            'high_percentile': learned_params.get('high_percentile', analysis['high_percentile']),
-            'erosion': learned_params.get('erosion', analysis['erosion']),
+            "smooth_low": learned_params.get("smooth_low", analysis["smooth_low"]),
+            "low_size": learned_params.get("low_size", analysis["low_size"]),
+            "low_percentile": learned_params.get("low_percentile", analysis["low_percentile"]),
+            "smooth_high": learned_params.get("smooth_high", analysis["smooth_high"]),
+            "high_size": learned_params.get("high_size", analysis["high_size"]),
+            "high_percentile": learned_params.get("high_percentile", analysis["high_percentile"]),
+            "erosion": learned_params.get("erosion", analysis["erosion"]),
         }
         source = "analysis+learned"
     else:
         suggested = {
-            'blank_clip_factor': analysis['blank_clip_factor'],
-            'blank_scale_factor': analysis['blank_scale_factor'],
-            'smooth_low': analysis['smooth_low'],
-            'low_size': analysis['low_size'],
-            'low_percentile': analysis['low_percentile'],
-            'smooth_high': analysis['smooth_high'],
-            'high_size': analysis['high_size'],
-            'high_percentile': analysis['high_percentile'],
-            'erosion': analysis['erosion'],
+            "blank_clip_factor": analysis["blank_clip_factor"],
+            "blank_scale_factor": analysis["blank_scale_factor"],
+            "smooth_low": analysis["smooth_low"],
+            "low_size": analysis["low_size"],
+            "low_percentile": analysis["low_percentile"],
+            "smooth_high": analysis["smooth_high"],
+            "high_size": analysis["high_size"],
+            "high_percentile": analysis["high_percentile"],
+            "erosion": analysis["erosion"],
         }
         source = "analysis"
 
     return {
         "status": "success",
         "suggested_parameters": suggested,
-        "confidence": analysis['confidence'],
+        "confidence": analysis["confidence"],
         "source": source,
         "analysis": {
-            "signal_blank_correlation": analysis['analysis']['correlation'],
-            "autofluorescence_contribution": analysis['analysis']['af_contribution'],
-            "signal_noise_ratio": analysis['analysis']['signal_noise_ratio'],
+            "signal_blank_correlation": analysis["analysis"]["correlation"],
+            "autofluorescence_contribution": analysis["analysis"]["af_contribution"],
+            "signal_noise_ratio": analysis["analysis"]["signal_noise_ratio"],
         },
-        "learned_parameters": {
-            "available": learned_params is not None,
-            "confidence": learned_confidence,
-        } if use_learning else None,
+        "learned_parameters": (
+            {
+                "available": learned_params is not None,
+                "confidence": learned_confidence,
+            }
+            if use_learning
+            else None
+        ),
         "tissue_type": tissue_type,
         "marker_name": marker_name,
     }
