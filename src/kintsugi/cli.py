@@ -435,7 +435,7 @@ def config(project_path: str, print_only: bool):
 
     if settings_file.exists():
         # Check if we need to update existing config
-        with open(settings_file, "r") as f:
+        with open(settings_file) as f:
             existing = json_mod.load(f)
 
         if "mcpServers" not in existing:
@@ -478,7 +478,9 @@ def config(project_path: str, print_only: bool):
 @click.option("--name", "-n", help="Project name")
 @click.option("--description", "-d", default="", help="Project description")
 @click.option("--force", "-f", is_flag=True, help="Skip confirmation prompts")
-@click.option("--adopt-data", is_flag=True, help="Automatically organize existing data into project structure")
+@click.option(
+    "--adopt-data", is_flag=True, help="Automatically organize existing data into project structure"
+)
 def init(project_path: str, name: str | None, description: str, force: bool, adopt_data: bool):
     """
     Initialize a new KINTSUGI project.
@@ -489,7 +491,8 @@ def init(project_path: str, name: str | None, description: str, force: bool, ado
     directory, you will be prompted to review it before proceeding.
     """
     from pathlib import Path
-    from kintsugi.project import KintsugiProject, scan_existing_data, extract_image_metadata
+
+    from kintsugi.project import KintsugiProject, scan_existing_data
 
     project_path = Path(project_path).resolve()
 
@@ -599,7 +602,8 @@ def scan(directory: str, depth: int, samples: int):
     Shows image counts, dimensions, channel names, and pixel sizes.
     """
     from pathlib import Path
-    from kintsugi.project import scan_existing_data, extract_image_metadata
+
+    from kintsugi.project import scan_existing_data
 
     directory = Path(directory).resolve()
 
@@ -663,9 +667,7 @@ def scan(directory: str, depth: int, samples: int):
         if all_channels:
             console.print(f"\n[bold]Channel names found:[/bold] {', '.join(sorted(all_channels))}")
 
-    console.print(
-        f"\n[dim]To create a project here: kintsugi init {directory}[/dim]"
-    )
+    console.print(f"\n[dim]To create a project here: kintsugi init {directory}[/dim]")
 
 
 # Standalone entry points

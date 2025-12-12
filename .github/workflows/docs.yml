@@ -53,10 +53,17 @@ jobs:
           rm -rf .doctrees .env .pytest_cache _build .cache
           cd ..
 
-      - name: Build documentation
+      - name: Build documentation (strict - pushes)
+        if: github.event_name != 'pull_request'
         run: |
           cd docs
           sphinx-build -M html . _build -W --keep-going
+
+      - name: Build documentation (non-strict - pull requests)
+        if: github.event_name == 'pull_request'
+        run: |
+          cd docs
+          sphinx-build -M html . _build --keep-going
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

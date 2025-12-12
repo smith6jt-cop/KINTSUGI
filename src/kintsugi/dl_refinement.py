@@ -25,6 +25,7 @@ warnings.warn(
     stacklevel=2,
 )
 
+
 # Provide helpful error messages for old imports
 def __getattr__(name):
     """Provide helpful error messages for deprecated classes."""
@@ -46,5 +47,6 @@ def __getattr__(name):
         )
 
     raise AttributeError(f"module 'kintsugi.dl_refinement' has no attribute '{name}'")
+
 
 __all__ = []

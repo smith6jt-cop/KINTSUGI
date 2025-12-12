@@ -22,6 +22,7 @@ STAR Protocols 6, 103976 (2025).
 Quick Links
 -----------
 
+- `Documentation <https://kintsugi.readthedocs.io/>`_
 - `GitHub Repository <https://github.com/smith6jt-cop/KINTSUGI>`_
 - `Zenodo DOI <https://doi.org/10.5281/zenodo.14984518>`_
 - `Test Data <https://zenodo.org/communities/kintsugi>`_

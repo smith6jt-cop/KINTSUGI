@@ -9,11 +9,13 @@ Smith, J. A. et al. Protocol for processing and analyzing multiplexed images imp
 </p>
 
 [![CI](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/ci.yml/badge.svg)](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/ci.yml)
+[![Documentation Status](https://readthedocs.org/projects/kintsugi/badge/?version=latest)](https://kintsugi.readthedocs.io/en/latest/?badge=latest)
 
 <div>
 
 ## Table of Contents
 
+- [Documentation](#documentation)
 - [Installation](#installation)
   - [Linux](#linux)
   - [Windows](#windows)
@@ -26,6 +28,18 @@ Smith, J. A. et al. Protocol for processing and analyzing multiplexed images imp
 - [Notebooks](#notebooks)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
+
+## Documentation
+
+**Full documentation with tutorials is available at [kintsugi.readthedocs.io](https://kintsugi.readthedocs.io/)**
+
+The documentation includes:
+- [Installation Guide](https://kintsugi.readthedocs.io/en/latest/installation.html) - Detailed setup instructions for all platforms
+- [Quick Start](https://kintsugi.readthedocs.io/en/latest/quickstart.html) - Get up and running quickly
+- [Processing Workflows](https://kintsugi.readthedocs.io/en/latest/workflows.html) - Step-by-step workflow guides
+- [CLI Reference](https://kintsugi.readthedocs.io/en/latest/cli.html) - Command line interface documentation
+- [API Reference](https://kintsugi.readthedocs.io/en/latest/api.html) - Python API documentation
+- [Troubleshooting](https://kintsugi.readthedocs.io/en/latest/TROUBLESHOOTING.html) - Common issues and solutions
 
 ## Installation
 

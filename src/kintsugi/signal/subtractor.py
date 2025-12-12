@@ -9,18 +9,17 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 import numpy as np
 
 from .autofluorescence import (
-    subtract_autofluorescence,
-    subtract_autofluorescence_dask,
     analyze_for_subtraction,
     compute_subtraction_quality,
+    subtract_autofluorescence,
+    subtract_autofluorescence_dask,
 )
 
 logger = logging.getLogger("kintsugi.signal.subtractor")
@@ -45,7 +44,7 @@ class SubtractionParameters:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'SubtractionParameters':
+    def from_dict(cls, d: dict) -> SubtractionParameters:
         """Create from dictionary."""
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
@@ -56,13 +55,13 @@ class SubtractionResult:
 
     image: np.ndarray
     parameters: SubtractionParameters
-    quality_metrics: Dict = field(default_factory=dict)
-    analysis: Dict = field(default_factory=dict)
+    quality_metrics: dict = field(default_factory=dict)
+    analysis: dict = field(default_factory=dict)
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def quality_passed(self, threshold: float = 0.5) -> bool:
         """Check if quality score passes threshold."""
-        return self.quality_metrics.get('quality_score', 0) >= threshold
+        return self.quality_metrics.get("quality_score", 0) >= threshold
 
 
 class AutofluorescenceSubtractor:
@@ -103,8 +102,8 @@ class AutofluorescenceSubtractor:
 
     def __init__(
         self,
-        project_dir: Optional[Union[str, Path]] = None,
-        tissue_type: Optional[str] = None,
+        project_dir: str | Path | None = None,
+        tissue_type: str | None = None,
         auto_learn: bool = True,
         quality_threshold: float = 0.5,
     ):
@@ -122,6 +121,7 @@ class AutofluorescenceSubtractor:
         if self._learning_engine is None and self.project_dir:
             try:
                 from kintsugi.mcp.tools.learning import ParameterLearningEngine
+
                 self._learning_engine = ParameterLearningEngine(str(self.project_dir))
             except ImportError:
                 logger.warning("Parameter learning not available. Install kintsugi[claude]")
@@ -131,8 +131,8 @@ class AutofluorescenceSubtractor:
         self,
         signal: np.ndarray,
         blank: np.ndarray,
-        marker: Optional[str] = None,
-        tissue_type: Optional[str] = None,
+        marker: str | None = None,
+        tissue_type: str | None = None,
         use_learning: bool = True,
     ) -> SubtractionParameters:
         """
@@ -169,14 +169,16 @@ class AutofluorescenceSubtractor:
         if use_learning and self.learning_engine and marker:
             try:
                 recommendation = self.learning_engine.recommend_parameters(
-                    operation='blank_subtraction',
-                    tissue_type=tissue or 'unknown',
+                    operation="blank_subtraction",
+                    tissue_type=tissue or "unknown",
                     marker_name=marker,
                 )
-                if recommendation.get('found') and recommendation.get('confidence', 0) > 0.5:
-                    learned_params = recommendation.get('recommended_parameters', {})
-                    logger.info(f"Using learned parameters for {marker} "
-                              f"(confidence: {recommendation['confidence']:.2f})")
+                if recommendation.get("found") and recommendation.get("confidence", 0) > 0.5:
+                    learned_params = recommendation.get("recommended_parameters", {})
+                    logger.info(
+                        f"Using learned parameters for {marker} "
+                        f"(confidence: {recommendation['confidence']:.2f})"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to get learned parameters: {e}")
 
@@ -186,15 +188,15 @@ class AutofluorescenceSubtractor:
             params = self._merge_parameters(analysis, learned_params)
         else:
             params = SubtractionParameters(
-                blank_clip_factor=analysis['blank_clip_factor'],
-                blank_scale_factor=analysis['blank_scale_factor'],
-                smooth_low=analysis['smooth_low'],
-                low_size=analysis['low_size'],
-                low_percentile=analysis['low_percentile'],
-                smooth_high=analysis['smooth_high'],
-                high_size=analysis['high_size'],
-                high_percentile=analysis['high_percentile'],
-                erosion=analysis['erosion'],
+                blank_clip_factor=analysis["blank_clip_factor"],
+                blank_scale_factor=analysis["blank_scale_factor"],
+                smooth_low=analysis["smooth_low"],
+                low_size=analysis["low_size"],
+                low_percentile=analysis["low_percentile"],
+                smooth_high=analysis["smooth_high"],
+                high_size=analysis["high_size"],
+                high_percentile=analysis["high_percentile"],
+                erosion=analysis["erosion"],
             )
 
         return params
@@ -203,9 +205,9 @@ class AutofluorescenceSubtractor:
         self,
         signal: np.ndarray,
         blank: np.ndarray,
-        params: Optional[SubtractionParameters] = None,
-        marker: Optional[str] = None,
-        tissue_type: Optional[str] = None,
+        params: SubtractionParameters | None = None,
+        marker: str | None = None,
+        tissue_type: str | None = None,
         use_dask: bool = False,
     ) -> SubtractionResult:
         """
@@ -236,29 +238,25 @@ class AutofluorescenceSubtractor:
         # Auto-suggest parameters if not provided
         if params is None:
             # Convert dask to numpy for analysis
-            signal_np = signal.compute() if hasattr(signal, 'compute') else signal
-            blank_np = blank.compute() if hasattr(blank, 'compute') else blank
+            signal_np = signal.compute() if hasattr(signal, "compute") else signal
+            blank_np = blank.compute() if hasattr(blank, "compute") else blank
             params = self.suggest_parameters(signal_np, blank_np, marker, tissue)
 
         # Perform subtraction
-        if use_dask or hasattr(signal, 'compute'):
-            result_image = subtract_autofluorescence_dask(
-                signal, blank, **params.to_dict()
-            )
+        if use_dask or hasattr(signal, "compute"):
+            result_image = subtract_autofluorescence_dask(signal, blank, **params.to_dict())
             # Compute for quality assessment
-            if hasattr(result_image, 'compute'):
+            if hasattr(result_image, "compute"):
                 result_image_np = result_image.compute()
             else:
                 result_image_np = result_image
         else:
-            result_image = subtract_autofluorescence(
-                signal, blank, **params.to_dict()
-            )
+            result_image = subtract_autofluorescence(signal, blank, **params.to_dict())
             result_image_np = result_image
 
         # Compute quality metrics
-        signal_np = signal.compute() if hasattr(signal, 'compute') else signal
-        blank_np = blank.compute() if hasattr(blank, 'compute') else blank
+        signal_np = signal.compute() if hasattr(signal, "compute") else signal
+        blank_np = blank.compute() if hasattr(blank, "compute") else blank
 
         quality = compute_subtraction_quality(signal_np, result_image_np, blank_np)
 
@@ -268,23 +266,29 @@ class AutofluorescenceSubtractor:
             parameters=params,
             quality_metrics=quality,
             analysis={
-                'marker': marker,
-                'tissue_type': tissue,
-            }
+                "marker": marker,
+                "tissue_type": tissue,
+            },
         )
 
         # Auto-learn if quality passed
-        if (self.auto_learn and result.quality_passed(self.quality_threshold)
-                and self.learning_engine and marker):
+        if (
+            self.auto_learn
+            and result.quality_passed(self.quality_threshold)
+            and self.learning_engine
+            and marker
+        ):
             try:
                 self.learning_engine.record_parameters(
-                    operation='blank_subtraction',
-                    tissue_type=tissue or 'unknown',
+                    operation="blank_subtraction",
+                    tissue_type=tissue or "unknown",
                     marker_name=marker,
                     parameters=params.to_dict(),
-                    quality_score=quality['quality_score'],
+                    quality_score=quality["quality_score"],
                 )
-                logger.info(f"Recorded parameters for {marker} (quality: {quality['quality_score']:.3f})")
+                logger.info(
+                    f"Recorded parameters for {marker} (quality: {quality['quality_score']:.3f})"
+                )
             except Exception as e:
                 logger.warning(f"Failed to record parameters: {e}")
 
@@ -292,12 +296,12 @@ class AutofluorescenceSubtractor:
 
     def process_batch(
         self,
-        channels: Dict[str, np.ndarray],
-        blank_channels: Dict[str, np.ndarray],
-        channel_blank_mapping: Optional[Dict[str, str]] = None,
-        tissue_type: Optional[str] = None,
-        progress_callback: Optional[callable] = None,
-    ) -> Dict[str, SubtractionResult]:
+        channels: dict[str, np.ndarray],
+        blank_channels: dict[str, np.ndarray],
+        channel_blank_mapping: dict[str, str] | None = None,
+        tissue_type: str | None = None,
+        progress_callback: callable | None = None,
+    ) -> dict[str, SubtractionResult]:
         """
         Process multiple channels in batch.
 
@@ -344,12 +348,15 @@ class AutofluorescenceSubtractor:
 
             try:
                 result = self.process(
-                    signal, blank,
+                    signal,
+                    blank,
                     marker=marker,
                     tissue_type=tissue_type,
                 )
                 results[marker] = result
-                logger.info(f"Processed {marker}: quality={result.quality_metrics['quality_score']:.3f}")
+                logger.info(
+                    f"Processed {marker}: quality={result.quality_metrics['quality_score']:.3f}"
+                )
             except Exception as e:
                 logger.error(f"Failed to process {marker}: {e}")
 
@@ -360,43 +367,45 @@ class AutofluorescenceSubtractor:
 
     def _merge_parameters(
         self,
-        analysis: Dict,
-        learned: Dict,
+        analysis: dict,
+        learned: dict,
         analysis_weight: float = 0.4,
     ) -> SubtractionParameters:
         """Merge analysis-based and learned parameters."""
         # For numeric parameters, weighted average
         clip = int(
-            analysis['blank_clip_factor'] * analysis_weight +
-            learned.get('blank_clip_factor', analysis['blank_clip_factor']) * (1 - analysis_weight)
+            analysis["blank_clip_factor"] * analysis_weight
+            + learned.get("blank_clip_factor", analysis["blank_clip_factor"])
+            * (1 - analysis_weight)
         )
         scale = round(
-            analysis['blank_scale_factor'] * analysis_weight +
-            learned.get('blank_scale_factor', analysis['blank_scale_factor']) * (1 - analysis_weight),
-            2
+            analysis["blank_scale_factor"] * analysis_weight
+            + learned.get("blank_scale_factor", analysis["blank_scale_factor"])
+            * (1 - analysis_weight),
+            2,
         )
 
         # For boolean parameters, use learned if available
-        smooth_low = learned.get('smooth_low', analysis['smooth_low'])
-        smooth_high = learned.get('smooth_high', analysis['smooth_high'])
+        smooth_low = learned.get("smooth_low", analysis["smooth_low"])
+        smooth_high = learned.get("smooth_high", analysis["smooth_high"])
 
         # Other parameters from learned if available, else analysis
         return SubtractionParameters(
             blank_clip_factor=clip,
             blank_scale_factor=scale,
             smooth_low=smooth_low,
-            low_size=learned.get('low_size', analysis['low_size']),
-            low_percentile=learned.get('low_percentile', analysis['low_percentile']),
+            low_size=learned.get("low_size", analysis["low_size"]),
+            low_percentile=learned.get("low_percentile", analysis["low_percentile"]),
             smooth_high=smooth_high,
-            high_size=learned.get('high_size', analysis['high_size']),
-            high_percentile=learned.get('high_percentile', analysis['high_percentile']),
-            erosion=learned.get('erosion', analysis['erosion']),
+            high_size=learned.get("high_size", analysis["high_size"]),
+            high_percentile=learned.get("high_percentile", analysis["high_percentile"]),
+            erosion=learned.get("erosion", analysis["erosion"]),
         )
 
     def save_results(
         self,
-        results: Dict[str, SubtractionResult],
-        output_dir: Union[str, Path],
+        results: dict[str, SubtractionResult],
+        output_dir: str | Path,
         save_images: bool = True,
     ) -> None:
         """
@@ -417,42 +426,40 @@ class AutofluorescenceSubtractor:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Save summary
-        summary = {
-            'timestamp': datetime.now().isoformat(),
-            'channels': {}
-        }
+        summary = {"timestamp": datetime.now().isoformat(), "channels": {}}
 
         for marker, result in results.items():
-            summary['channels'][marker] = {
-                'parameters': result.parameters.to_dict(),
-                'quality_metrics': result.quality_metrics,
-                'quality_passed': result.quality_passed(self.quality_threshold),
+            summary["channels"][marker] = {
+                "parameters": result.parameters.to_dict(),
+                "quality_metrics": result.quality_metrics,
+                "quality_passed": result.quality_passed(self.quality_threshold),
             }
 
             if save_images:
                 img = result.image
-                if hasattr(img, 'compute'):
+                if hasattr(img, "compute"):
                     img = img.compute()
-                tifffile.imwrite(
-                    str(output_dir / f"{marker}.tif"),
-                    img.astype(np.uint16)
-                )
+                tifffile.imwrite(str(output_dir / f"{marker}.tif"), img.astype(np.uint16))
 
         # Save summary JSON
-        with open(output_dir / 'subtraction_summary.json', 'w') as f:
+        with open(output_dir / "subtraction_summary.json", "w") as f:
             json.dump(summary, f, indent=2)
 
         # Save parameters for each channel
-        params_dir = output_dir / 'parameters'
+        params_dir = output_dir / "parameters"
         params_dir.mkdir(exist_ok=True)
 
         for marker, result in results.items():
-            with open(params_dir / f"{marker}_params.json", 'w') as f:
-                json.dump({
-                    'marker': marker,
-                    'parameters': result.parameters.to_dict(),
-                    'quality_metrics': result.quality_metrics,
-                    'timestamp': result.timestamp,
-                }, f, indent=2)
+            with open(params_dir / f"{marker}_params.json", "w") as f:
+                json.dump(
+                    {
+                        "marker": marker,
+                        "parameters": result.parameters.to_dict(),
+                        "quality_metrics": result.quality_metrics,
+                        "timestamp": result.timestamp,
+                    },
+                    f,
+                    indent=2,
+                )
 
         logger.info(f"Saved {len(results)} results to {output_dir}")
