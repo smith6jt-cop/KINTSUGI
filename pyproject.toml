@@ -148,6 +148,7 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.5.0",
     "pre-commit>=3.4.0",
+    "commitizen>=3.12.0",
 ]
 
 # Documentation
@@ -285,3 +286,24 @@ exclude = [
     "superglue_models",
     "tests",
 ]
+
+# Commitizen configuration for automatic versioning
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
+version_scheme = "semver"
+version_provider = "pep621"
+update_changelog_on_bump = true
+changelog_incremental = true
+major_version_zero = true
+gpg_sign = false
+
+# Changelog configuration
+[tool.commitizen.changelog_format]
+changelog_file = "CHANGELOG.md"
+
+# Bump settings - map commit types to version bumps
+[tool.commitizen.customize]
+bump_pattern = "^(feat|fix|refactor|perf|docs|style|test|build|ci|chore|revert)(\\(.+\\))?!?:"
+bump_map = { "feat" = "MINOR", "fix" = "PATCH", "refactor" = "PATCH", "perf" = "PATCH", "docs" = "PATCH", "style" = "PATCH", "test" = "PATCH", "build" = "PATCH", "ci" = "PATCH", "chore" = "PATCH", "revert" = "PATCH" }
+change_type_order = ["BREAKING CHANGE", "feat", "fix", "refactor", "perf", "docs", "style", "test", "build", "ci", "chore", "revert"]
