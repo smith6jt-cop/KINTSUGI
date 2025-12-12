@@ -89,24 +89,18 @@ kintsugi mcp tools
 
 ### kintsugi mcp config
 
-Generate Claude Code MCP configuration for a project.
+Generate and create Claude Code MCP configuration for a project.
 
 ```bash
 kintsugi mcp config /path/to/project
 ```
 
-This outputs a JSON configuration that you can add to `.claude/settings.local.json`:
+This automatically creates `.claude/settings.local.json` with the MCP server configuration. If the file already exists, it adds the KINTSUGI server to your existing configuration.
 
-```json
-{
-    "mcpServers": {
-        "kintsugi": {
-            "command": "kintsugi",
-            "args": ["mcp", "start"],
-            "cwd": "/path/to/project"
-        }
-    }
-}
+Use `--print-only` to display the configuration without creating files:
+
+```bash
+kintsugi mcp config /path/to/project --print-only
 ```
 
 ## Configuration File Format

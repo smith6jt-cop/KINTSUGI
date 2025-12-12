@@ -224,12 +224,14 @@ KINTSUGI includes an MCP (Model Context Protocol) server that enables Claude Cod
 ```bash
 # Install Claude Code dependencies
 pip install kintsugi[claude]
-
-# Generate configuration for your project
-kintsugi mcp config /path/to/your/project
 ```
 
-Copy the output JSON to `.claude/settings.local.json` in your project directory.
+**If creating a new project:** Use `kintsugi init` - Claude Code configuration is created automatically.
+
+**If adding to an existing project:**
+```bash
+kintsugi mcp config /path/to/your/project
+```
 
 **Available Tools:**
 
