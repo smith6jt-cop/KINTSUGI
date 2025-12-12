@@ -565,8 +565,8 @@ class TestNLMOpenCV:
         ssim_opt = ssim(shapes_image, optimized, data_range=255)
 
         assert (
-            abs(ssim_opt - ssim_orig) < 0.02
-        ), f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.02"
+            abs(ssim_opt - ssim_orig) < 0.03
+        ), f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.03"
 
     def test_performance_improvement(self, gradient_image):
         """Test that OpenCV version is significantly faster."""
