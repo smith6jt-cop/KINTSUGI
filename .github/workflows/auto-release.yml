@@ -1,0 +1,314 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump_type:
+        description: 'Version bump type (leave empty for auto-detection)'
+        required: false
+        type: choice
+        options:
+          - ''
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: 'Dry run (no actual release)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  analyze:
+    name: Analyze Commits
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.analyze.outputs.should_release }}
+      bump_type: ${{ steps.analyze.outputs.bump_type }}
+      new_version: ${{ steps.analyze.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install commitizen
+        run: pip install commitizen
+
+      - name: Analyze commits
+        id: analyze
+        run: |
+          # Get the last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "Last tag: $LAST_TAG"
+
+          # Count commits since last tag
+          if [ -n "$LAST_TAG" ]; then
+            COMMIT_COUNT=$(git rev-list ${LAST_TAG}..HEAD --count)
+          else
+            COMMIT_COUNT=$(git rev-list HEAD --count)
+          fi
+          echo "Commits since last release: $COMMIT_COUNT"
+
+          if [ "$COMMIT_COUNT" -eq 0 ]; then
+            echo "No new commits since last release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Use manual bump type if specified
+          if [ -n "${{ inputs.bump_type }}" ]; then
+            BUMP_TYPE="${{ inputs.bump_type }}"
+            echo "Using manual bump type: $BUMP_TYPE"
+          else
+            # Auto-detect bump type from commits
+            if [ -n "$LAST_TAG" ]; then
+              COMMITS=$(git log ${LAST_TAG}..HEAD --oneline)
+            else
+              COMMITS=$(git log --oneline)
+            fi
+
+            # Check for breaking changes
+            if echo "$COMMITS" | grep -qE "^[a-f0-9]+\s+\w+(\(.+\))?!:" || echo "$COMMITS" | grep -qi "BREAKING CHANGE"; then
+              BUMP_TYPE="major"
+            # Check for features
+            elif echo "$COMMITS" | grep -qE "^[a-f0-9]+\s+feat(\(.+\))?:"; then
+              BUMP_TYPE="minor"
+            # Check for fixes and other changes
+            elif echo "$COMMITS" | grep -qE "^[a-f0-9]+\s+(fix|refactor|perf|docs|style|test|build|ci|chore)(\(.+\))?:"; then
+              BUMP_TYPE="patch"
+            else
+              # Non-conventional commits - default to patch
+              BUMP_TYPE="patch"
+            fi
+            echo "Auto-detected bump type: $BUMP_TYPE"
+          fi
+
+          # Calculate new version
+          CURRENT_VERSION=$(grep '^version' pyproject.toml | sed 's/.*"\(.*\)"/\1/')
+          echo "Current version: $CURRENT_VERSION"
+
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          case "$BUMP_TYPE" in
+            major)
+              NEW_VERSION="$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              NEW_VERSION="${MAJOR}.$((MINOR + 1)).0"
+              ;;
+            patch)
+              NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
+              ;;
+          esac
+          echo "New version: $NEW_VERSION"
+
+          echo "should_release=true" >> $GITHUB_OUTPUT
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+  release:
+    name: Create Release
+    needs: analyze
+    if: needs.analyze.outputs.should_release == 'true' && inputs.dry_run != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install commitizen
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version and update changelog
+        id: bump
+        run: |
+          BUMP_TYPE="${{ needs.analyze.outputs.bump_type }}"
+          NEW_VERSION="${{ needs.analyze.outputs.new_version }}"
+
+          echo "Bumping version to $NEW_VERSION ($BUMP_TYPE)"
+
+          # Update version in pyproject.toml
+          sed -i "s/^version = .*/version = \"$NEW_VERSION\"/" pyproject.toml
+
+          # Update version fallback in __init__.py
+          sed -i "s/__version__ = \".*\"  # Fallback/__version__ = \"$NEW_VERSION\"  # Fallback/" src/kintsugi/__init__.py
+
+          # Generate changelog entry
+          DATE=$(date +%Y-%m-%d)
+
+          # Get commits since last tag for changelog
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          # Create changelog entry
+          python3 << 'EOF'
+          import subprocess
+          import re
+          from datetime import date
+
+          # Get last tag
+          result = subprocess.run(["git", "describe", "--tags", "--abbrev=0"], capture_output=True, text=True)
+          last_tag = result.stdout.strip() if result.returncode == 0 else ""
+
+          # Get commits
+          if last_tag:
+              result = subprocess.run(["git", "log", f"{last_tag}..HEAD", "--pretty=format:%s"], capture_output=True, text=True)
+          else:
+              result = subprocess.run(["git", "log", "--pretty=format:%s"], capture_output=True, text=True)
+
+          commits = result.stdout.strip().split("\n") if result.stdout else []
+
+          # Categorize commits
+          categories = {
+              "Added": [],
+              "Changed": [],
+              "Deprecated": [],
+              "Removed": [],
+              "Fixed": [],
+              "Security": [],
+          }
+
+          type_to_category = {
+              "feat": "Added",
+              "fix": "Fixed",
+              "refactor": "Changed",
+              "perf": "Changed",
+              "docs": "Changed",
+              "style": "Changed",
+              "test": "Changed",
+              "build": "Changed",
+              "ci": "Changed",
+              "chore": "Changed",
+              "revert": "Changed",
+              "security": "Security",
+          }
+
+          for commit in commits:
+              if not commit:
+                  continue
+              # Parse conventional commit
+              match = re.match(r"^(\w+)(?:\(([^)]+)\))?!?:\s*(.+)$", commit)
+              if match:
+                  type_name, scope, message = match.groups()
+                  category = type_to_category.get(type_name, "Changed")
+                  entry = f"- {message}"
+                  if scope:
+                      entry = f"- **{scope}**: {message}"
+                  categories[category].append(entry)
+              else:
+                  categories["Changed"].append(f"- {commit}")
+
+          # Read current changelog
+          with open("CHANGELOG.md", "r") as f:
+              content = f.read()
+
+          # Create new entry
+          new_version = "${{ needs.analyze.outputs.new_version }}"
+          today = date.today().isoformat()
+
+          new_entry = f"\n## [{new_version}] - {today}\n"
+          for category, entries in categories.items():
+              if entries:
+                  new_entry += f"\n### {category}\n"
+                  for entry in entries:
+                      new_entry += f"{entry}\n"
+
+          # Insert after ## [Unreleased] section
+          # Find the position after [Unreleased] section content
+          unreleased_match = re.search(r"(## \[Unreleased\].*?)(?=\n## \[|$)", content, re.DOTALL)
+          if unreleased_match:
+              # Keep the [Unreleased] header, clear its content, add new version
+              new_content = content[:unreleased_match.start()]
+              new_content += "## [Unreleased]\n"
+              new_content += new_entry
+              new_content += content[unreleased_match.end():]
+          else:
+              # No [Unreleased] section, insert after header
+              header_end = content.find("\n\n", content.find("# Changelog"))
+              if header_end > 0:
+                  new_content = content[:header_end] + "\n\n## [Unreleased]\n" + new_entry + content[header_end:]
+              else:
+                  new_content = content + "\n\n## [Unreleased]\n" + new_entry
+
+          # Update links at bottom
+          link_pattern = r"\[Unreleased\]: .+"
+          new_unreleased_link = f"[Unreleased]: https://github.com/smith6jt-cop/KINTSUGI/compare/v{new_version}...HEAD"
+          new_version_link = f"[{new_version}]: https://github.com/smith6jt-cop/KINTSUGI/compare/v1.1.0...v{new_version}"
+
+          if re.search(link_pattern, new_content):
+              new_content = re.sub(link_pattern, new_unreleased_link, new_content)
+              # Add new version link
+              new_content = new_content.rstrip() + f"\n{new_version_link}\n"
+          else:
+              new_content += f"\n{new_unreleased_link}\n{new_version_link}\n"
+
+          with open("CHANGELOG.md", "w") as f:
+              f.write(new_content)
+
+          print(f"Updated CHANGELOG.md for version {new_version}")
+          EOF
+
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Commit and tag
+        run: |
+          NEW_VERSION="${{ needs.analyze.outputs.new_version }}"
+
+          git add pyproject.toml src/kintsugi/__init__.py CHANGELOG.md
+          git commit -m "chore(release): v$NEW_VERSION
+
+          - Bump version to $NEW_VERSION
+          - Update CHANGELOG.md"
+
+          git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
+
+      - name: Push changes
+        run: |
+          git push origin main
+          git push origin --tags
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.analyze.outputs.new_version }}
+          name: v${{ needs.analyze.outputs.new_version }}
+          body_path: CHANGELOG.md
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dry-run-report:
+    name: Dry Run Report
+    needs: analyze
+    if: needs.analyze.outputs.should_release == 'true' && inputs.dry_run == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: |
+          echo "=== DRY RUN REPORT ==="
+          echo "Would bump: ${{ needs.analyze.outputs.bump_type }}"
+          echo "New version would be: ${{ needs.analyze.outputs.new_version }}"
+          echo "No changes were made."
