@@ -477,7 +477,7 @@ def config(project_path: str, print_only: bool):
 @click.argument("project_path", type=click.Path())
 @click.option("--name", "-n", help="Project name")
 @click.option("--description", "-d", default="", help="Project description")
-@click.option("--force", "-f", is_flag=True, help="Skip confirmation prompts")
+@click.option("--force", "-f", is_flag=True, help="Skip confirmation prompts and directory scanning")
 @click.option(
     "--adopt-data", is_flag=True, help="Automatically organize existing data into project structure"
 )
@@ -489,17 +489,25 @@ def init(project_path: str, name: str | None, description: str, force: bool, ado
 
     SAFETY: This command will NEVER delete existing files. If data exists in the
     directory, you will be prompted to review it before proceeding.
+
+    Use --force to skip directory scanning (faster for large existing datasets).
     """
     from pathlib import Path
 
-    from kintsugi.project import KintsugiProject, scan_existing_data
+    from kintsugi.project import KintsugiProject, scan_existing_data, ExistingDataReport
 
     project_path = Path(project_path).resolve()
 
     try:
-        # Scan for existing data first
-        console.print(f"\n[bold]Scanning directory:[/bold] {project_path}")
-        report = scan_existing_data(project_path)
+        # Skip scanning if --force is used (much faster for large datasets)
+        if force:
+            console.print(f"\n[bold]Initializing project:[/bold] {project_path}")
+            console.print("[dim]Skipping directory scan (--force)[/dim]")
+            report = ExistingDataReport()  # Empty report
+        else:
+            # Scan for existing data first
+            console.print(f"\n[bold]Scanning directory:[/bold] {project_path}")
+            report = scan_existing_data(project_path)
 
         if report.has_data:
             console.print(
