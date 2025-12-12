@@ -126,8 +126,7 @@ class GPUManager:
 
                     # Skip integrated GPUs (Intel, AMD APU, etc.)
                     is_integrated = any(
-                        x in name
-                        for x in ["intel", "integrated", "amd radeon graphics", "vega"]
+                        x in name for x in ["intel", "integrated", "amd radeon graphics", "vega"]
                     )
 
                     if is_integrated:
@@ -159,7 +158,11 @@ class GPUManager:
                 for i in range(count):
                     with cupy.cuda.Device(i):
                         props = cupy.cuda.runtime.getDeviceProperties(i)
-                        name = props["name"].decode() if isinstance(props["name"], bytes) else props["name"]
+                        name = (
+                            props["name"].decode()
+                            if isinstance(props["name"], bytes)
+                            else props["name"]
+                        )
 
                         # Skip integrated
                         if any(x in name.lower() for x in ["intel", "integrated"]):

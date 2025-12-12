@@ -477,7 +477,9 @@ def config(project_path: str, print_only: bool):
 @click.argument("project_path", type=click.Path())
 @click.option("--name", "-n", help="Project name")
 @click.option("--description", "-d", default="", help="Project description")
-@click.option("--force", "-f", is_flag=True, help="Skip confirmation prompts and directory scanning")
+@click.option(
+    "--force", "-f", is_flag=True, help="Skip confirmation prompts and directory scanning"
+)
 @click.option(
     "--adopt-data", is_flag=True, help="Automatically organize existing data into project structure"
 )

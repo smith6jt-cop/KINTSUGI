@@ -81,9 +81,8 @@ async def list_channels(
                 # Check if file matches our patterns
                 name_lower = f.name.lower()
                 suffix_lower = f.suffix.lower()
-                is_valid = (
-                    suffix_lower in valid_extensions
-                    or any(name_lower.endswith(s) for s in valid_suffixes)
+                is_valid = suffix_lower in valid_extensions or any(
+                    name_lower.endswith(s) for s in valid_suffixes
                 )
                 if not is_valid:
                     continue
