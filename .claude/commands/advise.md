@@ -36,5 +36,8 @@ Search the Skills Registry for relevant learnings before starting new work.
    - Suggest creating a new skill after completing their task using `/retrospective`
 
 ## Search Paths
-- `Skills_Registry/plugins/training/*/`
+- `Skills_Registry/plugins/general/*/` - Cross-project Python skills
+- `Skills_Registry/plugins/scientific/*/` - Scientific computing patterns
+- `Skills_Registry/plugins/kintsugi/*/` - KINTSUGI-specific skills
+- `Skills_Registry/plugins/templates/*/` - Examples and templates
 - Look for `.claude-plugin/plugin.json` and `skills/*/SKILL.md`
