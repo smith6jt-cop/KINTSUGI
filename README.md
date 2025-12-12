@@ -123,9 +123,9 @@ kintsugi install bio
 kintsugi install full
 ```
 
-### Multi-GPU & RAPIDS Acceleration
+### Multi-GPU Acceleration
 
-KINTSUGI automatically detects and uses all available NVIDIA GPUs:
+KINTSUGI automatically detects and uses all available NVIDIA GPUs for image processing:
 
 ```python
 from kintsugi.gpu import get_gpu_manager
@@ -133,24 +133,25 @@ gpu = get_gpu_manager()
 print(gpu.summary())  # Shows all detected GPUs
 ```
 
-For GPU-accelerated data science with RAPIDS (cuDF, cuML):
-
-```bash
-# Install RAPIDS via conda (recommended)
-# Use cuda-version matching your driver (check with nvidia-smi)
-conda install -c rapidsai -c conda-forge -c nvidia \
-    cudf=24.10 cuml=24.10 cuda-version=12.6
-
-# Or via pip
-pip install cudf-cu12 cuml-cu12 --extra-index-url=https://pypi.nvidia.com
-```
+**GPU-Accelerated Operations:**
+- **Illumination Correction** - BaSiC algorithm with CuPy FFT
+- **Stitching** - Phase correlation on GPU
+- **Deconvolution** - Lucy-Richardson with GPU FFT
+- **Extended Depth of Focus** - Variance projection on GPU
 
 ```python
-from kintsugi.rapids import get_rapids_manager
-rapids = get_rapids_manager()
-# GPU-accelerated clustering, UMAP, nearest neighbors, etc.
-labels, centers = rapids.kmeans(data, n_clusters=10)
+# Example: GPU-accelerated illumination correction
+from kintsugi.kcorrect_gpu import KCorrectGPU
+corrector = KCorrectGPU(device_id=0)  # Specify GPU
+flatfield, darkfield = corrector.estimate(images)
+
+# Example: Multi-GPU stitching
+from notebooks.Kstitch._translation_computation import get_multi_gpu_accelerator
+accelerator = get_multi_gpu_accelerator(tile_shape)
 ```
+
+> **Note:** For GPU-accelerated single-cell analysis (clustering, UMAP, spatial analysis),
+> see the [rapids_singlecell](https://github.com/smith6jt-cop/rapids_singlecell) repository.
 
 **Feature Requirements by Notebook:**
 

@@ -163,48 +163,37 @@ from notebooks.Kstitch._translation_computation import get_multi_gpu_accelerator
 accelerator = get_multi_gpu_accelerator((1024, 1024))
 ```
 
-### RAPIDS GPU-Accelerated Data Science (Optional)
+### GPU-Accelerated Image Processing
 
-For GPU-accelerated pandas and scikit-learn operations (10-100x speedup on large datasets):
+KINTSUGI uses CuPy for GPU-accelerated image processing operations:
 
-```bash
-# Option 1: Via conda (recommended)
-# Use cuda-version matching your driver (12.4+ for newer GPUs like B200/H100)
-conda install -c rapidsai -c conda-forge -c nvidia \
-    cudf=24.10 cuml=24.10 cugraph=24.10 \
-    cuda-version=12.6
-
-# Option 2: Via pip
-pip install cudf-cu12 cuml-cu12 cugraph-cu12 \
-    --extra-index-url=https://pypi.nvidia.com
-
-# Option 3: Via kintsugi optional dependencies
-pip install -e ".[rapids]" --extra-index-url=https://pypi.nvidia.com
-```
-
-> **Note:** Check your CUDA version with `nvidia-smi`. Newer GPUs (B200, H100, etc.)
-> require CUDA 12.4+. Match the `cuda-version` to your driver capabilities.
-
-RAPIDS provides:
-- **cuDF**: GPU DataFrame (drop-in pandas replacement)
-- **cuML**: GPU machine learning (drop-in scikit-learn replacement)
-- **cuDF-pandas**: Transparent pandas acceleration
+| Operation | GPU Acceleration |
+|-----------|------------------|
+| Illumination Correction | CuPy FFT-based BaSiC algorithm |
+| Stitching | CuPy phase correlation |
+| Deconvolution | CuPy Lucy-Richardson with FFT |
+| Extended Depth of Focus | CuPy variance projection |
 
 ```python
-from kintsugi.rapids import get_rapids_manager, enable_cudf_pandas
+# Check GPU availability
+from kintsugi.gpu import get_gpu_manager
+gpu = get_gpu_manager()
+print(gpu.summary())
 
-# Check RAPIDS status
-rapids = get_rapids_manager()
-print(rapids.summary())
+# GPU-accelerated illumination correction
+from kintsugi.kcorrect_gpu import KCorrectGPU
+corrector = KCorrectGPU(device_id=0)
+flatfield, darkfield = corrector.estimate(images)
 
-# GPU-accelerated operations
-labels, centers = rapids.kmeans(data, n_clusters=10)
-embedding = rapids.umap(data, n_components=2)
-
-# Enable transparent pandas acceleration (call before importing pandas)
-enable_cudf_pandas()
-import pandas as pd  # Now GPU-accelerated!
+# Multi-GPU stitching
+from notebooks.Kstitch._translation_computation import get_multi_gpu_accelerator
+accelerator = get_multi_gpu_accelerator(tile_shape)
 ```
+
+### GPU-Accelerated Single-Cell Analysis
+
+For GPU-accelerated single-cell analysis (clustering, UMAP, spatial analysis with RAPIDS),
+see the dedicated repository: [rapids_singlecell](https://github.com/smith6jt-cop/rapids_singlecell)
 
 ## External Dependencies
 
@@ -212,9 +201,8 @@ import pandas as pd  # Now GPU-accelerated!
 |------------|---------|--------------|
 | **libvips** | High-performance image I/O | `conda install libvips` (Linux/macOS) or Zenodo (Windows) |
 | **VALIS** | Image registration | `pip install valis-wsi` (included) |
-| **CuPy** | GPU acceleration (optional) | `conda install cupy` or `pip install cupy-cuda12x` |
+| **CuPy** | GPU image processing | `conda install cupy` or `pip install cupy-cuda12x` |
 | **PyTorch** | Deep learning models (optional) | `pip install torch torchvision` |
-| **RAPIDS** | GPU data science (optional) | See RAPIDS section above |
 
 > **Note:** Java, Maven, and FIJI/CLIJ2 are no longer required. KINTSUGI now uses pure Python
 > implementations (CuPy/NumPy) for all processing including Extended Depth of Focus (EDF).
@@ -228,12 +216,6 @@ kintsugi check
 # Or via Python
 python -c "
 from kintsugi.gpu import get_gpu_manager
-from kintsugi.rapids import get_rapids_manager
-
-print('=== GPU Status ===')
 print(get_gpu_manager().summary())
-
-print('\\n=== RAPIDS Status ===')
-print(get_rapids_manager().summary())
 "
 ```
