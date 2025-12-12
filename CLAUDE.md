@@ -105,9 +105,13 @@ python -m build
 - `cli.py` - Click-based CLI with subcommands: check, register, template, info, mcp, init
 - `kreg.py`, `kstitch.py`, `kview2.py` - Bridge modules to notebook implementations
 - `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA)
-- `edf.py` - Extended depth of focus processing
-- `project.py` - Project structure management
+- `edf.py` - Extended depth of focus processing (CuPy GPU or NumPy CPU)
+- `project.py` - Project structure management (`KintsugiProject` class)
 - `deprecation.py` - Deprecation warnings and migration guidance
+- `kcorrect_gpu.py` - GPU-accelerated BaSiC illumination correction (CuPy/SciPy)
+- `zarr_io.py` - OME-Zarr format I/O with Dask lazy loading
+- `parallel_io.py` - Parallel image loading/saving utilities
+- `dl_refinement.py` - Deep learning channel refinement
 
 **MCP Server** (`src/kintsugi/mcp/`):
 - `server.py` - FastMCP server implementation
@@ -122,12 +126,13 @@ python -m build
 - `denoise/` - Denoising algorithms (median, Gaussian, bilateral, NLM, N2V, CARE, BM3D-lite)
 - `qc/` - Quality control (ImageQC, CellQC, MarkerQC, BatchQC)
 - `segment/` - Segmentation (SAM wrapper, watershed, postprocessing)
+- `claude/` - Claude Code integration (parameter_learning, param_tuner, workflow_state)
 
 **Notebook Modules** (`notebooks/`):
-- `Kreg/` - Registration system (14 modules) wrapping VALIS for rigid/non-rigid registration
+- `Kreg/` - Registration system (15 modules) wrapping VALIS for rigid/non-rigid registration
 - `Kstitch/` - GPU-accelerated image stitching with CuPy
 - `Kview2/` - 20+ interactive visualization functions for Jupyter
-- `KDecon/` - Deconvolution utilities
+- `KDecon/` - Deconvolution utilities (pure Python, replaces MATLAB)
 - `instanseg/` - Instance segmentation models (local customized version)
 - `Kutils.py` - Signal isolation utilities (legacy, used by interactive tuners)
 
@@ -135,7 +140,7 @@ python -m build
 1. `1_Single_Channel_Eval.ipynb` - Parameter tuning and setup
 2. `2_Cycle_Processing.ipynb` - Batch cycle processing
 3. `3_Signal_Isolation_QC.ipynb` - Signal isolation with integrated QC (Claude-guided or interactive)
-4. `4_Segmentation_Analysis.ipynb` - Segmentation & spatial analysis
+4. `4_Segmentation_Analysis.ipynb` - Segmentation, feature extraction, SOM clustering & spatial analysis
 
 ## Key Patterns
 
@@ -243,6 +248,50 @@ python scripts/release.py --bump minor
 ### Changelog
 
 The `CHANGELOG.md` is automatically updated during releases based on commit messages.
+
+## Notebook 4: Segmentation & Spatial Analysis
+
+Notebook 4 provides a comprehensive workflow for cell segmentation, feature extraction, and spatial analysis:
+
+### Current Capabilities
+
+**Segmentation (InstanSeg):**
+- Nuclear segmentation from DAPI
+- Combined cell + nucleus segmentation
+- ECM (extracellular matrix) region segmentation via watershed from cell boundaries
+- Matched compartment masks (cytoplasm, nuclear, ECM) with shared labels
+
+**Feature Extraction:**
+- Uses `napari-simpleitk-image-processing.label_statistics` for:
+  - Morphological features (size, perimeter, shape descriptors)
+  - Position features (centroids)
+  - Intensity statistics (mean, median, min, max, sigma, variance, sum)
+  - Moments for texture analysis
+- Separate feature DataFrames for cell, nuclear, and ECM compartments
+
+**SOM Clustering (pyFlowSOM):**
+- Self-organizing map clustering with configurable grid size
+- Learning rate scheduling (start → end)
+- Iterative refinement with visualization
+- Separate clustering for: cells, nuclei, ECM, combined features
+
+**Spatial Analysis (scanpy + scimap):**
+- AnnData integration for single-cell analysis framework
+- PCA, UMAP dimensionality reduction
+- PAGA graph-based analysis
+- Leiden community detection clustering
+- Combined SOM + Leiden consensus phenotyping
+- Spatial scatter plots with cluster overlays
+- Hierarchical clustering for merged phenotypes
+- Differential marker analysis (Wilcoxon rank-sum)
+
+### Key Dependencies
+- `instanseg` - Deep learning instance segmentation
+- `pyFlowSOM` - Self-organizing maps for clustering
+- `napari-simpleitk-image-processing` - Feature extraction
+- `scanpy` - Single-cell analysis framework
+- `scimap` - Spatial analysis toolkit
+- `napari` - Interactive visualization
 
 ## Migration Notes
 
