@@ -267,9 +267,7 @@ def denoise_nlm_opencv(
     img_min, img_max = img.min(), img.max()
     target_max = 255
     if img_max > img_min:
-        img_scaled = (
-            (img - img_min) / (img_max - img_min) * target_max
-        ).astype(np.uint8)
+        img_scaled = ((img - img_min) / (img_max - img_min) * target_max).astype(np.uint8)
     else:
         img_scaled = np.zeros_like(img, dtype=np.uint8)
 
@@ -540,9 +538,7 @@ class TestNLMOpenCV:
         ), f"PSNR diff {psnr_opt - psnr_orig:.2f} dB exceeds 1.0 dB"
         # OpenCV's uint8 implementation introduces quantization differences;
         # allow a slightly larger tolerance while keeping PSNR closely matched.
-        assert (
-            abs(ssim_opt - ssim_orig) < 0.1
-        ), f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.1"
+        assert abs(ssim_opt - ssim_orig) < 0.1, f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.1"
 
     def test_quality_gradient_sigma25(self, gradient_image):
         """Test quality on gradient image with medium noise."""
