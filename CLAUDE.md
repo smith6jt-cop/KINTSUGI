@@ -10,22 +10,31 @@ KINTSUGI (Knowledge Integration with New Technologies for Simplified User-Guided
 
 KINTSUGI includes an MCP (Model Context Protocol) server that exposes image processing tools to Claude Code. This enables Claude to act as an AI image processing assistant.
 
-### Starting the MCP Server
+### Creating a Project
+
+Use `kintsugi init` to create a new project with the standard directory structure:
 
 ```bash
-# Start the MCP server
-kintsugi mcp start
-
-# List available tools
-kintsugi mcp tools
-
-# Generate Claude Code configuration
-kintsugi mcp config /path/to/project
+kintsugi init /path/to/my_project --name "My Experiment"
 ```
 
-### Configuring Claude Code
+This creates:
+```
+my_project/
+├── data/
+│   ├── raw/           ← Put your raw images here (cyc001/, cyc002/, etc.)
+│   └── processed/     ← Outputs go here automatically
+├── notebooks/         ← Working copies of processing notebooks
+├── configs/           ← Processing configuration files
+├── .claude/           ← Claude Code MCP config (auto-generated)
+└── .vscode/           ← VS Code settings (auto-generated)
+```
 
-Add to `.claude/settings.local.json`:
+The `.claude/settings.local.json` file is **automatically created** with the MCP server configuration.
+
+### Manual Claude Code Configuration
+
+If you're not using `kintsugi init`, or need to add MCP support to an existing project, create `.claude/settings.local.json` manually:
 
 ```json
 {
@@ -37,6 +46,21 @@ Add to `.claude/settings.local.json`:
         }
     }
 }
+```
+
+You can also generate this configuration with:
+```bash
+kintsugi mcp config /path/to/project
+```
+
+### MCP Server Commands
+
+```bash
+# Start the MCP server (usually called by Claude Code automatically)
+kintsugi mcp start
+
+# List available tools
+kintsugi mcp tools
 ```
 
 ### Available MCP Tools

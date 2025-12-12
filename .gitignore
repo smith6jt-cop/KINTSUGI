@@ -146,7 +146,13 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+# Claude Code local settings (project commands in .claude/commands/ should be tracked)
 .claude/settings.local.json
+
+# VS Code local settings (extensions.json can be tracked for recommendations)
+.vscode/settings.json
+
+# Skills Registry submodule
 Skills_Registry/
 
 # Spyder project settings
