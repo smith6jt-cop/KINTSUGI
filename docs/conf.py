@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath("../src"))
 project = "KINTSUGI"
 copyright = "2025, Smith JT"
 author = "Smith JT"
-release = "1.1.0"
+release = "1.2.1"
 
 # -- General configuration ---------------------------------------------------
 extensions = [
