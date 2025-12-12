@@ -200,6 +200,74 @@ CI runs on Windows/Linux/macOS with Python 3.10-3.12.
 - Linter: Ruff (with isort, pyupgrade, flake8-bugbear)
 - Python 3.10+ required
 
+## Release and Versioning
+
+This project uses **Conventional Commits** and **automatic semantic versioning**.
+
+### Commit Message Format
+
+All commits should follow the [Conventional Commits](https://www.conventionalcommits.org/) format:
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+**Types:**
+- `feat`: New feature (bumps MINOR version)
+- `fix`: Bug fix (bumps PATCH version)
+- `docs`: Documentation changes
+- `style`: Code style changes (formatting, etc.)
+- `refactor`: Code refactoring
+- `perf`: Performance improvements
+- `test`: Adding/updating tests
+- `build`: Build system changes
+- `ci`: CI/CD changes
+- `chore`: Maintenance tasks
+
+**Breaking Changes:** Add `!` after type or include `BREAKING CHANGE:` in footer (bumps MAJOR version).
+
+### Examples
+
+```bash
+feat(mcp): add new image processing tool
+fix(segmentation): resolve edge detection issue
+docs: update installation instructions
+refactor(signal)!: change API for background subtraction
+```
+
+### Pre-commit Hooks
+
+Install hooks for automatic commit validation:
+
+```bash
+pre-commit install
+pre-commit install --hook-type commit-msg
+```
+
+### Creating Releases
+
+Releases are automated via GitHub Actions:
+
+1. **Automatic releases**: Push to `main` triggers version analysis and release creation
+2. **Manual releases**: Use workflow dispatch in GitHub Actions
+3. **Local release script**: `python scripts/release.py --auto`
+
+```bash
+# Preview release (dry run)
+python scripts/release.py --dry-run --auto
+
+# Manual bump
+python scripts/release.py --bump minor
+```
+
+### Changelog
+
+The `CHANGELOG.md` is automatically updated during releases based on commit messages.
+
 ## Migration Notes
 
 The old Notebooks 3 (Signal Isolation) and 5 (DL Channel Refinement) have been replaced with a unified `3_Signal_Isolation_QC.ipynb` that supports both Claude-guided and interactive workflows. See `notebooks/MIGRATION_GUIDE.md` for detailed transition guidance.
