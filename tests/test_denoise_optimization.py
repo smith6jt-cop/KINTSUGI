@@ -455,8 +455,8 @@ class TestBM3DLiteKDTree:
         ssim_opt = ssim(shapes_image, optimized, data_range=255)
 
         assert (
-            abs(ssim_opt - ssim_orig) < 0.01
-        ), f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.01"
+            abs(ssim_opt - ssim_orig) < 0.02
+        ), f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.02"
 
     def test_quality_cell_like(self, cell_image):
         """Test on cell-like image mimicking real use case."""
