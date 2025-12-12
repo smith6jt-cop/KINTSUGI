@@ -31,7 +31,7 @@ import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 # Project configuration filename
 PROJECT_CONFIG_FILE = "kintsugi_project.json"
@@ -1036,6 +1036,29 @@ class KintsugiProject:
                 return self.paths.raw / cyc["path"]
         raise KeyError(f"Cycle not found: {name}")
 
+    def refresh_from_disk(self, update_cycles: bool = True) -> None:
+        """Refresh project configuration to match on-disk state."""
+
+        if update_cycles:
+            disk_cycles = find_raw_cycles(self.paths.raw)
+            existing_cycles = {c["name"]: c for c in self.config.cycles}
+            refreshed_cycles = []
+
+            for cycle_path in disk_cycles:
+                existing = existing_cycles.get(cycle_path.name, {})
+                refreshed_cycles.append(
+                    {
+                        "name": cycle_path.name,
+                        "path": cycle_path.name,
+                        "channels": existing.get("channels", []),
+                        "metadata": existing.get("metadata", {}),
+                    }
+                )
+
+            if refreshed_cycles != self.config.cycles:
+                self.config.cycles = refreshed_cycles
+                self.save()
+
     # -------------------------------------------------------------------------
     # Utility methods
     # -------------------------------------------------------------------------
@@ -1108,6 +1131,8 @@ def init_project(
     project_dir: str | Path,
     name: str | None = None,
     description: str = "",
+    mode: Literal["auto", "create", "load"] = "auto",
+    refresh: bool = True,
 ) -> KintsugiProject:
     """
     Initialize or load a KINTSUGI project.
@@ -1126,6 +1151,12 @@ def init_project(
         Project name (for new projects)
     description : str
         Project description (for new projects)
+    mode : {"auto", "create", "load"}
+        Choose whether to automatically create or load (default), force creation
+        of a new project, or require loading an existing project.
+    refresh : bool
+        If True, synchronize the loaded project with the on-disk folder state
+        (e.g., renamed cycle folders) before returning.
 
     Returns
     -------
@@ -1144,7 +1175,18 @@ def init_project(
     project_dir = Path(project_dir).resolve()
     config_file = project_dir / PROJECT_CONFIG_FILE
 
-    if config_file.exists():
+    if mode not in {"auto", "create", "load"}:
+        raise ValueError("mode must be one of 'auto', 'create', or 'load'")
+
+    if mode == "load":
+        project = KintsugiProject.load(project_dir)
+    elif mode == "create":
+        project = KintsugiProject.create(
+            project_dir,
+            name=name,
+            description=description,
+        )
+    elif config_file.exists():
         project = KintsugiProject.load(project_dir)
     else:
         project = KintsugiProject.create(
@@ -1155,6 +1197,9 @@ def init_project(
 
     # Setup CUDA for GPU acceleration
     project.setup_cuda_path()
+
+    if refresh:
+        project.refresh_from_disk()
 
     return project
 
