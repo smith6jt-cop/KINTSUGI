@@ -18,7 +18,7 @@ from importlib.metadata import PackageNotFoundError, version
 try:
     __version__ = version("kintsugi")
 except PackageNotFoundError:
-    __version__ = "1.1.0"  # Fallback for development
+    __version__ = "1.2.0"  # Fallback for development
 
 __author__ = "Smith JT"
 __email__ = "smith6jt@cop.ufl.edu"
