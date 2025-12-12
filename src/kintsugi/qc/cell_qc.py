@@ -12,12 +12,30 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Union
 
 import numpy as np
-from scipy.spatial.distance import cdist
+
+# Try RAPIDS for GPU-accelerated distance computation
+try:
+    from kintsugi.rapids import get_rapids_manager
+
+    _HAS_RAPIDS = True
+except ImportError:
+    _HAS_RAPIDS = False
+
+# CPU fallback
+from scipy.spatial.distance import cdist as scipy_cdist
 
 if TYPE_CHECKING:
     import pandas as pd
 
 logger = logging.getLogger("kintsugi.qc.cell_qc")
+
+
+def _pairwise_distances(X: np.ndarray, Y: np.ndarray | None = None) -> np.ndarray:
+    """Compute pairwise distances using RAPIDS if available, else scipy."""
+    if _HAS_RAPIDS:
+        rapids = get_rapids_manager()
+        return rapids.pairwise_distances(X, Y)
+    return scipy_cdist(X, Y if Y is not None else X)
 
 # Type alias
 ArrayLike = Union[np.ndarray, "pd.DataFrame"]
@@ -473,6 +491,7 @@ def detect_spatial_outliers(
     Detect cells with values that differ significantly from their neighbors.
 
     Useful for detecting technical artifacts that affect isolated cells.
+    Uses RAPIDS cuML for GPU acceleration when available.
 
     Parameters
     ----------
@@ -494,8 +513,34 @@ def detect_spatial_outliers(
     if n_cells < n_neighbors + 1:
         return np.zeros(n_cells, dtype=bool)
 
-    # Compute pairwise distances
-    distances = cdist(coordinates, coordinates)
+    # Try to use RAPIDS nearest neighbors (much faster for large datasets)
+    if _HAS_RAPIDS:
+        rapids = get_rapids_manager()
+        if rapids.cuml_available and rapids.should_use_gpu(coordinates):
+            try:
+                # Use cuML NearestNeighbors - much faster than computing full distance matrix
+                distances, indices = rapids.nearest_neighbors(
+                    coordinates, n_neighbors=n_neighbors + 1
+                )
+                # Remove self (first column)
+                neighbor_indices_all = indices[:, 1:]
+
+                outliers = np.zeros(n_cells, dtype=bool)
+                for i in range(n_cells):
+                    neighbor_values = values[neighbor_indices_all[i]]
+                    neighbor_median = np.median(neighbor_values)
+                    neighbor_mad = np.median(np.abs(neighbor_values - neighbor_median)) * 1.4826
+
+                    if neighbor_mad > 1e-8:
+                        z = np.abs(values[i] - neighbor_median) / neighbor_mad
+                        outliers[i] = z > threshold
+
+                return outliers
+            except Exception as e:
+                logger.debug(f"RAPIDS spatial outliers failed, using CPU: {e}")
+
+    # CPU fallback - compute pairwise distances
+    distances = _pairwise_distances(coordinates, coordinates)
 
     outliers = np.zeros(n_cells, dtype=bool)
 

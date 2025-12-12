@@ -140,6 +140,16 @@ denoise = [
     "torch>=2.0.0",
 ]
 
+# RAPIDS GPU-accelerated data science
+# Note: RAPIDS requires CUDA 11.x or 12.x and is best installed via conda
+# pip install cudf-cu12 cuml-cu12 --extra-index-url=https://pypi.nvidia.com
+rapids = [
+    "cudf-cu12>=24.10.0",
+    "cuml-cu12>=24.10.0",
+    "cugraph-cu12>=24.10.0",
+    "rmm-cu12>=24.10.0",
+]
+
 # Development and testing
 dev = [
     "pytest>=7.4.0",
@@ -161,8 +171,14 @@ docs = [
 
 # Full installation (all optional dependencies)
 # Note: java is excluded as it is deprecated
+# Note: rapids requires separate installation from NVIDIA channel
 full = [
     "kintsugi[gpu,viz,dl,analysis,bio]",
+]
+
+# Full installation with RAPIDS (for systems with NVIDIA GPU)
+full-rapids = [
+    "kintsugi[gpu,viz,dl,analysis,bio,rapids]",
 ]
 
 [project.scripts]

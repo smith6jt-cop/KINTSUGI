@@ -163,16 +163,26 @@ class CAREDenoiser:
         return denoiser
 
     def _setup_device(self):
-        """Set up PyTorch device."""
+        """Set up PyTorch device with multi-GPU support."""
         try:
             import torch
 
+            from kintsugi.gpu import get_gpu_manager
+
+            self._gpu_manager = get_gpu_manager()
+
             if self.config.device == "auto":
-                self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                self.device = self._gpu_manager.get_torch_device()
             else:
                 self.device = torch.device(self.config.device)
 
-            logger.info(f"CARE using device: {self.device}")
+            if self._gpu_manager.device_count > 1:
+                logger.info(
+                    f"CARE using {self._gpu_manager.device_count} GPUs: "
+                    f"{self._gpu_manager.device_ids}"
+                )
+            else:
+                logger.info(f"CARE using device: {self.device}")
 
         except ImportError:
             raise ImportError(
@@ -288,6 +298,9 @@ class CAREDenoiser:
             residual=self.config.residual,
         )
 
+        # Use GPUManager for multi-GPU wrapping
+        if hasattr(self, "_gpu_manager"):
+            return self._gpu_manager.wrap_model(model)
         return model.to(self.device)
 
     def _augment_batch(

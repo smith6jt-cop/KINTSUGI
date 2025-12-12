@@ -38,6 +38,8 @@ _SUBMODULE_MAPPING = {
     "qc": "qc",
     "denoise": "denoise",
     "segment": "segment",
+    "gpu": "gpu",
+    "rapids": "rapids",
 }
 
 
@@ -149,4 +151,7 @@ __all__ = [
     "qc",
     "denoise",
     "segment",
+    # GPU utilities
+    "gpu",
+    "rapids",
 ]

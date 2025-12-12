@@ -98,16 +98,26 @@ class SAMSegmenter:
         self.device = None
 
     def _setup_device(self):
-        """Set up PyTorch device."""
+        """Set up PyTorch device with multi-GPU support."""
         try:
             import torch
 
+            from kintsugi.gpu import get_gpu_manager
+
+            self._gpu_manager = get_gpu_manager()
+
             if self.config.device == "auto":
-                self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                self.device = self._gpu_manager.get_torch_device()
             else:
                 self.device = torch.device(self.config.device)
 
-            logger.info(f"SAM using device: {self.device}")
+            if self._gpu_manager.device_count > 1:
+                logger.info(
+                    f"SAM using {self._gpu_manager.device_count} GPUs: "
+                    f"{self._gpu_manager.device_ids}"
+                )
+            else:
+                logger.info(f"SAM using device: {self.device}")
 
         except ImportError:
             raise ImportError("PyTorch is required for SAM. Install with: pip install torch")
@@ -134,7 +144,12 @@ class SAMSegmenter:
         # Load model
         logger.info(f"Loading SAM model: {self.config.model_type}")
         self.model = sam_model_registry[self.config.model_type](checkpoint=str(model_path))
-        self.model.to(self.device)
+
+        # Use GPUManager for multi-GPU wrapping
+        if hasattr(self, "_gpu_manager"):
+            self.model = self._gpu_manager.wrap_model(self.model)
+        else:
+            self.model.to(self.device)
 
         # Create predictor and mask generator
         self.predictor = SamPredictor(self.model)

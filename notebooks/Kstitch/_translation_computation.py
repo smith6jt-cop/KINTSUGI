@@ -18,6 +18,13 @@ except ImportError:
     HAS_CUPY = False
     cp = None
 
+# Multi-GPU support
+try:
+    from kintsugi.gpu import get_gpu_manager
+    HAS_MULTI_GPU = True
+except ImportError:
+    HAS_MULTI_GPU = False
+
 
 def pcm(F1: np.ndarray, F2: np.ndarray) -> np.ndarray:
     """Phase correlation matrix computation (CPU version)."""
@@ -51,7 +58,7 @@ class GPUStitchingAccelerator:
     - CUDA stream pipelining for overlapping compute and transfer
     """
 
-    def __init__(self, image_shape: Tuple[int, int], max_batch_size: int = 16):
+    def __init__(self, image_shape: Tuple[int, int], max_batch_size: int = 16, device_id: int = 0):
         """Initialize the GPU accelerator.
 
         Args:
@@ -64,29 +71,33 @@ class GPUStitchingAccelerator:
         self.image_shape = image_shape
         self.max_batch_size = max_batch_size
         self.height, self.width = image_shape
+        self.device_id = device_id
 
-        # Create CUDA streams for pipelining
-        self.compute_stream = cp.cuda.Stream(non_blocking=True)
-        self.transfer_stream = cp.cuda.Stream(non_blocking=True)
+        # Set device for this accelerator
+        with cp.cuda.Device(device_id):
+            # Create CUDA streams for pipelining
+            self.compute_stream = cp.cuda.Stream(non_blocking=True)
+            self.transfer_stream = cp.cuda.Stream(non_blocking=True)
 
-        # Pre-allocate GPU buffers for batch processing
-        self._allocate_buffers()
+            # Pre-allocate GPU buffers for batch processing
+            self._allocate_buffers()
 
     def _allocate_buffers(self):
-        """Pre-allocate GPU memory buffers."""
-        h, w = self.image_shape
-        batch = self.max_batch_size
+        """Pre-allocate GPU memory buffers on this device."""
+        with cp.cuda.Device(self.device_id):
+            h, w = self.image_shape
+            batch = self.max_batch_size
 
-        # Input image buffers (batch of pairs)
-        self.img1_buffer = cp.empty((batch, h, w), dtype=cp.float32)
-        self.img2_buffer = cp.empty((batch, h, w), dtype=cp.float32)
+            # Input image buffers (batch of pairs)
+            self.img1_buffer = cp.empty((batch, h, w), dtype=cp.float32)
+            self.img2_buffer = cp.empty((batch, h, w), dtype=cp.float32)
 
-        # FFT result buffers
-        self.fft1_buffer = cp.empty((batch, h, w), dtype=cp.complex64)
-        self.fft2_buffer = cp.empty((batch, h, w), dtype=cp.complex64)
+            # FFT result buffers
+            self.fft1_buffer = cp.empty((batch, h, w), dtype=cp.complex64)
+            self.fft2_buffer = cp.empty((batch, h, w), dtype=cp.complex64)
 
-        # PCM result buffer
-        self.pcm_buffer = cp.empty((batch, h, w), dtype=cp.float32)
+            # PCM result buffer
+            self.pcm_buffer = cp.empty((batch, h, w), dtype=cp.float32)
 
     def compute_pcm_batch(self, image_pairs: List[Tuple[np.ndarray, np.ndarray]]) -> List[np.ndarray]:
         """Compute PCM for a batch of image pairs efficiently on GPU.
@@ -112,32 +123,33 @@ class GPUStitchingAccelerator:
         return results
 
     def _process_batch(self, batch: List[Tuple[np.ndarray, np.ndarray]]) -> List[np.ndarray]:
-        """Process a single batch of image pairs."""
+        """Process a single batch of image pairs on this device."""
         n = len(batch)
 
-        with self.transfer_stream:
-            # Transfer images to GPU
-            for i, (img1, img2) in enumerate(batch):
-                self.img1_buffer[i] = cp.asarray(img1, dtype=cp.float32)
-                self.img2_buffer[i] = cp.asarray(img2, dtype=cp.float32)
+        with cp.cuda.Device(self.device_id):
+            with self.transfer_stream:
+                # Transfer images to GPU
+                for i, (img1, img2) in enumerate(batch):
+                    self.img1_buffer[i] = cp.asarray(img1, dtype=cp.float32)
+                    self.img2_buffer[i] = cp.asarray(img2, dtype=cp.float32)
 
-        # Wait for transfer to complete before computing
-        self.transfer_stream.synchronize()
+            # Wait for transfer to complete before computing
+            self.transfer_stream.synchronize()
 
-        with self.compute_stream:
-            # Batch FFT - process all images at once
-            self.fft1_buffer[:n] = cp.fft.fft2(self.img1_buffer[:n], axes=(1, 2))
-            self.fft2_buffer[:n] = cp.fft.fft2(self.img2_buffer[:n], axes=(1, 2))
+            with self.compute_stream:
+                # Batch FFT - process all images at once
+                self.fft1_buffer[:n] = cp.fft.fft2(self.img1_buffer[:n], axes=(1, 2))
+                self.fft2_buffer[:n] = cp.fft.fft2(self.img2_buffer[:n], axes=(1, 2))
 
-            # Batch PCM computation
-            FC = self.fft1_buffer[:n] * cp.conjugate(self.fft2_buffer[:n])
-            self.pcm_buffer[:n] = cp.fft.ifft2(FC / (cp.abs(FC) + 1e-10), axes=(1, 2)).real
+                # Batch PCM computation
+                FC = self.fft1_buffer[:n] * cp.conjugate(self.fft2_buffer[:n])
+                self.pcm_buffer[:n] = cp.fft.ifft2(FC / (cp.abs(FC) + 1e-10), axes=(1, 2)).real
 
-        # Wait for compute to complete
-        self.compute_stream.synchronize()
+            # Wait for compute to complete
+            self.compute_stream.synchronize()
 
-        # Transfer results back to CPU
-        results = [cp.asnumpy(self.pcm_buffer[i]) for i in range(n)]
+            # Transfer results back to CPU
+            results = [cp.asnumpy(self.pcm_buffer[i]) for i in range(n)]
 
         return results
 
@@ -196,8 +208,121 @@ class GPUStitchingAccelerator:
             pass
 
 
+class MultiGPUStitchingAccelerator:
+    """Multi-GPU accelerated stitching that distributes work across all available GPUs.
+
+    This class creates a GPUStitchingAccelerator instance for each available GPU
+    and distributes image pairs across them for parallel processing.
+
+    Example:
+        accelerator = MultiGPUStitchingAccelerator((1024, 1024))
+        results = accelerator.compute_pcm_batch(image_pairs)
+    """
+
+    def __init__(self, image_shape: Tuple[int, int], max_batch_size: int = 16):
+        """Initialize multi-GPU accelerator.
+
+        Args:
+            image_shape: (height, width) of images to process
+            max_batch_size: Maximum batch size per GPU
+        """
+        if not HAS_CUPY:
+            raise RuntimeError("CuPy is required for GPU acceleration")
+
+        self.image_shape = image_shape
+        self.max_batch_size = max_batch_size
+
+        # Get available GPU device IDs
+        if HAS_MULTI_GPU:
+            gpu_manager = get_gpu_manager()
+            self.device_ids = gpu_manager.device_ids if gpu_manager.device_ids else [0]
+        else:
+            # Fallback to device 0 only
+            self.device_ids = [0]
+
+        # Create accelerator for each GPU
+        self.accelerators: List[GPUStitchingAccelerator] = []
+        for device_id in self.device_ids:
+            try:
+                acc = GPUStitchingAccelerator(
+                    image_shape, max_batch_size, device_id=device_id
+                )
+                self.accelerators.append(acc)
+            except Exception as e:
+                print(f"Warning: Could not initialize GPU {device_id}: {e}")
+
+        if not self.accelerators:
+            raise RuntimeError("No GPUs could be initialized")
+
+        self.n_gpus = len(self.accelerators)
+
+    def compute_pcm_batch(self, image_pairs: List[Tuple[np.ndarray, np.ndarray]]) -> List[np.ndarray]:
+        """Compute PCM for a batch of image pairs distributed across GPUs.
+
+        Args:
+            image_pairs: List of (image1, image2) tuples
+
+        Returns:
+            List of PCM arrays (on CPU), in same order as input
+        """
+        n_pairs = len(image_pairs)
+        if n_pairs == 0:
+            return []
+
+        if self.n_gpus == 1:
+            # Single GPU - use regular batch processing
+            return self.accelerators[0].compute_pcm_batch(image_pairs)
+
+        # Distribute work across GPUs
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Split image pairs evenly across GPUs
+        pairs_per_gpu = n_pairs // self.n_gpus
+        remainder = n_pairs % self.n_gpus
+
+        work_assignments = []
+        start = 0
+        for i in range(self.n_gpus):
+            count = pairs_per_gpu + (1 if i < remainder else 0)
+            if count > 0:
+                end = start + count
+                work_assignments.append((i, start, image_pairs[start:end]))
+                start = end
+
+        def process_on_gpu(args):
+            gpu_idx, start_idx, pairs = args
+            results = self.accelerators[gpu_idx].compute_pcm_batch(pairs)
+            return (start_idx, results)
+
+        # Process in parallel using threads (CuPy releases GIL during GPU ops)
+        all_results = [None] * n_pairs
+        with ThreadPoolExecutor(max_workers=self.n_gpus) as executor:
+            futures = list(executor.map(process_on_gpu, work_assignments))
+            for start_idx, results in futures:
+                for i, r in enumerate(results):
+                    all_results[start_idx + i] = r
+
+        return all_results
+
+    def free_buffers(self):
+        """Free all GPU buffers."""
+        for acc in self.accelerators:
+            try:
+                acc.free_buffers()
+            except Exception:
+                pass
+
+    def __del__(self):
+        """Cleanup on deletion."""
+        try:
+            self.free_buffers()
+        except Exception:
+            pass
+
+
 # Global accelerator instance (lazy initialization)
 _gpu_accelerator: Optional[GPUStitchingAccelerator] = None
+_multi_gpu_accelerator: Optional[MultiGPUStitchingAccelerator] = None
 
 
 def get_gpu_accelerator(image_shape: Tuple[int, int], max_batch_size: int = 16) -> GPUStitchingAccelerator:
@@ -220,12 +345,39 @@ def get_gpu_accelerator(image_shape: Tuple[int, int], max_batch_size: int = 16) 
     return _gpu_accelerator
 
 
+def get_multi_gpu_accelerator(
+    image_shape: Tuple[int, int], max_batch_size: int = 16
+) -> MultiGPUStitchingAccelerator:
+    """Get or create the global multi-GPU accelerator instance.
+
+    Uses all available non-integrated NVIDIA GPUs for parallel stitching.
+
+    Args:
+        image_shape: (height, width) of images
+        max_batch_size: Maximum batch size per GPU
+
+    Returns:
+        MultiGPUStitchingAccelerator instance
+    """
+    global _multi_gpu_accelerator
+
+    if _multi_gpu_accelerator is None or _multi_gpu_accelerator.image_shape != image_shape:
+        if _multi_gpu_accelerator is not None:
+            _multi_gpu_accelerator.free_buffers()
+        _multi_gpu_accelerator = MultiGPUStitchingAccelerator(image_shape, max_batch_size)
+
+    return _multi_gpu_accelerator
+
+
 def reset_gpu_accelerator():
-    """Reset the global GPU accelerator (free memory)."""
-    global _gpu_accelerator
+    """Reset the global GPU accelerators (free memory)."""
+    global _gpu_accelerator, _multi_gpu_accelerator
     if _gpu_accelerator is not None:
         _gpu_accelerator.free_buffers()
         _gpu_accelerator = None
+    if _multi_gpu_accelerator is not None:
+        _multi_gpu_accelerator.free_buffers()
+        _multi_gpu_accelerator = None
 
 
 def multi_peak_max(PCM: FloatArray) -> Tuple[IntArray, IntArray, FloatArray]:

@@ -34,6 +34,13 @@ except ImportError:
     CUPY_AVAILABLE = False
     cp = None
 
+# Multi-GPU support
+try:
+    from kintsugi.gpu import get_gpu_manager
+    HAS_MULTI_GPU = True
+except ImportError:
+    HAS_MULTI_GPU = False
+
 # CPU fallback
 from scipy.fft import dctn as sp_dctn
 from scipy.fft import idctn as sp_idctn
@@ -46,6 +53,7 @@ class KCorrectGPU:
 
     This class provides methods for computing flatfield and darkfield
     corrections using GPU acceleration via CuPy, with automatic CPU fallback.
+    Supports multi-GPU configurations for distributing work across devices.
 
     Parameters
     ----------
@@ -55,6 +63,8 @@ class KCorrectGPU:
         Size to downsample images for correction computation (default 128)
     verbose : bool
         Print progress messages
+    device_id : int, optional
+        Specific GPU device ID to use. If None, uses primary GPU.
 
     Attributes
     ----------
@@ -80,11 +90,16 @@ class KCorrectGPU:
     PRESERVE_RANGE = True
 
     def __init__(
-        self, use_gpu: bool | str = "auto", working_size: int = 128, verbose: bool = False
+        self,
+        use_gpu: bool | str = "auto",
+        working_size: int = 128,
+        verbose: bool = False,
+        device_id: int | None = None,
     ):
 
         self.working_size = working_size
         self.verbose = verbose
+        self.device_id = device_id
 
         # Determine device
         if use_gpu == "auto":
@@ -98,9 +113,21 @@ class KCorrectGPU:
         if use_gpu:
             self.xp = cp
             self.device = "gpu"
-            if verbose:
-                device = cp.cuda.Device()
-                print(f"KCorrectGPU using GPU: {device.id}")
+
+            # Use GPUManager for device selection if available
+            if device_id is None and HAS_MULTI_GPU:
+                gpu_manager = get_gpu_manager()
+                if gpu_manager.device_ids:
+                    self.device_id = gpu_manager.primary_device
+                else:
+                    self.device_id = 0
+            elif device_id is None:
+                self.device_id = 0
+
+            # Set the device
+            with cp.cuda.Device(self.device_id):
+                if verbose:
+                    print(f"KCorrectGPU using GPU: {self.device_id}")
         else:
             self.xp = np
             self.device = "cpu"
@@ -110,13 +137,15 @@ class KCorrectGPU:
     def _to_device(self, arr: np.ndarray) -> "cp.ndarray":
         """Move array to GPU if using GPU."""
         if self.use_gpu:
-            return cp.asarray(arr)
+            with cp.cuda.Device(self.device_id):
+                return cp.asarray(arr)
         return arr
 
     def _to_host(self, arr) -> np.ndarray:
         """Move array to CPU."""
         if self.use_gpu and hasattr(arr, "get"):
-            return arr.get()
+            with cp.cuda.Device(self.device_id):
+                return arr.get()
         return np.asarray(arr)
 
     def _dct2d(self, mtrx):
@@ -125,8 +154,9 @@ class KCorrectGPU:
             raise ValueError("Input must be 2D")
 
         if self.use_gpu:
-            # Single call handles both axes - more efficient than separate calls
-            return cp_dctn(mtrx, type=2, norm="ortho", axes=(0, 1))
+            with cp.cuda.Device(self.device_id):
+                # Single call handles both axes - more efficient than separate calls
+                return cp_dctn(mtrx, type=2, norm="ortho", axes=(0, 1))
         else:
             return sp_dctn(mtrx, type=2, norm="ortho", axes=(0, 1))
 
@@ -136,8 +166,9 @@ class KCorrectGPU:
             raise ValueError("Input must be 2D")
 
         if self.use_gpu:
-            # Single call handles both axes - more efficient than separate calls
-            return cp_idctn(mtrx, type=2, norm="ortho", axes=(0, 1))
+            with cp.cuda.Device(self.device_id):
+                # Single call handles both axes - more efficient than separate calls
+                return cp_idctn(mtrx, type=2, norm="ortho", axes=(0, 1))
         else:
             return sp_idctn(mtrx, type=2, norm="ortho", axes=(0, 1))
 
@@ -656,3 +687,110 @@ def check_gpu() -> tuple[bool, str]:
         return True, f"GPU available: Device {device.id} with {mem[1]/1e9:.1f} GB"
     except Exception as e:
         return False, f"GPU error: {e}"
+
+
+def get_available_gpus() -> list[int]:
+    """Get list of available GPU device IDs for KCorrect.
+
+    Returns
+    -------
+    list[int]
+        List of GPU device IDs, or empty list if none available
+    """
+    if not CUPY_AVAILABLE:
+        return []
+
+    if HAS_MULTI_GPU:
+        gpu_manager = get_gpu_manager()
+        return gpu_manager.device_ids if gpu_manager.device_ids else []
+
+    # Fallback: check CuPy device count
+    try:
+        return list(range(cp.cuda.runtime.getDeviceCount()))
+    except Exception:
+        return []
+
+
+def KCorrectMultiGPU(
+    images_list: list[np.ndarray] | np.ndarray,
+    if_darkfield: bool = True,
+    max_iterations: int = 500,
+    optimization_tolerance: float = 1e-6,
+    max_reweight_iterations: int = 25,
+    reweight_tolerance: float = 1e-3,
+    verbose: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Multi-GPU accelerated BaSiC correction.
+
+    Uses the GPU manager to automatically select the best available GPU.
+    For parallel processing of multiple image stacks, use separate
+    KCorrectGPU instances with different device_ids.
+
+    Parameters
+    ----------
+    images_list : list or np.ndarray
+        List of 2D images or 3D array (n_images, height, width)
+    if_darkfield : bool
+        Compute darkfield correction
+    max_iterations : int
+        Maximum ALM iterations
+    optimization_tolerance : float
+        ALM convergence tolerance
+    max_reweight_iterations : int
+        Maximum reweighting iterations
+    reweight_tolerance : float
+        Reweighting convergence tolerance
+    verbose : bool
+        Print progress
+
+    Returns
+    -------
+    flatfield : np.ndarray
+        Flatfield correction
+    darkfield : np.ndarray
+        Darkfield correction
+
+    Notes
+    -----
+    For processing multiple independent image stacks in parallel:
+
+    >>> from concurrent.futures import ThreadPoolExecutor
+    >>> gpus = get_available_gpus()
+    >>> def process_stack(args):
+    ...     stack, device_id = args
+    ...     corrector = KCorrectGPU(use_gpu=True, device_id=device_id)
+    ...     return corrector.fit(stack)
+    >>> with ThreadPoolExecutor(max_workers=len(gpus)) as executor:
+    ...     results = list(executor.map(process_stack, zip(stacks, cycle(gpus))))
+    """
+    # Convert list to array if needed
+    if isinstance(images_list, list):
+        images = np.stack(images_list, axis=0)
+    else:
+        images = images_list
+
+    # Ensure correct shape (n_images, height, width)
+    if images.ndim == 3 and images.shape[0] > images.shape[2]:
+        # Likely (height, width, n_images), transpose
+        images = np.transpose(images, (2, 0, 1))
+
+    # Use GPUManager to select optimal device
+    device_id = None
+    if HAS_MULTI_GPU:
+        gpu_manager = get_gpu_manager()
+        if gpu_manager.device_ids:
+            device_id = gpu_manager.primary_device
+            if verbose:
+                print(f"Using GPU {device_id} from {len(gpu_manager.device_ids)} available GPUs")
+
+    corrector = KCorrectGPU(use_gpu=True, verbose=verbose, device_id=device_id)
+
+    return corrector.fit(
+        images,
+        if_darkfield=if_darkfield,
+        max_iterations=max_iterations,
+        optimization_tolerance=optimization_tolerance,
+        max_reweight_iterations=max_reweight_iterations,
+        reweight_tolerance=reweight_tolerance,
+    )

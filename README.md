@@ -123,6 +123,35 @@ kintsugi install bio
 kintsugi install full
 ```
 
+### Multi-GPU & RAPIDS Acceleration
+
+KINTSUGI automatically detects and uses all available NVIDIA GPUs:
+
+```python
+from kintsugi.gpu import get_gpu_manager
+gpu = get_gpu_manager()
+print(gpu.summary())  # Shows all detected GPUs
+```
+
+For GPU-accelerated data science with RAPIDS (cuDF, cuML):
+
+```bash
+# Install RAPIDS via conda (recommended)
+# Use cuda-version matching your driver (check with nvidia-smi)
+conda install -c rapidsai -c conda-forge -c nvidia \
+    cudf=24.10 cuml=24.10 cuda-version=12.6
+
+# Or via pip
+pip install cudf-cu12 cuml-cu12 --extra-index-url=https://pypi.nvidia.com
+```
+
+```python
+from kintsugi.rapids import get_rapids_manager
+rapids = get_rapids_manager()
+# GPU-accelerated clustering, UMAP, nearest neighbors, etc.
+labels, centers = rapids.kmeans(data, n_clusters=10)
+```
+
 **Feature Requirements by Notebook:**
 
 | Notebook | Required Features |
@@ -157,6 +186,7 @@ kintsugi template -o my_config.json
 | **VALIS** | Image registration | Included in base install |
 | **CuPy** | GPU acceleration (optional) | `kintsugi install gpu` |
 | **PyTorch** | Deep learning (optional) | `kintsugi install gpu` or `kintsugi install dl` |
+| **RAPIDS** | GPU data science (optional) | See [installation docs](docs/installation.md#rapids-gpu-accelerated-data-science-optional) |
 
 > **Note:** Java, Maven, and FIJI/CLIJ2 are no longer required. KINTSUGI now uses pure Python
 > implementations (CuPy/NumPy) for all processing including Extended Depth of Focus (EDF).
@@ -353,6 +383,9 @@ kintsugi check
 ```bash
 # Check CUDA availability
 python -c "import torch; print(torch.cuda.is_available())"
+
+# Check all GPUs with KINTSUGI
+python -c "from kintsugi.gpu import get_gpu_manager; print(get_gpu_manager().summary())"
 
 # Install GPU support if missing
 kintsugi install gpu
