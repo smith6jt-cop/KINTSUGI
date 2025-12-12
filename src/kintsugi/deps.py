@@ -52,8 +52,13 @@ OPTIONAL_GROUPS = {
     "gpu": {
         "description": "GPU acceleration (PyTorch + CuPy for CUDA)",
         "packages": ["torch", "torchvision", "cupy"],
-        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install cupy-cuda12x",
-        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.4 cupy -c pytorch -c nvidia -c conda-forge",
+        # CUDA runtime libraries (libcufft, etc.) must be installed via conda;
+        # cupy-cuda12x (pip) only provides Python bindings, not the native libs
+        # Use CUDA 12.9 for broad GPU support including Blackwell (B200, compute 10.0)
+        # cuda-cudart-dev provides headers needed for CuPy JIT compilation
+        # Headers must be copied to $CONDA_PREFIX/include for CuPy to find them
+        "install_cmd": "conda install cuda-libraries cuda-cudart-dev -c nvidia -y && cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev/null; pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install cupy-cuda12x",
+        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.4 cupy cuda-libraries cuda-cudart-dev -c pytorch -c nvidia -c conda-forge && cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev/null",
     },
     "viz": {
         "description": "Napari interactive visualization",
@@ -81,7 +86,7 @@ OPTIONAL_GROUPS = {
     "full": {
         "description": "All optional features",
         "packages": [],  # Composite group
-        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install cupy-cuda12x napari magicgui instanseg instanseg-torch kornia scanpy anndata phenograph scimap aicsimageio bioio bioio-ome-tiff ome-zarr slideio readlif",
+        "install_cmd": "conda install cuda-libraries cuda-cudart-dev -c nvidia -y && cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev/null; pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install cupy-cuda12x napari magicgui instanseg instanseg-torch kornia scanpy anndata phenograph scimap aicsimageio bioio bioio-ome-tiff ome-zarr slideio readlif",
     },
 }
 

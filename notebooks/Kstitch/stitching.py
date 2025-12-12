@@ -21,16 +21,63 @@ from tqdm import tqdm
 
 def _setup_cuda_path():
     """
-    Ensure CUDA libraries are in PATH on Windows.
+    Ensure CUDA libraries and headers are accessible.
 
-    Conda installs CUDA libraries to Library/bin but doesn't add it to PATH.
-    This causes "DLL load failed" errors for nvrtc, cufft, etc.
+    On Windows: Conda installs CUDA libraries to Library/bin but doesn't add it to PATH.
+    On Linux: CUDA headers are at targets/x86_64-linux/include but CuPy expects them
+    at $CUDA_PATH/include. This function sets up the environment automatically.
 
-    This function searches multiple locations for CUDA DLLs:
-    1. Conda environment (Library/bin)
+    This function searches multiple locations for CUDA files:
+    1. Conda environment paths
     2. NVIDIA CUDA Toolkit installation
     3. Common CUDA installation paths
     """
+    conda_prefix = os.environ.get('CONDA_PREFIX', '')
+
+    # Linux-specific setup
+    if sys.platform.startswith('linux') and conda_prefix:
+        # Set CUDA_PATH and CUDA_HOME for CuPy
+        if not os.environ.get('CUDA_PATH'):
+            os.environ['CUDA_PATH'] = conda_prefix
+        if not os.environ.get('CUDA_HOME'):
+            os.environ['CUDA_HOME'] = conda_prefix
+
+        # Add library paths to LD_LIBRARY_PATH
+        lib_paths = [
+            os.path.join(conda_prefix, 'lib'),
+            os.path.join(conda_prefix, 'targets', 'x86_64-linux', 'lib'),
+        ]
+        current_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
+        paths_to_add = [p for p in lib_paths if os.path.exists(p) and p not in current_ld_path]
+        if paths_to_add:
+            new_ld_path = os.pathsep.join(paths_to_add)
+            if current_ld_path:
+                new_ld_path += os.pathsep + current_ld_path
+            os.environ['LD_LIBRARY_PATH'] = new_ld_path
+
+        # Copy CUDA headers to include/ if needed (for CuPy JIT compilation)
+        targets_include = os.path.join(conda_prefix, 'targets', 'x86_64-linux', 'include')
+        conda_include = os.path.join(conda_prefix, 'include')
+        cuda_header = os.path.join(conda_include, 'cuda_fp16.h')
+
+        if os.path.exists(targets_include) and not os.path.exists(cuda_header):
+            # Headers exist in targets but not in include - copy them
+            import shutil
+            try:
+                for item in os.listdir(targets_include):
+                    src = os.path.join(targets_include, item)
+                    dst = os.path.join(conda_include, item)
+                    if not os.path.exists(dst):
+                        if os.path.isdir(src):
+                            shutil.copytree(src, dst)
+                        else:
+                            shutil.copy2(src, dst)
+            except (PermissionError, OSError):
+                pass  # Can't copy, will rely on existing headers
+
+        return
+
+    # Windows-specific setup
     if sys.platform != 'win32':
         return
 
