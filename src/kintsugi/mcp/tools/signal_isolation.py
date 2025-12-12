@@ -236,7 +236,7 @@ async def suggest_subtraction_parameters(
 
     # Use the intelligent analysis
     try:
-        from kintsugi.signal import analyze_for_subtraction, compute_subtraction_quality
+        from kintsugi.signal import analyze_for_subtraction
     except ImportError:
         # Fallback to basic analysis
         logger.warning("kintsugi.signal module not available, using basic analysis")

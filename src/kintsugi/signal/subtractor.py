@@ -9,18 +9,17 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Union
 
 import numpy as np
 
 from .autofluorescence import (
-    subtract_autofluorescence,
-    subtract_autofluorescence_dask,
     analyze_for_subtraction,
     compute_subtraction_quality,
+    subtract_autofluorescence,
+    subtract_autofluorescence_dask,
 )
 
 logger = logging.getLogger("kintsugi.signal.subtractor")
@@ -45,7 +44,7 @@ class SubtractionParameters:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> 'SubtractionParameters':
+    def from_dict(cls, d: dict) -> SubtractionParameters:
         """Create from dictionary."""
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
@@ -56,8 +55,8 @@ class SubtractionResult:
 
     image: np.ndarray
     parameters: SubtractionParameters
-    quality_metrics: Dict = field(default_factory=dict)
-    analysis: Dict = field(default_factory=dict)
+    quality_metrics: dict = field(default_factory=dict)
+    analysis: dict = field(default_factory=dict)
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def quality_passed(self, threshold: float = 0.5) -> bool:
@@ -103,8 +102,8 @@ class AutofluorescenceSubtractor:
 
     def __init__(
         self,
-        project_dir: Optional[Union[str, Path]] = None,
-        tissue_type: Optional[str] = None,
+        project_dir: str | Path | None = None,
+        tissue_type: str | None = None,
         auto_learn: bool = True,
         quality_threshold: float = 0.5,
     ):
@@ -131,8 +130,8 @@ class AutofluorescenceSubtractor:
         self,
         signal: np.ndarray,
         blank: np.ndarray,
-        marker: Optional[str] = None,
-        tissue_type: Optional[str] = None,
+        marker: str | None = None,
+        tissue_type: str | None = None,
         use_learning: bool = True,
     ) -> SubtractionParameters:
         """
@@ -203,9 +202,9 @@ class AutofluorescenceSubtractor:
         self,
         signal: np.ndarray,
         blank: np.ndarray,
-        params: Optional[SubtractionParameters] = None,
-        marker: Optional[str] = None,
-        tissue_type: Optional[str] = None,
+        params: SubtractionParameters | None = None,
+        marker: str | None = None,
+        tissue_type: str | None = None,
         use_dask: bool = False,
     ) -> SubtractionResult:
         """
@@ -292,12 +291,12 @@ class AutofluorescenceSubtractor:
 
     def process_batch(
         self,
-        channels: Dict[str, np.ndarray],
-        blank_channels: Dict[str, np.ndarray],
-        channel_blank_mapping: Optional[Dict[str, str]] = None,
-        tissue_type: Optional[str] = None,
-        progress_callback: Optional[callable] = None,
-    ) -> Dict[str, SubtractionResult]:
+        channels: dict[str, np.ndarray],
+        blank_channels: dict[str, np.ndarray],
+        channel_blank_mapping: dict[str, str] | None = None,
+        tissue_type: str | None = None,
+        progress_callback: callable | None = None,
+    ) -> dict[str, SubtractionResult]:
         """
         Process multiple channels in batch.
 
@@ -360,8 +359,8 @@ class AutofluorescenceSubtractor:
 
     def _merge_parameters(
         self,
-        analysis: Dict,
-        learned: Dict,
+        analysis: dict,
+        learned: dict,
         analysis_weight: float = 0.4,
     ) -> SubtractionParameters:
         """Merge analysis-based and learned parameters."""
@@ -395,8 +394,8 @@ class AutofluorescenceSubtractor:
 
     def save_results(
         self,
-        results: Dict[str, SubtractionResult],
-        output_dir: Union[str, Path],
+        results: dict[str, SubtractionResult],
+        output_dir: str | Path,
         save_images: bool = True,
     ) -> None:
         """

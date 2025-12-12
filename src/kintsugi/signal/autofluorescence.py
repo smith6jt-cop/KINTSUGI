@@ -19,14 +19,10 @@ over-subtraction in regions where signal > autofluorescence.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from scipy import ndimage
 from skimage import morphology
-from skimage.filters import threshold_otsu
-from skimage.measure import label, regionprops
 
 logger = logging.getLogger("kintsugi.signal.autofluorescence")
 
@@ -244,9 +240,9 @@ def subtract_autofluorescence_dask(
 def analyze_for_subtraction(
     signal: np.ndarray,
     blank: np.ndarray,
-    tissue_type: Optional[str] = None,
-    marker_name: Optional[str] = None,
-) -> Dict:
+    tissue_type: str | None = None,
+    marker_name: str | None = None,
+) -> dict:
     """
     Analyze signal and blank images to suggest optimal subtraction parameters.
 
@@ -322,7 +318,7 @@ def analyze_for_subtraction(
 
     # Analyze noise characteristics for smoothing recommendations
     signal_noise = _estimate_noise_level(signal)
-    blank_noise = _estimate_noise_level(blank)
+    _blank_noise = _estimate_noise_level(blank)  # Reserved for future use
 
     # Recommend smoothing if noise is high
     noise_ratio = signal_noise / max(signal_stats['mean'], 1)
@@ -366,8 +362,8 @@ def analyze_for_subtraction(
 
 def suggest_blank_channel(
     signal: np.ndarray,
-    blank_channels: Dict[str, np.ndarray],
-) -> Tuple[str, float]:
+    blank_channels: dict[str, np.ndarray],
+) -> tuple[str, float]:
     """
     Suggest the best blank channel for a given signal channel.
 
@@ -414,7 +410,7 @@ def compute_subtraction_quality(
     original_signal: np.ndarray,
     subtracted_signal: np.ndarray,
     blank: np.ndarray,
-) -> Dict:
+) -> dict:
     """
     Compute quality metrics for a subtraction result.
 
@@ -479,7 +475,7 @@ def compute_subtraction_quality(
 # Internal helper functions
 # ============================================================================
 
-def _compute_image_stats(image: np.ndarray) -> Dict:
+def _compute_image_stats(image: np.ndarray) -> dict:
     """Compute basic statistics for an image."""
     flat = image.ravel()
     return {
@@ -567,8 +563,8 @@ def _compute_snr(image: np.ndarray) -> float:
 
 
 def _calculate_suggestion_confidence(
-    signal_stats: Dict,
-    blank_stats: Dict,
+    signal_stats: dict,
+    blank_stats: dict,
     correlation: float,
     af_contribution: float,
 ) -> float:
@@ -599,7 +595,7 @@ def _apply_tissue_marker_adjustments(
     scale: float,
     tissue_type: str,
     marker_name: str,
-) -> Tuple[int, float]:
+) -> tuple[int, float]:
     """Apply tissue and marker-specific adjustments."""
     tissue_type = tissue_type.lower()
     marker_name = marker_name.upper()

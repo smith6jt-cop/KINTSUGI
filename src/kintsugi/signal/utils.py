@@ -9,7 +9,6 @@ from __future__ import annotations
 import numpy as np
 from scipy import ndimage
 from skimage import morphology
-from typing import Optional, Tuple
 
 
 def clip_and_scale_blank(
@@ -118,7 +117,7 @@ def estimate_autofluorescence_level(
     signal: np.ndarray,
     blank: np.ndarray,
     method: str = 'correlation',
-) -> Tuple[float, dict]:
+) -> tuple[float, dict]:
     """
     Estimate the level of autofluorescence in signal channel.
 
@@ -203,7 +202,7 @@ def compute_optimal_clip_factor(
     blank: np.ndarray,
     noise_percentile: int = 10,
     min_clip: int = 0,
-    max_clip: Optional[int] = None,
+    max_clip: int | None = None,
 ) -> int:
     """
     Compute optimal clip factor for blank channel.
@@ -307,7 +306,7 @@ def validate_subtraction_params(
     low_percentile: int,
     high_percentile: int,
     erosion: int,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """
     Validate subtraction parameters are within reasonable ranges.
 
