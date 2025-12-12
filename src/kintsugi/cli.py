@@ -497,6 +497,22 @@ def init(project_path: str, name: str | None, description: str, force: bool, ado
     from kintsugi.project import KintsugiProject, scan_existing_data, ExistingDataReport
 
     project_path = Path(project_path).resolve()
+    config_file = project_path / "kintsugi_project.json"
+
+    # Fast path: refresh existing project assets from the current repo when --force is used
+    if config_file.exists() and force:
+        console.print(f"\n[bold]Updating existing project:[/bold] {project_path}")
+        project = KintsugiProject.load(project_path)
+        # Always use the current installed repo for refresh
+        project._kintsugi_path = project._detect_kintsugi_path()
+        project.config.kintsugi_path = str(project._kintsugi_path)
+        project.paths.create_all()
+        project.setup_notebooks(overwrite=True)
+        project._create_claude_config()
+        project._create_vscode_config()
+        project.save()
+        console.print("\n[green]Project updated from KINTSUGI templates.[/green]")
+        return
 
     try:
         # Skip scanning if --force is used (much faster for large datasets)

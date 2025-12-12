@@ -827,6 +827,7 @@ class KintsugiProject:
 
         if not source_dir.exists():
             raise FileNotFoundError(f"Notebook templates not found at {source_dir}")
+        dest_dir.mkdir(parents=True, exist_ok=True)
 
         # Notebooks to copy (main workflow)
         workflow_notebooks = [
@@ -844,13 +845,15 @@ class KintsugiProject:
             if not src.exists():
                 continue
 
+            existed = dst.exists()
             if dst.exists() and not overwrite:
                 print(f"  Skipping {nb_name} (exists)")
                 continue
 
             shutil.copy2(src, dst)
             copied.append(dst)
-            print(f"  Copied {nb_name}")
+            action = "Updated" if existed else "Copied"
+            print(f"  {action} {nb_name}")
 
         # Copy supporting modules
         support_dirs = ["Kreg", "Kstitch", "Kview2", "KDecon", "instanseg"]
@@ -858,9 +861,17 @@ class KintsugiProject:
             src_dir = source_dir / dir_name
             dst_dir = dest_dir / dir_name
 
-            if src_dir.exists() and not dst_dir.exists():
-                shutil.copytree(src_dir, dst_dir)
-                print(f"  Copied {dir_name}/")
+            if not src_dir.exists():
+                continue
+
+            existed = dst_dir.exists()
+            if dst_dir.exists() and not overwrite:
+                continue
+
+            # dirs_exist_ok updates existing files without removing user data
+            shutil.copytree(src_dir, dst_dir, dirs_exist_ok=True)
+            action = "Updated" if existed else "Copied"
+            print(f"  {action} {dir_name}/")
 
         # Copy supporting files
         support_files = ["Kutils.py", "config_example.json", "MIGRATION_GUIDE.md"]
@@ -868,9 +879,16 @@ class KintsugiProject:
             src_file = source_dir / file_name
             dst_file = dest_dir / file_name
 
-            if src_file.exists() and not dst_file.exists():
-                shutil.copy2(src_file, dst_file)
-                print(f"  Copied {file_name}")
+            if not src_file.exists():
+                continue
+
+            existed = dst_file.exists()
+            if dst_file.exists() and not overwrite:
+                continue
+
+            shutil.copy2(src_file, dst_file)
+            action = "Updated" if existed else "Copied"
+            print(f"  {action} {file_name}")
 
         return copied
 
