@@ -8,12 +8,11 @@ against original implementations for quality and performance.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 import pytest
-from scipy import ndimage
 from scipy.spatial import cKDTree
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
@@ -29,7 +28,6 @@ from kintsugi.denoise.patch_based import (
     denoise_bm3d_lite,
     denoise_patch_similarity,
 )
-
 
 # ============================================================================
 # Test Image Generation
@@ -624,8 +622,6 @@ def run_comprehensive_validation():
         for sigma in sigmas:
             print(f"\n{name} (sigma={sigma}):")
 
-            noisy = add_gaussian_noise(clean, sigma)
-
             result_orig, result_opt, comparison = compare_implementations(
                 denoise_bm3d_lite,
                 denoise_bm3d_lite_kdtree,
@@ -660,8 +656,6 @@ def run_comprehensive_validation():
     for name, clean, sigmas in test_configs:
         for sigma in sigmas:
             print(f"\n{name} (sigma={sigma}):")
-
-            noisy = add_gaussian_noise(clean, sigma)
             h_param = sigma * 1.2
 
             result_orig, result_opt, comparison = compare_implementations(
@@ -702,7 +696,7 @@ def run_comprehensive_validation():
     avg_bm3d_speedup = np.mean([r["comparison"]["speedup"] for r in bm3d_results])
     avg_nlm_speedup = np.mean([r["comparison"]["speedup"] for r in nlm_results])
 
-    print(f"\nAverage speedup:")
+    print("\nAverage speedup:")
     print(f"  BM3D-lite KD-tree: {avg_bm3d_speedup:.2f}x")
     print(f"  NLM OpenCV:        {avg_nlm_speedup:.2f}x")
 

@@ -494,7 +494,7 @@ def init(project_path: str, name: str | None, description: str, force: bool, ado
     """
     from pathlib import Path
 
-    from kintsugi.project import KintsugiProject, scan_existing_data, ExistingDataReport
+    from kintsugi.project import ExistingDataReport, KintsugiProject, scan_existing_data
 
     project_path = Path(project_path).resolve()
 

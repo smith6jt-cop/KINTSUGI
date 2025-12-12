@@ -31,16 +31,12 @@ Usage:
 
 from __future__ import annotations
 
-import os
 import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, TypeVar
-
-import numpy as np
+from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
-    import cupy as cp
     import torch
     import torch.nn as nn
 
@@ -48,7 +44,7 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 # Global singleton
-_gpu_manager: "GPUManager | None" = None
+_gpu_manager: GPUManager | None = None
 
 
 @dataclass
@@ -187,9 +183,9 @@ class GPUManager:
 
     def wrap_model(
         self,
-        model: "nn.Module",
+        model: nn.Module,
         device_ids: list[int] | None = None,
-    ) -> "nn.Module":
+    ) -> nn.Module:
         """
         Wrap a PyTorch model for multi-GPU inference using DataParallel.
 
@@ -228,7 +224,7 @@ class GPUManager:
             model = nn.DataParallel(model, device_ids=device_ids)
             return model
 
-    def get_torch_device(self, device_id: int | None = None) -> "torch.device":
+    def get_torch_device(self, device_id: int | None = None) -> torch.device:
         """
         Get a PyTorch device object.
 
@@ -434,6 +430,6 @@ def has_multi_gpu() -> bool:
     return get_gpu_manager().device_count > 1
 
 
-def wrap_model_multi_gpu(model: "nn.Module") -> "nn.Module":
+def wrap_model_multi_gpu(model: nn.Module) -> nn.Module:
     """Wrap a PyTorch model for multi-GPU inference."""
     return get_gpu_manager().wrap_model(model)
