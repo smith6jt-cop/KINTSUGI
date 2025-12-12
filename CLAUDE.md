@@ -186,6 +186,39 @@ Optional groups in pyproject.toml:
 
 **External requirements**: libvips (native library). Java/Maven no longer required.
 
+## Git Submodules
+
+This repository uses Git submodules for shared components. See [docs/SUBMODULES.md](docs/SUBMODULES.md) for detailed documentation.
+
+### Quick Reference
+
+```bash
+# Clone with submodules
+git clone --recurse-submodules https://github.com/smith6jt-cop/KINTSUGI.git
+
+# Initialize submodules after regular clone
+git submodule update --init --recursive
+
+# Pull with submodule updates
+git pull --recurse-submodules
+
+# Update submodules to latest remote
+git submodule update --remote
+```
+
+### Current Submodules
+
+| Submodule | Path | Purpose |
+|-----------|------|---------|
+| Skills_Registry | `Skills_Registry/` | Shared skills and learnings for Claude Code |
+
+### Recommended Aliases
+
+```bash
+git config --global alias.clone-all 'clone --recurse-submodules'
+git config --global alias.pull-all 'pull --recurse-submodules'
+```
+
 ## Testing
 
 Tests are in `tests/` with fixtures in `conftest.py`. Key fixtures: `sample_image`, `sample_multichannel_image`, `sample_stack`, `sample_tiff`, `sample_config`, `temp_dir`.
