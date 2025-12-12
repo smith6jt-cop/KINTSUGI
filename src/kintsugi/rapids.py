@@ -32,18 +32,16 @@ References:
 from __future__ import annotations
 
 import logging
-import os
-import warnings
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import numpy as np
+import pandas as pd
 
 if TYPE_CHECKING:
     import cudf
     import cuml
-    import pandas as pd
 
 logger = logging.getLogger("kintsugi.rapids")
 
@@ -87,9 +85,6 @@ try:
     _RAPIDS_AVAILABLE["cudf_pandas"] = True
 except (ImportError, AttributeError):
     pass
-
-# Always import pandas as fallback
-import pandas as pd
 
 
 @dataclass
@@ -308,7 +303,7 @@ class RAPIDSManager:
 
         return n_rows >= self.config.min_rows_for_gpu or n_cols >= self.config.min_cols_for_gpu
 
-    def to_gpu(self, data: "pd.DataFrame") -> "cudf.DataFrame | pd.DataFrame":
+    def to_gpu(self, data: pd.DataFrame) -> cudf.DataFrame | pd.DataFrame:
         """
         Convert pandas DataFrame to cuDF if beneficial.
 
@@ -334,7 +329,7 @@ class RAPIDSManager:
             logger.warning(f"Could not convert to cuDF: {e}")
             return data
 
-    def to_cpu(self, data: Any) -> "pd.DataFrame":
+    def to_cpu(self, data: Any) -> pd.DataFrame:
         """
         Convert cuDF DataFrame to pandas.
 
@@ -445,8 +440,8 @@ class RAPIDSManager:
         """
         if self.cuml_available and self.should_use_gpu(X):
             try:
-                from cuml.metrics import pairwise_distances as cuml_pdist
                 import cupy as cp
+                from cuml.metrics import pairwise_distances as cuml_pdist
 
                 X_gpu = cp.asarray(X)
                 Y_gpu = cp.asarray(Y) if Y is not None else None
@@ -488,8 +483,8 @@ class RAPIDSManager:
         """
         if self.cuml_available and self.should_use_gpu(X):
             try:
-                from cuml.neighbors import NearestNeighbors
                 import cupy as cp
+                from cuml.neighbors import NearestNeighbors
 
                 X_gpu = cp.asarray(X)
                 nn = NearestNeighbors(n_neighbors=n_neighbors, metric=metric)
@@ -537,8 +532,8 @@ class RAPIDSManager:
         """
         if self.cuml_available and self.should_use_gpu(X):
             try:
-                from cuml.cluster import KMeans
                 import cupy as cp
+                from cuml.cluster import KMeans
 
                 X_gpu = cp.asarray(X)
                 kmeans = KMeans(
@@ -583,8 +578,8 @@ class RAPIDSManager:
         """
         if self.cuml_available and self.should_use_gpu(X):
             try:
-                from cuml.decomposition import PCA
                 import cupy as cp
+                from cuml.decomposition import PCA
 
                 X_gpu = cp.asarray(X)
                 pca = PCA(n_components=n_components, random_state=random_state)
@@ -629,8 +624,8 @@ class RAPIDSManager:
         """
         if self.cuml_available and self.should_use_gpu(X):
             try:
-                from cuml.manifold import UMAP
                 import cupy as cp
+                from cuml.manifold import UMAP
 
                 X_gpu = cp.asarray(X)
                 umap = UMAP(

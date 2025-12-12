@@ -37,6 +37,7 @@ except ImportError:
 # Multi-GPU support
 try:
     from kintsugi.gpu import get_gpu_manager
+
     HAS_MULTI_GPU = True
 except ImportError:
     HAS_MULTI_GPU = False

@@ -37,6 +37,7 @@ def _pairwise_distances(X: np.ndarray, Y: np.ndarray | None = None) -> np.ndarra
         return rapids.pairwise_distances(X, Y)
     return scipy_cdist(X, Y if Y is not None else X)
 
+
 # Type alias
 ArrayLike = Union[np.ndarray, "pd.DataFrame"]
 
