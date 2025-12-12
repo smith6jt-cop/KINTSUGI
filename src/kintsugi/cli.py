@@ -393,11 +393,15 @@ def tools():
 
 @mcp.command()
 @click.argument("project_path", type=click.Path(exists=True))
-def config(project_path: str):
+@click.option("--print-only", is_flag=True, help="Only print config, don't create file")
+def config(project_path: str, print_only: bool):
     """
     Generate Claude Code MCP configuration for a project.
 
     PROJECT_PATH is the path to your KINTSUGI project directory.
+
+    By default, creates .claude/settings.local.json in the project directory.
+    Use --print-only to just display the configuration without creating files.
     """
     import json as json_mod
     from pathlib import Path
@@ -414,18 +418,54 @@ def config(project_path: str):
         }
     }
 
+    if print_only:
+        console.print(
+            Panel.fit(
+                json_mod.dumps(config_json, indent=2),
+                title="Claude Code MCP Configuration",
+            )
+        )
+        return
+
+    # Create .claude directory and settings file
+    claude_dir = project_path / ".claude"
+    claude_dir.mkdir(exist_ok=True)
+
+    settings_file = claude_dir / "settings.local.json"
+
+    if settings_file.exists():
+        # Check if we need to update existing config
+        with open(settings_file, "r") as f:
+            existing = json_mod.load(f)
+
+        if "mcpServers" not in existing:
+            existing["mcpServers"] = {}
+
+        if "kintsugi" in existing.get("mcpServers", {}):
+            console.print(f"[yellow]KINTSUGI MCP config already exists in {settings_file}[/yellow]")
+            console.print("Use --print-only to see the configuration.")
+            return
+
+        # Add kintsugi to existing config
+        existing["mcpServers"]["kintsugi"] = config_json["mcpServers"]["kintsugi"]
+        with open(settings_file, "w") as f:
+            json_mod.dump(existing, f, indent=2)
+        console.print(f"[green]Added KINTSUGI MCP config to existing {settings_file}[/green]")
+    else:
+        # Create new config file
+        with open(settings_file, "w") as f:
+            json_mod.dump(config_json, f, indent=2)
+        console.print(f"[green]Created {settings_file}[/green]")
+
     console.print(
         Panel.fit(
             json_mod.dumps(config_json, indent=2),
             title="Claude Code MCP Configuration",
-            subtitle="Add to .claude/settings.local.json",
         )
     )
-
-    console.print("\n[bold]To configure Claude Code:[/bold]")
-    console.print("1. Copy the JSON above")
-    console.print("2. Add to your project's .claude/settings.local.json")
-    console.print("3. Restart Claude Code")
+    console.print("\n[bold]Next steps:[/bold]")
+    console.print("1. Open this project folder in VS Code")
+    console.print("2. Start Claude Code - the MCP server will be available automatically")
 
 
 # ============================================================================
@@ -437,25 +477,195 @@ def config(project_path: str):
 @click.argument("project_path", type=click.Path())
 @click.option("--name", "-n", help="Project name")
 @click.option("--description", "-d", default="", help="Project description")
-def init(project_path: str, name: str | None, description: str):
+@click.option("--force", "-f", is_flag=True, help="Skip confirmation prompts")
+@click.option("--adopt-data", is_flag=True, help="Automatically organize existing data into project structure")
+def init(project_path: str, name: str | None, description: str, force: bool, adopt_data: bool):
     """
     Initialize a new KINTSUGI project.
 
     Creates the project directory structure and configuration.
+
+    SAFETY: This command will NEVER delete existing files. If data exists in the
+    directory, you will be prompted to review it before proceeding.
     """
-    from kintsugi.project import KintsugiProject
+    from pathlib import Path
+    from kintsugi.project import KintsugiProject, scan_existing_data, extract_image_metadata
+
+    project_path = Path(project_path).resolve()
 
     try:
+        # Scan for existing data first
+        console.print(f"\n[bold]Scanning directory:[/bold] {project_path}")
+        report = scan_existing_data(project_path)
+
+        if report.has_data:
+            console.print(
+                Panel(
+                    f"[yellow]Existing data detected![/yellow]\n\n"
+                    f"Image files: {report.image_count}\n"
+                    f"Total size: {report.total_size_mb:.1f} MB\n"
+                    f"Cycle folders: {', '.join(report.cycle_folders) if report.cycle_folders else 'None'}\n"
+                    f"Filename patterns: {', '.join(report.filename_patterns[:5]) if report.filename_patterns else 'None'}",
+                    title="Data Protection Warning",
+                    border_style="yellow",
+                )
+            )
+
+            # Show metadata from sample images
+            if report.metadata_samples:
+                console.print("\n[bold]Sample Image Metadata:[/bold]")
+                meta_table = Table(show_header=True, header_style="bold")
+                meta_table.add_column("File")
+                meta_table.add_column("Dimensions")
+                meta_table.add_column("Channels")
+                meta_table.add_column("Pixel Size")
+                meta_table.add_column("OME")
+
+                for sample in report.metadata_samples[:5]:
+                    dims = str(sample.get("dimensions", "N/A"))
+                    if len(dims) > 25:
+                        dims = dims[:22] + "..."
+                    ch_names = sample.get("channel_names", [])
+                    ch_str = str(sample.get("channels", "N/A"))
+                    if ch_names:
+                        ch_str = f"{len(ch_names)}: {', '.join(ch_names[:3])}"
+                        if len(ch_names) > 3:
+                            ch_str += "..."
+                    px = sample.get("pixel_size")
+                    px_str = f"{px:.4f} {sample.get('pixel_unit', 'um')}" if px else "N/A"
+
+                    meta_table.add_row(
+                        sample.get("file", "?")[:30],
+                        dims,
+                        ch_str,
+                        px_str,
+                        "Yes" if sample.get("is_ome") else "No",
+                    )
+                console.print(meta_table)
+
+            console.print(
+                "\n[bold green]SAFETY GUARANTEE:[/bold green] "
+                "No existing files will be deleted or overwritten."
+            )
+
+            if not force:
+                # Ask user to confirm
+                console.print("\n[bold]Options:[/bold]")
+                console.print("  1. Continue - Create project structure around existing data")
+                console.print("  2. Adopt - Move existing data into data/raw/ folder")
+                console.print("  3. Cancel - Exit without making changes")
+
+                choice = click.prompt(
+                    "\nSelect option",
+                    type=click.Choice(["1", "2", "3", "continue", "adopt", "cancel"]),
+                    default="1",
+                )
+
+                if choice in ["3", "cancel"]:
+                    console.print("[yellow]Cancelled. No changes made.[/yellow]")
+                    return
+
+                adopt_data = choice in ["2", "adopt"]
+
+        # Create the project
         KintsugiProject.create(
             project_path,
             name=name,
             description=description,
+            existing_data_report=report,
+            adopt_existing_data=adopt_data,
         )
         console.print("\n[green]Project created successfully![/green]")
+
+        # Remind about Claude Code
+        console.print(
+            "\n[dim]Claude Code is configured. Open this folder in VS Code to start.[/dim]"
+        )
 
     except Exception as e:
         console.print(f"[red]Failed to create project: {e}[/red]")
         raise SystemExit(1)
+
+
+@main.command()
+@click.argument("directory", type=click.Path(exists=True))
+@click.option("--depth", "-d", default=3, help="Maximum scan depth")
+@click.option("--samples", "-s", default=5, help="Number of images to sample for metadata")
+def scan(directory: str, depth: int, samples: int):
+    """
+    Scan a directory for image data and extract metadata.
+
+    Useful for inspecting data before initializing a project.
+    Shows image counts, dimensions, channel names, and pixel sizes.
+    """
+    from pathlib import Path
+    from kintsugi.project import scan_existing_data, extract_image_metadata
+
+    directory = Path(directory).resolve()
+
+    console.print(f"\n[bold]Scanning:[/bold] {directory}")
+    console.print(f"[dim]Depth: {depth}, Samples: {samples}[/dim]\n")
+
+    report = scan_existing_data(directory, max_depth=depth, sample_count=samples)
+
+    if not report.has_data:
+        console.print("[yellow]No image data found.[/yellow]")
+        return
+
+    # Summary panel
+    console.print(
+        Panel(
+            f"Image files: {report.image_count}\n"
+            f"Total size: {report.total_size_mb:.1f} MB\n"
+            f"Cycle folders: {', '.join(report.cycle_folders) if report.cycle_folders else 'None'}\n"
+            f"Filename patterns: {', '.join(report.filename_patterns[:5]) if report.filename_patterns else 'None'}",
+            title="Data Summary",
+            border_style="blue",
+        )
+    )
+
+    # Detailed metadata table
+    if report.metadata_samples:
+        console.print("\n[bold]Image Metadata (sampled):[/bold]")
+        meta_table = Table(show_header=True, header_style="bold")
+        meta_table.add_column("File", max_width=35)
+        meta_table.add_column("Dimensions")
+        meta_table.add_column("Type")
+        meta_table.add_column("Channels")
+        meta_table.add_column("Pixel Size")
+        meta_table.add_column("OME")
+
+        for sample in report.metadata_samples:
+            dims = str(sample.get("dimensions", "N/A"))
+            ch_names = sample.get("channel_names", [])
+            ch_str = str(sample.get("channels") or "N/A")
+            if ch_names:
+                ch_str = f"{len(ch_names)}: {', '.join(ch_names[:3])}"
+                if len(ch_names) > 3:
+                    ch_str += f"... (+{len(ch_names) - 3})"
+            px = sample.get("pixel_size")
+            px_str = f"{px:.4f} {sample.get('pixel_unit', 'um')}" if px else "N/A"
+
+            meta_table.add_row(
+                sample.get("file", "?"),
+                dims,
+                sample.get("dtype", "N/A") if "dtype" in sample else "N/A",
+                ch_str,
+                px_str,
+                "Yes" if sample.get("is_ome") else "No",
+            )
+        console.print(meta_table)
+
+        # Show channel names if OME
+        all_channels = set()
+        for sample in report.metadata_samples:
+            all_channels.update(sample.get("channel_names", []))
+        if all_channels:
+            console.print(f"\n[bold]Channel names found:[/bold] {', '.join(sorted(all_channels))}")
+
+    console.print(
+        f"\n[dim]To create a project here: kintsugi init {directory}[/dim]"
+    )
 
 
 # Standalone entry points

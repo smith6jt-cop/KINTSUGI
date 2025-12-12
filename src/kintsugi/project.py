@@ -37,6 +37,354 @@ from typing import Any
 PROJECT_CONFIG_FILE = "kintsugi_project.json"
 PROJECT_VERSION = "1.0.0"
 
+# Common image file extensions
+IMAGE_EXTENSIONS = {
+    ".tif",
+    ".tiff",
+    ".ome.tif",
+    ".ome.tiff",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".nd2",
+    ".czi",
+    ".lif",
+    ".ims",
+    ".vsi",
+    ".svs",
+    ".qptiff",
+}
+
+
+@dataclass
+class ExistingDataReport:
+    """Report of existing data found in a directory."""
+
+    has_data: bool = False
+    image_files: list[Path] = field(default_factory=list)
+    image_count: int = 0
+    total_size_mb: float = 0.0
+    cycle_folders: list[str] = field(default_factory=list)
+    other_files: list[Path] = field(default_factory=list)
+    metadata_samples: list[dict[str, Any]] = field(default_factory=list)
+    filename_patterns: list[str] = field(default_factory=list)
+
+    def summary(self) -> str:
+        """Generate a human-readable summary."""
+        lines = []
+        if not self.has_data:
+            lines.append("No existing data found.")
+            return "\n".join(lines)
+
+        lines.append(f"Found {self.image_count} image files ({self.total_size_mb:.1f} MB total)")
+
+        if self.cycle_folders:
+            lines.append(f"Cycle folders detected: {', '.join(self.cycle_folders)}")
+
+        if self.filename_patterns:
+            lines.append(f"Filename patterns: {', '.join(self.filename_patterns[:5])}")
+
+        if self.other_files:
+            lines.append(f"Other files: {len(self.other_files)}")
+
+        return "\n".join(lines)
+
+
+@dataclass
+class ImageMetadata:
+    """Metadata extracted from an image file."""
+
+    path: Path
+    filename: str
+    size_mb: float
+    dimensions: tuple[int, ...] | None = None
+    dtype: str | None = None
+    channels: int | None = None
+    channel_names: list[str] = field(default_factory=list)
+    pixel_size: float | None = None
+    pixel_unit: str | None = None
+    software: str | None = None
+    datetime: str | None = None
+    description: str | None = None
+    is_ome: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def summary(self) -> str:
+        """Generate a human-readable summary."""
+        lines = [f"File: {self.filename}"]
+        if self.dimensions:
+            lines.append(f"  Dimensions: {self.dimensions}")
+        if self.dtype:
+            lines.append(f"  Data type: {self.dtype}")
+        if self.channels:
+            lines.append(f"  Channels: {self.channels}")
+        if self.channel_names:
+            lines.append(f"  Channel names: {', '.join(self.channel_names[:5])}")
+        if self.pixel_size:
+            lines.append(f"  Pixel size: {self.pixel_size} {self.pixel_unit or 'units'}")
+        if self.software:
+            lines.append(f"  Software: {self.software}")
+        if self.datetime:
+            lines.append(f"  Acquired: {self.datetime}")
+        return "\n".join(lines)
+
+
+def scan_existing_data(
+    directory: str | Path,
+    max_depth: int = 3,
+    sample_count: int = 5,
+) -> ExistingDataReport:
+    """
+    Scan a directory for existing data files.
+
+    Parameters
+    ----------
+    directory : str or Path
+        Directory to scan
+    max_depth : int
+        Maximum depth to scan for files
+    sample_count : int
+        Number of images to sample for metadata extraction
+
+    Returns
+    -------
+    ExistingDataReport
+        Report of existing data found
+    """
+    import re
+
+    directory = Path(directory)
+    report = ExistingDataReport()
+
+    if not directory.exists():
+        return report
+
+    image_files = []
+    other_files = []
+    cycle_pattern = re.compile(r"^cyc\d+$|^cycle\d+$|^Cycle\d+$", re.IGNORECASE)
+    filename_bases = set()
+
+    def scan_dir(path: Path, depth: int = 0):
+        if depth > max_depth:
+            return
+        try:
+            for item in path.iterdir():
+                if item.is_dir():
+                    # Check for cycle folder pattern
+                    if cycle_pattern.match(item.name):
+                        report.cycle_folders.append(item.name)
+                    scan_dir(item, depth + 1)
+                elif item.is_file():
+                    # Check file extension
+                    suffix = item.suffix.lower()
+                    # Handle .ome.tif specially
+                    if item.name.lower().endswith(".ome.tif") or item.name.lower().endswith(
+                        ".ome.tiff"
+                    ):
+                        suffix = ".ome.tif"
+
+                    if suffix in IMAGE_EXTENSIONS:
+                        image_files.append(item)
+                        # Extract filename pattern (remove numbers)
+                        base = re.sub(r"\d+", "#", item.stem)
+                        filename_bases.add(base)
+                    elif suffix not in {".pyc", ".log", ".json", ".md", ".txt", ".gitignore"}:
+                        other_files.append(item)
+        except PermissionError:
+            pass
+
+    scan_dir(directory)
+
+    report.image_files = image_files
+    report.image_count = len(image_files)
+    report.other_files = other_files
+    report.has_data = len(image_files) > 0 or len(other_files) > 0
+    report.filename_patterns = sorted(filename_bases)[:10]
+
+    # Calculate total size
+    try:
+        report.total_size_mb = sum(f.stat().st_size for f in image_files) / (1024 * 1024)
+    except (OSError, PermissionError):
+        pass
+
+    # Sort cycle folders naturally
+    report.cycle_folders = sorted(set(report.cycle_folders))
+
+    # Extract metadata from sample images
+    if image_files and sample_count > 0:
+        sample_files = image_files[: min(sample_count, len(image_files))]
+        for img_path in sample_files:
+            try:
+                metadata = extract_image_metadata(img_path)
+                if metadata:
+                    report.metadata_samples.append(
+                        {
+                            "file": str(img_path.name),
+                            "dimensions": metadata.dimensions,
+                            "channels": metadata.channels,
+                            "channel_names": metadata.channel_names,
+                            "pixel_size": metadata.pixel_size,
+                            "pixel_unit": metadata.pixel_unit,
+                            "is_ome": metadata.is_ome,
+                        }
+                    )
+            except Exception:
+                pass
+
+    return report
+
+
+def extract_image_metadata(path: str | Path) -> ImageMetadata | None:
+    """
+    Extract metadata from an image file.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to image file
+
+    Returns
+    -------
+    ImageMetadata or None
+        Extracted metadata, or None if extraction failed
+    """
+    path = Path(path)
+
+    if not path.exists():
+        return None
+
+    metadata = ImageMetadata(
+        path=path,
+        filename=path.name,
+        size_mb=path.stat().st_size / (1024 * 1024),
+    )
+
+    suffix = path.suffix.lower()
+
+    # Try tifffile for TIFF images
+    if suffix in {".tif", ".tiff"} or path.name.lower().endswith((".ome.tif", ".ome.tiff")):
+        try:
+            import tifffile
+
+            with tifffile.TiffFile(str(path)) as tif:
+                # Basic dimensions
+                series = tif.series[0] if tif.series else None
+                if series:
+                    metadata.dimensions = series.shape
+                    metadata.dtype = str(series.dtype)
+                elif tif.pages:
+                    page = tif.pages[0]
+                    metadata.dimensions = (len(tif.pages), page.shape[0], page.shape[1])
+                    metadata.dtype = str(page.dtype)
+
+                # Check for OME metadata
+                if tif.ome_metadata:
+                    metadata.is_ome = True
+                    _parse_ome_metadata(tif.ome_metadata, metadata)
+
+                # Check TIFF tags
+                if tif.pages:
+                    page = tif.pages[0]
+                    tags = page.tags
+
+                    # Software
+                    if "Software" in tags:
+                        metadata.software = str(tags["Software"].value)[:100]
+
+                    # DateTime
+                    if "DateTime" in tags:
+                        metadata.datetime = str(tags["DateTime"].value)
+
+                    # ImageDescription (may contain metadata)
+                    if "ImageDescription" in tags:
+                        desc = str(tags["ImageDescription"].value)
+                        metadata.description = desc[:500] if len(desc) > 500 else desc
+
+                    # Resolution
+                    if "XResolution" in tags and "ResolutionUnit" in tags:
+                        try:
+                            xres = tags["XResolution"].value
+                            if isinstance(xres, tuple):
+                                xres = xres[0] / xres[1] if xres[1] else xres[0]
+                            unit = tags["ResolutionUnit"].value
+                            if unit == 3:  # centimeter
+                                metadata.pixel_size = 10000 / xres  # convert to microns
+                                metadata.pixel_unit = "um"
+                            elif unit == 2:  # inch
+                                metadata.pixel_size = 25400 / xres
+                                metadata.pixel_unit = "um"
+                        except (TypeError, ZeroDivisionError):
+                            pass
+
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
+    # Try to determine channels from shape
+    if metadata.dimensions:
+        shape = metadata.dimensions
+        if len(shape) >= 3:
+            # Assume smallest dim < 10 is channels
+            for i, dim in enumerate(shape):
+                if dim < 10 and dim > 1:
+                    metadata.channels = dim
+                    break
+
+    return metadata
+
+
+def _parse_ome_metadata(ome_xml: str, metadata: ImageMetadata) -> None:
+    """Parse OME-XML metadata and populate ImageMetadata."""
+    try:
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(ome_xml)
+        ns = {"ome": "http://www.openmicroscopy.org/Schemas/OME/2016-06"}
+
+        # Try to find Image element
+        image = root.find(".//ome:Image", ns)
+        if image is None:
+            # Try without namespace
+            image = root.find(".//Image")
+
+        if image is not None:
+            # Get acquisition date
+            acq_date = image.get("AcquisitionDate")
+            if acq_date:
+                metadata.datetime = acq_date
+
+        # Find Pixels element
+        pixels = root.find(".//ome:Pixels", ns)
+        if pixels is None:
+            pixels = root.find(".//Pixels")
+
+        if pixels is not None:
+            # Get physical sizes
+            px_size = pixels.get("PhysicalSizeX")
+            if px_size:
+                try:
+                    metadata.pixel_size = float(px_size)
+                    metadata.pixel_unit = pixels.get("PhysicalSizeXUnit", "um")
+                except ValueError:
+                    pass
+
+            # Get channel count and names
+            channels = root.findall(".//ome:Channel", ns)
+            if not channels:
+                channels = root.findall(".//Channel")
+
+            if channels:
+                metadata.channels = len(channels)
+                metadata.channel_names = []
+                for ch in channels:
+                    name = ch.get("Name") or ch.get("ID", "")
+                    if name:
+                        metadata.channel_names.append(name)
+
+    except Exception:
+        pass
+
 
 @dataclass
 class ProjectPaths:
@@ -236,6 +584,26 @@ class KintsugiProject:
         return Path.cwd()
 
     @classmethod
+    def scan_directory(cls, root: str | Path) -> ExistingDataReport:
+        """
+        Scan a directory for existing data before project creation.
+
+        Use this to check for existing files and extract metadata
+        before calling create().
+
+        Parameters
+        ----------
+        root : str or Path
+            Directory to scan
+
+        Returns
+        -------
+        ExistingDataReport
+            Report of existing data found
+        """
+        return scan_existing_data(root)
+
+    @classmethod
     def create(
         cls,
         root: str | Path,
@@ -243,9 +611,14 @@ class KintsugiProject:
         description: str = "",
         kintsugi_path: str | Path | None = None,
         setup_notebooks: bool = True,
+        existing_data_report: ExistingDataReport | None = None,
+        adopt_existing_data: bool = False,
     ) -> KintsugiProject:
         """
         Create a new KINTSUGI project.
+
+        IMPORTANT: This method will NEVER delete existing files. It only creates
+        new directories and files. Existing data is preserved.
 
         Parameters
         ----------
@@ -259,6 +632,11 @@ class KintsugiProject:
             Path to KINTSUGI repository
         setup_notebooks : bool
             Whether to copy notebook templates
+        existing_data_report : ExistingDataReport, optional
+            Pre-scanned data report (avoids re-scanning)
+        adopt_existing_data : bool
+            If True and existing data is found, automatically organize it
+            into the project structure (move to data/raw/)
 
         Returns
         -------
@@ -277,6 +655,10 @@ class KintsugiProject:
             )
             return cls.load(root)
 
+        # Scan for existing data if not provided
+        if existing_data_report is None:
+            existing_data_report = scan_existing_data(root)
+
         # Create project
         config = ProjectConfig(
             name=name or root.name,
@@ -285,8 +667,22 @@ class KintsugiProject:
 
         project = cls(root, config, kintsugi_path)
 
-        # Create directory structure
+        # Store discovered metadata in project config
+        if existing_data_report.has_data:
+            config.parameters["discovered_data"] = {
+                "image_count": existing_data_report.image_count,
+                "total_size_mb": existing_data_report.total_size_mb,
+                "cycle_folders": existing_data_report.cycle_folders,
+                "filename_patterns": existing_data_report.filename_patterns,
+                "metadata_samples": existing_data_report.metadata_samples,
+            }
+
+        # Create directory structure (uses exist_ok=True, never overwrites)
         project.paths.create_all()
+
+        # Handle existing data adoption
+        if adopt_existing_data and existing_data_report.has_data:
+            project._adopt_existing_data(existing_data_report)
 
         # Copy notebooks if requested
         if setup_notebooks:
@@ -314,12 +710,51 @@ class KintsugiProject:
         print("  +-- .claude/          <- Claude Code config")
         print("  +-- .vscode/          <- VS Code config")
         print()
+
+        if existing_data_report.has_data:
+            print("Existing data detected:")
+            print(f"  {existing_data_report.image_count} image files")
+            if existing_data_report.cycle_folders:
+                print(f"  Cycles: {', '.join(existing_data_report.cycle_folders)}")
+            print()
+
         print("Next steps:")
-        print("  1. Copy raw images to data/raw/")
+        if existing_data_report.has_data and not adopt_existing_data:
+            print("  1. Review existing data locations")
+            print("  2. Move/copy raw images to data/raw/ if needed")
+        else:
+            print("  1. Copy raw images to data/raw/")
         print("  2. Open folder in VS Code: code .")
         print("  3. Start with notebooks/1_Single_Channel_Eval.ipynb")
 
         return project
+
+    def _adopt_existing_data(self, report: ExistingDataReport) -> None:
+        """
+        Organize existing data into the project structure.
+
+        Moves cycle folders and images to data/raw/ while preserving structure.
+        NEVER deletes data - only moves it within the project.
+        """
+        import shutil
+
+        # If cycle folders exist at root level, move them to raw
+        for cycle_name in report.cycle_folders:
+            src = self.root / cycle_name
+            if src.exists() and src.is_dir():
+                dest = self.paths.raw / cycle_name
+                if not dest.exists():
+                    print(f"  Moving {cycle_name}/ -> data/raw/{cycle_name}/")
+                    shutil.move(str(src), str(dest))
+
+        # Check for images directly in root (not in cycle folders)
+        for img_path in report.image_files:
+            # Only move images that are directly in root (not in subdirs)
+            if img_path.parent == self.root:
+                dest = self.paths.raw / img_path.name
+                if not dest.exists():
+                    print(f"  Moving {img_path.name} -> data/raw/{img_path.name}")
+                    shutil.move(str(img_path), str(dest))
 
     @classmethod
     def load(cls, root: str | Path) -> KintsugiProject:

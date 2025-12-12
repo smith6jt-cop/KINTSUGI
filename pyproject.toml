@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kintsugi"
-version = "1.2.1"
+version = "1.2.3"
 description = "Multi-cycle immunofluorescence image registration and analysis pipeline"
 readme = "README.md"
 license = {text = "MIT"}

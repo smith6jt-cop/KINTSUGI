@@ -32,25 +32,19 @@ my_project/
 
 The `.claude/settings.local.json` file is **automatically created** with the MCP server configuration.
 
-### Manual Claude Code Configuration
+### Adding MCP Support to Existing Projects
 
-If you're not using `kintsugi init`, or need to add MCP support to an existing project, create `.claude/settings.local.json` manually:
+If you're not using `kintsugi init`, or need to add MCP support to an existing project, run:
 
-```json
-{
-    "mcpServers": {
-        "kintsugi": {
-            "command": "kintsugi",
-            "args": ["mcp", "start"],
-            "cwd": "/path/to/your/project"
-        }
-    }
-}
-```
-
-You can also generate this configuration with:
 ```bash
 kintsugi mcp config /path/to/project
+```
+
+This automatically creates `.claude/settings.local.json` with the proper configuration. If the file already exists, it will add the KINTSUGI MCP server to your existing configuration.
+
+Use `--print-only` to display the configuration without creating files:
+```bash
+kintsugi mcp config /path/to/project --print-only
 ```
 
 ### MCP Server Commands

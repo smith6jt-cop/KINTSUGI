@@ -57,8 +57,8 @@ Use Claude Code with the KINTSUGI MCP server for interactive, AI-assisted signal
 **Setup:**
 ```bash
 pip install kintsugi[claude]
-kintsugi mcp config /path/to/project
-# Add output to .claude/settings.local.json
+# If using kintsugi init, Claude config is automatic
+# For existing projects: kintsugi mcp config /path/to/project
 ```
 
 **Usage:**
