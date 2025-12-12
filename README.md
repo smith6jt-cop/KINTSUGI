@@ -11,7 +11,6 @@ Smith, J. A. et al. Protocol for processing and analyzing multiplexed images imp
 
 </p>
 
-[![DOI](https://zenodo.org/badge/794118146.svg)](https://doi.org/10.5281/zenodo.14984518)
 [![CI](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/ci.yml/badge.svg)](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/ci.yml)
 
 <div>
