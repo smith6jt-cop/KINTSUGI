@@ -335,18 +335,23 @@ def deconvolve(stack: np.ndarray, psf: np.ndarray,
     if psf.ndim != 3:
         raise ValueError(f"Expected 3D PSF, got {psf.ndim}D")
 
-    # Determine device
-    use_gpu = False
-    if device.lower() == 'gpu':
-        if not CUPY_AVAILABLE:
-            warnings.warn("GPU requested but CuPy not available. Using CPU.")
-        else:
-            use_gpu = True
-    elif device.lower() == 'auto':
-        use_gpu = CUPY_AVAILABLE
+    # Use unified device detection from chunking module for consistency
+    # This ensures memory estimation and actual processing use the same device
+    from .chunking import detect_best_device
+
+    use_gpu, device_id, device_name = detect_best_device(device)
+
+    # Set the CuPy device if using GPU
+    if use_gpu and CUPY_AVAILABLE:
+        try:
+            cp.cuda.Device(device_id).use()
+        except Exception as e:
+            warnings.warn(f"Failed to set GPU device {device_id}: {e}. Using CPU.")
+            use_gpu = False
+            device_name = "CPU"
 
     if verbose:
-        print(f"  Using {'GPU' if use_gpu else 'CPU'} for deconvolution")
+        print(f"  Using {device_name} for deconvolution")
 
     # Convert to float32
     original_dtype = stack.dtype

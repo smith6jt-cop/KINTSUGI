@@ -16,7 +16,7 @@ import warnings
 
 from .psf import generate_psf, calculate_psf_size
 from .deconvolution import deconvolve, deconvolve_stack, CUPY_AVAILABLE
-from .chunking import get_available_memory, calculate_chunks
+from .chunking import get_available_memory, calculate_chunks, detect_best_device
 from .io import (
     get_stack_info, load_stack, save_stack,
     write_parameters_file
@@ -168,12 +168,18 @@ class KDecon:
             print("KDecon - KINTSUGI Python Deconvolution")
             print("=" * 60)
 
-        # Get available memory and determine device
-        available_mem, device_name = get_available_memory(self.device)
+        # Use unified device detection - this ensures consistency between
+        # memory estimation and actual processing (fixes OOM bug)
+        use_gpu, device_id, device_name = detect_best_device(self.device)
+
+        # Get available memory for the selected device
+        available_mem, _ = get_available_memory(self.device, device_id=device_id)
 
         if self.verbose:
             print(f"\nDevice: {device_name}")
             print(f"Available memory: {available_mem / 1e9:.2f} GB")
+            if use_gpu and device_id >= 0:
+                print(f"GPU Device ID: {device_id}")
 
         # Load stack
         if self.verbose:

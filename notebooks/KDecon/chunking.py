@@ -19,40 +19,145 @@ except ImportError:
     cp = None
 
 
-def get_available_memory(device: str = 'auto') -> Tuple[int, str]:
+def detect_best_device(device: str = 'auto') -> Tuple[bool, int, str]:
     """
-    Get available memory on the specified device.
+    Detect the best device to use, prioritizing multi-GPU setups.
+
+    This function provides unified device detection that should be used
+    by both memory estimation and actual processing to avoid mismatches.
 
     Parameters
     ----------
     device : str
-        'GPU', 'CPU', or 'auto'
+        'GPU', 'CPU', 'multi-gpu', or 'auto'
+
+    Returns
+    -------
+    tuple
+        (use_gpu: bool, device_id: int, device_name: str)
+        device_id is -1 for CPU, otherwise the GPU device ID
+    """
+    if device.lower() == 'cpu':
+        return False, -1, "CPU"
+
+    # Try to use the centralized GPU manager first
+    try:
+        import sys
+        from pathlib import Path
+
+        # Add src to path if needed
+        repo_root = Path(__file__).resolve().parents[2]
+        src_path = repo_root / 'src'
+        if src_path.exists() and str(src_path) not in sys.path:
+            sys.path.insert(0, str(src_path))
+
+        from kintsugi.gpu import get_gpu_manager, has_multi_gpu
+
+        gpu = get_gpu_manager()
+
+        if gpu.has_gpu and gpu.cupy_available:
+            # Multi-GPU takes priority when 'auto' - select GPU with most free memory
+            if has_multi_gpu() and device.lower() in ('auto', 'multi-gpu'):
+                best_device = gpu.primary_device
+                best_free = 0
+
+                for info in gpu.gpu_info:
+                    mem_info = gpu.get_memory_info(info.device_id)
+                    if mem_info['free'] > best_free:
+                        best_free = mem_info['free']
+                        best_device = info.device_id
+
+                # Set CuPy to use this device
+                cp.cuda.Device(best_device).use()
+                device_name = f"GPU {best_device} (Multi-GPU: {gpu.device_count} available)"
+                return True, best_device, device_name
+
+            # Single GPU or explicit GPU request
+            device_id = gpu.primary_device
+            device_name = gpu.gpu_info[0].name if gpu.gpu_info else "GPU"
+            cp.cuda.Device(device_id).use()
+            return True, device_id, f"GPU ({device_name})"
+
+    except ImportError:
+        pass
+    except Exception as e:
+        warnings.warn(f"GPUManager not available, using direct detection: {e}")
+
+    # Fallback to direct CuPy detection
+    if device.lower() in ('gpu', 'auto', 'multi-gpu') and CUPY_AVAILABLE:
+        try:
+            # Test that GPU is actually accessible, not just importable
+            device_count = cp.cuda.runtime.getDeviceCount()
+            if device_count > 0:
+                # Get the device with most free memory
+                best_device = 0
+                best_free = 0
+
+                for i in range(device_count):
+                    with cp.cuda.Device(i):
+                        free_mem, total_mem = cp.cuda.Device(i).mem_info
+                        if free_mem > best_free:
+                            best_free = free_mem
+                            best_device = i
+
+                cp.cuda.Device(best_device).use()
+                props = cp.cuda.Device(best_device)
+
+                if device_count > 1:
+                    device_name = f"GPU {best_device} (Multi-GPU: {device_count} available)"
+                else:
+                    device_name = f"GPU ({props.name if hasattr(props, 'name') else best_device})"
+
+                return True, best_device, device_name
+
+        except Exception as e:
+            if device.lower() == 'gpu':
+                warnings.warn(f"GPU requested but not accessible: {e}. Falling back to CPU.")
+
+    # CPU fallback
+    return False, -1, "CPU"
+
+
+def get_available_memory(device: str = 'auto', device_id: int = None) -> Tuple[int, str]:
+    """
+    Get available memory on the specified device.
+
+    Uses unified device detection to ensure consistency between memory
+    estimation and actual processing.
+
+    Parameters
+    ----------
+    device : str
+        'GPU', 'CPU', 'multi-gpu', or 'auto'
+    device_id : int, optional
+        Specific GPU device ID to query. If None, auto-detects best device.
 
     Returns
     -------
     tuple
         (available_bytes, device_name)
     """
-    if device.lower() == 'gpu' or (device.lower() == 'auto' and CUPY_AVAILABLE):
-        if CUPY_AVAILABLE:
-            try:
-                mempool = cp.get_default_memory_pool()
-                # Get device memory info
-                device_props = cp.cuda.Device()
-                total_mem = device_props.mem_info[1]
-                used_mem = mempool.used_bytes()
-                free_mem = device_props.mem_info[0]
+    # Use unified device detection
+    use_gpu, detected_device_id, device_name = detect_best_device(device)
 
-                # Be conservative - use free memory
-                return free_mem, f"GPU ({device_props.name})"
-            except Exception as e:
-                warnings.warn(f"Could not get GPU memory: {e}. Using CPU.")
+    if device_id is not None:
+        detected_device_id = device_id
+
+    if use_gpu and CUPY_AVAILABLE:
+        try:
+            with cp.cuda.Device(detected_device_id):
+                free_mem, total_mem = cp.cuda.Device(detected_device_id).mem_info
+                return free_mem, device_name
+        except Exception as e:
+            warnings.warn(f"Could not get GPU memory: {e}. Falling back to CPU.")
+            # Update device_name to reflect fallback
+            device_name = "CPU (GPU memory detection failed)"
 
     # CPU memory
     try:
         import psutil
         mem = psutil.virtual_memory()
-        return mem.available, "CPU"
+        return mem.available, device_name if "CPU" in device_name else "CPU"
     except ImportError:
         # Fallback: assume 8GB available
         warnings.warn("psutil not available, assuming 8GB memory")
