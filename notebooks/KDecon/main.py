@@ -16,7 +16,7 @@ import warnings
 
 from .psf import generate_psf, calculate_psf_size
 from .deconvolution import deconvolve, deconvolve_stack, CUPY_AVAILABLE
-from .chunking import get_available_memory, calculate_chunks, detect_best_device
+from .chunking import get_available_memory, calculate_chunks, detect_best_device, estimate_padded_shape
 from .io import (
     get_stack_info, load_stack, save_stack,
     write_parameters_file
@@ -145,8 +145,7 @@ class KDecon:
         input_path : str or Path
             Directory containing input TIFF files
         output_path : str or Path, optional
-            Directory for output files. If None, creates 'deconvolved'
-            subdirectory in input_path.
+            Directory for output files. If None, uses input_path as output.
         bit_depth : int
             Output bit depth: 16 or 32 (default 16)
 
@@ -159,7 +158,7 @@ class KDecon:
         input_path = Path(input_path)
 
         if output_path is None:
-            output_path = input_path / 'deconvolved'
+            output_path = input_path  # Output to same directory as input
         else:
             output_path = Path(output_path)
 
@@ -190,9 +189,17 @@ class KDecon:
         # Get raw max for scaling
         raw_max = np.max(stack)
 
-        # Determine number of chunks
+        # Calculate the PADDED shape that will actually be used by deconvolution
+        # This is critical for accurate memory estimation (fixes OOM bug)
+        padded_shape = estimate_padded_shape(stack.shape, self.psf.shape)
+
+        if self.verbose:
+            padding_ratio = np.prod(padded_shape) / np.prod(stack.shape)
+            print(f"FFT padding: {stack.shape} → {padded_shape} ({padding_ratio:.2f}x voxels)")
+
+        # Determine number of chunks using PADDED shape for accurate memory estimation
         n_chunks = calculate_chunks(
-            stack.shape,
+            padded_shape,  # Use padded shape, not original!
             stack.dtype,
             int(available_mem * self.max_memory_fraction),
             memory_factor=6.0,
@@ -434,11 +441,10 @@ def decon(base_dir: Union[str, Path],
         verbose=True
     )
 
-    # Process
-    output_dir = dest / 'deconvolved'
-    kdecon.process(source, output_dir)
+    # Process - output directly to dest (no extra 'deconvolved' subfolder)
+    kdecon.process(source, dest)
 
-    return str(output_dir)
+    return str(dest)
 
 
 def check_gpu_available() -> Tuple[bool, str]:

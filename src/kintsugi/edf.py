@@ -47,6 +47,98 @@ def _check_cupy_available() -> bool:
         return False
 
 
+def _detect_best_device(device: str = "auto") -> tuple[bool, int, str]:
+    """
+    Detect the best device to use, prioritizing multi-GPU setups.
+
+    This provides unified device detection for consistency with deconvolution.
+
+    Parameters
+    ----------
+    device : str
+        'gpu', 'cpu', 'multi-gpu', or 'auto'
+
+    Returns
+    -------
+    tuple
+        (use_gpu: bool, device_id: int, device_name: str)
+        device_id is -1 for CPU, otherwise the GPU device ID
+    """
+    if device.lower() == "cpu":
+        return False, -1, "CPU"
+
+    # Try to use the centralized GPU manager first
+    try:
+        from kintsugi.gpu import get_gpu_manager, has_multi_gpu
+
+        gpu = get_gpu_manager()
+
+        if gpu.has_gpu and gpu.cupy_available:
+            import cupy as cp
+
+            # Multi-GPU takes priority when 'auto' - select GPU with most free memory
+            if has_multi_gpu() and device.lower() in ("auto", "multi-gpu"):
+                best_device = gpu.primary_device
+                best_free = 0
+
+                for info in gpu.gpu_info:
+                    mem_info = gpu.get_memory_info(info.device_id)
+                    if mem_info["free"] > best_free:
+                        best_free = mem_info["free"]
+                        best_device = info.device_id
+
+                # Set CuPy to use this device
+                cp.cuda.Device(best_device).use()
+                device_name = f"GPU {best_device} (Multi-GPU: {gpu.device_count} available)"
+                return True, best_device, device_name
+
+            # Single GPU or explicit GPU request
+            device_id = gpu.primary_device
+            device_name = gpu.gpu_info[0].name if gpu.gpu_info else "GPU"
+            cp.cuda.Device(device_id).use()
+            return True, device_id, f"GPU ({device_name})"
+
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"GPUManager not available, using direct detection: {e}")
+
+    # Fallback to direct CuPy detection
+    if device.lower() in ("gpu", "auto", "multi-gpu") and _check_cupy_available():
+        try:
+            import cupy as cp
+
+            # Test that GPU is actually accessible
+            device_count = cp.cuda.runtime.getDeviceCount()
+            if device_count > 0:
+                # Get the device with most free memory
+                best_device = 0
+                best_free = 0
+
+                for i in range(device_count):
+                    with cp.cuda.Device(i):
+                        free_mem, total_mem = cp.cuda.Device(i).mem_info
+                        if free_mem > best_free:
+                            best_free = free_mem
+                            best_device = i
+
+                cp.cuda.Device(best_device).use()
+
+                if device_count > 1:
+                    device_name = f"GPU {best_device} (Multi-GPU: {device_count} available)"
+                else:
+                    device_name = f"GPU {best_device}"
+
+                return True, best_device, device_name
+
+        except Exception as e:
+            if device.lower() == "gpu":
+                logger.warning(f"GPU requested but not accessible: {e}. Falling back to CPU.")
+
+    # CPU fallback
+    return False, -1, "CPU"
+
+
 def _check_clij2_available() -> bool:
     """Check if PyImageJ/CLIJ2 is available.
 
@@ -76,6 +168,7 @@ def extended_depth_of_focus_variance(
     radius_y: int = 5,
     sigma: float = 20.0,
     use_gpu: bool = False,
+    device: str = "auto",
 ) -> np.ndarray:
     """
     Extended depth of focus using local variance projection.
@@ -99,6 +192,10 @@ def extended_depth_of_focus_variance(
         Larger values = more smoothing = less noise sensitivity.
     use_gpu : bool, default=False
         If True and CuPy is available, use GPU acceleration.
+        Deprecated: Use `device` parameter instead.
+    device : str, default='auto'
+        Device selection: 'auto', 'gpu', 'cpu', or 'multi-gpu'.
+        When 'auto', prioritizes multi-GPU and selects best available GPU.
 
     Returns
     -------
@@ -131,26 +228,36 @@ def extended_depth_of_focus_variance(
     original_dtype = stack.dtype
     n_slices, height, width = stack.shape
 
-    # Select backend
-    if use_gpu and _check_cupy_available():
+    # Use unified device detection (prioritizes multi-GPU)
+    # If use_gpu is explicitly set, convert to device string for backwards compatibility
+    if use_gpu and device == "auto":
+        device = "gpu"
+    elif not use_gpu and device == "auto":
+        # Keep as auto - let detection decide
+        pass
+
+    detected_gpu, device_id, device_name = _detect_best_device(device)
+
+    # Select backend based on detected device
+    if detected_gpu:
         import cupy as cp
         from cupyx.scipy.ndimage import gaussian_filter as gpu_gaussian_filter
         from cupyx.scipy.ndimage import uniform_filter as gpu_uniform_filter
+
+        # Ensure we're using the selected device
+        cp.cuda.Device(device_id).use()
 
         xp = cp
         stack_gpu = cp.asarray(stack.astype(np.float32))
         uf = gpu_uniform_filter
         gf = gpu_gaussian_filter
-        logger.info("Using CuPy GPU backend for EDF")
+        logger.info(f"Using {device_name} for EDF")
     else:
         xp = np
         stack_gpu = stack.astype(np.float32)
         uf = uniform_filter
         gf = gaussian_filter
-        if use_gpu:
-            logger.warning("GPU requested but CuPy not available, falling back to NumPy")
-        else:
-            logger.info("Using NumPy CPU backend for EDF")
+        logger.info("Using NumPy CPU backend for EDF")
 
     # Window size for variance calculation
     window_size = (2 * radius_y + 1, 2 * radius_x + 1)
@@ -177,7 +284,8 @@ def extended_depth_of_focus_variance(
     result = stack_gpu[max_var_idx, y_idx, x_idx]
 
     # Convert back to numpy if using GPU
-    if use_gpu and _check_cupy_available():
+    if detected_gpu:
+        import cupy as cp
         result = cp.asnumpy(result)
 
     # Restore original dtype
@@ -192,6 +300,7 @@ def extended_depth_of_focus_laplacian(
     stack: np.ndarray,
     kernel_size: int = 5,
     use_gpu: bool = False,
+    device: str = "auto",
 ) -> np.ndarray:
     """
     Extended depth of focus using Laplacian gradient method.
@@ -207,7 +316,11 @@ def extended_depth_of_focus_laplacian(
     kernel_size : int, default=5
         Size of Gaussian blur kernel applied before Laplacian calculation
     use_gpu : bool, default=False
-        If True and CuPy available, use GPU acceleration
+        If True and CuPy available, use GPU acceleration.
+        Deprecated: Use `device` parameter instead.
+    device : str, default='auto'
+        Device selection: 'auto', 'gpu', 'cpu', or 'multi-gpu'.
+        When 'auto', prioritizes multi-GPU and selects best available GPU.
 
     Returns
     -------
@@ -227,16 +340,26 @@ def extended_depth_of_focus_laplacian(
     # Laplacian kernel
     laplacian_kernel = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float32)
 
-    if use_gpu and _check_cupy_available():
+    # Use unified device detection (prioritizes multi-GPU)
+    if use_gpu and device == "auto":
+        device = "gpu"
+
+    detected_gpu, device_id, device_name = _detect_best_device(device)
+
+    if detected_gpu:
         import cupy as cp
         from cupyx.scipy.ndimage import convolve as gpu_convolve
         from cupyx.scipy.ndimage import gaussian_filter as gpu_gaussian_filter
+
+        # Ensure we're using the selected device
+        cp.cuda.Device(device_id).use()
 
         xp = cp
         stack_gpu = cp.asarray(stack.astype(np.float32))
         laplacian_kernel = cp.asarray(laplacian_kernel)
         gf = gpu_gaussian_filter
         conv = gpu_convolve
+        logger.info(f"Using {device_name} for EDF (Laplacian)")
     else:
         from scipy.ndimage import convolve
 
@@ -244,6 +367,7 @@ def extended_depth_of_focus_laplacian(
         stack_gpu = stack.astype(np.float32)
         gf = gaussian_filter
         conv = convolve
+        logger.info("Using NumPy CPU backend for EDF (Laplacian)")
 
     # Calculate Laplacian magnitude for each slice
     focus_measures = xp.zeros((n_slices, height, width), dtype=xp.float32)
@@ -265,9 +389,8 @@ def extended_depth_of_focus_laplacian(
     y_idx, x_idx = xp.meshgrid(xp.arange(height), xp.arange(width), indexing="ij")
     result = stack_gpu[max_focus_idx, y_idx, x_idx]
 
-    if use_gpu and _check_cupy_available():
+    if detected_gpu:
         import cupy as cp
-
         result = cp.asnumpy(result)
 
     if np.issubdtype(original_dtype, np.integer):
@@ -281,6 +404,7 @@ def edf_tiled(
     tile_size: tuple[int, int] = (3000, 3000),
     overlap: int = 50,
     method: Literal["variance", "laplacian"] = "variance",
+    device: str = "auto",
     **kwargs,
 ) -> np.ndarray:
     """
@@ -299,6 +423,9 @@ def edf_tiled(
         Pixel overlap between tiles for seamless blending
     method : {'variance', 'laplacian'}, default='variance'
         EDF algorithm to use
+    device : str, default='auto'
+        Device selection: 'auto', 'gpu', 'cpu', or 'multi-gpu'.
+        When 'auto', prioritizes multi-GPU and selects best available GPU.
     **kwargs
         Additional arguments passed to the EDF function
 
@@ -375,8 +502,8 @@ def edf_tiled(
             # Extract tile
             tile = stack[:, y_start:y_end, x_start:x_end]
 
-            # Process tile
-            tile_result = edf_func(tile, **kwargs)
+            # Process tile (pass device parameter explicitly)
+            tile_result = edf_func(tile, device=device, **kwargs)
 
             # Create blending weights for this tile
             tile_blend = create_blend_weights(y_end - y_start, x_end - x_start, overlap)
@@ -518,7 +645,9 @@ class EDFProcessor:
         ij_instance : optional
             Pre-initialized ImageJ instance for CLIJ2 backend
         device : str, optional
-            OpenCL device name for CLIJ2 backend
+            Device selection: 'auto', 'gpu', 'cpu', or 'multi-gpu'.
+            For CLIJ2 backend, this is the OpenCL device name.
+            For CuPy/NumPy backends, 'auto' prioritizes multi-GPU.
 
         Returns
         -------
@@ -547,25 +676,28 @@ class EDFProcessor:
                 stack, radius_x, radius_y, sigma, tiles or (1, 1), ij_instance, device
             )
         else:
-            use_gpu = self.backend == "cupy"
+            # Determine device for CuPy/NumPy backends
+            # Use 'auto' for cupy backend, 'cpu' for numpy backend
+            if device is None:
+                device = "auto" if self.backend == "cupy" else "cpu"
 
             if tile_size is not None:
                 return edf_tiled(
                     stack,
                     tile_size=tile_size,
                     method=self.method,
+                    device=device,
                     radius_x=radius_x,
                     radius_y=radius_y,
                     sigma=sigma,
-                    use_gpu=use_gpu,
                 )
             else:
                 if self.method == "variance":
                     return extended_depth_of_focus_variance(
-                        stack, radius_x, radius_y, sigma, use_gpu
+                        stack, radius_x, radius_y, sigma, device=device
                     )
                 else:
-                    return extended_depth_of_focus_laplacian(stack, use_gpu=use_gpu)
+                    return extended_depth_of_focus_laplacian(stack, device=device)
 
     def _process_clij2(
         self,

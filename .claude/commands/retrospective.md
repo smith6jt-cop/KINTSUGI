@@ -1,6 +1,6 @@
 ---
 description: Save learnings from the current session as a new skill in the registry
-allowed-tools: Glob, Grep, Read, Write, Bash(git:*), Bash(gh:*)
+allowed-tools: Glob, Grep, Read, Write
 ---
 
 # Skills Registry Retrospective

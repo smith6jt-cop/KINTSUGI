@@ -19,6 +19,53 @@ except ImportError:
     cp = None
 
 
+def _find_good_fft_length(n: int) -> int:
+    """
+    Find the next integer >= n whose largest prime factor is <= 5.
+
+    FFT is most efficient for sizes that are products of small primes (2, 3, 5).
+    """
+    def max_prime_factor(num):
+        if num <= 1:
+            return 1
+        factor = 2
+        max_factor = 1
+        while factor * factor <= num:
+            while num % factor == 0:
+                max_factor = factor
+                num //= factor
+            factor += 1
+        if num > 1:
+            max_factor = num
+        return max_factor
+
+    while max_prime_factor(n) > 5:
+        n += 1
+    return n
+
+
+def estimate_padded_shape(shape: Tuple[int, ...], psf_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+    """
+    Estimate the padded shape that deconvolution will use for FFT efficiency.
+
+    Parameters
+    ----------
+    shape : tuple
+        Original image shape
+    psf_shape : tuple
+        PSF shape
+
+    Returns
+    -------
+    tuple
+        Padded shape for FFT-efficient processing
+    """
+    return tuple(
+        _find_good_fft_length(s + 4 * p)
+        for s, p in zip(shape, psf_shape)
+    )
+
+
 def detect_best_device(device: str = 'auto') -> Tuple[bool, int, str]:
     """
     Detect the best device to use, prioritizing multi-GPU setups.
@@ -358,9 +405,17 @@ def process_in_chunks(stack: np.ndarray,
     if verbose:
         print(f"Available memory on {device_name}: {available_mem / 1e9:.2f} GB")
 
-    # Calculate number of chunks
+    # Calculate the PADDED shape that FFT deconvolution will actually use
+    # This is critical for accurate memory estimation (fixes OOM bug)
+    padded_shape = estimate_padded_shape(stack.shape, psf.shape)
+    padding_ratio = np.prod(padded_shape) / np.prod(stack.shape)
+
+    if verbose:
+        print(f"FFT padding estimate: {stack.shape} → {padded_shape} ({padding_ratio:.2f}x voxels)")
+
+    # Calculate number of chunks using PADDED shape for accurate memory estimation
     n_chunks = calculate_chunks(
-        stack.shape,
+        padded_shape,  # Use padded shape, not original!
         stack.dtype,
         available_mem,
         memory_factor=6.0,

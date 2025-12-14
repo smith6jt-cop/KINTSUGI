@@ -308,6 +308,7 @@ from ._translation_computation import interpret_translation
 from ._translation_computation import multi_peak_max
 from ._translation_computation import pcm
 from ._translation_computation import get_gpu_accelerator
+from ._translation_computation import get_multi_gpu_accelerator
 from ._translation_computation import reset_gpu_accelerator
 from ._typing_utils import BoolArray
 from ._typing_utils import Float
@@ -679,9 +680,14 @@ def stitch_images(
 
     if actual_use_gpu:
         # GPU mode with optimized batch processing
-        # Initialize GPU accelerator with pre-allocated buffers
-        accelerator = get_gpu_accelerator((sizeY, sizeX), max_batch_size=16)
-        print(f"GPU mode: using batch processing with pre-allocated buffers")
+        # Use multi-GPU accelerator if available, otherwise single GPU
+        try:
+            accelerator = get_multi_gpu_accelerator((sizeY, sizeX), max_batch_size=16)
+            n_gpus = len(accelerator.device_ids)
+            print(f"GPU mode: using {n_gpus} GPU(s) with batch processing")
+        except Exception:
+            accelerator = get_gpu_accelerator((sizeY, sizeX), max_batch_size=16)
+            print(f"GPU mode: using single GPU with batch processing")
 
         for direction in ["left", "top"]:
             # Collect all pairs for this direction
