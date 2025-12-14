@@ -30,7 +30,9 @@ def test_setup_notebooks_overwrite_updates_files(tmp_path):
     notebooks_dir = _create_fake_repo(repo_path)
 
     project_root = tmp_path / "project"
-    project = KintsugiProject(project_root, config=ProjectConfig(name="test"), kintsugi_path=repo_path)
+    project = KintsugiProject(
+        project_root, config=ProjectConfig(name="test"), kintsugi_path=repo_path
+    )
     project.paths.create_all()
 
     project.setup_notebooks(overwrite=True)
