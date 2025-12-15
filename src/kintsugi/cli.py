@@ -229,7 +229,7 @@ def info():
             gpu_info = f"{torch.cuda.device_count()} GPU(s): {torch.cuda.get_device_name(0)}"
         else:
             gpu_info = "Not available (CPU mode)"
-    except ImportError:
+    except (ImportError, OSError):
         gpu_info = "PyTorch not installed"
 
     table.add_row("GPU", gpu_info)
