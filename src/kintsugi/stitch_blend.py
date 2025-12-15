@@ -24,14 +24,14 @@ References
 - Sigmoid blending for seamless mosaics
 """
 
+
 import numpy as np
-from typing import Tuple, Optional, Union
 import pandas as pd
 
 
 def generate_taper(
-    tile_size: Tuple[int, int],
-    overlap: Tuple[float, float],
+    tile_size: tuple[int, int],
+    overlap: tuple[float, float],
     sigma: float = 10.0
 ) -> np.ndarray:
     """
@@ -91,8 +91,8 @@ def stitch_with_blending(
     result_df: pd.DataFrame,
     blend: bool = True,
     sigma: float = 10.0,
-    overlap_fraction: Optional[Tuple[float, float]] = None,
-    output_dtype: Optional[np.dtype] = None,
+    overlap_fraction: tuple[float, float] | None = None,
+    output_dtype: np.dtype | None = None,
 ) -> np.ndarray:
     """
     Stitch tiles into a seamless mosaic using sigmoid taper blending.
@@ -148,7 +148,6 @@ def stitch_with_blending(
     >>> # Stitch with blending (replaces manual placement + smooth_tile_borders_2d)
     >>> stitched = stitch_with_blending(tiles, result_df, blend=True, sigma=10)
     """
-    n_tiles = tiles.shape[0]
     tile_h, tile_w = tiles.shape[1], tiles.shape[2]
 
     # Determine position column names
@@ -226,7 +225,7 @@ def _estimate_overlap_fraction(
     tile_w: int,
     y_col: str,
     x_col: str
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Estimate overlap fraction from tile positions.
 
@@ -284,9 +283,9 @@ def _estimate_overlap_fraction(
 def smooth_tile_borders_sigmoid(
     stitched_plane: np.ndarray,
     result_df: pd.DataFrame,
-    tile_shape: Tuple[int, int],
+    tile_shape: tuple[int, int],
     sigma: float = 10.0,
-    overlap_fraction: Optional[Tuple[float, float]] = None,
+    overlap_fraction: tuple[float, float] | None = None,
 ) -> np.ndarray:
     """
     Re-stitch an already-stitched image using sigmoid blending.
@@ -382,7 +381,7 @@ def stitch_with_blending_gpu(
     tiles: np.ndarray,
     result_df: pd.DataFrame,
     sigma: float = 10.0,
-    overlap_fraction: Optional[Tuple[float, float]] = None,
+    overlap_fraction: tuple[float, float] | None = None,
     device_id: int = 0,
 ) -> np.ndarray:
     """
@@ -421,7 +420,6 @@ def stitch_with_blending_gpu(
         return stitch_with_blending(tiles, result_df, blend=True, sigma=sigma,
                                      overlap_fraction=overlap_fraction)
 
-    n_tiles = tiles.shape[0]
     tile_h, tile_w = tiles.shape[1], tiles.shape[2]
 
     # Determine position columns
