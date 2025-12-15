@@ -345,7 +345,8 @@ def decon(base_dir: Union[str, Path],
           stop_criterion: float = 5.0,
           max_memory: float = 0.8,
           device: str = 'auto',
-          wavelengths: Optional[Dict[int, Tuple[float, float]]] = None) -> str:
+          wavelengths: Optional[Dict[int, Tuple[float, float]]] = None,
+          decon_dir: Optional[Union[str, Path]] = None) -> str:
     """
     High-level deconvolution function matching the original MATLAB interface.
 
@@ -355,7 +356,7 @@ def decon(base_dir: Union[str, Path],
     Parameters
     ----------
     base_dir : str or Path
-        Base directory for project
+        Base directory for project (unused, kept for backward compatibility)
     stitch_dir : str or Path
         Directory containing stitched images
     dec_cycle : int
@@ -388,6 +389,8 @@ def decon(base_dir: Union[str, Path],
         'GPU', 'CPU', or 'auto' (default 'auto')
     wavelengths : dict, optional
         Channel wavelengths dict {channel: (ex, em)}. If None, uses defaults.
+    decon_dir : str or Path, optional
+        Output directory for deconvolved images. If None, derives from stitch_dir.
 
     Returns
     -------
@@ -414,8 +417,22 @@ def decon(base_dir: Union[str, Path],
 
     # Set up paths
     source = stitch_dir / f"cyc{dec_cycle:02d}" / f"CH{dec_channel}"
-    decon_dir = Path(str(stitch_dir).replace('_BaSiC_Stitched', '_Decon'))
-    dest = decon_dir / f"cyc{dec_cycle:02d}" / f"CH{dec_channel}"
+
+    # Use explicit decon_dir if provided, otherwise derive from stitch_dir
+    if decon_dir is not None:
+        output_base = Path(decon_dir)
+    else:
+        # Legacy: try to derive from stitch_dir name
+        stitch_str = str(stitch_dir)
+        if '_BaSiC_Stitched' in stitch_str:
+            output_base = Path(stitch_str.replace('_BaSiC_Stitched', '_Decon'))
+        elif 'stitched' in stitch_str:
+            output_base = Path(stitch_str.replace('stitched', 'deconvolved'))
+        else:
+            # Fallback: put deconvolved next to stitched
+            output_base = stitch_dir.parent / 'deconvolved'
+
+    dest = output_base / f"cyc{dec_cycle:02d}" / f"CH{dec_channel}"
 
     dest.mkdir(parents=True, exist_ok=True)
 
