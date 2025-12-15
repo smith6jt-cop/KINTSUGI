@@ -32,53 +32,17 @@ my_project/
 
 The `.claude/settings.local.json` file is **automatically created** with the MCP server configuration.
 
-## Development Workspace Setup
+## Development Workspace
 
-### Multi-Root Workspace
+Use the VS Code multi-root workspace (`kintsugi-dev.code-workspace`) which combines:
 
-For development, use the VS Code multi-root workspace (`kintsugi-dev.code-workspace`) which combines:
+| Workspace Folder | Path | Purpose |
+|------------------|------|---------|
+| KINTSUGI (repo) | `KINTSUGI/` | Source code |
+| Test Project | `KINTSUGI/test_data/mini_project/` | 2x2 test dataset |
+| Full Project | `KINTSUGI_Projects/.../1904CC1-1L/` | Real data |
 
-| Workspace Folder | Actual Path | Purpose |
-|------------------|-------------|---------|
-| **KINTSUGI (repo)** | `KINTSUGI/` | Source code repository - don't put data here |
-| **Test Project** | `KINTSUGI/test_data/mini_project/` | Minimal 2x2 test dataset for rapid iteration |
-| **Full Project** | `KINTSUGI_Projects/.../1904CC1-1L/` | Real experimental data for production |
-
-This allows working on code, testing changes, and processing real data without switching VS Code windows (which interrupts Claude Code sessions).
-
-### Understanding PROJECT_DIR in Notebooks
-
-**`PROJECT_DIR` is the root folder of your experiment data** - it is NOT the repository.
-
-When running notebooks, set `PROJECT_DIR` to match the project you're processing:
-
-```python
-# For Test Project (quick testing):
-PROJECT_DIR = Path("/path/to/KINTSUGI/test_data/mini_project")
-
-# For Full Project (real data):
-PROJECT_DIR = Path("/path/to/KINTSUGI_Projects/your_experiment")
-
-# NOT the repository:
-# PROJECT_DIR = Path("/path/to/KINTSUGI")  # WRONG!
-```
-
-The workspace folder display names ("Test Project", "Full Project") are just labels - the actual paths matter for `PROJECT_DIR`.
-
-### Canonical Project Paths
-
-Always use `project.paths.*` for directory references. **Never override with custom folder names** - this causes path mismatches between notebooks.
-
-```python
-# CORRECT: Use canonical paths
-stitch_dir = project.paths.stitched      # data/processed/stitched/
-decon_dir = project.paths.deconvolved    # data/processed/deconvolved/
-
-# WRONG: Custom folder names cause inconsistencies
-stitch_dir = project.paths.processed / "BaSiC_Stitched"  # Don't do this!
-```
-
-See the `project-data-separation` skill in Skills_Registry for detailed patterns.
+Notebooks default to mini_project for testing. Change `PROJECT_DIR` for other projects.
 
 ### Adding MCP Support to Existing Projects
 
