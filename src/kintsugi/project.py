@@ -398,9 +398,11 @@ class ProjectPaths:
 
     # Processing outputs
     processed: Path  # Base processed directory
-    stitched: Path  # Stitched images
-    corrected: Path  # Illumination-corrected images
+    stitched: Path  # Stitched images (illumination corrected)
+    deconvolved: Path  # Deconvolved images
+    edf: Path  # Extended depth of focus projections
     registered: Path  # Registered multi-cycle images
+    signal_isolated: Path  # Signal-isolated images (autofluorescence removed)
     segmented: Path  # Segmentation masks
     analysis: Path  # Analysis outputs (tables, plots)
 
@@ -423,8 +425,10 @@ class ProjectPaths:
             raw=root / "data" / "raw",
             processed=root / "data" / "processed",
             stitched=root / "data" / "processed" / "stitched",
-            corrected=root / "data" / "processed" / "corrected",
+            deconvolved=root / "data" / "processed" / "deconvolved",
+            edf=root / "data" / "processed" / "edf",
             registered=root / "data" / "processed" / "registered",
+            signal_isolated=root / "data" / "processed" / "signal_isolated",
             segmented=root / "data" / "processed" / "segmented",
             analysis=root / "data" / "processed" / "analysis",
             notebooks=root / "notebooks",
@@ -988,9 +992,24 @@ class KintsugiProject:
         return self.paths.stitched
 
     @property
+    def deconvolved_dir(self) -> Path:
+        """Deconvolved images directory."""
+        return self.paths.deconvolved
+
+    @property
+    def edf_dir(self) -> Path:
+        """Extended depth of focus directory."""
+        return self.paths.edf
+
+    @property
     def registered_dir(self) -> Path:
         """Registered images directory."""
         return self.paths.registered
+
+    @property
+    def signal_isolated_dir(self) -> Path:
+        """Signal-isolated images directory."""
+        return self.paths.signal_isolated
 
     @property
     def notebooks_dir(self) -> Path:
