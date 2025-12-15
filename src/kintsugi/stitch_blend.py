@@ -24,15 +24,12 @@ References
 - Sigmoid blending for seamless mosaics
 """
 
-
 import numpy as np
 import pandas as pd
 
 
 def generate_taper(
-    tile_size: tuple[int, int],
-    overlap: tuple[float, float],
-    sigma: float = 10.0
+    tile_size: tuple[int, int], overlap: tuple[float, float], sigma: float = 10.0
 ) -> np.ndarray:
     """
     Generate sigmoid taper for blending tile overlaps.
@@ -151,15 +148,15 @@ def stitch_with_blending(
     tile_h, tile_w = tiles.shape[1], tiles.shape[2]
 
     # Determine position column names
-    if 'y_pos2' in result_df.columns and 'x_pos2' in result_df.columns:
-        y_col, x_col = 'y_pos2', 'x_pos2'
-    elif 'y_pos' in result_df.columns and 'x_pos' in result_df.columns:
-        y_col, x_col = 'y_pos', 'x_pos'
+    if "y_pos2" in result_df.columns and "x_pos2" in result_df.columns:
+        y_col, x_col = "y_pos2", "x_pos2"
+    elif "y_pos" in result_df.columns and "x_pos" in result_df.columns:
+        y_col, x_col = "y_pos", "x_pos"
         # Normalize positions to start from 0
         result_df = result_df.copy()
-        result_df['y_pos2'] = result_df['y_pos'] - result_df['y_pos'].min()
-        result_df['x_pos2'] = result_df['x_pos'] - result_df['x_pos'].min()
-        y_col, x_col = 'y_pos2', 'x_pos2'
+        result_df["y_pos2"] = result_df["y_pos"] - result_df["y_pos"].min()
+        result_df["x_pos2"] = result_df["x_pos"] - result_df["x_pos"].min()
+        y_col, x_col = "y_pos2", "x_pos2"
     else:
         raise ValueError("result_df must contain position columns (x_pos/y_pos or x_pos2/y_pos2)")
 
@@ -176,7 +173,7 @@ def stitch_with_blending(
         stitched = np.zeros((out_h, out_w), dtype=output_dtype)
         for i, row in result_df.iterrows():
             y0, x0 = int(row[y_col]), int(row[x_col])
-            stitched[y0:y0+tile_h, x0:x0+tile_w] = tiles[i]
+            stitched[y0 : y0 + tile_h, x0 : x0 + tile_w] = tiles[i]
         return stitched
 
     # Estimate overlap fraction if not provided
@@ -220,11 +217,7 @@ def stitch_with_blending(
 
 
 def _estimate_overlap_fraction(
-    result_df: pd.DataFrame,
-    tile_h: int,
-    tile_w: int,
-    y_col: str,
-    x_col: str
+    result_df: pd.DataFrame, tile_h: int, tile_w: int, y_col: str, x_col: str
 ) -> tuple[float, float]:
     """
     Estimate overlap fraction from tile positions.
@@ -410,6 +403,7 @@ def stitch_with_blending_gpu(
     """
     try:
         import cupy as cp
+
         cp.cuda.Device(device_id).use()
         HAS_CUPY = True
     except ImportError:
@@ -417,19 +411,20 @@ def stitch_with_blending_gpu(
 
     if not HAS_CUPY:
         # Fallback to CPU
-        return stitch_with_blending(tiles, result_df, blend=True, sigma=sigma,
-                                     overlap_fraction=overlap_fraction)
+        return stitch_with_blending(
+            tiles, result_df, blend=True, sigma=sigma, overlap_fraction=overlap_fraction
+        )
 
     tile_h, tile_w = tiles.shape[1], tiles.shape[2]
 
     # Determine position columns
-    if 'y_pos2' in result_df.columns and 'x_pos2' in result_df.columns:
-        y_col, x_col = 'y_pos2', 'x_pos2'
+    if "y_pos2" in result_df.columns and "x_pos2" in result_df.columns:
+        y_col, x_col = "y_pos2", "x_pos2"
     else:
         result_df = result_df.copy()
-        result_df['y_pos2'] = result_df['y_pos'] - result_df['y_pos'].min()
-        result_df['x_pos2'] = result_df['x_pos'] - result_df['x_pos'].min()
-        y_col, x_col = 'y_pos2', 'x_pos2'
+        result_df["y_pos2"] = result_df["y_pos"] - result_df["y_pos"].min()
+        result_df["x_pos2"] = result_df["x_pos"] - result_df["x_pos"].min()
+        y_col, x_col = "y_pos2", "x_pos2"
 
     # Calculate output size
     out_h = int(result_df[y_col].max() + tile_h)

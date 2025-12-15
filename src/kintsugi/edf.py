@@ -286,6 +286,7 @@ def extended_depth_of_focus_variance(
     # Convert back to numpy if using GPU
     if detected_gpu:
         import cupy as cp
+
         result = cp.asnumpy(result)
 
     # Restore original dtype
@@ -391,6 +392,7 @@ def extended_depth_of_focus_laplacian(
 
     if detected_gpu:
         import cupy as cp
+
         result = cp.asnumpy(result)
 
     if np.issubdtype(original_dtype, np.integer):
