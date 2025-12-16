@@ -66,7 +66,7 @@ def estimate_padded_shape(shape: Tuple[int, ...], psf_shape: Tuple[int, ...]) ->
     )
 
 
-def detect_best_device(device: str = 'auto') -> Tuple[bool, int, str]:
+def detect_best_device(device: str = 'auto', explicit_device_id: int = None) -> Tuple[bool, int, str]:
     """
     Detect the best device to use, prioritizing multi-GPU setups.
 
@@ -77,6 +77,10 @@ def detect_best_device(device: str = 'auto') -> Tuple[bool, int, str]:
     ----------
     device : str
         'GPU', 'CPU', 'multi-gpu', or 'auto'
+    explicit_device_id : int, optional
+        If provided, use this specific GPU device ID instead of auto-detecting.
+        This is critical for multi-GPU processing where each thread/process
+        must use its assigned GPU.
 
     Returns
     -------
@@ -86,6 +90,16 @@ def detect_best_device(device: str = 'auto') -> Tuple[bool, int, str]:
     """
     if device.lower() == 'cpu':
         return False, -1, "CPU"
+
+    # If explicit device_id is provided, use that specific GPU
+    if explicit_device_id is not None and CUPY_AVAILABLE:
+        try:
+            cp.cuda.Device(explicit_device_id).use()
+            device_name = f"GPU {explicit_device_id}"
+            return True, explicit_device_id, device_name
+        except Exception as e:
+            warnings.warn(f"Failed to use explicit GPU {explicit_device_id}: {e}")
+            # Fall through to auto-detection
 
     # Try to use the centralized GPU manager first
     try:
@@ -184,8 +198,8 @@ def get_available_memory(device: str = 'auto', device_id: int = None) -> Tuple[i
     tuple
         (available_bytes, device_name)
     """
-    # Use unified device detection
-    use_gpu, detected_device_id, device_name = detect_best_device(device)
+    # Use unified device detection, passing explicit device_id if provided
+    use_gpu, detected_device_id, device_name = detect_best_device(device, explicit_device_id=device_id)
 
     if device_id is not None:
         detected_device_id = device_id
@@ -367,6 +381,7 @@ def process_in_chunks(stack: np.ndarray,
                       psf: np.ndarray,
                       deconv_func: Callable,
                       device: str = 'auto',
+                      device_id: Optional[int] = None,
                       max_memory_fraction: float = 0.8,
                       overlap: Optional[int] = None,
                       verbose: bool = True) -> np.ndarray:
@@ -383,6 +398,9 @@ def process_in_chunks(stack: np.ndarray,
         Function that takes (stack, psf) and returns deconvolved stack
     device : str
         'GPU', 'CPU', or 'auto'
+    device_id : int, optional
+        Specific GPU device ID for multi-GPU processing. If provided,
+        this GPU will be used instead of auto-detection.
     max_memory_fraction : float
         Fraction of available memory to use
     overlap : int, optional
@@ -398,8 +416,8 @@ def process_in_chunks(stack: np.ndarray,
     if overlap is None:
         overlap = max(psf.shape)
 
-    # Get available memory
-    available_mem, device_name = get_available_memory(device)
+    # Get available memory, passing explicit device_id if provided
+    available_mem, device_name = get_available_memory(device, device_id=device_id)
     available_mem = int(available_mem * max_memory_fraction)
 
     if verbose:

@@ -85,6 +85,7 @@ class KDecon:
                  damping: float = 0.0,
                  stop_criterion: float = 5.0,
                  device: str = 'auto',
+                 device_id: Optional[int] = None,
                  max_memory_fraction: float = 0.8,
                  fcyl: float = None,
                  slitwidth: float = None,
@@ -101,6 +102,7 @@ class KDecon:
         self.damping = damping
         self.stop_criterion = stop_criterion
         self.device = device
+        self.device_id = device_id
         self.max_memory_fraction = max_memory_fraction
         self.fcyl = fcyl
         self.slitwidth = slitwidth
@@ -167,9 +169,22 @@ class KDecon:
             print("KDecon - KINTSUGI Python Deconvolution")
             print("=" * 60)
 
-        # Use unified device detection - this ensures consistency between
-        # memory estimation and actual processing (fixes OOM bug)
-        use_gpu, device_id, device_name = detect_best_device(self.device)
+        # Handle explicit device_id for multi-GPU support
+        # When device_id is explicitly set, use that specific GPU
+        if self.device_id is not None and CUPY_AVAILABLE:
+            import cupy as cp
+            cp.cuda.Device(self.device_id).use()
+            use_gpu = True
+            device_id = self.device_id
+            try:
+                free_mem, total_mem = cp.cuda.Device(device_id).mem_info
+                device_name = f"GPU (NVIDIA B200)"  # Get actual name if needed
+            except Exception:
+                device_name = f"GPU {device_id}"
+        else:
+            # Use unified device detection - this ensures consistency between
+            # memory estimation and actual processing (fixes OOM bug)
+            use_gpu, device_id, device_name = detect_best_device(self.device)
 
         # Get available memory for the selected device
         available_mem, _ = get_available_memory(self.device, device_id=device_id)
@@ -222,6 +237,7 @@ class KDecon:
                 damping=self.damping,
                 stop_criterion=self.stop_criterion,
                 device=self.device,
+                device_id=self.device_id,
                 max_memory_fraction=self.max_memory_fraction,
                 verbose=self.verbose
             )
@@ -232,6 +248,7 @@ class KDecon:
                 damping=self.damping,
                 stop_criterion=self.stop_criterion,
                 device=self.device,
+                device_id=self.device_id,
                 verbose=self.verbose
             )
 
@@ -345,6 +362,7 @@ def decon(base_dir: Union[str, Path],
           stop_criterion: float = 5.0,
           max_memory: float = 0.8,
           device: str = 'auto',
+          device_id: Optional[int] = None,
           wavelengths: Optional[Dict[int, Tuple[float, float]]] = None,
           decon_dir: Optional[Union[str, Path]] = None) -> str:
     """
@@ -387,6 +405,9 @@ def decon(base_dir: Union[str, Path],
         Max memory fraction to use (default 0.8)
     device : str
         'GPU', 'CPU', or 'auto' (default 'auto')
+    device_id : int, optional
+        Specific GPU device ID for multi-GPU processing. If provided,
+        this GPU will be used instead of auto-detection.
     wavelengths : dict, optional
         Channel wavelengths dict {channel: (ex, em)}. If None, uses defaults.
     decon_dir : str or Path, optional
@@ -451,6 +472,7 @@ def decon(base_dir: Union[str, Path],
         damping=damping_frac,
         stop_criterion=stop_criterion,
         device=device,
+        device_id=device_id,
         max_memory_fraction=max_memory,
         fcyl=f_cyl,
         slitwidth=slit_aper,

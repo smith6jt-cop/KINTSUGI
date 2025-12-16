@@ -293,6 +293,7 @@ def deconvolve(stack: np.ndarray, psf: np.ndarray,
                damping: float = 0.0,
                stop_criterion: float = 5.0,
                device: str = 'auto',
+               device_id: Optional[int] = None,
                pad_for_fft: bool = True,
                callback: Optional[Callable] = None,
                verbose: bool = True) -> np.ndarray:
@@ -317,6 +318,9 @@ def deconvolve(stack: np.ndarray, psf: np.ndarray,
         Stop if relative change falls below this percentage (default 5.0)
     device : str
         'GPU', 'CPU', or 'auto' (default 'auto')
+    device_id : int, optional
+        Specific GPU device ID for multi-GPU processing. If provided,
+        this GPU will be used instead of auto-detection.
     pad_for_fft : bool
         Pad data for efficient FFT (default True)
     callback : callable, optional
@@ -339,14 +343,14 @@ def deconvolve(stack: np.ndarray, psf: np.ndarray,
     # This ensures memory estimation and actual processing use the same device
     from .chunking import detect_best_device
 
-    use_gpu, device_id, device_name = detect_best_device(device)
+    use_gpu, detected_device_id, device_name = detect_best_device(device, explicit_device_id=device_id)
 
     # Set the CuPy device if using GPU
     if use_gpu and CUPY_AVAILABLE:
         try:
-            cp.cuda.Device(device_id).use()
+            cp.cuda.Device(detected_device_id).use()
         except Exception as e:
-            warnings.warn(f"Failed to set GPU device {device_id}: {e}. Using CPU.")
+            warnings.warn(f"Failed to set GPU device {detected_device_id}: {e}. Using CPU.")
             use_gpu = False
             device_name = "CPU"
 
@@ -410,6 +414,7 @@ def deconvolve_stack(stack: np.ndarray, psf: np.ndarray,
                      damping: float = 0.0,
                      stop_criterion: float = 5.0,
                      device: str = 'auto',
+                     device_id: Optional[int] = None,
                      max_memory_fraction: float = 0.8,
                      verbose: bool = True) -> np.ndarray:
     """
@@ -432,6 +437,9 @@ def deconvolve_stack(stack: np.ndarray, psf: np.ndarray,
         Convergence threshold (default 5.0)
     device : str
         'GPU', 'CPU', or 'auto'
+    device_id : int, optional
+        Specific GPU device ID for multi-GPU processing. If provided,
+        this GPU will be used instead of auto-detection.
     max_memory_fraction : float
         Fraction of available memory to use per chunk (default 0.8)
     verbose : bool
@@ -447,9 +455,10 @@ def deconvolve_stack(stack: np.ndarray, psf: np.ndarray,
     return process_in_chunks(
         stack, psf,
         deconv_func=lambda s, p: deconvolve(
-            s, p, iterations, damping, stop_criterion, device, True, None, verbose
+            s, p, iterations, damping, stop_criterion, device, device_id, True, None, verbose
         ),
         device=device,
+        device_id=device_id,
         max_memory_fraction=max_memory_fraction,
         overlap=max(psf.shape),  # Overlap by PSF size to avoid edge artifacts
         verbose=verbose
