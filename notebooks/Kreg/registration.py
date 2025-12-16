@@ -3560,10 +3560,13 @@ class Valis(object):
         if slide_list is None:
             slide_list = list(self.slide_dict.values())
 
+        n_slides = len(slide_list)
         combo_mask = np.zeros(self.aligned_img_shape_rc, dtype=int)
         summary_img = np.zeros(self.aligned_img_shape_rc)
 
+        print(f"  Creating mask from {n_slides} processed images...")
         for i, slide_obj in enumerate(slide_list):
+            print(f"    [{i+1}/{n_slides}] Processing {slide_obj.name} (summary)...", end=" ", flush=True)
             # Determine where images overlap
             rigid_mask = slide_obj.warp_img(slide_obj.rigid_reg_mask, non_rigid=False, crop=False, interp_method="nearest")
             combo_mask[rigid_mask > 0] += 1
@@ -3574,9 +3577,11 @@ class Valis(object):
             padded_processed[slide_obj.rigid_reg_mask > 0] = exposure.rescale_intensity(padded_processed[slide_obj.rigid_reg_mask > 0], out_range=(0, 255))
             for_summary = slide_obj.warp_img(padded_processed, non_rigid=False, crop=False).astype(float)
             for_summary = exposure.rescale_intensity(for_summary, out_range=(0, 1))
-            for_summary = exposure.equalize_adapthist(for_summary)
+            # Use smaller kernel for CLAHE to speed up processing
+            for_summary = exposure.equalize_adapthist(for_summary, kernel_size=64)
             # summary_img += for_summary
             summary_img = np.dstack([for_summary, summary_img]).max(axis=2)
+            print("done")
 
         summary_img /= summary_img.max()
         hyst_thresh = min(self.size-0.5, 2)
@@ -3585,20 +3590,37 @@ class Valis(object):
         # Remake masks, weighting by summary image
         weighted_combo_mask = np.zeros(self.aligned_img_shape_rc, dtype=int)
         weighted_mask_list = [None] * self.size
+        print(f"  Computing weighted masks...")
         for i, slide_obj in enumerate(slide_list):
+            print(f"    [{i+1}/{n_slides}] Processing {slide_obj.name} (threshold)...", end=" ", flush=True)
             warped_processed = slide_obj.warp_img(slide_obj.pad_cropped_processed_img(), non_rigid=False, crop=False).astype(float)
             if combo_mask.max() > 0:
                 warped_processed[combo_mask == 0] = 0
             weighted_processed = summary_img*(warped_processed/warped_processed.max())
-            weighted_processed = exposure.equalize_adapthist(weighted_processed)
-            wt, _ = filters.threshold_multiotsu(weighted_processed)
+            # Use smaller kernel for CLAHE to speed up processing
+            weighted_processed = exposure.equalize_adapthist(weighted_processed, kernel_size=64)
+            # Use try/except for multi-otsu as it can fail on uniform images
+            try:
+                # Downsample for threshold calculation to speed up multi-otsu
+                ds_factor = max(1, min(weighted_processed.shape) // 512)
+                if ds_factor > 1:
+                    ds_img = weighted_processed[::ds_factor, ::ds_factor]
+                    wt, _ = filters.threshold_multiotsu(ds_img)
+                else:
+                    wt, _ = filters.threshold_multiotsu(weighted_processed)
+            except ValueError:
+                # Fallback to simple Otsu if multi-otsu fails
+                wt = filters.threshold_otsu(weighted_processed)
             weighted_mask = 255*(weighted_processed > wt).astype(np.uint8)
             weighted_mask = preprocessing.mask2contours(weighted_mask, 1)
             weighted_mask_list[i] = weighted_mask
             weighted_combo_mask[weighted_mask > 0] += 1
+            print("done")
 
+        print("  Finalizing mask...", end=" ", flush=True)
         temp_non_rigid_mask = 255*filters.apply_hysteresis_threshold(weighted_combo_mask, 0.5, hyst_thresh).astype(np.uint8) # At least 2 masks are touching
         overlap_mask = preprocessing.mask2bbox_mask(temp_non_rigid_mask)
+        print("done")
 
         return overlap_mask
 
@@ -4660,6 +4682,38 @@ class Valis(object):
         self.micro_rigid_registrar_cls = None
         self.non_rigid_registrar = None
 
+    def save_registrar(self, filepath=None):
+        """Save the registrar object to a pickle file
+
+        Parameters
+        ----------
+        filepath : str, optional
+            Path to save the registrar. If None, uses self.reg_f or
+            creates a default path in self.data_dir.
+
+        Returns
+        -------
+        str
+            Path where the registrar was saved
+        """
+        if filepath is None:
+            if hasattr(self, 'reg_f') and self.reg_f is not None:
+                filepath = self.reg_f
+            else:
+                pathlib.Path(self.data_dir).mkdir(exist_ok=True, parents=True)
+                filepath = os.path.join(self.data_dir, self.name + "_registrar.pickle")
+
+        # Ensure directory exists
+        pathlib.Path(os.path.dirname(filepath)).mkdir(exist_ok=True, parents=True)
+
+        # Cleanup before saving
+        self.cleanup()
+
+        # Save
+        pickle.dump(self, open(filepath, 'wb'))
+        self.reg_f = filepath
+
+        return filepath
 
     @valtils.deprecated_args(max_non_rigid_registartion_dim_px="max_non_rigid_registration_dim_px")
     def register_micro(self,  brightfield_processing_cls=DEFAULT_BRIGHTFIELD_CLASS,

@@ -927,16 +927,29 @@ class SimpleElastixWarper(NonRigidRegistrarXY):
         return dxdy
 
 
+def _get_cuda_optical_flow():
+    """Try to create CUDA-accelerated optical flow if available."""
+    try:
+        if cv2.cuda.getCudaEnabledDeviceCount() > 0:
+            # Try CUDA TVL1 optical flow (fastest CUDA option)
+            return cv2.cuda_OpticalFlowDual_TVL1.create(), True
+    except (AttributeError, cv2.error):
+        pass
+    return None, False
+
+
 class OpticalFlowWarper(NonRigidRegistrar):
     """Use dense optical flow to register images.
 
     Dense optical flow fields may not be diffeomorphic, and so
     this class provides options to smooth displacement fields.
+
+    Automatically uses CUDA acceleration if available.
     """
     def __init__(self, params=None, optical_flow_obj=None,
                  n_grid_pts=50, sigma_ratio=0.005,
                  paint_size=5000, fold_penalty=1e-6,
-                 smoothing_method=None):
+                 smoothing_method=None, use_gpu=True):
         """
         Parameters
         ----------
@@ -981,6 +994,10 @@ class OpticalFlowWarper(NonRigidRegistrar):
 
             If "None" then no smoothing will be applied.
 
+        use_gpu : bool
+            If True, attempt to use CUDA-accelerated optical flow.
+            Falls back to CPU if CUDA is not available.
+
         """
 
         super().__init__(params)
@@ -990,7 +1007,19 @@ class OpticalFlowWarper(NonRigidRegistrar):
         self.paint_size = paint_size
         self.fold_penalty = fold_penalty
         self.n_grid_pts = n_grid_pts
+        self.use_cuda = False
+
         if optical_flow_obj is None:
+            # Try CUDA acceleration first if requested
+            if use_gpu:
+                cuda_flow, cuda_available = _get_cuda_optical_flow()
+                if cuda_available:
+                    self.optical_flow_obj = cuda_flow
+                    self.use_cuda = True
+                    self.method = "cuda_OpticalFlowDual_TVL1"
+                    return
+
+            # Fall back to CPU DeepFlow
             optical_flow_obj = cv2.optflow.createOptFlow_DeepFlow
 
         self.method = optical_flow_obj.__name__
@@ -1004,8 +1033,26 @@ class OpticalFlowWarper(NonRigidRegistrar):
             if fixed_img.ndim == 2:
                 fixed_img = color.gray2rgb(fixed_img)
 
-        backward_flow = self.optical_flow_obj.calc(fixed_img, moving_img,
-                                                   np.zeros(moving_img.shape[0:2]))
+        # Handle CUDA optical flow
+        if self.use_cuda:
+            # Convert to float32 for CUDA
+            fixed_f32 = fixed_img.astype(np.float32)
+            moving_f32 = moving_img.astype(np.float32)
+
+            # Upload to GPU
+            gpu_fixed = cv2.cuda_GpuMat()
+            gpu_moving = cv2.cuda_GpuMat()
+            gpu_fixed.upload(fixed_f32)
+            gpu_moving.upload(moving_f32)
+
+            # Compute flow on GPU
+            gpu_flow = self.optical_flow_obj.calc(gpu_fixed, gpu_moving, None)
+
+            # Download result
+            backward_flow = gpu_flow.download()
+        else:
+            backward_flow = self.optical_flow_obj.calc(fixed_img, moving_img,
+                                                       np.zeros(moving_img.shape[0:2]))
 
         backward_flow = np.array([backward_flow[..., 0], backward_flow[..., 1]])
         if self.smoothing_method == "gauss":

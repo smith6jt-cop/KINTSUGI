@@ -129,6 +129,257 @@ class ImageMetadata:
         return "\n".join(lines)
 
 
+# Processing stage names in order
+PROCESSING_STAGES = [
+    "stitched",
+    "deconvolved",
+    "edf",
+    "registered",
+    "signal_isolated",
+    "segmented",
+    "analysis",
+]
+
+
+@dataclass
+class ProcessedStageInfo:
+    """Information about data in a single processing stage."""
+
+    name: str
+    path: Path
+    exists: bool = False
+    file_count: int = 0
+    total_size_mb: float = 0.0
+    cycle_folders: list[str] = field(default_factory=list)
+    sample_files: list[str] = field(default_factory=list)
+
+    def summary(self) -> str:
+        """Generate a human-readable summary."""
+        if not self.exists or self.file_count == 0:
+            return f"  {self.name}: (empty)"
+        cycles_str = f", cycles: {', '.join(self.cycle_folders)}" if self.cycle_folders else ""
+        return f"  {self.name}: {self.file_count} files ({self.total_size_mb:.1f} MB){cycles_str}"
+
+
+@dataclass
+class ProcessedDataReport:
+    """Report of existing data in processed subdirectories."""
+
+    stages: dict[str, ProcessedStageInfo] = field(default_factory=dict)
+    total_files: int = 0
+    total_size_mb: float = 0.0
+
+    @property
+    def has_data(self) -> bool:
+        """Check if any processing stage has data."""
+        return self.total_files > 0
+
+    @property
+    def stages_with_data(self) -> list[str]:
+        """Get list of stage names that have data."""
+        return [name for name, info in self.stages.items() if info.file_count > 0]
+
+    def summary(self) -> str:
+        """Generate a human-readable summary."""
+        lines = []
+        if not self.has_data:
+            lines.append("No processed data found.")
+            return "\n".join(lines)
+
+        lines.append(f"Found {self.total_files} files ({self.total_size_mb:.1f} MB) in processed directories:")
+        for name in PROCESSING_STAGES:
+            if name in self.stages:
+                lines.append(self.stages[name].summary())
+        return "\n".join(lines)
+
+
+def scan_processed_data(project_paths: "ProjectPaths") -> ProcessedDataReport:
+    """
+    Scan processed subdirectories for existing data.
+
+    Parameters
+    ----------
+    project_paths : ProjectPaths
+        Project paths object with processed directory paths
+
+    Returns
+    -------
+    ProcessedDataReport
+        Report of existing data in each processing stage
+    """
+    import re
+
+    report = ProcessedDataReport()
+
+    stage_paths = {
+        "stitched": project_paths.stitched,
+        "deconvolved": project_paths.deconvolved,
+        "edf": project_paths.edf,
+        "registered": project_paths.registered,
+        "signal_isolated": project_paths.signal_isolated,
+        "segmented": project_paths.segmented,
+        "analysis": project_paths.analysis,
+    }
+
+    cycle_pattern = re.compile(r"cyc\d+", re.IGNORECASE)
+
+    for stage_name, stage_path in stage_paths.items():
+        info = ProcessedStageInfo(name=stage_name, path=stage_path)
+
+        if not stage_path.exists():
+            report.stages[stage_name] = info
+            continue
+
+        info.exists = True
+        files = []
+        cycles = set()
+
+        # Scan for files
+        for item in stage_path.rglob("*"):
+            if item.is_file():
+                files.append(item)
+                info.total_size_mb += item.stat().st_size / (1024 * 1024)
+
+                # Check for cycle folders
+                rel_path = item.relative_to(stage_path)
+                for part in rel_path.parts:
+                    if cycle_pattern.match(part):
+                        cycles.add(part)
+
+        info.file_count = len(files)
+        info.cycle_folders = sorted(cycles)
+        info.sample_files = [f.name for f in files[:5]]
+
+        report.stages[stage_name] = info
+        report.total_files += info.file_count
+        report.total_size_mb += info.total_size_mb
+
+    return report
+
+
+def prompt_for_processed_data(
+    report: ProcessedDataReport,
+    interactive: bool = True,
+) -> dict[str, Literal["keep", "delete", "cancel"]]:
+    """
+    Prompt user for what to do with existing processed data.
+
+    Parameters
+    ----------
+    report : ProcessedDataReport
+        Report of existing processed data
+    interactive : bool
+        If True, prompt user. If False, default to 'keep'.
+
+    Returns
+    -------
+    dict
+        Dictionary mapping stage names to actions ('keep', 'delete', 'cancel')
+    """
+    if not report.has_data:
+        return {}
+
+    stages_with_data = report.stages_with_data
+
+    print("\n" + "=" * 60)
+    print("EXISTING PROCESSED DATA DETECTED")
+    print("=" * 60)
+    print(report.summary())
+    print()
+
+    if not interactive:
+        print("Non-interactive mode: keeping all existing data.")
+        return {stage: "keep" for stage in stages_with_data}
+
+    print("Options:")
+    print("  1. Keep all - Continue without deleting any data")
+    print("  2. Delete all - Remove all processed data and start fresh")
+    print("  3. Select per stage - Choose what to do for each stage")
+    print("  4. Cancel - Exit without changes")
+    print()
+
+    while True:
+        try:
+            choice = input("Enter choice [1-4] (default: 1): ").strip() or "1"
+            if choice == "1":
+                print("Keeping all existing data.")
+                return {stage: "keep" for stage in stages_with_data}
+            elif choice == "2":
+                confirm = input("Are you sure you want to delete ALL processed data? [y/N]: ").strip().lower()
+                if confirm == "y":
+                    print("Will delete all processed data.")
+                    return {stage: "delete" for stage in stages_with_data}
+                else:
+                    print("Cancelled. Keeping all data.")
+                    return {stage: "keep" for stage in stages_with_data}
+            elif choice == "3":
+                decisions = {}
+                print("\nFor each stage, enter: k=keep, d=delete, s=skip (keep)")
+                for stage in stages_with_data:
+                    info = report.stages[stage]
+                    while True:
+                        action = input(f"  {stage} ({info.file_count} files, {info.total_size_mb:.1f} MB) [k/d/s]: ").strip().lower() or "k"
+                        if action in ("k", "s"):
+                            decisions[stage] = "keep"
+                            break
+                        elif action == "d":
+                            decisions[stage] = "delete"
+                            break
+                        else:
+                            print("    Invalid choice. Enter k, d, or s.")
+                return decisions
+            elif choice == "4":
+                return {stage: "cancel" for stage in stages_with_data}
+            else:
+                print("Invalid choice. Enter 1, 2, 3, or 4.")
+        except (EOFError, KeyboardInterrupt):
+            print("\nCancelled.")
+            return {stage: "cancel" for stage in stages_with_data}
+
+
+def apply_processed_data_decisions(
+    project_paths: "ProjectPaths",
+    decisions: dict[str, Literal["keep", "delete", "cancel"]],
+) -> bool:
+    """
+    Apply user decisions for processed data (delete stages as requested).
+
+    Parameters
+    ----------
+    project_paths : ProjectPaths
+        Project paths object
+    decisions : dict
+        Dictionary mapping stage names to actions
+
+    Returns
+    -------
+    bool
+        True if successful, False if cancelled
+    """
+    if any(action == "cancel" for action in decisions.values()):
+        return False
+
+    stage_paths = {
+        "stitched": project_paths.stitched,
+        "deconvolved": project_paths.deconvolved,
+        "edf": project_paths.edf,
+        "registered": project_paths.registered,
+        "signal_isolated": project_paths.signal_isolated,
+        "segmented": project_paths.segmented,
+        "analysis": project_paths.analysis,
+    }
+
+    for stage_name, action in decisions.items():
+        if action == "delete" and stage_name in stage_paths:
+            stage_path = stage_paths[stage_name]
+            if stage_path.exists():
+                print(f"  Deleting {stage_name}...")
+                shutil.rmtree(stage_path)
+                stage_path.mkdir(parents=True, exist_ok=True)
+
+    return True
+
+
 def scan_existing_data(
     directory: str | Path,
     max_depth: int = 3,
@@ -1164,6 +1415,33 @@ class KintsugiProject:
 # -----------------------------------------------------------------------------
 
 
+def _handle_processed_data_check(project: "KintsugiProject", interactive: bool) -> bool:
+    """
+    Check for existing processed data and handle user interaction.
+
+    Parameters
+    ----------
+    project : KintsugiProject
+        The loaded project
+    interactive : bool
+        Whether to prompt the user
+
+    Returns
+    -------
+    bool
+        True if should continue, False if cancelled
+    """
+    report = scan_processed_data(project.paths)
+    if not report.has_data:
+        return True  # No data, nothing to do
+
+    decisions = prompt_for_processed_data(report, interactive=interactive)
+    if not decisions:
+        return True  # No data or empty decisions
+
+    return apply_processed_data_decisions(project.paths, decisions)
+
+
 def init_project(
     project_dir: str | Path,
     name: str | None = None,
@@ -1172,6 +1450,7 @@ def init_project(
     refresh: bool = True,
     interactive: bool = True,
     on_existing: Literal["prompt", "keep", "clear", "cancel"] = "prompt",
+    check_processed: bool = True,
 ) -> KintsugiProject | None:
     """
     Initialize or load a KINTSUGI project.
@@ -1179,8 +1458,9 @@ def init_project(
     This is the main entry point for notebooks. It will:
     1. Create a new project if it doesn't exist
     2. Load an existing project if it does
-    3. Setup CUDA paths for GPU acceleration
-    4. Return the project object with all paths configured
+    3. Check for existing processed data and prompt user for action
+    4. Setup CUDA paths for GPU acceleration
+    5. Return the project object with all paths configured
 
     Parameters
     ----------
@@ -1205,6 +1485,9 @@ def init_project(
         - "keep": Keep existing files and create project around them
         - "clear": Delete existing files and start fresh
         - "cancel": Cancel project creation
+    check_processed : bool
+        If True (default), check for existing processed data when loading
+        a project and prompt user for what to do (keep/delete per stage).
 
     Returns
     -------
@@ -1235,6 +1518,10 @@ def init_project(
         project.setup_cuda_path()
         if refresh:
             project.refresh_from_disk()
+        # Check for existing processed data
+        if check_processed:
+            if not _handle_processed_data_check(project, interactive):
+                return None
         return project
 
     # Check if project already exists (auto mode)
@@ -1243,6 +1530,10 @@ def init_project(
         project.setup_cuda_path()
         if refresh:
             project.refresh_from_disk()
+        # Check for existing processed data
+        if check_processed:
+            if not _handle_processed_data_check(project, interactive):
+                return None
         return project
 
     # Creating a new project - check for existing contents

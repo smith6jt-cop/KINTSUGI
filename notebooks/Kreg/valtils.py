@@ -199,12 +199,38 @@ def hex_to_rgb(value):
 #     return int(ncpus)
 
 def get_ncpus_available():
+    """Get number of available CPUs, with HPC environment detection.
+
+    Checks for SLURM, PBS, and other HPC scheduler environment variables
+    to get the correct number of allocated CPUs.
+    """
     try:
-        if hasattr(os, "sched_getaffinity"):
-            ncpus = len(os.sched_getaffinity(0))
-        else:
-            ncpus = multiprocessing.cpu_count()
-        
+        ncpus = None
+
+        # Check HPC scheduler environment variables first
+        hpc_cpu_vars = [
+            'SLURM_CPUS_PER_TASK',  # SLURM
+            'SLURM_CPUS_ON_NODE',   # SLURM (fallback)
+            'PBS_NUM_PPN',          # PBS/Torque
+            'NSLOTS',               # SGE
+            'OMP_NUM_THREADS',      # OpenMP (often set by schedulers)
+        ]
+
+        for var in hpc_cpu_vars:
+            if var in os.environ:
+                try:
+                    ncpus = int(os.environ[var])
+                    break
+                except (ValueError, TypeError):
+                    continue
+
+        # Fall back to system detection
+        if ncpus is None:
+            if hasattr(os, "sched_getaffinity"):
+                ncpus = len(os.sched_getaffinity(0))
+            else:
+                ncpus = multiprocessing.cpu_count()
+
         # Safety check - ensure we return at least 2
         return max(2, int(ncpus))
     except Exception as e:
