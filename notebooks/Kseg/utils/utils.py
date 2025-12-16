@@ -233,7 +233,7 @@ def display_as_grid(display_list,
                     title_height: int = 20,
                     fontsize: float = 12):
 
-    from instanseg.utils.augmentations import Augmentations
+    from Kseg.utils.augmentations import Augmentations
     Augmenter = Augmentations()
 
     tensor_list = []
@@ -526,7 +526,7 @@ def display_cells_and_nuclei(lab):
     return display
 
 def display_colourized(mIF, random_seed = 0):
-    from instanseg.utils.augmentations import Augmentations
+    from Kseg.utils.augmentations import Augmentations
     Augmenter=Augmentations()
 
     mIF = Augmenter.to_tensor(mIF, normalize=False)[0]
@@ -732,7 +732,7 @@ def set_export_paths():
 def export_to_torchscript(model_str: str, show_example: bool = False, output_dir: str = "../torchscripts",
                           model_path: str = "../models", torchscript_name: str = None, use_optimized_params = False):
     device = 'cpu'
-    from instanseg.utils.model_loader import load_model
+    from Kseg.utils.model_loader import load_model
     import math
 
     import os
@@ -765,7 +765,7 @@ def export_to_torchscript(model_str: str, show_example: bool = False, output_dir
 
     input_data = tifffile.imread(os.path.join(example_path,"HE_example.tif"))
     #input_data = tifffile.imread("../examples/LuCa1.tif")
-    from instanseg.utils.augmentations import Augmentations
+    from Kseg.utils.augmentations import Augmentations
     Augmenter = Augmentations()
     input_tensor, _ = Augmenter.to_tensor(input_data, normalize=False)
     input_tensor, _ = Augmenter.normalize(input_tensor)
@@ -781,7 +781,7 @@ def export_to_torchscript(model_str: str, show_example: bool = False, output_dir
     else:
         dim_in = 3
 
-    from instanseg.utils.loss.instanseg_loss import InstanSeg_Torchscript
+    from Kseg.utils.loss.instanseg_loss import InstanSeg_Torchscript
     super_model = InstanSeg_Torchscript(model, cells_and_nuclei=cells_and_nuclei, 
                                         pixel_size = pixel_size, 
                                         n_sigma = n_sigma, 

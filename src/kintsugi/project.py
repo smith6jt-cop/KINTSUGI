@@ -860,7 +860,7 @@ class KintsugiProject:
             print(f"  {action} {nb_name}")
 
         # Copy supporting modules
-        support_dirs = ["Kreg", "Kstitch", "Kview2", "KDecon", "instanseg"]
+        support_dirs = ["Kreg", "Kstitch", "Kview", "Kdecon", "Kseg"]
         for dir_name in support_dirs:
             src_dir = source_dir / dir_name
             dst_dir = dest_dir / dir_name
@@ -1170,7 +1170,9 @@ def init_project(
     description: str = "",
     mode: Literal["auto", "create", "load"] = "auto",
     refresh: bool = True,
-) -> KintsugiProject:
+    interactive: bool = True,
+    on_existing: Literal["prompt", "keep", "clear", "cancel"] = "prompt",
+) -> KintsugiProject | None:
     """
     Initialize or load a KINTSUGI project.
 
@@ -1194,11 +1196,20 @@ def init_project(
     refresh : bool
         If True, synchronize the loaded project with the on-disk folder state
         (e.g., renamed cycle folders) before returning.
+    interactive : bool
+        If True (default), prompt the user when the directory is non-empty.
+        If False, use the `on_existing` default behavior.
+    on_existing : {"prompt", "keep", "clear", "cancel"}
+        What to do when the directory is non-empty:
+        - "prompt": Ask the user (default, requires interactive=True)
+        - "keep": Keep existing files and create project around them
+        - "clear": Delete existing files and start fresh
+        - "cancel": Cancel project creation
 
     Returns
     -------
-    KintsugiProject
-        Initialized project
+    KintsugiProject or None
+        Initialized project, or None if creation was cancelled
 
     Example
     -------
@@ -1215,22 +1226,47 @@ def init_project(
     if mode not in {"auto", "create", "load"}:
         raise ValueError("mode must be one of 'auto', 'create', or 'load'")
 
+    if on_existing not in {"prompt", "keep", "clear", "cancel"}:
+        raise ValueError("on_existing must be one of 'prompt', 'keep', 'clear', or 'cancel'")
+
+    # Check if loading existing project
     if mode == "load":
         project = KintsugiProject.load(project_dir)
-    elif mode == "create":
-        project = KintsugiProject.create(
-            project_dir,
-            name=name,
-            description=description,
-        )
-    elif config_file.exists():
+        project.setup_cuda_path()
+        if refresh:
+            project.refresh_from_disk()
+        return project
+
+    # Check if project already exists (auto mode)
+    if mode == "auto" and config_file.exists():
         project = KintsugiProject.load(project_dir)
-    else:
-        project = KintsugiProject.create(
-            project_dir,
-            name=name,
-            description=description,
-        )
+        project.setup_cuda_path()
+        if refresh:
+            project.refresh_from_disk()
+        return project
+
+    # Creating a new project - check for existing contents
+    contents = check_directory_contents(project_dir)
+
+    if contents["exists"] and not contents["is_empty"] and not contents["has_project_config"]:
+        # Directory has files but no project config - need to decide what to do
+        if on_existing == "prompt":
+            action = prompt_for_existing_directory(project_dir, contents, interactive=interactive)
+        else:
+            action = on_existing
+
+        if action == "cancel":
+            return None
+        elif action == "clear":
+            deleted = clear_directory_contents(project_dir)
+            print(f"Deleted {deleted} items from {project_dir}")
+
+    # Create the project
+    project = KintsugiProject.create(
+        project_dir,
+        name=name,
+        description=description,
+    )
 
     # Setup CUDA for GPU acceleration
     project.setup_cuda_path()
@@ -1239,6 +1275,206 @@ def init_project(
         project.refresh_from_disk()
 
     return project
+
+
+def check_directory_contents(directory: str | Path) -> dict[str, Any]:
+    """
+    Check if a directory has existing contents.
+
+    Parameters
+    ----------
+    directory : str or Path
+        Directory to check
+
+    Returns
+    -------
+    dict
+        Dictionary with:
+        - 'exists': bool - whether directory exists
+        - 'is_empty': bool - whether directory is empty
+        - 'file_count': int - number of files (recursive)
+        - 'dir_count': int - number of subdirectories
+        - 'total_size_mb': float - total size in MB
+        - 'has_project_config': bool - whether kintsugi_project.json exists
+        - 'sample_files': list - sample of file names
+    """
+    directory = Path(directory)
+
+    result = {
+        "exists": False,
+        "is_empty": True,
+        "file_count": 0,
+        "dir_count": 0,
+        "total_size_mb": 0.0,
+        "has_project_config": False,
+        "sample_files": [],
+    }
+
+    if not directory.exists():
+        return result
+
+    result["exists"] = True
+    result["has_project_config"] = (directory / PROJECT_CONFIG_FILE).exists()
+
+    files = []
+    dirs = []
+    total_size = 0
+
+    try:
+        for item in directory.rglob("*"):
+            if item.is_file():
+                files.append(item)
+                try:
+                    total_size += item.stat().st_size
+                except (OSError, PermissionError):
+                    pass
+            elif item.is_dir():
+                dirs.append(item)
+    except (OSError, PermissionError):
+        pass
+
+    result["file_count"] = len(files)
+    result["dir_count"] = len(dirs)
+    result["total_size_mb"] = total_size / (1024 * 1024)
+    result["is_empty"] = len(files) == 0 and len(dirs) == 0
+    result["sample_files"] = [f.name for f in files[:10]]
+
+    return result
+
+
+def prompt_for_existing_directory(
+    directory: str | Path,
+    contents: dict[str, Any],
+    interactive: bool = True,
+) -> str:
+    """
+    Prompt the user about what to do with an existing non-empty directory.
+
+    Parameters
+    ----------
+    directory : str or Path
+        Directory path
+    contents : dict
+        Result from check_directory_contents()
+    interactive : bool
+        If True, prompt for user input. If False, return 'keep' by default.
+
+    Returns
+    -------
+    str
+        One of: 'keep', 'clear', 'cancel'
+    """
+    directory = Path(directory)
+
+    if contents["is_empty"]:
+        return "keep"
+
+    if contents["has_project_config"]:
+        # Directory already has a KINTSUGI project - just load it
+        return "keep"
+
+    # Build information message
+    print("\n" + "=" * 60)
+    print("WARNING: Directory is not empty!")
+    print("=" * 60)
+    print(f"Location: {directory}")
+    print(f"Files: {contents['file_count']}")
+    print(f"Subdirectories: {contents['dir_count']}")
+    print(f"Total size: {contents['total_size_mb']:.1f} MB")
+    if contents["sample_files"]:
+        print(f"Sample files: {', '.join(contents['sample_files'][:5])}")
+    print()
+
+    if not interactive:
+        print("Non-interactive mode: keeping existing files.")
+        return "keep"
+
+    # Check if we're in a Jupyter notebook
+    try:
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        in_notebook = shell is not None and "IPKernelApp" in shell.config
+    except (ImportError, AttributeError):
+        in_notebook = False
+
+    # Prompt user for choice
+    print("Options:")
+    print("  [K]eep   - Keep existing files and create project around them")
+    print("  [C]lear  - Delete all existing files and start fresh")
+    print("  [A]bort  - Cancel project creation")
+    print()
+
+    while True:
+        try:
+            if in_notebook:
+                # In Jupyter, use input() which shows a text field
+                response = input("Choose an option [K/C/A] (default: K): ").strip().lower()
+            else:
+                # CLI mode
+                response = input("Choose an option [K/C/A] (default: K): ").strip().lower()
+
+            if response == "" or response == "k" or response == "keep":
+                print("Keeping existing files.")
+                return "keep"
+            elif response == "c" or response == "clear":
+                # Double-check for clear operation
+                confirm = input(
+                    f"Are you sure you want to DELETE all {contents['file_count']} files? [y/N]: "
+                ).strip().lower()
+                if confirm == "y" or confirm == "yes":
+                    print("Clearing directory...")
+                    return "clear"
+                else:
+                    print("Clear cancelled. Keeping existing files.")
+                    return "keep"
+            elif response == "a" or response == "abort":
+                print("Project creation cancelled.")
+                return "cancel"
+            else:
+                print("Invalid option. Please enter K, C, or A.")
+        except (EOFError, KeyboardInterrupt):
+            print("\nProject creation cancelled.")
+            return "cancel"
+
+
+def clear_directory_contents(directory: str | Path, preserve_hidden: bool = True) -> int:
+    """
+    Clear all contents from a directory.
+
+    Parameters
+    ----------
+    directory : str or Path
+        Directory to clear
+    preserve_hidden : bool
+        If True, preserve hidden files/directories (starting with '.')
+
+    Returns
+    -------
+    int
+        Number of items deleted
+    """
+    directory = Path(directory)
+    deleted = 0
+
+    if not directory.exists():
+        return 0
+
+    for item in list(directory.iterdir()):
+        if preserve_hidden and item.name.startswith("."):
+            continue
+
+        try:
+            if item.is_file():
+                item.unlink()
+                deleted += 1
+            elif item.is_dir():
+                shutil.rmtree(item)
+                deleted += 1
+        except (OSError, PermissionError) as e:
+            print(f"Warning: Could not delete {item}: {e}")
+
+    return deleted
 
 
 def find_raw_cycles(raw_dir: str | Path) -> list[Path]:

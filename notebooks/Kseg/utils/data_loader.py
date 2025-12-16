@@ -65,7 +65,7 @@ def export_dataset_dict_as_folder(dataset,destination = "benchmarking_data"):
     import torch
     import tifffile
     import os
-    from instanseg.utils.utils import _move_channel_axis
+    from Kseg.utils.utils import _move_channel_axis
     from pathlib import Path
 
     expanded_datasets = Path("../datasets/") / destination
@@ -216,10 +216,10 @@ def _read_images_from_pth(data_path= "../datasets", dataset = "segmentation", da
 
 def get_loaders(train_images_local, train_labels_local, val_images_local, val_labels_local, train_meta, val_meta, args):
     from torch.utils.data.sampler import RandomSampler, WeightedRandomSampler
-    from instanseg.utils.augmentation_config import get_augmentation_dict
-    from instanseg.utils.AI_utils import Segmentation_Dataset, collate_fn
+    from Kseg.utils.augmentation_config import get_augmentation_dict
+    from Kseg.utils.AI_utils import Segmentation_Dataset, collate_fn
     from torch.utils.data import DataLoader
-    from instanseg.utils.utils import count_instances
+    from Kseg.utils.utils import count_instances
 
     augmentation_dict = get_augmentation_dict(args.dim_in, nuclei_channel=None, amount=args.transform_intensity,
                                               pixel_size=args.requested_pixel_size, augmentation_type=args.augmentation_type)

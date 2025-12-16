@@ -70,7 +70,7 @@ parser.add_argument('-use_deterministic', '--use_deterministic', default=False, 
 parser.add_argument('-tile', '--tile_size', default=256, type=int, help = "Tile sizes for the input images")
 
 def main(model, loss_fn, train_loader, test_loader, num_epochs=1000, epoch_name='output_epoch'):
-    from instanseg.utils.AI_utils import optimize_hyperparameters, train_epoch, test_epoch
+    from Kseg.utils.AI_utils import optimize_hyperparameters, train_epoch, test_epoch
     global best_f1_score, device, method, iou_threshold, args, optimizer, scheduler
 
     train_losses = []
@@ -160,9 +160,9 @@ def instanseg_training(segmentation_dataset: Dict = None, **kwargs):
             raise ValueError(f"Argument {key} not recognized")
 
        
-    from instanseg.utils.utils import plot_average, _choose_device
-    from instanseg.utils.model_loader import build_model_from_dict, load_model_weights
-    from instanseg.utils.data_loader import _read_images_from_pth, get_loaders
+    from Kseg.utils.utils import plot_average, _choose_device
+    from Kseg.utils.model_loader import build_model_from_dict, load_model_weights
+    from Kseg.utils.data_loader import _read_images_from_pth, get_loaders
 
     args.data_path = Path(args.data_path)
 
@@ -210,7 +210,7 @@ def instanseg_training(segmentation_dataset: Dict = None, **kwargs):
     device = _choose_device(args.device)
 
     if args.loss_function == "instanseg_loss":
-        from instanseg.utils.loss.instanseg_loss import InstanSeg
+        from Kseg.utils.loss.instanseg_loss import InstanSeg
 
 
         method = InstanSeg(binary_loss_fn_str=args.binary_loss_fn, 
@@ -250,7 +250,7 @@ def instanseg_training(segmentation_dataset: Dict = None, **kwargs):
     # print(flop_count_str(flops))
 
     if args.loss_function in ["instanseg_loss"]:
-        from instanseg.utils.loss.instanseg_loss import has_pixel_classifier_model
+        from Kseg.utils.loss.instanseg_loss import has_pixel_classifier_model
 
         if not has_pixel_classifier_model(model):
             model = method.initialize_pixel_classifier(model, MLP_width = args.mlp_width)
@@ -272,7 +272,7 @@ def instanseg_training(segmentation_dataset: Dict = None, **kwargs):
         optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     if args.channel_invariant:
-        from instanseg.utils.models.ChannelInvariantNet import AdaptorNetWrapper, has_AdaptorNet
+        from Kseg.utils.models.ChannelInvariantNet import AdaptorNetWrapper, has_AdaptorNet
         if not has_AdaptorNet(model):
             model = AdaptorNetWrapper(model,adaptor_net_str=args.adaptor_net_str, norm = args.norm)
         optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -328,7 +328,7 @@ def instanseg_training(segmentation_dataset: Dict = None, **kwargs):
 
     model, train_losses, test_losses, f1_list, f1_list_cells = main(model, loss_fn, train_loader, test_loader, num_epochs=num_epochs)
 
-    from instanseg.utils.model_loader import load_model
+    from Kseg.utils.model_loader import load_model
     model, model_dict = load_model(folder="", path=args.output_path) #Load model from checkpoint
     model.eval()
     model.to(device)

@@ -41,7 +41,7 @@ def instanseg_inference(val_images, val_labels, model, postprocessing_fn, device
             tta.Rotate90(angles=[0, 180, 90, 270]),
         ])
 
-    from instanseg.utils.tiling import _instanseg_padding, _recover_padding
+    from Kseg.utils.tiling import _instanseg_padding, _recover_padding
     count = 0
     time_dict = {'preprocessing': 0, 'model': 0, 'postprocessing': 0, 'torchscript': 0, 'combined': []}
 
@@ -139,7 +139,7 @@ def instanseg_inference(val_images, val_labels, model, postprocessing_fn, device
             gt_masks.append(masks.astype(np.int16))
 
             if parser_args.save_ims:
-                from instanseg.utils.augmentations import Augmentations
+                from Kseg.utils.augmentations import Augmentations
                 augmenter = Augmentations()
                 display = augmenter.colourize(torch.tensor(imgs), random_seed=1)[0]
 
@@ -158,10 +158,10 @@ def instanseg_inference(val_images, val_labels, model, postprocessing_fn, device
 
 if __name__ == "__main__":
 
-    from instanseg.utils.utils import show_images, save_image_with_label_overlay, _move_channel_axis
-    from instanseg.utils.model_loader import load_model
-    from instanseg.utils.metrics import compute_and_export_metrics
-    from instanseg.utils.augmentations import Augmentations
+    from Kseg.utils.utils import show_images, save_image_with_label_overlay, _move_channel_axis
+    from Kseg.utils.model_loader import load_model
+    from Kseg.utils.metrics import compute_and_export_metrics
+    from Kseg.utils.augmentations import Augmentations
 
     parser_args = parser.parse_args()
     if parser_args.model_folder == "None":
@@ -181,7 +181,7 @@ if __name__ == "__main__":
         parser_args.source_dataset = model_dict['source_dataset']
 
     if parser_args.loss_function.lower() == "instanseg_loss":
-        from instanseg.utils.loss.instanseg_loss import InstanSeg
+        from Kseg.utils.loss.instanseg_loss import InstanSeg
 
         method = InstanSeg(binary_loss_fn_str=model_dict["binary_loss_fn"], seed_loss_fn=model_dict["seed_loss_fn"],
                            n_sigma=model_dict["n_sigma"],
@@ -224,13 +224,13 @@ if __name__ == "__main__":
 
     model.eval()
     if "inference_folder" not in parser_args or parser_args.inference_folder is None:
-        from instanseg.utils.data_loader import _read_images_from_pth
+        from Kseg.utils.data_loader import _read_images_from_pth
 
         val_images, val_labels, val_meta = _read_images_from_pth(args=parser_args, sets=[parser_args.test_set],
                                                                  dataset=parser_args.dataset)
 
     else:
-        from instanseg.utils.data_loader import _read_images_from_path
+        from Kseg.utils.data_loader import _read_images_from_path
 
         val_images, val_labels = _read_images_from_path(sets=[parser_args.test_set])
 
@@ -277,14 +277,14 @@ if __name__ == "__main__":
 
     # val_data = [Augmenter.colourize(img,label,c_nuclei = val_meta[i]['nuclei_channels'][0]) for i, (img,label) in enumerate(val_data)]
 
-    # from instanseg.utils.augmentations import get_marker_location
+    # from Kseg.utils.augmentations import get_marker_location
     # val_meta = [get_marker_location(meta) for meta in val_meta]
     # val_data = [Augmenter.extract_nucleus_and_cytoplasm_channels(img,label,c_nuclei = val_meta[i]['nuclei_channels'][0],metadata = val_meta[i]) for i, (img,label) in enumerate(val_data)]
 
     val_images = [item[0] for item in val_data]  #[::-1]
     val_labels = [item[1] for item in val_data]  #[::-1]
 
-    from instanseg.utils.utils import count_instances
+    from Kseg.utils.utils import count_instances
 
     freq = np.array([count_instances(label) for label in val_labels])
     area = np.array(
@@ -294,7 +294,7 @@ if __name__ == "__main__":
     print("Found:", sum(freq), "instances, across", len(freq), "images.", "Median area:", np.median(area), "pixels")
 
     if parser_args.optimize_hyperparameters:
-        from instanseg.utils.AI_utils import optimize_hyperparameters
+        from Kseg.utils.AI_utils import optimize_hyperparameters
 
         params = optimize_hyperparameters(model, postprocessing_fn=method.postprocessing, val_images=val_images,
                                           val_labels=val_labels, verbose=True)
@@ -310,14 +310,14 @@ if __name__ == "__main__":
     # params["window_size"] = parser_args.window_size
     instanseg = None
     if parser_args.export_to_torchscript:
-        from instanseg.utils.utils import export_to_torchscript
+        from Kseg.utils.utils import export_to_torchscript
 
         print("Exporting model to torchscript")
         export_to_torchscript(parser_args.model_folder)
         instanseg = torch.jit.load("../torchscripts/" + parser_args.model_folder + ".pt")
     if parser_args.export_to_bioimageio:
         print("Exporting model to bioimageio")
-        from instanseg.utils.create_bioimageio_model import export_bioimageio
+        from Kseg.utils.create_bioimageio_model import export_bioimageio
 
         instanseg = torch.jit.load("../torchscripts/" + parser_args.model_folder + ".pt")
         export_bioimageio(instanseg, deepimagej=True, test_img_path="../examples/HE_example.tif",

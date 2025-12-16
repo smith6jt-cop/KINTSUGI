@@ -26,7 +26,7 @@ __email__ = "smith6jt@cop.ufl.edu"
 # Mapping of public names to submodule names
 _SUBMODULE_MAPPING = {
     "Kreg": "kreg",
-    "Kview2": "kview2",
+    "Kview": "kview",
     "Kstitch": "kstitch",
     "deps": "deps",
     "edf": "edf",
@@ -137,7 +137,7 @@ __all__ = [
     "get_config_template",
     # Notebook module bridges
     "Kreg",
-    "Kview2",
+    "Kview",
     "Kstitch",
     # Core modules
     "deps",

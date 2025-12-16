@@ -9,14 +9,14 @@ from collections.abc import Sequence
 import pdb
 
 
-from instanseg.utils.utils import show_images
+from Kseg.utils.utils import show_images
 
 from einops import rearrange, repeat
 
 
 
 
-from instanseg.utils.models.InstanSeg_UNet import DecoderBlock, EncoderBlock, conv_norm_act
+from Kseg.utils.models.InstanSeg_UNet import DecoderBlock, EncoderBlock, conv_norm_act
 
 class ChannelInvariantEncoderBlock(EncoderBlock):
     def __init__(

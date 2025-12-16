@@ -4,9 +4,9 @@ import numpy as np
 import torch
 from bioio import BioImage
 
-from instanseg.utils.augmentations import Augmentations
-from instanseg.utils.utils import _choose_device, show_images
-from instanseg.utils.model_loader import load_model
+from Kseg.utils.augmentations import Augmentations
+from Kseg.utils.utils import _choose_device, show_images
+from Kseg.utils.model_loader import load_model
 
 
 def set_export_paths():
@@ -242,7 +242,7 @@ def export_bioimageio(torchsript: torch.jit._script.RecursiveScriptModule,
         dim_out = output.shape[1]
     np.save(os.path.join(output_name, "test-output.npy"), output.cpu().numpy())
 
-    from instanseg.utils.utils import _display_overlay
+    from Kseg.utils.utils import _display_overlay
 
     cover = _display_overlay(input_crop[0], output)
     show_images(cover, colorbar=False)

@@ -65,7 +65,7 @@ def _rescale_to_pixel_size(image: torch.Tensor,
     
 
 def display_colourized(mIF):
-    from instanseg.utils.utils import _move_channel_axis, generate_colors
+    from Kseg.utils.utils import _move_channel_axis, generate_colors
 
     mIF = _to_tensor_float32(mIF)
     mIF = mIF / (mIF.max() + 1e-6)
@@ -107,7 +107,7 @@ class InstanSeg():
                 The verbosity level. 0 is silent, 1 is normal, 2 is verbose.
         
         """
-        from instanseg.utils.utils import download_model, _choose_device
+        from Kseg.utils.utils import download_model, _choose_device
 
         self.verbosity = verbosity
         self.verbose = verbosity != 0
@@ -242,7 +242,7 @@ class InstanSeg():
         return _to_tensor_float32(image)
     
     def _normalise(self, image: torch.Tensor) -> torch.Tensor:
-        from instanseg.utils.utils import percentile_normalize, _move_channel_axis
+        from Kseg.utils.utils import percentile_normalize, _move_channel_axis
         assert image.ndim == 3 or image.ndim == 4, f"Input image shape {image.shape} is not supported."
         if image.dim() == 3:
             image = percentile_normalize(image)
@@ -339,7 +339,7 @@ class InstanSeg():
             labels = to_ndim(labels, 4)
         
             output_dimension = labels.shape[1]
-            from instanseg.utils.utils import labels_to_features
+            from Kseg.utils.utils import labels_to_features
             import json
             if output_dimension == 1:
                 features = labels_to_features(labels[0,0],object_type = "detection")
@@ -377,7 +377,7 @@ class InstanSeg():
             image (torch.Tensor): The input image(s) to be evaluated.
             pixel_size (Optional[float]): The pixel size of the image. If not provided, it will be read from the image metadata.
         """
-        from instanseg.utils.utils import percentile_normalize
+        from Kseg.utils.utils import percentile_normalize
 
         image = _to_tensor_float32(image)
 
@@ -436,12 +436,12 @@ class InstanSeg():
                         rescale_output: bool = True,
                           **kwargs):
         
-        from instanseg.utils.utils import percentile_normalize, _move_channel_axis
+        from Kseg.utils.utils import percentile_normalize, _move_channel_axis
 
     
         image = _to_tensor_float32(image)
         
-        from instanseg.utils.tiling import sliding_window_inference
+        from Kseg.utils.tiling import sliding_window_inference
         original_shape = image.shape
         original_ndim = image.dim()
 
@@ -509,7 +509,7 @@ class InstanSeg():
                                tile_size: int = 512,
                                output_geojson: bool = False,
                                **kwargs):
-            from instanseg.utils.tiling import segment_image_larger_than_memory
+            from Kseg.utils.tiling import segment_image_larger_than_memory
                                  
             segment_image_larger_than_memory(instanseg_class= self,
                                             image_path= image, 
@@ -527,7 +527,7 @@ class InstanSeg():
     def display(self, image: torch.tensor,
                instances: torch.Tensor):
         
-        from instanseg.utils.utils import save_image_with_label_overlay
+        from Kseg.utils.utils import save_image_with_label_overlay
 
         if isinstance(image, torch.Tensor):
             image = image.cpu().detach().numpy()
@@ -552,11 +552,11 @@ class InstanSeg():
 
         #This is experimental code that is not yet implemented. You'll need to install rapids_singlecell, cuml and scanpy to run this code.
 
-        from instanseg.utils.biological_utils import get_mean_object_features
+        from Kseg.utils.biological_utils import get_mean_object_features
         import fastremap
         import numpy as np
-        from instanseg.utils.utils import apply_cmap
-        from instanseg.utils.pytorch_utils import torch_fastremap
+        from Kseg.utils.utils import apply_cmap
+        from Kseg.utils.pytorch_utils import torch_fastremap
         import rapids_singlecell as rsc
         import scanpy as sc
         import matplotlib.pyplot as plt
@@ -596,7 +596,7 @@ def run_inference_tests():
     import os
     import pdb
     sys.path = sys.path[1:]
-    from instanseg.utils.utils import show_images
+    from Kseg.utils.utils import show_images
 
     example_image_folder = Path(os.path.join(os.path.dirname(__file__),"./examples/"))
 

@@ -3,12 +3,12 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
-from instanseg.utils.metrics import _robust_average_precision, _robust_f1_mean_calculator
+from Kseg.utils.metrics import _robust_average_precision, _robust_f1_mean_calculator
 
-from instanseg.utils.augmentations import Augmentations
+from Kseg.utils.augmentations import Augmentations
 import time
 
-from instanseg.utils.utils import show_images
+from Kseg.utils.utils import show_images
 import warnings
 
 
@@ -228,8 +228,8 @@ def check_mean_grad(_model):
 def optimize_hyperparameters(model,postprocessing_fn, data_loader = None, val_images = None, val_labels = None,max_evals = 50, verbose = False, threshold = [0.5, 0.7, 0.9], show_progressbar = True, device = None):
 
 
-    from instanseg.utils.metrics import _robust_average_precision
-    from instanseg.utils.utils import _choose_device
+    from Kseg.utils.metrics import _robust_average_precision
+    from Kseg.utils.utils import _choose_device
 
     from hyperopt import fmin
     from hyperopt import hp
@@ -278,7 +278,7 @@ def optimize_hyperparameters(model,postprocessing_fn, data_loader = None, val_im
                 return 1 - mean_f1
         
         elif val_images is not None and val_labels is not None:
-            from instanseg.utils.tiling import _instanseg_padding, _recover_padding
+            from Kseg.utils.tiling import _instanseg_padding, _recover_padding
             def objective(params={}):
                 pred_masks = []
                 gt_masks = []

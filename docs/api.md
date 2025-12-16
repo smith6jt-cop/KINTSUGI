@@ -73,7 +73,7 @@ registrar = Valis(
 ## Kview2 Module (Visualization)
 
 ```python
-from kintsugi import Kview2
+from kintsugi import Kview
 # or
 from kintsugi.kview2 import imshow, curtain, crop
 ```

@@ -6,11 +6,11 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from instanseg.utils.pytorch_utils import torch_sparse_onehot, torch_fastremap, remap_values, torch_onehot
+from Kseg.utils.pytorch_utils import torch_sparse_onehot, torch_fastremap, remap_values, torch_onehot
 
 def get_intersection_over_union(label: torch.Tensor, return_lab: bool = True) -> torch.Tensor:
 
-    from instanseg.utils.pytorch_utils import fast_sparse_dual_iou, torch_sparse_onehot
+    from Kseg.utils.pytorch_utils import fast_sparse_dual_iou, torch_sparse_onehot
     label = torch.stack((torch_fastremap(label[0,0]),torch_fastremap(label[0,1])))[None]
     nucleus_onehot = torch_sparse_onehot(label[0, 0], flatten=True)[0]
     cell_onehot = torch_sparse_onehot(label[0, 1], flatten=True)[0]
@@ -223,7 +223,7 @@ def get_mean_object_features(image: torch.Tensor, label: torch.Tensor) -> torch.
     if label.max() == 0:
         return torch.tensor([])
     label = label.squeeze()
-    from instanseg.utils.pytorch_utils import torch_sparse_onehot
+    from Kseg.utils.pytorch_utils import torch_sparse_onehot
     sparse_onehot = torch_sparse_onehot(label, flatten=True)[0]
     out = torch.mm(sparse_onehot, image.flatten(1).T)  # object features
     sums = torch.sparse.sum(sparse_onehot, dim=1).to_dense()  # object areas
@@ -251,7 +251,7 @@ def get_features_by_location(input_tensor: torch.Tensor, lab: torch.Tensor, to_n
     return X_cell, X_nuclei, X_cytoplasm
 
 
-from instanseg.utils.utils import _move_channel_axis
+from Kseg.utils.utils import _move_channel_axis
 def get_nc_ratio(lab):
     # lab is 1,2,H,W where the first channel is nuclei and the second is whole cell
     
@@ -348,15 +348,15 @@ def show_umap_and_cluster(X_features):
 
 if __name__ == "__main__":
     from skimage import io
-    from instanseg.utils.pytorch_utils import torch_sparse_onehot
-    from instanseg.utils.utils import _choose_device
+    from Kseg.utils.pytorch_utils import torch_sparse_onehot
+    from Kseg.utils.utils import _choose_device
 
     instanseg = torch.jit.load("../torchscripts/1793450.pt")
     device = _choose_device()
     instanseg.to(device)
     input_data = io.imread("../examples/LuCa1.tif")
    # input_data = io.imread(Path(drag_and_drop_file()))
-    from instanseg.utils.augmentations import Augmentations
+    from Kseg.utils.augmentations import Augmentations
 
     Augmenter = Augmentations()
   #  input_tensor, _ = Augmenter.to_tensor(input_data, normalize=True)
@@ -372,8 +372,8 @@ if __name__ == "__main__":
     
     lab = resolve_cell_and_nucleus_boundaries(lab)
 
-    from instanseg.utils.utils import export_to_torchscript
-    from instanseg.utils.model_loader import load_model
+    from Kseg.utils.utils import export_to_torchscript
+    from Kseg.utils.model_loader import load_model
     model_str = "1793450"
 
     device = "cpu"
@@ -387,7 +387,7 @@ if __name__ == "__main__":
     pixel_size = model_dict['pixel_size']
     n_sigma = model_dict['n_sigma']
 
-    from instanseg.utils.loss.instanseg_loss import InstanSeg_Torchscript
+    from Kseg.utils.loss.instanseg_loss import InstanSeg_Torchscript
     super_model = InstanSeg_Torchscript(model, cells_and_nuclei=cells_and_nuclei, 
                                         pixel_size = pixel_size, 
                                         n_sigma = n_sigma, 

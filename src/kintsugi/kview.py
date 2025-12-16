@@ -1,7 +1,7 @@
 """
-Kview2 module bridge.
+Kview module bridge.
 
-Re-exports the Kview2 visualization module from notebooks/Kview2
+Re-exports the Kview visualization module from notebooks/Kview
 for use with the kintsugi package interface.
 """
 
@@ -13,9 +13,9 @@ _notebooks_path = Path(__file__).parent.parent.parent / "notebooks"
 if str(_notebooks_path) not in sys.path:
     sys.path.insert(0, str(_notebooks_path))
 
-# Import and re-export from notebooks/Kview2
+# Import and re-export from notebooks/Kview
 try:
-    from Kview2 import (
+    from Kview import (
         __version__,
         animate,
         animate_curtain,
@@ -71,7 +71,7 @@ except ImportError as e:
     import warnings
 
     warnings.warn(
-        f"Failed to import Kview2 module: {e}. "
+        f"Failed to import Kview module: {e}. "
         "Make sure you're running from the KINTSUGI directory or "
         "have installed the package properly.",
         stacklevel=2,

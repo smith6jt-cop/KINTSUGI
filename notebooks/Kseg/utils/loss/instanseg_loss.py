@@ -4,9 +4,9 @@ import pdb
 
 from typing import Tuple, List, Union
 
-from instanseg.utils.loss.lovasz_losses import binary_xloss
-from instanseg.utils.pytorch_utils import torch_fastremap, torch_onehot, remap_values, fast_iou, fast_sparse_iou, eccentricity_batch, connected_components
-from instanseg.utils.tiling import _instanseg_padding, _recover_padding
+from Kseg.utils.loss.lovasz_losses import binary_xloss
+from Kseg.utils.pytorch_utils import torch_fastremap, torch_onehot, remap_values, fast_iou, fast_sparse_iou, eccentricity_batch, connected_components
+from Kseg.utils.tiling import _instanseg_padding, _recover_padding
 
 import torch.nn.functional as F
 import torch.nn as nn
@@ -14,9 +14,9 @@ import torch.nn as nn
 binary_xloss = torch.nn.BCEWithLogitsLoss()
 l1_loss = torch.nn.L1Loss()
 
-from instanseg.utils.utils import show_images
+from Kseg.utils.utils import show_images
 
-from instanseg.utils.utils import timer
+from Kseg.utils.utils import timer
 
 integer_dtype = torch.int64
 
@@ -637,13 +637,13 @@ class InstanSeg(nn.Module):
     def update_binary_loss(self,binary_loss_fn_str):
 
         if binary_loss_fn_str == "lovasz_hinge":
-            from instanseg.utils.loss.lovasz_losses import lovasz_hinge
+            from Kseg.utils.loss.lovasz_losses import lovasz_hinge
             def binary_loss_fn(pred, gt, **kwargs):
                # pred = torch.sigmoid_(pred)
                 return lovasz_hinge((pred.squeeze(1)), gt,per_image = True)
 
         elif binary_loss_fn_str == "binary_xloss":
-            from instanseg.utils.loss.lovasz_losses import binary_xloss
+            from Kseg.utils.loss.lovasz_losses import binary_xloss
             self.binary_loss_fn = torch.nn.BCEWithLogitsLoss()
         elif binary_loss_fn_str == "dicefocal_loss":
             from monai.losses import DiceFocalLoss
@@ -708,7 +708,7 @@ class InstanSeg(nn.Module):
             self.seed_loss = seed_loss
 
         elif seed_loss_fn in ["l1_distance"]:
-            from instanseg.utils.pytorch_utils import instance_wise_edt
+            from Kseg.utils.pytorch_utils import instance_wise_edt
             distance_loss = torch.nn.L1Loss(reduction='none')
             def seed_loss(x,y, mask = None):
                 edt = (instance_wise_edt(y.float(), edt_type= 'edt') - 0.5 ) * 15 #This is to mimick the range of CELoss
@@ -1199,7 +1199,7 @@ class IdentityTransform:
 
         
 
-from instanseg.utils.biological_utils import resolve_cell_and_nucleus_boundaries
+from Kseg.utils.biological_utils import resolve_cell_and_nucleus_boundaries
 from typing import Dict, Optional
 class InstanSeg_Torchscript(nn.Module):
     def __init__(self, model, 

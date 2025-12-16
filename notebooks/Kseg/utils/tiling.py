@@ -80,7 +80,7 @@ def _tiles_from_chops(image: torch.Tensor, shape: tuple, tuple_index: tuple) -> 
 def _stitch(tiles: list, shape: tuple, chop_list: list, final_shape: tuple, offset : int):
     """This function takes a list of tiles, a shape, and a tuple of window indices (e.g., outputed by the function _chops)
     and returns a stitched image"""
-    from instanseg.utils.pytorch_utils import torch_fastremap, match_labels
+    from Kseg.utils.pytorch_utils import torch_fastremap, match_labels
 
     canvas = torch.zeros(final_shape, dtype=torch.int32, device = tiles[0].device)
 
@@ -169,12 +169,12 @@ def _zarr_to_json_export(path_to_zarr, detection_size = 30, size = 1024, scale =
     output_path = str(path_to_zarr).replace(".zarr",".geojson")   
 
 
-    from instanseg.utils.tiling import _chops
+    from Kseg.utils.tiling import _chops
 
     chop_list = _chops(z.shape, shape=(size,size), overlap=detection_size)
 
-    from instanseg.utils.utils import labels_to_features
-    from instanseg.utils.tiling import _remove_edge_labels
+    from Kseg.utils.utils import labels_to_features
+    from Kseg.utils.tiling import _remove_edge_labels
     import json
 
     count = 0

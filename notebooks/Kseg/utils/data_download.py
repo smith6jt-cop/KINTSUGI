@@ -1,6 +1,6 @@
 
 from pathlib import Path
-from instanseg.utils.utils import _move_channel_axis
+from Kseg.utils.utils import _move_channel_axis
 import fastremap
 from tqdm import tqdm
 from skimage import io
@@ -59,8 +59,8 @@ def create_processed_datasets_dir(*others) -> Path:
     
 def load_Cellpose(Segmentation_Dataset: dict, verbose: bool = True) -> dict:
 
-    from instanseg.utils.augmentations import Augmentations
-    from instanseg.utils.pytorch_utils import torch_fastremap
+    from Kseg.utils.augmentations import Augmentations
+    from Kseg.utils.pytorch_utils import torch_fastremap
 
     cellpose_dir = create_raw_datasets_dir("Cell_Segmentation", "Cellpose")
 
@@ -557,8 +557,8 @@ def load_CIL(Segmentation_Dataset: dict, verbose: bool = True) -> dict:
     import torch
     from skimage import io
     from tqdm import tqdm
-    from instanseg.utils.augmentations import Augmentations
-    from instanseg.utils.pytorch_utils import torch_fastremap
+    from Kseg.utils.augmentations import Augmentations
+    from Kseg.utils.pytorch_utils import torch_fastremap
 
     if not image_zip_path.exists():
         # Define the URLs and paths

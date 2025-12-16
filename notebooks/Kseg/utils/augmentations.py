@@ -1,4 +1,4 @@
-from instanseg.utils.utils import show_images, _move_channel_axis
+from Kseg.utils.utils import show_images, _move_channel_axis
 import torchvision
 import torchvision.transforms.functional as TF
 import torch
@@ -6,7 +6,7 @@ import random
 import numpy as np
 from torchvision.transforms import RandomCrop, Resize, RandomPerspective
 from monai.transforms import RandGaussianNoise, AdjustContrast
-from instanseg.utils.utils import percentile_normalize, generate_colors
+from Kseg.utils.utils import percentile_normalize, generate_colors
 import warnings
 
 import time
@@ -80,7 +80,7 @@ def generate_random_label_area(min=30, max=30):
 
 
 def get_marker_location(meta):
-    from instanseg.utils.augmentation_config import markers_info
+    from Kseg.utils.augmentation_config import markers_info
     stains = [channel_str.split(" ")[0] for channel_str in meta['channel_names']]
     subcellular_location = ["N/A" if channel.upper() not in markers_info.keys() else markers_info[channel.upper()]['Subcellular Location'] for channel in stains]
     meta["subcellular_location"] = subcellular_location
@@ -753,7 +753,7 @@ class Augmentations(object):
 
     def __call__(self, image, labels, meta=None):
 
-        from instanseg.utils.utils import _estimate_image_modality
+        from Kseg.utils.utils import _estimate_image_modality
 
         if self.modality is None:
             if meta is not None and "image_modality" in meta.keys():
@@ -790,7 +790,7 @@ class Augmentations(object):
                 pixel_size = None
 
         if meta is not None and "channel_names" in meta.keys():
-            from instanseg.utils.augmentation_config import markers_info
+            from Kseg.utils.augmentation_config import markers_info
             stains = [channel_str.split(" ")[0] for channel_str in meta['channel_names']]
             subcellular_location = [
                 "N/A" if channel.upper() not in markers_info.keys() else markers_info[channel.upper()][
@@ -867,7 +867,7 @@ class Augmentations(object):
 
 
 if __name__ == "__main__":
-    from instanseg.utils.augmentation_config import get_augmentation_dict
+    from Kseg.utils.augmentation_config import get_augmentation_dict
 
     augmentation_dict = get_augmentation_dict(nuclei_channel=6, dim_in=3, amount=0.5,augmentation_type="heavy")['train']
 

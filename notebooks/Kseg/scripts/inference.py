@@ -35,13 +35,13 @@ prediction_tag = "_instanseg_prediction"
 
 
 if __name__ == "__main__":
-    from instanseg.utils.utils import show_images
+    from Kseg.utils.utils import show_images
     from instanseg import InstanSeg
 
     parser = parser.parse_args()
 
     if parser.image_path is None or not os.path.exists(parser.image_path):
-        from instanseg.utils.utils import drag_and_drop_file
+        from Kseg.utils.utils import drag_and_drop_file
         parser.image_path = drag_and_drop_file()
         print("Using image path: ", parser.image_path)
 

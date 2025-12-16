@@ -176,7 +176,7 @@ jobs:
           print('  OK: preprocessing')
 
           print('Testing Kview2 import...')
-          from Kview2 import imshow, curtain, crop
+          from Kview import imshow, curtain, crop
           print('  OK: visualization functions')
 
           print('Testing Kstitch import...')

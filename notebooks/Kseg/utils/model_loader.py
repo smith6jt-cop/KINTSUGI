@@ -106,7 +106,7 @@ def build_model_from_dict(build_model_dictionary):
         build_model_dictionary["dropprob"] = 0.0
 
     if build_model_dictionary["model_str"] == "InstanSeg_UNet":
-            from instanseg.utils.models.InstanSeg_UNet import InstanSeg_UNet
+            from Kseg.utils.models.InstanSeg_UNet import InstanSeg_UNet
             print("Generating InstanSeg_UNet")
             multihead = build_model_dictionary["multihead"]
 
@@ -188,17 +188,17 @@ def load_model_weights(model, device, folder, path=r"../models/", dict = None):
     model_dict['model_state_dict'] = remove_module_prefix_from_dict(model_dict['model_state_dict'])
 
     if has_pixel_classifier_state_dict(model_dict['model_state_dict']) and not has_pixel_classifier_model(model):
-        from instanseg.utils.loss.instanseg_loss import InstanSeg
+        from Kseg.utils.loss.instanseg_loss import InstanSeg
 
         method = InstanSeg(n_sigma=int(dict["n_sigma"]), feature_engineering_function= dict["feature_engineering"],dim_coords = dict["dim_coords"],device =device)
         model = method.initialize_pixel_classifier(model, MLP_width=int(dict["mlp_width"]))
 
-    from instanseg.utils.models.ChannelInvariantNet import AdaptorNetWrapper, has_AdaptorNet
+    from Kseg.utils.models.ChannelInvariantNet import AdaptorNetWrapper, has_AdaptorNet
     if has_adaptor_net_state_dict(model_dict['model_state_dict']) and not has_AdaptorNet(model):
-        from instanseg.utils.models.ChannelInvariantNet import AdaptorNetWrapper, has_AdaptorNet
+        from Kseg.utils.models.ChannelInvariantNet import AdaptorNetWrapper, has_AdaptorNet
         model = AdaptorNetWrapper(model, norm = dict["norm"],adaptor_net_str = dict["adaptor_net_str"])
 
-    #from instanseg.utils.AI_utils import set_running_stats
+    #from Kseg.utils.AI_utils import set_running_stats
     #set_running_stats(model,device = "cuda")
 
     model.load_state_dict(model_dict['model_state_dict'], strict=True)
