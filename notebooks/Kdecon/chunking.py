@@ -228,13 +228,19 @@ def get_available_memory(device: str = 'auto', device_id: int = None) -> Tuple[i
 def calculate_chunks(shape: Tuple[int, int, int],
                      dtype: np.dtype,
                      available_memory: int,
-                     memory_factor: float = 6.0,
+                     memory_factor: float = 15.0,
                      overlap: int = 0) -> Tuple[int, int, int]:
     """
     Calculate the number of chunks needed in each dimension.
 
-    The deconvolution process requires approximately 6x the input data size
-    in memory (input, output, OTF, intermediate buffers).
+    FFT-based deconvolution requires significant memory per voxel:
+    - Input arrays (float32): 2x4 = 8 bytes (deconvolved + stack_gpu)
+    - OTF arrays (complex64): 2x8 = 16 bytes (otf + otf_conj, FULL stack size!)
+    - FFT workspace (complex): ~16+ bytes (CuPy internal allocations)
+    - Intermediate results: ~12 bytes (denom, ratio, deconvolved_new)
+    Total: ~52 bytes per voxel = 13x float32 size
+
+    Using factor of 15 for safety margin against CuPy FFT workspace variability.
 
     Parameters
     ----------
@@ -384,9 +390,12 @@ def process_in_chunks(stack: np.ndarray,
                       device_id: Optional[int] = None,
                       max_memory_fraction: float = 0.8,
                       overlap: Optional[int] = None,
-                      verbose: bool = True) -> np.ndarray:
+                      verbose: bool = True,
+                      max_retries: int = 3) -> np.ndarray:
     """
-    Process a large image stack in chunks.
+    Process a large image stack in chunks with automatic OOM retry.
+
+    If an out-of-memory error occurs, automatically retries with smaller chunks.
 
     Parameters
     ----------
@@ -407,6 +416,8 @@ def process_in_chunks(stack: np.ndarray,
         Overlap between chunks (default: max PSF dimension)
     verbose : bool
         Print progress information
+    max_retries : int
+        Maximum OOM retries with smaller chunks (default 3)
 
     Returns
     -------
@@ -431,63 +442,106 @@ def process_in_chunks(stack: np.ndarray,
     if verbose:
         print(f"FFT padding estimate: {stack.shape} → {padded_shape} ({padding_ratio:.2f}x voxels)")
 
-    # Calculate number of chunks using PADDED shape for accurate memory estimation
-    n_chunks = calculate_chunks(
-        padded_shape,  # Use padded shape, not original!
-        stack.dtype,
-        available_mem,
-        memory_factor=6.0,
-        overlap=overlap
-    )
+    # Start with conservative memory factor (15.0 for FFT-based deconvolution)
+    # Increases on OOM retry for extra safety
+    memory_factor = 15.0
+    retry_count = 0
 
-    total_chunks = np.prod(n_chunks)
+    while retry_count <= max_retries:
+        # Calculate number of chunks using PADDED shape for accurate memory estimation
+        n_chunks = calculate_chunks(
+            padded_shape,  # Use padded shape, not original!
+            stack.dtype,
+            available_mem,
+            memory_factor=memory_factor,
+            overlap=overlap
+        )
 
-    if verbose:
-        if total_chunks > 1:
-            print(f"Splitting into {n_chunks[0]} x {n_chunks[1]} x {n_chunks[2]} = {total_chunks} chunks")
-        else:
-            print("Processing entire image (no chunking needed)")
-
-    if total_chunks == 1:
-        # No chunking needed
-        return deconv_func(stack, psf)
-
-    # Get chunk slices
-    chunk_slices = get_chunk_slices(stack.shape, n_chunks, overlap)
-
-    # Initialize output
-    result = np.zeros(stack.shape, dtype=np.float32)
-
-    # Process each chunk
-    for i, chunk_info in enumerate(chunk_slices):
-        if verbose:
-            print(f"\nProcessing chunk {i + 1}/{total_chunks}")
-
-        # Extract chunk with extended boundaries
-        ext_slices = chunk_info['extended']
-        chunk = stack[ext_slices[0], ext_slices[1], ext_slices[2]]
-
-        # Process chunk
-        chunk_result = deconv_func(chunk, psf)
-
-        # Extract core region (without overlap)
-        offset = chunk_info['offset']
-        core_size = chunk_info['core_size']
-
-        core_result = chunk_result[
-            offset[0]:offset[0] + core_size[0],
-            offset[1]:offset[1] + core_size[1],
-            offset[2]:offset[2] + core_size[2]
-        ]
-
-        # Place in output
-        core_slices = chunk_info['core']
-        result[core_slices[0], core_slices[1], core_slices[2]] = core_result
+        total_chunks = np.prod(n_chunks)
 
         if verbose:
-            print(f"  Chunk {i + 1} complete")
+            if total_chunks > 1:
+                print(f"Splitting into {n_chunks[0]} x {n_chunks[1]} x {n_chunks[2]} = {total_chunks} chunks")
+            else:
+                print("Processing entire image (no chunking needed)")
 
-    return result
+        try:
+            if total_chunks == 1:
+                # No chunking needed - but wrap in try/except for OOM
+                return deconv_func(stack, psf)
+
+            # Get chunk slices
+            chunk_slices = get_chunk_slices(stack.shape, n_chunks, overlap)
+
+            # Initialize output
+            result = np.zeros(stack.shape, dtype=np.float32)
+
+            # Process each chunk
+            for i, chunk_info in enumerate(chunk_slices):
+                if verbose:
+                    print(f"\nProcessing chunk {i + 1}/{total_chunks}")
+
+                # Extract chunk with extended boundaries
+                ext_slices = chunk_info['extended']
+                chunk = stack[ext_slices[0], ext_slices[1], ext_slices[2]]
+
+                # Process chunk - may raise OOM
+                chunk_result = deconv_func(chunk, psf)
+
+                # Extract core region (without overlap)
+                offset = chunk_info['offset']
+                core_size = chunk_info['core_size']
+
+                core_result = chunk_result[
+                    offset[0]:offset[0] + core_size[0],
+                    offset[1]:offset[1] + core_size[1],
+                    offset[2]:offset[2] + core_size[2]
+                ]
+
+                # Place in output
+                core_slices = chunk_info['core']
+                result[core_slices[0], core_slices[1], core_slices[2]] = core_result
+
+                if verbose:
+                    print(f"  Chunk {i + 1} complete")
+
+                # Clean up GPU memory between chunks
+                if CUPY_AVAILABLE:
+                    try:
+                        cp.get_default_memory_pool().free_all_blocks()
+                    except Exception:
+                        pass
+
+            return result
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            is_oom = ('out of memory' in error_msg or
+                      'memory' in error_msg and 'alloc' in error_msg or
+                      'cuda' in error_msg and 'memory' in error_msg)
+
+            if is_oom and retry_count < max_retries:
+                retry_count += 1
+                # Increase memory factor by 50% each retry to force more chunks
+                memory_factor *= 1.5
+
+                if verbose:
+                    print(f"\n[OOM] Out of memory with {total_chunks} chunks. "
+                          f"Retrying with memory_factor={memory_factor:.1f} (attempt {retry_count}/{max_retries})...")
+
+                # Clean up GPU memory before retry
+                if CUPY_AVAILABLE:
+                    try:
+                        cp.get_default_memory_pool().free_all_blocks()
+                        cp.get_default_pinned_memory_pool().free_all_blocks()
+                    except Exception:
+                        pass
+            else:
+                # Not an OOM error or max retries exceeded
+                raise
+
+    # Should not reach here, but just in case
+    raise RuntimeError(f"Failed after {max_retries} OOM retries")
 
 
 def estimate_memory_usage(shape: Tuple[int, int, int],

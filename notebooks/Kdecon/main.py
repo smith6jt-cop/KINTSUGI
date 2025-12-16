@@ -173,18 +173,26 @@ class KDecon:
         # When device_id is explicitly set, use that specific GPU
         if self.device_id is not None and CUPY_AVAILABLE:
             import cupy as cp
+            # CRITICAL: Set the device BEFORE any other GPU operations
             cp.cuda.Device(self.device_id).use()
             use_gpu = True
             device_id = self.device_id
             try:
-                free_mem, total_mem = cp.cuda.Device(device_id).mem_info
-                device_name = f"GPU (NVIDIA B200)"  # Get actual name if needed
+                # Get memory info for THIS specific device
+                with cp.cuda.Device(device_id):
+                    free_mem, total_mem = cp.cuda.Device(device_id).mem_info
+                    props = cp.cuda.runtime.getDeviceProperties(device_id)
+                    device_name = f"GPU {device_id} ({props['name'].decode()})"
             except Exception:
                 device_name = f"GPU {device_id}"
+            if self.verbose:
+                print(f"[Multi-GPU] Using explicit device_id={self.device_id}")
         else:
             # Use unified device detection - this ensures consistency between
             # memory estimation and actual processing (fixes OOM bug)
             use_gpu, device_id, device_name = detect_best_device(self.device)
+            if self.verbose and self.device_id is None:
+                print(f"[Auto-detect] Selected device_id={device_id}")
 
         # Get available memory for the selected device
         available_mem, _ = get_available_memory(self.device, device_id=device_id)
@@ -217,7 +225,7 @@ class KDecon:
             padded_shape,  # Use padded shape, not original!
             stack.dtype,
             int(available_mem * self.max_memory_fraction),
-            memory_factor=6.0,
+            memory_factor=15.0,
             overlap=max(self.psf.shape)
         )
 
