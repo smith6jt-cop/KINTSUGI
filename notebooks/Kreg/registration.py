@@ -2283,6 +2283,7 @@ class Valis(object):
         """
 
         default_name = valtils.get_name(src_f)
+        slide_obj = None  # Initialize to avoid UnboundLocalError
 
         if src_f in self.name_dict.keys():
             # src_f is full path to image
@@ -2318,7 +2319,11 @@ class Valis(object):
                    f"{pformat(possible_names_dict)}")
 
             valtils.print_warning(msg, rgb=Fore.RED)
-            slide_obj = None
+
+        else:
+            # No match found
+            msg = f"Could not find slide for '{src_f}'. Available slides: {list(self.slide_dict.keys())}"
+            valtils.print_warning(msg, rgb=Fore.RED)
 
         return slide_obj
 

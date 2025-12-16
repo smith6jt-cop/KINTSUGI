@@ -1525,6 +1525,15 @@ def register_images(img_dir, dst_dir=None, name="registrar",
             # Remove feature points outside of mask
             for img_obj in registrar.img_obj_dict.values():
                 slide_obj = valis_obj.get_slide(img_obj.name)
+                if slide_obj is None:
+                    # Try to find slide by matching partial name
+                    for slide_name, slide in valis_obj.slide_dict.items():
+                        if img_obj.name in slide_name or slide_name in img_obj.name:
+                            slide_obj = slide
+                            break
+                if slide_obj is None:
+                    valtils.print_warning(f"Could not find slide for '{img_obj.name}', skipping mask filtering")
+                    continue
                 reg_mask = valis_obj.crop_rigid_reg_mask(slide_obj, mask=slide_obj.rigid_reg_mask)
                 reg_mask = preprocessing.mask2bbox_mask(reg_mask)
                 features_in_mask_idx = warp_tools.get_xy_inside_mask(xy=img_obj.kp_pos_xy, mask=reg_mask)
