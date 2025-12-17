@@ -460,6 +460,6 @@ def deconvolve_stack(stack: np.ndarray, psf: np.ndarray,
         device=device,
         device_id=device_id,
         max_memory_fraction=max_memory_fraction,
-        overlap=max(psf.shape),  # Overlap by PSF size to avoid edge artifacts
+        overlap=None,  # Use default (4x PSF size) for proper FFT boundary handling
         verbose=verbose
     )

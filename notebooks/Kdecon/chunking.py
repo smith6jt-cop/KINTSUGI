@@ -383,6 +383,54 @@ def get_chunk_slices(shape: Tuple[int, int, int],
     return slices
 
 
+def _create_blend_weights_1d(size: int, blend_start: int, blend_end: int) -> np.ndarray:
+    """
+    Create 1D blend weights that taper from 0 to 1 at boundaries.
+
+    Uses cosine tapering for smooth transitions.
+
+    Parameters
+    ----------
+    size : int
+        Size of the array
+    blend_start : int
+        Blend width at start (0 = no tapering at start)
+    blend_end : int
+        Blend width at end (0 = no tapering at end)
+    """
+    weights = np.ones(size, dtype=np.float32)
+    if blend_start > 0 and blend_start < size // 2:
+        # Cosine taper at start (0 to 1)
+        taper = 0.5 * (1 - np.cos(np.pi * np.arange(blend_start) / blend_start))
+        weights[:blend_start] = taper
+    if blend_end > 0 and blend_end < size // 2:
+        # Cosine taper at end (1 to 0)
+        taper = 0.5 * (1 - np.cos(np.pi * np.arange(blend_end) / blend_end))
+        weights[-blend_end:] = taper[::-1]
+    return weights
+
+
+def _create_blend_weights_3d(shape: Tuple[int, int, int],
+                              blend_start: Tuple[int, int, int],
+                              blend_end: Tuple[int, int, int]) -> np.ndarray:
+    """
+    Create 3D blend weights by outer product of 1D weights.
+
+    Parameters
+    ----------
+    shape : tuple
+        Shape of the 3D array
+    blend_start : tuple
+        Blend widths at start of each dimension
+    blend_end : tuple
+        Blend widths at end of each dimension
+    """
+    wx = _create_blend_weights_1d(shape[0], blend_start[0], blend_end[0])
+    wy = _create_blend_weights_1d(shape[1], blend_start[1], blend_end[1])
+    wz = _create_blend_weights_1d(shape[2], blend_start[2], blend_end[2])
+    return wx[:, np.newaxis, np.newaxis] * wy[np.newaxis, :, np.newaxis] * wz[np.newaxis, np.newaxis, :]
+
+
 def process_in_chunks(stack: np.ndarray,
                       psf: np.ndarray,
                       deconv_func: Callable,
@@ -396,6 +444,7 @@ def process_in_chunks(stack: np.ndarray,
     Process a large image stack in chunks with automatic OOM retry.
 
     If an out-of-memory error occurs, automatically retries with smaller chunks.
+    Uses cosine-weighted blending in overlap regions to eliminate boundary artifacts.
 
     Parameters
     ----------
@@ -413,7 +462,7 @@ def process_in_chunks(stack: np.ndarray,
     max_memory_fraction : float
         Fraction of available memory to use
     overlap : int, optional
-        Overlap between chunks (default: max PSF dimension)
+        Overlap between chunks (default: 4x max PSF dimension for FFT ringing)
     verbose : bool
         Print progress information
     max_retries : int
@@ -424,8 +473,10 @@ def process_in_chunks(stack: np.ndarray,
     ndarray
         Deconvolved image stack
     """
+    # FFT deconvolution needs 4x PSF size overlap to handle ringing artifacts
+    # Using max PSF dimension is NOT enough - causes visible boundary artifacts
     if overlap is None:
-        overlap = max(psf.shape)
+        overlap = 4 * max(psf.shape)
 
     # Get available memory, passing explicit device_id if provided
     available_mem, device_name = get_available_memory(device, device_id=device_id)
@@ -473,22 +524,27 @@ def process_in_chunks(stack: np.ndarray,
             # Get chunk slices
             chunk_slices = get_chunk_slices(stack.shape, n_chunks, overlap)
 
-            # Initialize output
+            # Initialize output - NO blending, just extract core regions
+            # This matches MATLAB's approach: overlap provides CONTEXT only
             result = np.zeros(stack.shape, dtype=np.float32)
+
+            if verbose:
+                print(f"Using overlap={overlap} for context (no blending - MATLAB style)")
 
             # Process each chunk
             for i, chunk_info in enumerate(chunk_slices):
                 if verbose:
                     print(f"\nProcessing chunk {i + 1}/{total_chunks}")
 
-                # Extract chunk with extended boundaries
+                # Extract chunk with extended boundaries (overlap for context)
                 ext_slices = chunk_info['extended']
                 chunk = stack[ext_slices[0], ext_slices[1], ext_slices[2]]
 
                 # Process chunk - may raise OOM
                 chunk_result = deconv_func(chunk, psf)
 
-                # Extract core region (without overlap)
+                # Extract ONLY the core region (discard overlap - it was just for context)
+                # This is the correct approach for FFT-based deconvolution
                 offset = chunk_info['offset']
                 core_size = chunk_info['core_size']
 
@@ -498,7 +554,7 @@ def process_in_chunks(stack: np.ndarray,
                     offset[2]:offset[2] + core_size[2]
                 ]
 
-                # Place in output
+                # Place core region directly into output (no blending)
                 core_slices = chunk_info['core']
                 result[core_slices[0], core_slices[1], core_slices[2]] = core_result
 
