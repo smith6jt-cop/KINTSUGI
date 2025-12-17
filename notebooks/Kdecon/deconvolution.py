@@ -374,13 +374,35 @@ def deconvolve(stack: np.ndarray, psf: np.ndarray,
         pad_before = tuple((ps - os) // 2 for ps, os in zip(padded_shape, original_shape))
         pad_after = tuple(ps - os - pb for ps, os, pb in zip(padded_shape, original_shape, pad_before))
 
-        # Symmetric padding (mirror at boundaries)
-        stack_padded = np.pad(stack_float,
-                             [(pb, pa) for pb, pa in zip(pad_before, pad_after)],
-                             mode='symmetric')
+        # Choose padding mode per dimension:
+        # - Use 'edge' for small dimensions where padding > 50% of original size
+        #   (prevents FFT artifacts from symmetric mirroring)
+        # - Use 'symmetric' for larger dimensions (better boundary handling)
+        pad_modes = []
+        for pb, pa, os in zip(pad_before, pad_after, original_shape):
+            total_pad = pb + pa
+            if total_pad > os // 2:
+                # Small dimension: use edge padding to avoid mirroring artifacts
+                pad_modes.append('edge')
+            else:
+                pad_modes.append('symmetric')
+
+        # Apply padding with per-dimension modes (requires separate pad calls)
+        stack_padded = stack_float
+        for axis in range(3):
+            if pad_before[axis] > 0 or pad_after[axis] > 0:
+                pad_width = [(0, 0)] * 3
+                pad_width[axis] = (pad_before[axis], pad_after[axis])
+                stack_padded = np.pad(stack_padded, pad_width, mode=pad_modes[axis])
 
         if verbose:
             print(f"  Padded from {original_shape} to {padded_shape} for FFT efficiency")
+            # Report if any dimensions used edge padding (small dimension handling)
+            edge_dims = [i for i, m in enumerate(pad_modes) if m == 'edge']
+            if edge_dims:
+                dim_names = ['X', 'Y', 'Z']
+                edge_names = [dim_names[i] for i in edge_dims]
+                print(f"  Using edge padding for small dimension(s): {', '.join(edge_names)}")
     else:
         stack_padded = stack_float
         pad_before = (0, 0, 0)
