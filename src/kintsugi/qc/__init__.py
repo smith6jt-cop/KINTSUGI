@@ -74,6 +74,53 @@ from kintsugi.qc.stripe_artifact import (
     detect_stripe_artifact,
     scan_zstack,
 )
+
+# Backwards compatibility aliases (deprecated)
+def detect_stripe_artifacts(image, sensitivity=0.5, **kwargs):
+    """Deprecated: Use detect_stripe_artifact() instead."""
+    return detect_stripe_artifact(image, **kwargs)
+
+def scan_zstack_for_artifacts(z_stack, sensitivity=0.5, verbose=True, **kwargs):
+    """Deprecated: Use scan_zstack() instead."""
+    affected, results = scan_zstack(z_stack, **kwargs)
+    # Return a compatible report object
+    from dataclasses import dataclass, field
+    from typing import Literal
+
+    @dataclass
+    class _LegacyReport:
+        total_planes: int
+        affected_planes: list
+        results: dict
+        worst_severity: str
+        summary: str
+
+        @property
+        def has_artifacts(self):
+            return len(self.affected_planes) > 0
+
+        def __str__(self):
+            if not self.has_artifacts:
+                return f"No artifacts detected in {self.total_planes} z-planes"
+            return f"Artifacts in {len(self.affected_planes)}/{self.total_planes} planes"
+
+    worst = "none"
+    severity_order = {"none": 0, "mild": 1, "moderate": 2, "severe": 3}
+    for r in results.values():
+        if severity_order.get(r.severity, 0) > severity_order.get(worst, 0):
+            worst = r.severity
+
+    if verbose and affected:
+        for z in affected:
+            print(f"  Z-plane {z}: {results[z]}")
+
+    return _LegacyReport(
+        total_planes=len(results),
+        affected_planes=affected,
+        results=results,
+        worst_severity=worst,
+        summary=f"Detected {len(affected)}/{len(results)} affected planes"
+    )
 from kintsugi.qc.stripe_mitigation import (
     MitigationResult,
     apply_directional_filter,
@@ -95,6 +142,9 @@ __all__ = [
     "detect_stripe_artifact",
     "scan_zstack",
     "compute_zstack_baseline",
+    # Deprecated aliases (backwards compatibility)
+    "detect_stripe_artifacts",
+    "scan_zstack_for_artifacts",
     # Stripe Mitigation
     "MitigationResult",
     "apply_notch_filter",
