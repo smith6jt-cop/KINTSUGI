@@ -58,18 +58,20 @@ from kintsugi.qc.marker_qc import (
 from kintsugi.qc.stripe_artifact import (
     StripeArtifactResult,
     ZStackArtifactReport,
-    detect_stripe_artifacts,
-    scan_zstack_for_artifacts,
-    get_fft_visualization,
     compute_stripe_direction,
+    detect_stripe_artifacts,
+    detect_stripe_artifacts_batch,
+    get_fft_visualization,
+    scan_zstack_for_artifacts,
+    scan_zstack_for_artifacts_fast,
 )
 from kintsugi.qc.stripe_mitigation import (
     MitigationResult,
-    apply_notch_filter,
     apply_directional_filter,
+    apply_notch_filter,
+    get_recommended_method,
     interpolate_zplane,
     mitigate_artifact,
-    get_recommended_method,
 )
 
 __all__ = [
@@ -98,7 +100,9 @@ __all__ = [
     "StripeArtifactResult",
     "ZStackArtifactReport",
     "detect_stripe_artifacts",
+    "detect_stripe_artifacts_batch",
     "scan_zstack_for_artifacts",
+    "scan_zstack_for_artifacts_fast",
     "get_fft_visualization",
     "compute_stripe_direction",
     # Stripe Artifact Mitigation
