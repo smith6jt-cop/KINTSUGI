@@ -5,16 +5,16 @@ Provides widget-based interface for reviewing detected artifacts,
 selecting mitigation methods, and verifying results.
 """
 
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Optional, Literal
 import json
+from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
+
 import numpy as np
 
 try:
     import ipywidgets as widgets
-    from IPython.display import display, clear_output
+    from IPython.display import clear_output, display
     WIDGETS_AVAILABLE = True
 except ImportError:
     WIDGETS_AVAILABLE = False
@@ -36,7 +36,7 @@ class ArtifactTunerResult:
     mitigated_planes: dict = field(default_factory=dict)  # z_index -> mitigated image
     approved: bool = False
 
-    def get_mitigated_image(self, z_index: int) -> Optional[np.ndarray]:
+    def get_mitigated_image(self, z_index: int) -> np.ndarray | None:
         """Get mitigated image for a z-plane, or None if not mitigated."""
         return self.mitigated_planes.get(z_index)
 
@@ -45,7 +45,7 @@ def artifact_detection_tuner(
     z_stack: np.ndarray,
     channel_name: str = "",
     sensitivity: float = 0.5,
-    output_dir: Optional[Path] = None,
+    output_dir: Path | None = None,
 ) -> ArtifactTunerResult:
     """
     Interactive widget for artifact detection and mitigation.
@@ -74,11 +74,11 @@ def artifact_detection_tuner(
         Contains all decisions and mitigated images
     """
     from ..qc.stripe_artifact import (
-        scan_zstack_for_artifacts,
         detect_stripe_artifacts,
         get_fft_visualization,
+        scan_zstack_for_artifacts,
     )
-    from ..qc.stripe_mitigation import mitigate_artifact, get_recommended_method
+    from ..qc.stripe_mitigation import get_recommended_method, mitigate_artifact
 
     # Scan for artifacts
     print(f"Scanning {channel_name} for artifacts (sensitivity={sensitivity})...")
@@ -299,10 +299,10 @@ def _auto_mitigate(
     z_stack: np.ndarray,
     report,
     result: ArtifactTunerResult,
-    output_dir: Optional[Path],
+    output_dir: Path | None,
 ) -> ArtifactTunerResult:
     """Automatic mitigation when widgets unavailable."""
-    from ..qc.stripe_mitigation import mitigate_artifact, get_recommended_method
+    from ..qc.stripe_mitigation import get_recommended_method, mitigate_artifact
 
     nz = z_stack.shape[0]
 

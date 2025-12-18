@@ -193,7 +193,7 @@ class ProcessedDataReport:
         return "\n".join(lines)
 
 
-def scan_processed_data(project_paths: "ProjectPaths") -> ProcessedDataReport:
+def scan_processed_data(project_paths: ProjectPaths) -> ProcessedDataReport:
     """
     Scan processed subdirectories for existing data (TIFF and Zarr).
 
@@ -305,7 +305,7 @@ def prompt_for_processed_data(
 
     if not interactive:
         print("Non-interactive mode: keeping all existing data.")
-        return {stage: "keep" for stage in stages_with_data}
+        return dict.fromkeys(stages_with_data, "keep")
 
     print("Options:")
     print("  1. Keep all - Continue without deleting any data")
@@ -319,15 +319,15 @@ def prompt_for_processed_data(
             choice = input("Enter choice [1-4] (default: 1): ").strip() or "1"
             if choice == "1":
                 print("Keeping all existing data.")
-                return {stage: "keep" for stage in stages_with_data}
+                return dict.fromkeys(stages_with_data, "keep")
             elif choice == "2":
                 confirm = input("Are you sure you want to delete ALL processed data? [y/N]: ").strip().lower()
                 if confirm == "y":
                     print("Will delete all processed data.")
-                    return {stage: "delete" for stage in stages_with_data}
+                    return dict.fromkeys(stages_with_data, "delete")
                 else:
                     print("Cancelled. Keeping all data.")
-                    return {stage: "keep" for stage in stages_with_data}
+                    return dict.fromkeys(stages_with_data, "keep")
             elif choice == "3":
                 decisions = {}
                 print("\nFor each stage, enter: k=keep, d=delete")
@@ -345,16 +345,16 @@ def prompt_for_processed_data(
                             print("    Invalid choice. Enter k or d.")
                 return decisions
             elif choice == "4":
-                return {stage: "cancel" for stage in stages_with_data}
+                return dict.fromkeys(stages_with_data, "cancel")
             else:
                 print("Invalid choice. Enter 1, 2, 3, or 4.")
         except (EOFError, KeyboardInterrupt):
             print("\nCancelled.")
-            return {stage: "cancel" for stage in stages_with_data}
+            return dict.fromkeys(stages_with_data, "cancel")
 
 
 def apply_processed_data_decisions(
-    project_paths: "ProjectPaths",
+    project_paths: ProjectPaths,
     decisions: dict[str, Literal["keep", "delete", "cancel"]],
 ) -> bool:
     """
@@ -1449,7 +1449,7 @@ class KintsugiProject:
 # -----------------------------------------------------------------------------
 
 
-def _handle_processed_data_check(project: "KintsugiProject", interactive: bool) -> bool:
+def _handle_processed_data_check(project: KintsugiProject, interactive: bool) -> bool:
     """
     Check for existing processed data and handle user interaction.
 
