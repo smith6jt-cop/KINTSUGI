@@ -73,12 +73,26 @@ def artifact_detection_tuner(
     ArtifactTunerResult
         Contains all decisions and mitigated images
     """
-    from ..qc.stripe_artifact import (
+    from ..qc import (
         detect_stripe_artifacts,
-        get_fft_visualization,
         scan_zstack_for_artifacts,
     )
     from ..qc.stripe_mitigation import get_recommended_method, mitigate_artifact
+
+    # Local helper for FFT visualization (simplified)
+    def get_fft_visualization(image, result):
+        """Get FFT visualization data."""
+        height = image.shape[0]
+        row_means = np.mean(image, axis=1)
+        fft_1d = np.fft.rfft(row_means - row_means.mean())
+        power_1d = np.abs(fft_1d) ** 2
+        if power_1d.max() > 0:
+            power_1d = power_1d / power_1d.max()
+        # 2D FFT for display
+        fft_2d = np.fft.fft2(image.astype(np.float64))
+        fft_shifted = np.fft.fftshift(fft_2d)
+        log_power = np.log1p(np.abs(fft_shifted) ** 2)
+        return log_power, power_1d, result.metrics.get('peak_indices', [])
 
     # Scan for artifacts
     print(f"Scanning {channel_name} for artifacts (sensitivity={sensitivity})...")
@@ -437,7 +451,7 @@ def visualize_artifact_comparison(
         print("Matplotlib not available for visualization")
         return
 
-    from ..qc.stripe_artifact import detect_stripe_artifacts
+    from ..qc import detect_stripe_artifacts
 
     orig_result = detect_stripe_artifacts(original)
     mit_result = detect_stripe_artifacts(mitigated)

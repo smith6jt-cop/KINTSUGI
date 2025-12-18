@@ -22,6 +22,12 @@ class StripeArtifactResult:
     severity: Literal["none", "mild", "moderate", "severe"]
     score: float  # 0-1, higher = worse
     metrics: dict = field(default_factory=dict)
+    frequency_peaks: list = field(default_factory=list)  # For backwards compatibility
+
+    @property
+    def stripe_score(self) -> float:
+        """Backwards compatibility alias for score."""
+        return self.score
 
     def __str__(self) -> str:
         if not self.has_artifact:

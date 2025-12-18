@@ -250,10 +250,10 @@ def mitigate_artifact(
     MitigationResult
         Result containing mitigated image and metrics
     """
-    from .stripe_artifact import detect_stripe_artifacts
+    from .stripe_artifact import detect_stripe_artifact
 
     # Get original score
-    original_result = detect_stripe_artifacts(image)
+    original_result = detect_stripe_artifact(image)
     original_score = original_result.stripe_score
 
     if method == "keep_as_is":
@@ -317,7 +317,7 @@ def mitigate_artifact(
         raise ValueError(f"Unknown method: {method}")
 
     # Check effectiveness
-    mitigated_result = detect_stripe_artifacts(mitigated)
+    mitigated_result = detect_stripe_artifact(mitigated)
     mitigated_score = mitigated_result.stripe_score
     improvement = original_score - mitigated_score
 
