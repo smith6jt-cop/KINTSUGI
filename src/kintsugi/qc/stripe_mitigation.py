@@ -6,9 +6,10 @@ stripe artifacts detected by stripe_artifact.py.
 """
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
+
 import numpy as np
-from scipy.ndimage import gaussian_filter1d, gaussian_filter
+from scipy.ndimage import gaussian_filter
 
 
 @dataclass
@@ -218,9 +219,9 @@ def interpolate_zplane(
 def mitigate_artifact(
     image: np.ndarray,
     method: Literal["notch", "directional", "interpolate", "keep_as_is"],
-    frequencies: Optional[list[float]] = None,
-    z_stack: Optional[np.ndarray] = None,
-    z_index: Optional[int] = None,
+    frequencies: list[float] | None = None,
+    z_stack: np.ndarray | None = None,
+    z_index: int | None = None,
     notch_bandwidth: float = 0.02,
     directional_sigma: float = 2.0,
 ) -> MitigationResult:

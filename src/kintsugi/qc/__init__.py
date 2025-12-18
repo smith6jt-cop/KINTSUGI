@@ -2,34 +2,47 @@
 KINTSUGI Quality Control Module
 
 Pure Python implementations of quality control algorithms for
-multiplex immunofluorescence imaging, inspired by CyLinter.
+multiplex immunofluorescence imaging.
 
 Features:
 - Image-level quality assessment
 - Cell-level quality control
-- Outlier detection
-- Artifact identification
+- Artifact detection (stripe/banding)
 - Batch effect detection
 - Marker quality validation
 
-Usage:
-    from kintsugi.qc import (
-        ImageQC,
-        CellQC,
-        MarkerQC,
-        detect_outliers,
-        assess_image_quality,
-    )
+Artifact Detection:
+    # Project-level scanning (recommended)
+    from kintsugi.project import KintsugiProject
+    from kintsugi.qc import ArtifactScanner
 
-    # Image-level QC
+    project = KintsugiProject.load("/path/to/project")
+    scanner = ArtifactScanner(project)
+    report = scanner.scan_raw_data()
+    print(report.summary())
+
+    # Low-level z-stack scanning
+    from kintsugi.qc import scan_zstack
+    affected, results = scan_zstack(z_stack)
+
+Image QC:
+    from kintsugi.qc import ImageQC, assess_image_quality
     qc = ImageQC()
     result = qc.assess(image, marker="CD3", tissue="tonsil")
 
-    # Cell-level QC
+Cell QC:
+    from kintsugi.qc import CellQC
     cell_qc = CellQC()
     filtered_cells = cell_qc.filter_outliers(cell_data)
 """
 
+from kintsugi.qc.artifact_scanner import (
+    ArtifactItem,
+    ArtifactReport,
+    ArtifactScanner,
+    ChannelScanResult,
+    scan_project_artifacts,
+)
 from kintsugi.qc.batch_qc import (
     BatchQC,
     compute_batch_statistics,
@@ -57,13 +70,9 @@ from kintsugi.qc.marker_qc import (
 )
 from kintsugi.qc.stripe_artifact import (
     StripeArtifactResult,
-    ZStackArtifactReport,
-    compute_stripe_direction,
-    detect_stripe_artifacts,
-    detect_stripe_artifacts_batch,
-    get_fft_visualization,
-    scan_zstack_for_artifacts,
-    scan_zstack_for_artifacts_fast,
+    compute_zstack_baseline,
+    detect_stripe_artifact,
+    scan_zstack,
 )
 from kintsugi.qc.stripe_mitigation import (
     MitigationResult,
@@ -75,6 +84,24 @@ from kintsugi.qc.stripe_mitigation import (
 )
 
 __all__ = [
+    # Artifact Scanner (primary interface)
+    "ArtifactScanner",
+    "ArtifactReport",
+    "ArtifactItem",
+    "ChannelScanResult",
+    "scan_project_artifacts",
+    # Stripe Detection (low-level)
+    "StripeArtifactResult",
+    "detect_stripe_artifact",
+    "scan_zstack",
+    "compute_zstack_baseline",
+    # Stripe Mitigation
+    "MitigationResult",
+    "apply_notch_filter",
+    "apply_directional_filter",
+    "interpolate_zplane",
+    "mitigate_artifact",
+    "get_recommended_method",
     # Image QC
     "ImageQC",
     "assess_image_quality",
@@ -96,20 +123,4 @@ __all__ = [
     "BatchQC",
     "detect_batch_effects",
     "compute_batch_statistics",
-    # Stripe Artifact Detection
-    "StripeArtifactResult",
-    "ZStackArtifactReport",
-    "detect_stripe_artifacts",
-    "detect_stripe_artifacts_batch",
-    "scan_zstack_for_artifacts",
-    "scan_zstack_for_artifacts_fast",
-    "get_fft_visualization",
-    "compute_stripe_direction",
-    # Stripe Artifact Mitigation
-    "MitigationResult",
-    "apply_notch_filter",
-    "apply_directional_filter",
-    "interpolate_zplane",
-    "mitigate_artifact",
-    "get_recommended_method",
 ]
