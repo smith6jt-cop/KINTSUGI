@@ -438,6 +438,7 @@ def process_in_chunks(stack: np.ndarray,
                       device_id: Optional[int] = None,
                       max_memory_fraction: float = 0.8,
                       overlap: Optional[int] = None,
+                      blend: bool = False,
                       verbose: bool = True,
                       max_retries: int = 3) -> np.ndarray:
     """
@@ -463,6 +464,10 @@ def process_in_chunks(stack: np.ndarray,
         Fraction of available memory to use
     overlap : int, optional
         Overlap between chunks (default: 4x max PSF dimension for FFT ringing)
+    blend : bool
+        If True, use cosine-weighted blending in overlap regions (recommended
+        for oblique tissue acquisitions). If False, use core-only extraction
+        (original MATLAB style). Default False for backward compatibility.
     verbose : bool
         Print progress information
     max_retries : int
@@ -524,12 +529,20 @@ def process_in_chunks(stack: np.ndarray,
             # Get chunk slices
             chunk_slices = get_chunk_slices(stack.shape, n_chunks, overlap)
 
-            # Initialize output - NO blending, just extract core regions
-            # This matches MATLAB's approach: overlap provides CONTEXT only
-            result = np.zeros(stack.shape, dtype=np.float32)
+            if blend:
+                # Use cosine-weighted blending for smooth transitions
+                # Critical for oblique tissue where different areas are in focus at each z-plane
+                result_weighted = np.zeros(stack.shape, dtype=np.float32)
+                weight_sum = np.zeros(stack.shape, dtype=np.float32)
 
-            if verbose:
-                print(f"Using overlap={overlap} for context (no blending - MATLAB style)")
+                if verbose:
+                    print(f"Using overlap={overlap} with cosine-weighted blending")
+            else:
+                # Original MATLAB style: overlap provides context only, extract core
+                result = np.zeros(stack.shape, dtype=np.float32)
+
+                if verbose:
+                    print(f"Using overlap={overlap} for context (no blending - MATLAB style)")
 
             # Process each chunk
             for i, chunk_info in enumerate(chunk_slices):
@@ -543,23 +556,68 @@ def process_in_chunks(stack: np.ndarray,
                 # Process chunk - may raise OOM
                 chunk_result = deconv_func(chunk, psf)
 
-                # Extract ONLY the core region (discard overlap - it was just for context)
-                # This is the correct approach for FFT-based deconvolution
-                offset = chunk_info['offset']
-                core_size = chunk_info['core_size']
+                if blend:
+                    # Create blend weights based on position in the grid
+                    # Edge chunks get no tapering on exterior edges
+                    chunk_shape = chunk_result.shape
 
-                core_result = chunk_result[
-                    offset[0]:offset[0] + core_size[0],
-                    offset[1]:offset[1] + core_size[1],
-                    offset[2]:offset[2] + core_size[2]
-                ]
+                    # Determine blend widths for each edge
+                    # Use half the overlap for the blend region (cosine taper)
+                    blend_width = overlap // 2
 
-                # Place core region directly into output (no blending)
-                core_slices = chunk_info['core']
-                result[core_slices[0], core_slices[1], core_slices[2]] = core_result
+                    # Get chunk indices in the grid
+                    chunk_idx = i
+                    iz = chunk_idx // (n_chunks[0] * n_chunks[1])
+                    iy = (chunk_idx % (n_chunks[0] * n_chunks[1])) // n_chunks[0]
+                    ix = chunk_idx % n_chunks[0]
 
-                if verbose:
-                    print(f"  Chunk {i + 1} complete")
+                    # Determine which edges need tapering (interior edges only)
+                    blend_start = [
+                        blend_width if ix > 0 else 0,
+                        blend_width if iy > 0 else 0,
+                        blend_width if iz > 0 else 0
+                    ]
+                    blend_end = [
+                        blend_width if ix < n_chunks[0] - 1 else 0,
+                        blend_width if iy < n_chunks[1] - 1 else 0,
+                        blend_width if iz < n_chunks[2] - 1 else 0
+                    ]
+
+                    # Create weights
+                    weights = _create_blend_weights_3d(
+                        chunk_shape,
+                        tuple(blend_start),
+                        tuple(blend_end)
+                    )
+
+                    # Accumulate weighted result into the extended region
+                    ext_x = ext_slices[0]
+                    ext_y = ext_slices[1]
+                    ext_z = ext_slices[2]
+
+                    result_weighted[ext_x, ext_y, ext_z] += chunk_result * weights
+                    weight_sum[ext_x, ext_y, ext_z] += weights
+
+                    if verbose:
+                        print(f"  Chunk {i + 1} complete (blended)")
+
+                else:
+                    # Core-only extraction (original approach)
+                    offset = chunk_info['offset']
+                    core_size = chunk_info['core_size']
+
+                    core_result = chunk_result[
+                        offset[0]:offset[0] + core_size[0],
+                        offset[1]:offset[1] + core_size[1],
+                        offset[2]:offset[2] + core_size[2]
+                    ]
+
+                    # Place core region directly into output (no blending)
+                    core_slices = chunk_info['core']
+                    result[core_slices[0], core_slices[1], core_slices[2]] = core_result
+
+                    if verbose:
+                        print(f"  Chunk {i + 1} complete")
 
                 # Clean up GPU memory between chunks
                 if CUPY_AVAILABLE:
@@ -567,6 +625,12 @@ def process_in_chunks(stack: np.ndarray,
                         cp.get_default_memory_pool().free_all_blocks()
                     except Exception:
                         pass
+
+            if blend:
+                # Normalize by weight sum to get final result
+                # Avoid division by zero (shouldn't happen with proper overlap)
+                weight_sum = np.maximum(weight_sum, 1e-10)
+                result = result_weighted / weight_sum
 
             return result
 

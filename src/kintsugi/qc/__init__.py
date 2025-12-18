@@ -55,6 +55,22 @@ from kintsugi.qc.marker_qc import (
     detect_crosstalk,
     validate_marker_expression,
 )
+from kintsugi.qc.stripe_artifact import (
+    StripeArtifactResult,
+    ZStackArtifactReport,
+    detect_stripe_artifacts,
+    scan_zstack_for_artifacts,
+    get_fft_visualization,
+    compute_stripe_direction,
+)
+from kintsugi.qc.stripe_mitigation import (
+    MitigationResult,
+    apply_notch_filter,
+    apply_directional_filter,
+    interpolate_zplane,
+    mitigate_artifact,
+    get_recommended_method,
+)
 
 __all__ = [
     # Image QC
@@ -78,4 +94,18 @@ __all__ = [
     "BatchQC",
     "detect_batch_effects",
     "compute_batch_statistics",
+    # Stripe Artifact Detection
+    "StripeArtifactResult",
+    "ZStackArtifactReport",
+    "detect_stripe_artifacts",
+    "scan_zstack_for_artifacts",
+    "get_fft_visualization",
+    "compute_stripe_direction",
+    # Stripe Artifact Mitigation
+    "MitigationResult",
+    "apply_notch_filter",
+    "apply_directional_filter",
+    "interpolate_zplane",
+    "mitigate_artifact",
+    "get_recommended_method",
 ]

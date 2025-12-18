@@ -107,11 +107,128 @@ def _conv_fft_gpu(data: 'cp.ndarray', otf: 'cp.ndarray') -> 'cp.ndarray':
     return cp.real(cupy_fft.ifftn(otf * cupy_fft.fftn(data)))
 
 
+def _conv_same_gpu(data: 'cp.ndarray', kernel: 'cp.ndarray') -> 'cp.ndarray':
+    """
+    3D convolution with 'same' output size on GPU.
+
+    Equivalent to MATLAB's convn(data, kernel, 'same').
+    Uses FFT with zero-padding to avoid circular wraparound artifacts.
+
+    Parameters
+    ----------
+    data : cp.ndarray
+        Input 3D array
+    kernel : cp.ndarray
+        Convolution kernel (PSF)
+
+    Returns
+    -------
+    cp.ndarray
+        Convolved array with same shape as input data
+    """
+    # Calculate padded size to avoid circular convolution artifacts
+    # Full convolution size is data.shape + kernel.shape - 1
+    full_shape = tuple(d + k - 1 for d, k in zip(data.shape, kernel.shape))
+
+    # Find FFT-efficient sizes (optional but faster)
+    def next_fast_len(n):
+        # Find next size with small prime factors for efficient FFT
+        while True:
+            m = n
+            for p in (2, 3, 5):
+                while m % p == 0:
+                    m //= p
+            if m == 1:
+                return n
+            n += 1
+
+    fft_shape = tuple(next_fast_len(s) for s in full_shape)
+
+    # FFT of zero-padded data and kernel
+    data_fft = cupy_fft.fftn(data, s=fft_shape)
+    kernel_fft = cupy_fft.fftn(kernel, s=fft_shape)
+
+    # Multiply in frequency domain and inverse FFT
+    result_full = cp.real(cupy_fft.ifftn(data_fft * kernel_fft))
+
+    # Extract 'same' size output (centered on full convolution)
+    # For 'same' mode: output[i] corresponds to kernel centered at data[i]
+    # Start index is (kernel.shape - 1) // 2
+    start = tuple((k - 1) // 2 for k in kernel.shape)
+    end = tuple(s + d for s, d in zip(start, data.shape))
+
+    return result_full[start[0]:end[0], start[1]:end[1], start[2]:end[2]]
+
+
 def _create_damping_kernel() -> np.ndarray:
     """Create 3x3x3 averaging kernel for damping (excluding center)."""
     R = np.ones((3, 3, 3), dtype=np.float32) / 26
     R[1, 1, 1] = 0
     return R
+
+
+def _create_tukey_window_3d(shape: Tuple[int, ...],
+                            pad_before: Tuple[int, ...],
+                            pad_after: Tuple[int, ...],
+                            alpha: float = 0.5) -> np.ndarray:
+    """
+    Create a 3D Tukey (cosine-tapered) window for apodization.
+
+    This window smoothly tapers the padded regions to prevent FFT edge
+    artifacts (Gibbs ringing) that cause horizontal banding.
+
+    Parameters
+    ----------
+    shape : tuple
+        Shape of the padded array (padded_x, padded_y, padded_z)
+    pad_before : tuple
+        Padding added before data in each dimension
+    pad_after : tuple
+        Padding added after data in each dimension
+    alpha : float
+        Shape parameter (0 = rectangular, 1 = Hann window).
+        Default 0.5 provides good edge smoothing.
+
+    Returns
+    -------
+    ndarray
+        3D window array with smooth transitions at boundaries
+    """
+    windows_1d = []
+
+    for i in range(3):
+        n = shape[i]
+        pb = pad_before[i]
+        pa = pad_after[i]
+
+        if pb == 0 and pa == 0:
+            # No padding in this dimension - use flat window
+            windows_1d.append(np.ones(n, dtype=np.float32))
+            continue
+
+        w = np.ones(n, dtype=np.float32)
+
+        # Taper width is the padding region (or at least 4 pixels)
+        taper_before = max(pb, 4) if pb > 0 else 0
+        taper_after = max(pa, 4) if pa > 0 else 0
+
+        # Cosine taper at the start
+        if taper_before > 0:
+            t = np.linspace(0, np.pi/2, taper_before)
+            w[:taper_before] = np.sin(t) ** 2
+
+        # Cosine taper at the end
+        if taper_after > 0:
+            t = np.linspace(np.pi/2, 0, taper_after)
+            w[-taper_after:] = np.sin(t) ** 2
+
+        windows_1d.append(w)
+
+    # Create 3D window as outer product of 1D windows
+    window = np.outer(windows_1d[0], windows_1d[1]).reshape(shape[0], shape[1], 1)
+    window = window * windows_1d[2].reshape(1, 1, shape[2])
+
+    return window.astype(np.float32)
 
 
 def lucy_richardson_cpu(stack: np.ndarray, psf: np.ndarray,
@@ -157,7 +274,8 @@ def lucy_richardson_cpu(stack: np.ndarray, psf: np.ndarray,
         R = _create_damping_kernel()
 
     delta_last = np.inf
-    eps = np.finfo(np.float32).eps
+    # Use eps('single') as floor value - matches MATLAB exactly
+    eps = np.finfo(np.float32).eps  # ~1.19e-7
 
     for i in range(iterations):
         # Richardson-Lucy iteration:
@@ -165,9 +283,9 @@ def lucy_richardson_cpu(stack: np.ndarray, psf: np.ndarray,
 
         # Forward model: blur estimate
         denom = _conv_fft(deconvolved, otf)
-        denom = np.maximum(denom, eps)  # Avoid division by zero
+        denom = np.maximum(denom, eps)  # Protect against division by zero
 
-        # Ratio
+        # Ratio (no clipping - matches MATLAB)
         ratio = stack / denom
 
         # Backward step
@@ -215,6 +333,11 @@ def lucy_richardson_gpu(stack: np.ndarray, psf: np.ndarray,
     """
     Lucy-Richardson deconvolution on GPU using CuPy.
 
+    This implementation matches MATLAB's deconGPU exactly:
+    - Uses spatial convolution (not FFT) with 'same' output size
+    - Uses spatially reversed PSF for backward step
+    - Uses eps('single') as floor value
+
     Parameters are the same as lucy_richardson_cpu().
     """
     if not CUPY_AVAILABLE:
@@ -225,31 +348,34 @@ def lucy_richardson_gpu(stack: np.ndarray, psf: np.ndarray,
     stack_gpu = cp.asarray(stack.astype(np.float32))
     psf_gpu = cp.asarray(psf.astype(np.float32))
 
-    # Compute OTF on GPU
-    otf = _psf_to_otf_gpu(psf_gpu, stack.shape)
-    otf_conj = cp.conj(otf)
+    # Spatially reversed PSF for backward step (matches MATLAB: psf(end:-1:1, end:-1:1, end:-1:1))
+    psf_inv = psf_gpu[::-1, ::-1, ::-1]
 
     # Damping kernel
     if damping > 0:
         R = cp.asarray(_create_damping_kernel())
 
     delta_last = np.inf
-    eps = cp.finfo(cp.float32).eps
+    # Use eps('single') as floor value - matches MATLAB exactly
+    eps = np.finfo(np.float32).eps  # ~1.19e-7
 
     try:
         for i in range(iterations):
-            # Forward model
-            denom = _conv_fft_gpu(deconvolved, otf)
-            denom = cp.maximum(denom, eps)
+            # Forward model: convolution with PSF (matches MATLAB convGPU)
+            # MATLAB: denom = convGPU(deconvolved, psf) = gather(convn(gpuArray(data), psf, 'same'))
+            # Uses _conv_same_gpu which implements convn(..., 'same') via FFT with proper padding
+            denom = _conv_same_gpu(deconvolved, psf_gpu)
+            denom = cp.maximum(denom, eps)  # Protect against division by zero
 
-            # Ratio
+            # Ratio (no clipping - matches MATLAB)
             ratio = stack_gpu / denom
 
-            # Backward step
+            # Backward step: convolution with reversed PSF
+            # MATLAB: convGPU(stack ./ denom, psf_inv) .* deconvolved
             if damping == 0:
-                deconvolved_new = _conv_fft_gpu(ratio, otf_conj) * deconvolved
+                deconvolved_new = _conv_same_gpu(ratio, psf_inv) * deconvolved
             else:
-                lr_update = _conv_fft_gpu(ratio, otf_conj) * deconvolved
+                lr_update = _conv_same_gpu(ratio, psf_inv) * deconvolved
                 smooth_term = cupy_convolve(deconvolved, R, mode='reflect')
                 deconvolved_new = (1 - damping) * lr_update + damping * smooth_term
 
@@ -275,12 +401,12 @@ def lucy_richardson_gpu(stack: np.ndarray, psf: np.ndarray,
                     print(f"  Stop criterion reached at iteration {i+1}")
                 break
 
-        # Transfer back to CPU
+        # Transfer back to CPU - get rid of imaginary artifacts (matches MATLAB: deconvolved = abs(deconvolved))
         result = cp.asnumpy(cp.abs(deconvolved))
 
     finally:
         # Clean up GPU memory
-        del deconvolved, stack_gpu, psf_gpu, otf, otf_conj
+        del deconvolved, stack_gpu, psf_gpu, psf_inv
         if damping > 0:
             del R
         cp.get_default_memory_pool().free_all_blocks()
@@ -374,35 +500,14 @@ def deconvolve(stack: np.ndarray, psf: np.ndarray,
         pad_before = tuple((ps - os) // 2 for ps, os in zip(padded_shape, original_shape))
         pad_after = tuple(ps - os - pb for ps, os, pb in zip(padded_shape, original_shape, pad_before))
 
-        # Choose padding mode per dimension:
-        # - Use 'edge' for small dimensions where padding > 50% of original size
-        #   (prevents FFT artifacts from symmetric mirroring)
-        # - Use 'symmetric' for larger dimensions (better boundary handling)
-        pad_modes = []
-        for pb, pa, os in zip(pad_before, pad_after, original_shape):
-            total_pad = pb + pa
-            if total_pad > os // 2:
-                # Small dimension: use edge padding to avoid mirroring artifacts
-                pad_modes.append('edge')
-            else:
-                pad_modes.append('symmetric')
-
-        # Apply padding with per-dimension modes (requires separate pad calls)
-        stack_padded = stack_float
-        for axis in range(3):
-            if pad_before[axis] > 0 or pad_after[axis] > 0:
-                pad_width = [(0, 0)] * 3
-                pad_width[axis] = (pad_before[axis], pad_after[axis])
-                stack_padded = np.pad(stack_padded, pad_width, mode=pad_modes[axis])
+        # Use symmetric padding (matches MATLAB padarray with 'symmetric' mode)
+        # MATLAB: block = padarray(block, [floor(pad_x) floor(pad_y) floor(pad_z)], 'pre', 'symmetric');
+        #         block = padarray(block, [ceil(pad_x) ceil(pad_y) ceil(pad_z)], 'post', 'symmetric');
+        pad_width = [(pb, pa) for pb, pa in zip(pad_before, pad_after)]
+        stack_padded = np.pad(stack_float, pad_width, mode='symmetric')
 
         if verbose:
             print(f"  Padded from {original_shape} to {padded_shape} for FFT efficiency")
-            # Report if any dimensions used edge padding (small dimension handling)
-            edge_dims = [i for i, m in enumerate(pad_modes) if m == 'edge']
-            if edge_dims:
-                dim_names = ['X', 'Y', 'Z']
-                edge_names = [dim_names[i] for i in edge_dims]
-                print(f"  Using edge padding for small dimension(s): {', '.join(edge_names)}")
     else:
         stack_padded = stack_float
         pad_before = (0, 0, 0)
@@ -438,6 +543,7 @@ def deconvolve_stack(stack: np.ndarray, psf: np.ndarray,
                      device: str = 'auto',
                      device_id: Optional[int] = None,
                      max_memory_fraction: float = 0.8,
+                     blend: bool = False,
                      verbose: bool = True) -> np.ndarray:
     """
     Deconvolve a 3D stack with automatic chunking for large images.
@@ -464,6 +570,11 @@ def deconvolve_stack(stack: np.ndarray, psf: np.ndarray,
         this GPU will be used instead of auto-detection.
     max_memory_fraction : float
         Fraction of available memory to use per chunk (default 0.8)
+    blend : bool
+        If True, use cosine-weighted blending in overlap regions to eliminate
+        boundary artifacts (recommended for oblique tissue acquisitions).
+        If False, use core-only extraction (original MATLAB style).
+        Default False to maintain backward compatibility.
     verbose : bool
         Print progress (default True)
 
@@ -483,5 +594,6 @@ def deconvolve_stack(stack: np.ndarray, psf: np.ndarray,
         device_id=device_id,
         max_memory_fraction=max_memory_fraction,
         overlap=None,  # Use default (4x PSF size) for proper FFT boundary handling
+        blend=blend,
         verbose=verbose
     )

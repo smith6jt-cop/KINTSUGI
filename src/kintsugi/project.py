@@ -195,7 +195,7 @@ class ProcessedDataReport:
 
 def scan_processed_data(project_paths: "ProjectPaths") -> ProcessedDataReport:
     """
-    Scan processed subdirectories for existing data.
+    Scan processed subdirectories for existing data (TIFF and Zarr).
 
     Parameters
     ----------
@@ -223,29 +223,45 @@ def scan_processed_data(project_paths: "ProjectPaths") -> ProcessedDataReport:
 
     cycle_pattern = re.compile(r"cyc\d+", re.IGNORECASE)
 
+    # Find zarr file if it exists
+    zarr_path = project_paths.processed / f"{project_paths.root.name}.zarr"
+
     for stage_name, stage_path in stage_paths.items():
         info = ProcessedStageInfo(name=stage_name, path=stage_path)
 
-        if not stage_path.exists():
-            report.stages[stage_name] = info
-            continue
-
-        info.exists = True
+        tiff_exists = stage_path.exists()
+        zarr_stage_exists = False
         files = []
         cycles = set()
 
-        # Scan for files
-        for item in stage_path.rglob("*"):
-            if item.is_file():
-                files.append(item)
-                info.total_size_mb += item.stat().st_size / (1024 * 1024)
+        # Scan TIFF directory for files
+        if tiff_exists:
+            for item in stage_path.rglob("*"):
+                if item.is_file():
+                    files.append(item)
+                    info.total_size_mb += item.stat().st_size / (1024 * 1024)
 
-                # Check for cycle folders
-                rel_path = item.relative_to(stage_path)
-                for part in rel_path.parts:
-                    if cycle_pattern.match(part):
-                        cycles.add(part)
+                    # Check for cycle folders
+                    rel_path = item.relative_to(stage_path)
+                    for part in rel_path.parts:
+                        if cycle_pattern.match(part):
+                            cycles.add(part)
 
+        # Scan Zarr for this stage (in each cycle)
+        if zarr_path.exists():
+            for cycle_dir in zarr_path.iterdir():
+                if cycle_dir.is_dir() and not cycle_dir.name.startswith('.'):
+                    zarr_stage_path = cycle_dir / stage_name
+                    if zarr_stage_path.exists():
+                        zarr_stage_exists = True
+                        cycles.add(cycle_dir.name)
+                        # Count zarr chunk files and size
+                        for item in zarr_stage_path.rglob("*"):
+                            if item.is_file():
+                                files.append(item)
+                                info.total_size_mb += item.stat().st_size / (1024 * 1024)
+
+        info.exists = tiff_exists or zarr_stage_exists
         info.file_count = len(files)
         info.cycle_folders = sorted(cycles)
         info.sample_files = [f.name for f in files[:5]]
@@ -314,19 +330,19 @@ def prompt_for_processed_data(
                     return {stage: "keep" for stage in stages_with_data}
             elif choice == "3":
                 decisions = {}
-                print("\nFor each stage, enter: k=keep, d=delete, s=skip (keep)")
+                print("\nFor each stage, enter: k=keep, d=delete")
                 for stage in stages_with_data:
                     info = report.stages[stage]
                     while True:
-                        action = input(f"  {stage} ({info.file_count} files, {info.total_size_mb:.1f} MB) [k/d/s]: ").strip().lower() or "k"
-                        if action in ("k", "s"):
+                        action = input(f"  {stage} ({info.file_count} files, {info.total_size_mb:.1f} MB) [k/d]: ").strip().lower() or "k"
+                        if action == "k":
                             decisions[stage] = "keep"
                             break
                         elif action == "d":
                             decisions[stage] = "delete"
                             break
                         else:
-                            print("    Invalid choice. Enter k, d, or s.")
+                            print("    Invalid choice. Enter k or d.")
                 return decisions
             elif choice == "4":
                 return {stage: "cancel" for stage in stages_with_data}
@@ -343,6 +359,8 @@ def apply_processed_data_decisions(
 ) -> bool:
     """
     Apply user decisions for processed data (delete stages as requested).
+
+    Deletes both TIFF directories and corresponding Zarr groups for each stage.
 
     Parameters
     ----------
@@ -369,13 +387,29 @@ def apply_processed_data_decisions(
         "analysis": project_paths.analysis,
     }
 
+    # Find the zarr file if it exists
+    zarr_path = project_paths.processed / f"{project_paths.root.name}.zarr"
+
     for stage_name, action in decisions.items():
         if action == "delete" and stage_name in stage_paths:
+            # Delete TIFF directory
             stage_path = stage_paths[stage_name]
             if stage_path.exists():
-                print(f"  Deleting {stage_name}...")
+                print(f"  Deleting {stage_name} (TIFF)...")
                 shutil.rmtree(stage_path)
                 stage_path.mkdir(parents=True, exist_ok=True)
+
+            # Delete corresponding Zarr groups (in each cycle)
+            if zarr_path.exists():
+                deleted_zarr = False
+                for cycle_dir in zarr_path.iterdir():
+                    if cycle_dir.is_dir() and not cycle_dir.name.startswith('.'):
+                        zarr_stage_path = cycle_dir / stage_name
+                        if zarr_stage_path.exists():
+                            if not deleted_zarr:
+                                print(f"  Deleting {stage_name} (Zarr)...")
+                                deleted_zarr = True
+                            shutil.rmtree(zarr_stage_path)
 
     return True
 
