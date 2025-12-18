@@ -165,6 +165,15 @@ def detect_stripe_artifacts(
 
     has_artifact = stripe_score > 0.08
 
+    # Safely extract prominence metrics (handle empty arrays)
+    prominences = properties.get('prominences', np.array([]))
+    if len(prominences) > 0:
+        max_prominence = float(np.max(prominences))
+        mean_prominence = float(np.mean(prominences))
+    else:
+        max_prominence = 0.0
+        mean_prominence = 0.0
+
     return StripeArtifactResult(
         has_artifact=has_artifact,
         severity=severity,
@@ -173,8 +182,8 @@ def detect_stripe_artifacts(
         peak_indices=peaks.tolist(),
         metrics={
             'peak_count': len(peaks),
-            'max_prominence': float(np.max(properties.get('prominences', [0]))),
-            'mean_prominence': float(np.mean(properties.get('prominences', [0]))) if len(peaks) else 0,
+            'max_prominence': max_prominence,
+            'mean_prominence': mean_prominence,
             'profile_energy': float(np.sum(profile_norm[min_idx:max_idx])),
             'sensitivity': sensitivity,
         }

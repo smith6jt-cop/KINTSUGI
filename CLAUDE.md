@@ -154,7 +154,10 @@ python -m build
 **Pure Python Modules** (`src/kintsugi/`):
 - `signal/` - Autofluorescence subtraction with intelligent parameter suggestion
 - `denoise/` - Denoising algorithms (median, Gaussian, bilateral, NLM, N2V, CARE, BM3D-lite)
-- `qc/` - Quality control (ImageQC, CellQC, MarkerQC, BatchQC)
+- `qc/` - Quality control:
+  - `ImageQC`, `CellQC`, `MarkerQC`, `BatchQC` - Standard QC classes
+  - `stripe_artifact.py` - FFT-based stripe artifact detection (horizontal stripes from microscope vibration)
+  - `stripe_mitigation.py` - Artifact correction (notch filter, directional filter, z-plane interpolation)
 - `segment/` - Segmentation (SAM wrapper, watershed, postprocessing)
 - `claude/` - Claude Code integration (parameter_learning, param_tuner, workflow_state)
 
@@ -180,6 +183,28 @@ python -m build
 - **Platform-specific**: Windows/Linux/macOS have different environment files (`envs/`) and dependency handling
 - **Parameter learning**: Successful parameters are stored in SQLite databases, indexed by tissue type and marker name
 - **MCP integration**: Claude Code can access image processing tools via the MCP server
+
+## Recent Enhancements
+
+**Multi-GPU Support:**
+- Explicit device ID parameter for GPU functions (`device_id` parameter)
+- Queue-based GPU allocation to prevent OOM during parallel processing
+- Robust memory management with automatic OOM retry and chunk size reduction
+
+**Deconvolution Optimizations:**
+- Smart padding strategy for optimal FFT performance (power-of-2 friendly sizes)
+- Configurable output directory (`decon_dir` parameter)
+
+**Artifact Detection & Mitigation:**
+- Interactive artifact detection tuner for microscopy images
+- FFT-based stripe artifact detection with sensitivity control
+- Multiple mitigation methods: notch filter, directional filter, z-plane interpolation
+- Usage: `from kintsugi.qc import detect_stripe_artifacts, mitigate_artifact`
+
+**Skills Registry Integration:**
+- `/advise` - Search for relevant learnings before starting new work
+- `/retrospective` - Save session learnings as new skills
+- `/skills` - List all available skills with trigger conditions
 
 ## Dependencies
 
