@@ -155,9 +155,10 @@ python -m build
 - `signal/` - Autofluorescence subtraction with intelligent parameter suggestion
 - `denoise/` - Denoising algorithms (median, Gaussian, bilateral, NLM, N2V, CARE, BM3D-lite)
 - `qc/` - Quality control:
+  - `artifact_scanner.py` - Unified `ArtifactScanner` with project/Zarr integration
+  - `stripe_artifact.py` - Core detection algorithms (`scan_zstack`, `detect_stripe_artifact`)
+  - `stripe_mitigation.py` - Correction methods (notch filter, directional filter, z-plane interpolation)
   - `ImageQC`, `CellQC`, `MarkerQC`, `BatchQC` - Standard QC classes
-  - `stripe_artifact.py` - FFT-based stripe artifact detection (horizontal stripes from microscope vibration)
-  - `stripe_mitigation.py` - Artifact correction (notch filter, directional filter, z-plane interpolation)
 - `segment/` - Segmentation (SAM wrapper, watershed, postprocessing)
 - `claude/` - Claude Code integration (parameter_learning, param_tuner, workflow_state)
 
@@ -196,10 +197,23 @@ python -m build
 - Configurable output directory (`decon_dir` parameter)
 
 **Artifact Detection & Mitigation:**
-- Interactive artifact detection tuner for microscopy images
-- FFT-based stripe artifact detection with sensitivity control
+- Unified `ArtifactScanner` class integrated with project structure
+- Comparative z-stack analysis for robust detection (avoids dataset-specific threshold issues)
+- Supports both TIFF files and Zarr stores
+- Generates saveable JSON reports
 - Multiple mitigation methods: notch filter, directional filter, z-plane interpolation
-- Usage: `from kintsugi.qc import detect_stripe_artifacts, mitigate_artifact`
+
+Usage:
+```python
+from kintsugi.project import KintsugiProject
+from kintsugi.qc import ArtifactScanner
+
+project = KintsugiProject.load("/path/to/project")
+scanner = ArtifactScanner(project)
+report = scanner.scan_raw_data()
+print(report.summary())
+report.save(project.paths.meta / "artifacts.json")
+```
 
 **Skills Registry Integration:**
 - `/advise` - Search for relevant learnings before starting new work
