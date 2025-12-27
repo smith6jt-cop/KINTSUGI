@@ -246,11 +246,14 @@ def make_channel_names_unique(channel_dict: Dict[int, List[str]]) -> Dict[int, L
     """
     Ensure all channel names are unique both within and across cycles.
 
-    Handles two types of duplicates:
-    1. Intra-cycle: Multiple "Blank" in same cycle -> Blank, Blank_b, Blank_c
-    2. Inter-cycle: Same name in different cycles -> name_cyc02, name_cyc03
+    Naming convention for duplicates (Blank/Empty channels):
+    - Format: {name}_{cycle}{channel_letter}
+    - cycle: no zero padding (1, 2, ... 9, 10, 11)
+    - channel_letter: a=CH2, b=CH3, c=CH4
+    - Example: Blank on cycle 9, CH3 -> "Blank_9b"
+    - Example: Empty on cycle 6, CH2 -> "Empty_6a"
 
-    DAPI channels after cycle 1 are automatically suffixed with cycle number.
+    DAPI channels after cycle 1 get cycle suffix: DAPI_cyc02, DAPI_cyc03, etc.
 
     Parameters
     ----------
@@ -267,49 +270,53 @@ def make_channel_names_unique(channel_dict: Dict[int, List[str]]) -> Dict[int, L
     >>> channel_dict = {1: ['DAPI-01', 'Blank', 'Blank', 'Blank']}
     >>> unique = make_channel_names_unique(channel_dict)
     >>> print(unique[1])
-    ['DAPI-01', 'Blank', 'Blank_b', 'Blank_c']
+    ['DAPI-01', 'Blank_1a', 'Blank_1b', 'Blank_1c']
     """
-    # First pass: make names unique WITHIN each cycle
-    intra_unique = {}
+    # Channel index to letter mapping (0-indexed: CH2=0->a, CH3=1->b, CH4=2->c)
+    def get_channel_letter(channel_idx):
+        """Convert channel index (0-based, excluding CH1) to letter."""
+        return chr(ord('a') + channel_idx)
+
+    # First pass: identify all names that appear multiple times (within or across cycles)
+    # These need the _Xa suffix format
+    global_name_counts = {}
+    for cycle_num, cycle_names in channel_dict.items():
+        for name in cycle_names:
+            if name.upper().startswith('DAPI'):
+                continue
+            key = name.upper()
+            if key not in global_name_counts:
+                global_name_counts[key] = 0
+            global_name_counts[key] += 1
+
+    # Names that need suffix: appear more than once globally
+    needs_suffix = {name for name, count in global_name_counts.items() if count > 1}
+
+    unique_dict = {}
+
     for cycle_num in sorted(channel_dict.keys()):
         cycle_names = channel_dict[cycle_num]
         new_names = []
-        name_counts = {}  # Track how many times we've seen each name in this cycle
 
-        for name in cycle_names:
-            if name in name_counts:
-                # This is a duplicate within the cycle
-                count = name_counts[name]
-                # Use letter suffix: _b, _c, _d, etc.
-                suffix = chr(ord('a') + count)
-                unique_name = f"{name}_{suffix}"
-                new_names.append(unique_name)
-                name_counts[name] = count + 1
-            else:
-                name_counts[name] = 1
-                new_names.append(name)
-
-        intra_unique[cycle_num] = new_names
-
-    # Second pass: make names unique ACROSS cycles
-    seen_global = {}
-    unique_dict = {}
-
-    for cycle_num in sorted(intra_unique.keys()):
-        new_names = []
-
-        for name in intra_unique[cycle_num]:
-            # DAPI after cycle 1: always suffix with cycle number
-            if name.upper().startswith('DAPI') and cycle_num > 1:
-                new_names.append(f"DAPI_cyc{cycle_num:02d}")
+        for ch_idx, name in enumerate(cycle_names):
+            # DAPI handling: keep first cycle DAPI as-is, suffix others
+            if name.upper().startswith('DAPI'):
+                if cycle_num > 1:
+                    new_names.append(f"DAPI_cyc{cycle_num:02d}")
+                else:
+                    new_names.append(name)
                 continue
 
-            if name in seen_global:
-                # Make unique by appending cycle number
-                unique_name = f"{name}_cyc{cycle_num:02d}"
+            # Check if this name needs a suffix (duplicated anywhere)
+            if name.upper() in needs_suffix:
+                # Use format: name_Xa where X=cycle, a=channel letter
+                # ch_idx is 0-based: CH1=0, CH2=1, CH3=2, CH4=3
+                # Letter: CH2->a, CH3->b, CH4->c (ch_idx - 1)
+                letter = get_channel_letter(ch_idx - 1) if ch_idx > 0 else 'a'
+                unique_name = f"{name}_{cycle_num}{letter}"
                 new_names.append(unique_name)
             else:
-                seen_global[name] = cycle_num
+                # Unique name - keep as-is
                 new_names.append(name)
 
         unique_dict[cycle_num] = new_names
