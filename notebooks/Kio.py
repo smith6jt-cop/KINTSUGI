@@ -683,7 +683,11 @@ def alphanumeric_key(s: str) -> List:
     return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', s)]
 
 
-def cleanup_gpu_memory(device_id: int = 0) -> None:
+def cleanup_gpu_memory(
+    device_id: int = None,
+    device_ids: List[int] = None,
+    verbose: bool = False
+) -> None:
     """
     Explicitly free GPU memory pools to prevent OOM errors.
 
@@ -692,16 +696,37 @@ def cleanup_gpu_memory(device_id: int = 0) -> None:
 
     Parameters
     ----------
-    device_id : int
-        GPU device ID to clean up (default: 0)
+    device_id : int, optional
+        Single GPU device ID to clean up (for backwards compatibility)
+    device_ids : list of int, optional
+        List of GPU device IDs to clean up (preferred for multi-GPU)
+    verbose : bool
+        Print cleanup status (default: False)
+
+    Examples
+    --------
+    >>> cleanup_gpu_memory(device_id=0)  # Single GPU
+    >>> cleanup_gpu_memory(device_ids=[0, 1, 2, 3])  # Multi-GPU
     """
+    # Determine which devices to clean
+    if device_ids is not None:
+        devices = device_ids
+    elif device_id is not None:
+        devices = [device_id]
+    else:
+        devices = [0]  # Default to device 0
+
     try:
         import cupy as cp
-        with cp.cuda.Device(device_id):
-            cp.get_default_memory_pool().free_all_blocks()
-            cp.get_default_pinned_memory_pool().free_all_blocks()
-    except Exception:
-        pass
+        for dev_id in devices:
+            with cp.cuda.Device(dev_id):
+                cp.get_default_memory_pool().free_all_blocks()
+                cp.get_default_pinned_memory_pool().free_all_blocks()
+                if verbose:
+                    print(f"  GPU {dev_id}: memory pools cleared")
+    except Exception as e:
+        if verbose:
+            print(f"  Warning: GPU cleanup failed: {e}")
     gc.collect()
 
 
