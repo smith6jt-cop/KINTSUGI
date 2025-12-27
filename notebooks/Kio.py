@@ -1,22 +1,34 @@
 """
-KINTSUGI I/O and Channel Name Functions
+KINTSUGI I/O, Channel Name, and Parallel Processing Utilities
 
 This module contains functions for:
 - Loading and saving channel name configurations
 - Extracting channels from OME-TIFF files
 - Image resize utilities for processing
+- Parallel I/O utilities (tile loading, z-stack loading)
+- Progress tracking for long-running operations
 
 Location: notebooks/Kio.py
 """
 
+import gc
 import os
 import re
+import sys
+import threading
+import time
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, field
+from datetime import datetime
+from glob import glob
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
+import pandas as pd
 import tifffile as tiff
+from skimage.io import imread, imsave
 from skimage.transform import resize as skresize
 
 
@@ -465,3 +477,235 @@ def resize_stack_for_estimation(
     downsized = np.stack(resized_list, axis=2)
 
     return downsized
+
+
+# =============================================================================
+# PARALLEL PROCESSING UTILITIES
+# =============================================================================
+
+class ProgressCounter:
+    """
+    Thread-safe counter for progress tracking with reduced verbosity.
+
+    Used for tracking progress of parallel processing operations.
+    Only prints updates on first item, every Nth item, and last item
+    to reduce output clutter in HPC environments.
+
+    Parameters
+    ----------
+    total : int
+        Total number of items to process
+    desc : str
+        Description prefix for progress messages
+    print_every : int
+        Print progress every N items (default: 4)
+
+    Example
+    -------
+    >>> progress = ProgressCounter(100, desc="Processing tiles")
+    >>> for i in range(100):
+    ...     do_work()
+    ...     progress.increment(f"Completed tile {i}")
+    """
+
+    def __init__(self, total: int, desc: str = "Processing", print_every: int = 4):
+        self.count = 0
+        self.total = total
+        self.desc = desc
+        self.lock = threading.Lock()
+        self.start_time = datetime.now()
+        self.print_every = print_every
+
+    def increment(self, msg: str = "") -> None:
+        """Increment counter and optionally print progress."""
+        with self.lock:
+            self.count += 1
+            # Only print on first, every Nth, and last item
+            should_print = (
+                self.count == 1 or
+                self.count == self.total or
+                self.count % self.print_every == 0
+            )
+            if should_print:
+                elapsed = (datetime.now() - self.start_time).total_seconds()
+                rate = self.count / elapsed if elapsed > 0 else 0
+                eta = (self.total - self.count) / rate if rate > 0 else 0
+                print(f"[{self.count}/{self.total}] {self.desc} "
+                      f"({elapsed:.0f}s elapsed, ~{eta:.0f}s remaining)")
+                sys.stdout.flush()
+
+
+def load_tiles_parallel(
+    file_paths: List[str],
+    max_workers: Optional[int] = None,
+    default_workers: int = 32
+) -> np.ndarray:
+    """
+    Load multiple tile images in parallel using ThreadPoolExecutor.
+
+    Performance: 10-20x faster than sequential loading for 50+ images.
+    Uses I/O-bound parallelism which scales well with many workers.
+
+    Parameters
+    ----------
+    file_paths : list
+        List of file paths to load
+    max_workers : int, optional
+        Maximum number of parallel workers. If None, uses default_workers.
+    default_workers : int
+        Default number of workers if max_workers not specified (default: 32)
+
+    Returns
+    -------
+    np.ndarray
+        Stacked array of images with shape (n_images, height, width)
+
+    Example
+    -------
+    >>> files = glob("tiles/*.tif")
+    >>> stack = load_tiles_parallel(files, max_workers=64)
+    >>> print(stack.shape)
+    (117, 2048, 2048)
+    """
+    if max_workers is None:
+        max_workers = default_workers
+
+    n_files = len(file_paths)
+    if n_files == 0:
+        return np.array([])
+
+    workers = min(max_workers, n_files)
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        images = list(executor.map(imread, file_paths))
+
+    return np.stack(images, axis=0)
+
+
+def load_stack_parallel(
+    file_paths: List[str],
+    max_workers: Optional[int] = None,
+    default_workers: int = 32
+) -> np.ndarray:
+    """
+    Load z-stack images in parallel for EDF processing.
+
+    Identical to load_tiles_parallel but named for clarity when
+    loading z-stacks for extended depth of focus processing.
+
+    Parameters
+    ----------
+    file_paths : list
+        List of file paths to load (one per z-plane)
+    max_workers : int, optional
+        Maximum number of parallel workers
+    default_workers : int
+        Default number of workers (default: 32)
+
+    Returns
+    -------
+    np.ndarray
+        Stacked array with shape (n_zplanes, height, width)
+    """
+    return load_tiles_parallel(file_paths, max_workers, default_workers)
+
+
+def alphanumeric_key(s: str) -> List:
+    """
+    Key function for natural alphanumeric sorting.
+
+    Splits string into numeric and non-numeric parts for sorting
+    so that "tile_2" comes before "tile_10".
+
+    Parameters
+    ----------
+    s : str
+        String to generate sort key for
+
+    Returns
+    -------
+    list
+        List of alternating string and integer parts
+
+    Example
+    -------
+    >>> sorted(["tile_2", "tile_10", "tile_1"], key=alphanumeric_key)
+    ['tile_1', 'tile_2', 'tile_10']
+    """
+    return [int(c) if c.isdigit() else c.lower() for c in re.split('([0-9]+)', s)]
+
+
+def cleanup_gpu_memory(device_id: int = 0) -> None:
+    """
+    Explicitly free GPU memory pools to prevent OOM errors.
+
+    Should be called after processing each channel or batch
+    to release memory for subsequent operations.
+
+    Parameters
+    ----------
+    device_id : int
+        GPU device ID to clean up (default: 0)
+    """
+    try:
+        import cupy as cp
+        with cp.cuda.Device(device_id):
+            cp.get_default_memory_pool().free_all_blocks()
+            cp.get_default_pinned_memory_pool().free_all_blocks()
+    except Exception:
+        pass
+    gc.collect()
+
+
+# Thread-safe lock for zarr writes (zarr is not fully thread-safe for concurrent writes)
+zarr_write_lock = threading.Lock()
+
+
+@dataclass
+class ProcessingConfig:
+    """
+    Configuration for parallel processing pipeline.
+
+    Centralizes all processing parameters for BaSiC correction,
+    stitching, and output formatting. Create an instance in your
+    notebook and pass to processing functions.
+
+    Example
+    -------
+    >>> config = ProcessingConfig(
+    ...     n_rows=13, n_cols=9,
+    ...     blend_mode='sigmoid', blend_sigma=10.0
+    ... )
+    >>> process_zplane(..., config=config)
+    """
+    # Grid configuration
+    n_rows: int = 13
+    n_cols: int = 9
+
+    # BaSiC illumination correction parameters
+    basic_if_darkfield: bool = True
+    basic_max_iterations: int = 500
+    basic_optimization_tolerance: float = 1e-6
+    basic_max_reweight_iterations: int = 25
+    basic_reweight_tolerance: float = 1e-3
+
+    # Stitching parameters
+    initial_ncc_threshold: float = 0.078
+    overlap_percentage: float = 30.0
+    pou: float = 0.5
+    max_cores: int = 16
+
+    # Blend mode
+    blend_mode: str = 'sigmoid'  # 'sigmoid' or 'legacy'
+    blend_sigma: float = 10.0
+
+    # Output configuration
+    output_format: str = 'tiff'  # 'tiff' or 'zarr'
+    save_tiff_for_qc: bool = True
+
+    # Parallel processing
+    io_workers: int = 32
+    zplanes_per_gpu: int = 6
+
+    # GPU settings (populated at runtime)
+    gpu_device_ids: List[int] = field(default_factory=lambda: [0])
