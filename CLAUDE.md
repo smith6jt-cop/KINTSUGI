@@ -167,7 +167,7 @@ python -m build
 - `Kstitch/` - GPU-accelerated image stitching with CuPy
 - `Kview2/` - 20+ interactive visualization functions for Jupyter
 - `KDecon/` - Deconvolution utilities (pure Python, replaces MATLAB)
-- `Kio.py` - Channel name parsing (multi-format), OME-TIFF extraction, image resize utilities
+- `Kio.py` - I/O and parallel processing: channel name parsing, OME-TIFF extraction, parallel tile/stack loading, ProcessingConfig dataclass, ProgressCounter
 - `instanseg/` - Instance segmentation models (local customized version)
 - `Kutils.py` - Signal isolation utilities (legacy, used by interactive tuners)
 
