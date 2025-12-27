@@ -132,6 +132,8 @@ class KDecon:
         self._psf, self._psf_info = generate_psf(
             self.dxy, self.dz, self.NA, self.rf,
             self.lambda_ex, self.lambda_em,
+            fcyl=self.fcyl,
+            slitwidth=self.slitwidth,
             verbose=self.verbose
         )
 

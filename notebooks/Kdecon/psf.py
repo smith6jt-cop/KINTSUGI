@@ -86,7 +86,10 @@ def _psf_single_wavelength(x: float, y: float, z: float,
 def _psf_light_sheet(x: float, y: float, z: float, NA: float, n: float,
                      lambda_ex: float, lambda_em: float) -> float:
     """
-    Calculate light sheet PSF at a point (product of excitation and emission PSFs).
+    Calculate widefield PSF at a point (product of excitation and emission PSFs).
+
+    This is a standard widefield PSF where both excitation and emission
+    use the same NA and coordinate system.
 
     Parameters
     ----------
@@ -111,8 +114,54 @@ def _psf_light_sheet(x: float, y: float, z: float, NA: float, n: float,
     return psf_ex * psf_em
 
 
+def _psf_light_sheet_full(x: float, y: float, z: float,
+                          NA_obj: float, n: float,
+                          lambda_ex: float, lambda_em: float,
+                          NA_ls: float) -> float:
+    """
+    Calculate true light sheet PSF at a point.
+
+    This matches the MATLAB LsDeconv implementation where the PSF is the
+    product of:
+    1. Lightsheet excitation PSF (oriented along sheet, using NA_ls)
+    2. Objective emission PSF (standard detection, using NA_obj)
+
+    The key difference from widefield is the coordinate swap for excitation:
+    the lightsheet illuminates along one axis, so excitation PSF uses (z, 0, x)
+    instead of (x, y, z).
+
+    Parameters
+    ----------
+    x, y, z : float
+        Position coordinates in nanometers
+    NA_obj : float
+        Numerical aperture of detection objective
+    n : float
+        Refractive index
+    lambda_ex : float
+        Excitation wavelength in nanometers
+    lambda_em : float
+        Emission wavelength in nanometers
+    NA_ls : float
+        Numerical aperture of lightsheet illumination
+        Calculated as: sin(atan(slitwidth / (2 * fcyl)))
+
+    Returns
+    -------
+    float
+        Combined PSF intensity
+    """
+    # Lightsheet excitation PSF - note coordinate swap (z, 0, x)
+    # This models the sheet illuminating perpendicular to detection axis
+    psf_ex = _psf_single_wavelength(z, 0, x, NA_ls, n, lambda_ex)
+    # Objective emission PSF - standard (x, y, z)
+    psf_em = _psf_single_wavelength(x, y, z, NA_obj, n, lambda_em)
+    return psf_ex * psf_em
+
+
 def calculate_psf_size(dxy: float, dz: float, NA: float, n: float,
                        lambda_ex: float, lambda_em: float,
+                       fcyl: float = None, slitwidth: float = None,
                        grid_size_xy: float = 2.0,
                        grid_size_z: float = 2.0) -> Tuple[int, int, float, float]:
     """
@@ -132,6 +181,10 @@ def calculate_psf_size(dxy: float, dz: float, NA: float, n: float,
         Excitation wavelength in nanometers
     lambda_em : float
         Emission wavelength in nanometers
+    fcyl : float, optional
+        Focal length of cylinder lens (mm) for lightsheet mode
+    slitwidth : float, optional
+        Width of slit aperture (mm) for lightsheet mode
     grid_size_xy : float
         Grid size as multiple of FWHM in XY (default 2.0)
     grid_size_z : float
@@ -142,17 +195,29 @@ def calculate_psf_size(dxy: float, dz: float, NA: float, n: float,
     tuple
         (nxy, nz, FWHM_xy, FWHM_z) - grid dimensions and FWHM values in nm
     """
+    # Determine if using lightsheet mode
+    use_lightsheet = fcyl is not None and slitwidth is not None
+    if use_lightsheet:
+        NA_ls = np.sin(np.arctan(slitwidth / (2 * fcyl)))
+
+    # Define PSF function based on mode
+    def psf_func(x, y, z):
+        if use_lightsheet:
+            return _psf_light_sheet_full(x, y, z, NA, n, lambda_ex, lambda_em, NA_ls)
+        else:
+            return _psf_light_sheet(x, y, z, NA, n, lambda_ex, lambda_em)
+
     # Get PSF value at origin for half-max calculation
-    psf_origin = _psf_light_sheet(0, 0, 0, NA, n, lambda_ex, lambda_em)
+    psf_origin = psf_func(0, 0, 0)
     half_max = 0.5 * psf_origin
 
     # Find FWHM in XY direction
     def xy_func(x):
-        return _psf_light_sheet(x, 0, 0, NA, n, lambda_ex, lambda_em) - half_max
+        return psf_func(x, 0, 0) - half_max
 
     # Find FWHM in Z direction
     def z_func(z):
-        return _psf_light_sheet(0, 0, z, NA, n, lambda_ex, lambda_em) - half_max
+        return psf_func(0, 0, z) - half_max
 
     # Search for half-max crossings
     try:
@@ -190,6 +255,7 @@ def calculate_psf_size(dxy: float, dz: float, NA: float, n: float,
 
 def generate_psf(dxy: float, dz: float, NA: float, n: float,
                  lambda_ex: float, lambda_em: float,
+                 fcyl: float = None, slitwidth: float = None,
                  nxy: int = None, nz: int = None,
                  verbose: bool = True) -> Tuple[np.ndarray, dict]:
     """
@@ -198,6 +264,10 @@ def generate_psf(dxy: float, dz: float, NA: float, n: float,
     This function computes a 3D PSF based on the Airy disk model, exploiting
     octant symmetry for computational efficiency.
 
+    When fcyl and slitwidth are provided, computes a true lightsheet PSF
+    (product of lightsheet excitation and widefield emission) matching the
+    MATLAB LsDeconv implementation.
+
     Parameters
     ----------
     dxy : float
@@ -205,13 +275,17 @@ def generate_psf(dxy: float, dz: float, NA: float, n: float,
     dz : float
         Z voxel size in nanometers
     NA : float
-        Numerical aperture
+        Numerical aperture of detection objective
     n : float
         Refractive index
     lambda_ex : float
         Excitation wavelength in nanometers
     lambda_em : float
         Emission wavelength in nanometers
+    fcyl : float, optional
+        Focal length of cylinder lens (mm) for lightsheet mode
+    slitwidth : float, optional
+        Width of slit aperture (mm) for lightsheet mode
     nxy : int, optional
         PSF grid size in XY (auto-calculated if None)
     nz : int, optional
@@ -224,8 +298,16 @@ def generate_psf(dxy: float, dz: float, NA: float, n: float,
     tuple
         (psf, info) - 3D PSF array and dictionary with PSF parameters
     """
-    if verbose:
-        print("Calculating PSF...")
+    # Determine if using lightsheet mode
+    use_lightsheet = fcyl is not None and slitwidth is not None
+    if use_lightsheet:
+        NA_ls = np.sin(np.arctan(slitwidth / (2 * fcyl)))
+        if verbose:
+            print(f"Calculating lightsheet PSF (NA_ls={NA_ls:.3f})...")
+    else:
+        NA_ls = None
+        if verbose:
+            print("Calculating PSF...")
 
     # Calculate Rayleigh limit for minimum sampling
     Rxy = 0.61 * lambda_em / NA
@@ -234,7 +316,8 @@ def generate_psf(dxy: float, dz: float, NA: float, n: float,
     # Auto-calculate size if not provided
     if nxy is None or nz is None:
         auto_nxy, auto_nz, fwhm_xy, fwhm_z = calculate_psf_size(
-            dxy, dz, NA, n, lambda_ex, lambda_em
+            dxy, dz, NA, n, lambda_ex, lambda_em,
+            fcyl=fcyl, slitwidth=slitwidth
         )
         if nxy is None:
             nxy = auto_nxy
@@ -242,7 +325,10 @@ def generate_psf(dxy: float, dz: float, NA: float, n: float,
             nz = auto_nz
     else:
         # Still calculate FWHM for info
-        _, _, fwhm_xy, fwhm_z = calculate_psf_size(dxy, dz, NA, n, lambda_ex, lambda_em)
+        _, _, fwhm_xy, fwhm_z = calculate_psf_size(
+            dxy, dz, NA, n, lambda_ex, lambda_em,
+            fcyl=fcyl, slitwidth=slitwidth
+        )
 
     # Ensure odd dimensions
     if nxy % 2 == 0:
@@ -270,7 +356,14 @@ def generate_psf(dxy: float, dz: float, NA: float, n: float,
             y = iy * dxy_corr
             for ix in range(half_nxy):
                 x = ix * dxy_corr
-                octant[ix, iy, iz] = _psf_light_sheet(x, y, z, NA, n, lambda_ex, lambda_em)
+                if use_lightsheet:
+                    octant[ix, iy, iz] = _psf_light_sheet_full(
+                        x, y, z, NA, n, lambda_ex, lambda_em, NA_ls
+                    )
+                else:
+                    octant[ix, iy, iz] = _psf_light_sheet(
+                        x, y, z, NA, n, lambda_ex, lambda_em
+                    )
                 computed += 1
 
         if verbose and (iz + 1) % max(1, half_nz // 5) == 0:
@@ -296,6 +389,10 @@ def generate_psf(dxy: float, dz: float, NA: float, n: float,
         'rayleigh_xy': Rxy,
         'rayleigh_z': Rz,
         'dxy_corrected': dxy_corr,
+        'lightsheet_mode': use_lightsheet,
+        'fcyl': fcyl,
+        'slitwidth': slitwidth,
+        'NA_ls': NA_ls,
     }
 
     return psf.astype(np.float32), info
