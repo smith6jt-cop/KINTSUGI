@@ -39,7 +39,8 @@ from skimage.transform import resize as skresize
 def load_channel_names(
     meta_dir: Union[str, Path],
     filename: str = "CHANNELNAMES.txt",
-    channels_per_cycle: int = 4
+    channels_per_cycle: int = 4,
+    make_unique: bool = True
 ) -> Optional[Dict[int, List[str]]]:
     """
     Load channel names from a text file in the metadata directory.
@@ -68,18 +69,21 @@ def load_channel_names(
         Name of channel names file (default: CHANNELNAMES.txt)
     channels_per_cycle : int
         Expected channels per cycle (for validation)
+    make_unique : bool
+        If True (default), automatically make channel names unique both
+        within and across cycles. Set to False to get raw names from file.
 
     Returns
     -------
     dict or None
         Dictionary mapping cycle number (int) to list of channel names,
-        or None if file not found
+        or None if file not found. Names are made unique by default.
 
     Example
     -------
     >>> channel_dict = load_channel_names(meta_dir)
-    >>> print(channel_dict[1])
-    ['DAPI-01', 'Blank', 'Blank', 'Blank']
+    >>> print(channel_dict[1])  # Duplicates are made unique
+    ['DAPI-01', 'Blank', 'Blank_b', 'Blank_c']
     """
     channel_file = Path(meta_dir) / filename
 
@@ -175,7 +179,14 @@ def load_channel_names(
             channel_dict[current_cycle] = cycle_channels
 
     if channel_dict:
-        print(f"  Loaded {len(channel_dict)} cycle(s)")
+        # Apply uniquification if requested (default)
+        if make_unique:
+            channel_dict = make_channel_names_unique(channel_dict)
+            unique_suffix = " (with unique names)"
+        else:
+            unique_suffix = ""
+
+        print(f"  Loaded {len(channel_dict)} cycle(s){unique_suffix}")
         for cyc_num in sorted(channel_dict.keys()):
             print(f"    Cycle {cyc_num}: {', '.join(channel_dict[cyc_num])}")
 
@@ -233,9 +244,13 @@ def save_channel_names_template(
 
 def make_channel_names_unique(channel_dict: Dict[int, List[str]]) -> Dict[int, List[str]]:
     """
-    Ensure all channel names across cycles are unique.
+    Ensure all channel names are unique both within and across cycles.
 
-    Appends cycle number suffix to duplicate names (except DAPI in cycle 1).
+    Handles two types of duplicates:
+    1. Intra-cycle: Multiple "Blank" in same cycle -> Blank, Blank_b, Blank_c
+    2. Inter-cycle: Same name in different cycles -> name_cyc02, name_cyc03
+
+    DAPI channels after cycle 1 are automatically suffixed with cycle number.
 
     Parameters
     ----------
@@ -249,26 +264,52 @@ def make_channel_names_unique(channel_dict: Dict[int, List[str]]) -> Dict[int, L
 
     Example
     -------
-    >>> unique_names = make_channel_names_unique(channel_dict)
+    >>> channel_dict = {1: ['DAPI-01', 'Blank', 'Blank', 'Blank']}
+    >>> unique = make_channel_names_unique(channel_dict)
+    >>> print(unique[1])
+    ['DAPI-01', 'Blank', 'Blank_b', 'Blank_c']
     """
-    seen = {}
+    # First pass: make names unique WITHIN each cycle
+    intra_unique = {}
+    for cycle_num in sorted(channel_dict.keys()):
+        cycle_names = channel_dict[cycle_num]
+        new_names = []
+        name_counts = {}  # Track how many times we've seen each name in this cycle
+
+        for name in cycle_names:
+            if name in name_counts:
+                # This is a duplicate within the cycle
+                count = name_counts[name]
+                # Use letter suffix: _b, _c, _d, etc.
+                suffix = chr(ord('a') + count)
+                unique_name = f"{name}_{suffix}"
+                new_names.append(unique_name)
+                name_counts[name] = count + 1
+            else:
+                name_counts[name] = 1
+                new_names.append(name)
+
+        intra_unique[cycle_num] = new_names
+
+    # Second pass: make names unique ACROSS cycles
+    seen_global = {}
     unique_dict = {}
 
-    for cycle_num in sorted(channel_dict.keys()):
+    for cycle_num in sorted(intra_unique.keys()):
         new_names = []
 
-        for name in channel_dict[cycle_num]:
-            # Skip DAPI after cycle 1 (usually kept as reference)
+        for name in intra_unique[cycle_num]:
+            # DAPI after cycle 1: always suffix with cycle number
             if name.upper().startswith('DAPI') and cycle_num > 1:
                 new_names.append(f"DAPI_cyc{cycle_num:02d}")
                 continue
 
-            if name in seen:
+            if name in seen_global:
                 # Make unique by appending cycle number
                 unique_name = f"{name}_cyc{cycle_num:02d}"
                 new_names.append(unique_name)
             else:
-                seen[name] = cycle_num
+                seen_global[name] = cycle_num
                 new_names.append(name)
 
         unique_dict[cycle_num] = new_names
