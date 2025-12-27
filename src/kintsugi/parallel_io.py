@@ -171,7 +171,8 @@ class TileLoader:
         np.ndarray or list
             Loaded tiles as stack or list
         """
-        pattern = f"1_000??_Z0{str(zplane).zfill(2)}_CH{str(channel)}.tif"
+        # Use * wildcard to match any tile number (supports 2-digit, 3-digit, or more)
+        pattern = f"1_*_Z0{str(zplane).zfill(2)}_CH{str(channel)}.tif"
         files = sorted(
             glob(os.path.join(image_dir, f"cyc{str(cycle).zfill(3)}", pattern)),
             key=alphanumeric_key,

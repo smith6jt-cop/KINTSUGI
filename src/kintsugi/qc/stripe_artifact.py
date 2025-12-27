@@ -35,16 +35,91 @@ class StripeArtifactResult:
         return f"Stripe artifact: {self.severity} (score={self.score:.3f})"
 
 
+def _compute_highfreq_stripe_metric(img: np.ndarray) -> float:
+    """
+    Compute high-frequency stripe metric for deconvolution ringing artifacts.
+
+    Downsamples image to 1/4 dimensions for speed, then analyzes patches
+    in low-intensity areas where artifacts are most visible.
+
+    Returns a normalized score where higher values indicate stronger
+    high-frequency horizontal banding.
+    """
+    from scipy.fft import fft2, fftshift
+
+    # Downsample to 1/4 dimensions (1/16 pixels) for speed
+    img_ds = img[::4, ::4].astype(np.float32)
+
+    # Get non-zero pixels to determine intensity thresholds
+    nonzero = img_ds[img_ds > 0]
+    if len(nonzero) < 1000:
+        return 0.0
+
+    # Focus on lower 25% of non-zero values where artifacts are most visible
+    low_thresh = np.percentile(nonzero, 25)
+    low_mask = (img_ds > 0) & (img_ds < low_thresh)
+
+    # Scan patches on downsampled image
+    patch_size = 128  # Smaller patches for downsampled image
+    step_size = patch_size
+    best_metric = 0.0
+
+    y_steps = range(0, img_ds.shape[0] - patch_size, step_size)
+    x_steps = range(0, img_ds.shape[1] - patch_size, step_size)
+
+    for y in y_steps:
+        for x in x_steps:
+            mask_patch = low_mask[y:y + patch_size, x:x + patch_size]
+
+            # Only analyze if >50% of patch is low-intensity
+            if np.mean(mask_patch) < 0.5:
+                continue
+
+            patch = img_ds[y:y + patch_size, x:x + patch_size]
+
+            # 2D FFT of this patch
+            fft_result = fftshift(fft2(patch))
+            power = np.abs(fft_result) ** 2
+
+            ph, pw = power.shape
+            cy, cx = ph // 2, pw // 2
+
+            # Horizontal stripe energy (vertical axis in FFT, excludes DC)
+            fx_band = 3
+            fy_high_start = ph // 4
+            h_stripe = power[cy + fy_high_start:, cx - fx_band:cx + fx_band].sum()
+            h_stripe += power[:cy - fy_high_start, cx - fx_band:cx + fx_band].sum()
+
+            # Vertical stripe energy (horizontal axis in FFT)
+            fy_band = 3
+            fx_high_start = pw // 4
+            v_stripe = power[cy - fy_band:cy + fy_band, cx + fx_high_start:].sum()
+            v_stripe += power[cy - fy_band:cy + fy_band, :cx - fx_high_start].sum()
+
+            # Ratio of horizontal to vertical stripe energy
+            if v_stripe > 0:
+                ratio = h_stripe / v_stripe
+            else:
+                ratio = 1.0
+
+            best_metric = max(best_metric, ratio)
+
+    # Normalize: ratio of 1.0 = no bias, higher = horizontal stripes
+    return float(max(0.0, best_metric - 1.0))
+
+
 def detect_stripe_artifact(
     image: np.ndarray,
     baseline_row_diff: float | None = None,
+    baseline_highfreq: float | None = None,
     threshold_sigma: float = 2.0,
 ) -> StripeArtifactResult:
     """
     Detect horizontal stripe artifacts in a single image.
 
-    Uses normalized row-difference metric to detect anomalous
-    horizontal banding patterns.
+    Uses both low-frequency (row-mean based) and high-frequency
+    (pixel-level alternating rows) metrics to detect stripe artifacts
+    from various sources including vibration and deconvolution ringing.
 
     Parameters
     ----------
@@ -53,6 +128,8 @@ def detect_stripe_artifact(
     baseline_row_diff : float, optional
         Expected baseline row-diff metric. If provided, uses comparative
         detection. If None, uses absolute thresholds.
+    baseline_highfreq : float, optional
+        Expected baseline high-frequency metric for comparative detection.
     threshold_sigma : float
         For comparative detection, number of std devs above baseline.
 
@@ -66,7 +143,7 @@ def detect_stripe_artifact(
 
     img = image.astype(np.float32)
 
-    # Compute normalized row-difference metric
+    # Compute normalized row-difference metric (low-frequency stripes)
     row_means = np.mean(img, axis=1)
     row_diff_std = np.std(np.diff(row_means))
     signal_std = np.std(img)
@@ -75,6 +152,9 @@ def detect_stripe_artifact(
         normalized_row_diff = row_diff_std / signal_std
     else:
         normalized_row_diff = 0.0
+
+    # Compute high-frequency stripe metric (deconvolution ringing)
+    highfreq_metric = _compute_highfreq_stripe_metric(img)
 
     # Compute gradient ratio (row vs column variance)
     col_means = np.mean(img, axis=0)
@@ -88,26 +168,48 @@ def detect_stripe_artifact(
 
     metrics = {
         "normalized_row_diff": float(normalized_row_diff),
+        "highfreq_stripe": float(highfreq_metric),
         "gradient_ratio": float(gradient_ratio),
         "row_diff_std": float(row_diff_std),
         "signal_std": float(signal_std),
     }
 
-    # Determine if artifact is present
-    if baseline_row_diff is not None:
-        # Comparative detection (preferred)
-        # Score based on deviation from baseline
-        deviation = normalized_row_diff - baseline_row_diff
-        score = min(1.0, max(0.0, deviation * 50))  # Scale to 0-1
+    # Determine if artifact is present using both metrics
+    lowfreq_artifact = False
+    highfreq_artifact = False
+    lowfreq_score = 0.0
+    highfreq_score = 0.0
 
-        # Threshold based on provided baseline
-        has_artifact = normalized_row_diff > baseline_row_diff * (1 + threshold_sigma * 0.1)
+    if baseline_row_diff is not None:
+        # Comparative detection for low-frequency
+        deviation = normalized_row_diff - baseline_row_diff
+        lowfreq_score = min(1.0, max(0.0, deviation * 50))
+        lowfreq_artifact = normalized_row_diff > baseline_row_diff * (1 + threshold_sigma * 0.1)
     else:
-        # Absolute detection (fallback)
-        # Calibrated for typical microscopy data
-        # normalized_row_diff typically 0.005-0.015
-        score = min(1.0, max(0.0, (normalized_row_diff - 0.005) * 50))
-        has_artifact = normalized_row_diff > 0.012  # Empirical threshold
+        # Absolute detection for low-frequency
+        lowfreq_score = min(1.0, max(0.0, (normalized_row_diff - 0.005) * 50))
+        lowfreq_artifact = normalized_row_diff > 0.012
+
+    # High-frequency detection (deconvolution ringing)
+    # Use absolute thresholds calibrated on typical data:
+    # - Clean images: highfreq < 10
+    # - Mild artifacts: 10-20
+    # - Moderate artifacts: 20-30
+    # - Severe artifacts: > 30
+    # Comparative detection can contaminate baseline when multiple planes are affected
+    highfreq_artifact = highfreq_metric > 15.0
+    if highfreq_metric > 30:
+        highfreq_score = min(1.0, 0.7 + (highfreq_metric - 30) / 50.0)  # Severe
+    elif highfreq_metric > 20:
+        highfreq_score = 0.4 + (highfreq_metric - 20) / 33.0  # Moderate
+    elif highfreq_metric > 10:
+        highfreq_score = 0.1 + (highfreq_metric - 10) / 33.0  # Mild
+    else:
+        highfreq_score = 0.0
+
+    # Combine scores - take the maximum as either type indicates artifact
+    has_artifact = lowfreq_artifact or highfreq_artifact
+    score = max(lowfreq_score, highfreq_score)
 
     # Classify severity
     if score > 0.6:
@@ -127,7 +229,7 @@ def detect_stripe_artifact(
     )
 
 
-def compute_zstack_baseline(z_stack: np.ndarray) -> tuple[float, float]:
+def compute_zstack_baseline(z_stack: np.ndarray) -> dict:
     """
     Compute baseline statistics for a z-stack.
 
@@ -138,8 +240,10 @@ def compute_zstack_baseline(z_stack: np.ndarray) -> tuple[float, float]:
 
     Returns
     -------
-    tuple[float, float]
-        (mean, std) of normalized_row_diff across z-planes
+    dict
+        Dictionary with baseline statistics:
+        - 'lowfreq_mean', 'lowfreq_std': normalized_row_diff stats
+        - 'highfreq_mean', 'highfreq_std': high-frequency stripe stats
     """
     if z_stack.ndim != 3:
         raise ValueError(f"Expected 3D z-stack, got {z_stack.ndim}D")
@@ -147,16 +251,26 @@ def compute_zstack_baseline(z_stack: np.ndarray) -> tuple[float, float]:
     nz = z_stack.shape[0]
     stack = z_stack.astype(np.float32)
 
-    # Compute metric for each plane
+    # Compute low-frequency metric for each plane
     row_means = np.mean(stack, axis=2)
     row_diffs = np.diff(row_means, axis=1)
     row_diff_stds = np.std(row_diffs, axis=1)
     signal_stds = np.std(stack.reshape(nz, -1), axis=1)
 
     with np.errstate(divide="ignore", invalid="ignore"):
-        metrics = row_diff_stds / (signal_stds + 1e-10)
+        lowfreq_metrics = row_diff_stds / (signal_stds + 1e-10)
 
-    return float(np.mean(metrics)), float(np.std(metrics))
+    # Compute high-frequency metric for each plane
+    highfreq_metrics = np.array([
+        _compute_highfreq_stripe_metric(stack[z]) for z in range(nz)
+    ])
+
+    return {
+        'lowfreq_mean': float(np.mean(lowfreq_metrics)),
+        'lowfreq_std': float(np.std(lowfreq_metrics)),
+        'highfreq_mean': float(np.mean(highfreq_metrics)),
+        'highfreq_std': float(np.std(highfreq_metrics)),
+    }
 
 
 def scan_zstack(
@@ -167,7 +281,8 @@ def scan_zstack(
     Scan a z-stack for stripe artifacts using comparative analysis.
 
     This is the recommended method for artifact detection as it
-    automatically determines thresholds from the data.
+    automatically determines thresholds from the data. Detects both
+    low-frequency (vibration) and high-frequency (deconvolution) artifacts.
 
     Parameters
     ----------
@@ -188,9 +303,17 @@ def scan_zstack(
 
     nz = z_stack.shape[0]
 
-    # Compute baseline
-    baseline_mean, baseline_std = compute_zstack_baseline(z_stack)
-    threshold = baseline_mean + threshold_sigma * baseline_std
+    # Compute baseline for low frequency metric (comparative detection)
+    baseline = compute_zstack_baseline(z_stack)
+    # Use both comparative threshold AND minimum absolute threshold
+    # to avoid false positives when baseline variance is very tight
+    lowfreq_comparative = baseline['lowfreq_mean'] + threshold_sigma * baseline['lowfreq_std']
+    lowfreq_absolute_min = 0.012  # Minimum to flag as artifact
+    lowfreq_threshold = max(lowfreq_comparative, lowfreq_absolute_min)
+
+    # High-frequency uses absolute thresholds (comparative doesn't work well
+    # when multiple planes have artifacts, which contaminates the baseline)
+    highfreq_threshold = 15.0
 
     # Scan each plane
     results = {}
@@ -199,20 +322,42 @@ def scan_zstack(
     for z in range(nz):
         result = detect_stripe_artifact(
             z_stack[z],
-            baseline_row_diff=baseline_mean,
+            baseline_row_diff=baseline['lowfreq_mean'],
+            baseline_highfreq=None,  # Use absolute thresholds
             threshold_sigma=threshold_sigma,
         )
 
-        # Override detection using comparative threshold
-        metric = result.metrics["normalized_row_diff"]
-        if metric > threshold:
-            deviation = (metric - baseline_mean) / (baseline_std + 1e-10)
-            result.has_artifact = True
-            result.score = min(1.0, deviation / 5.0)
+        # Override low-frequency detection using comparative threshold
+        lowfreq_metric = result.metrics["normalized_row_diff"]
+        highfreq_metric = result.metrics["highfreq_stripe"]
 
-            if deviation > 4:
+        lowfreq_exceeds = lowfreq_metric > lowfreq_threshold
+        highfreq_exceeds = highfreq_metric > highfreq_threshold
+
+        if lowfreq_exceeds or highfreq_exceeds:
+            # Determine severity based on metrics
+            # Low-frequency: use comparative deviation
+            lowfreq_dev = (lowfreq_metric - baseline['lowfreq_mean']) / (baseline['lowfreq_std'] + 1e-10)
+
+            # High-frequency: use absolute thresholds
+            if highfreq_metric > 30:
+                highfreq_severity_score = 0.7 + (highfreq_metric - 30) / 50.0
+            elif highfreq_metric > 20:
+                highfreq_severity_score = 0.4 + (highfreq_metric - 20) / 33.0
+            elif highfreq_metric > 10:
+                highfreq_severity_score = 0.1 + (highfreq_metric - 10) / 33.0
+            else:
+                highfreq_severity_score = 0.0
+
+            lowfreq_severity_score = min(1.0, lowfreq_dev / 5.0)
+            max_score = max(lowfreq_severity_score, highfreq_severity_score)
+
+            result.has_artifact = True
+            result.score = min(1.0, max_score)
+
+            if result.score > 0.6:
                 result.severity = "severe"
-            elif deviation > 3:
+            elif result.score > 0.3:
                 result.severity = "moderate"
             else:
                 result.severity = "mild"
