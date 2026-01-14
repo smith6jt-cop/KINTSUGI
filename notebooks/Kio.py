@@ -761,6 +761,7 @@ class ProcessingConfig:
     basic_optimization_tolerance: float = 1e-6
     basic_max_reweight_iterations: int = 25
     basic_reweight_tolerance: float = 1e-3
+    basic_flatfield_min: float = 0.1  # Minimum flatfield value to prevent division artifacts
 
     # Stitching parameters
     initial_ncc_threshold: float = 0.078
