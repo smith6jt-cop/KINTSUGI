@@ -197,6 +197,12 @@ python -m build
 - Smart padding strategy for optimal FFT performance (power-of-2 friendly sizes)
 - Configurable output directory (`decon_dir` parameter)
 
+**BaSiC Illumination Correction:**
+- Flatfield minimum threshold (`BASIC_FLATFIELD_MIN`) prevents division artifacts
+- Default 0.1 limits maximum amplification to 10x, preventing extreme value clipping
+- Diagnostic warning when significant flatfield clamping occurs
+- Particularly important for sparse markers (e.g., CD8) and out-of-focus z-planes
+
 **Artifact Detection & Mitigation:**
 - Unified `ArtifactScanner` class integrated with project structure
 - Comparative z-stack analysis for robust detection (avoids dataset-specific threshold issues)
