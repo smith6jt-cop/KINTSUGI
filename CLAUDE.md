@@ -252,6 +252,63 @@ report.save(project.paths.meta / "artifacts.json")
 - `/retrospective` - Save session learnings as new skills
 - `/skills` - List all available skills with trigger conditions
 
+**Cache Validation (Kio.py):**
+- `validate_stats_cache()` - Check if cached statistics reference files that still exist
+- `invalidate_phase_cache()` - Delete cached statistics for a specific processing phase
+- Prevents using stale cached data when images are deleted or reprocessed
+- Usage:
+```python
+from Kio import validate_stats_cache, invalidate_phase_cache
+
+# Validate before using cache
+if CACHE_FILE.exists():
+    with open(CACHE_FILE, 'rb') as f:
+        cached_df = pickle.load(f)
+    if validate_stats_cache(cached_df, source_dir, phase='stitched'):
+        # Safe to use cache
+    else:
+        invalidate_phase_cache(cache_dir, phase='stitched')
+        # Recompute
+```
+
+**Quantification Comparisons (Kutils.py):**
+- `compare_raw_to_stitched()` - Compare raw tile to corrected/stitched region
+- `compare_stitched_to_deconvolved()` - Compare stitched to deconvolved image
+- `quantify_processing_pipeline()` - Comprehensive pipeline quantification
+- Metrics: SNR improvement, uniformity improvement, sharpness improvement, contrast improvement
+- Usage:
+```python
+from Kutils import quantify_processing_pipeline
+
+result = quantify_processing_pipeline(
+    raw_tile, stitched_region, deconvolved_region,
+    channel_name='CD3e', cycle='cyc01', zplane=7
+)
+print(f"Pipeline SNR improvement: {result['pipeline_snr_improvement']:.1f}x")
+```
+
+**EDF Smooth Transitions:**
+- `blend_depth` parameter - Number of adjacent z-slices to blend for smooth transitions
+- `z_smooth_sigma` parameter - Gaussian smoothing for z-index map
+- Fixes abrupt transitions in areas of changing contrast
+- Usage:
+```python
+from kintsugi.edf import extended_depth_of_focus_variance
+
+edf = extended_depth_of_focus_variance(
+    stack,
+    blend_depth=2,      # Blend 2 adjacent slices
+    z_smooth_sigma=1.0  # Smooth z-index map
+)
+```
+
+**Stitched Image Quality Control:**
+- New skill `stitched-image-qc` detects saturation and tile grid patterns
+- Reprocessing script: `notebooks/reprocess_problematic_images.py`
+- Saturation detection: >50% pixels at maximum value
+- Tile grid detection: std/mean ratio > 0.8
+- See TROUBLESHOOTING.md for detailed diagnostic steps
+
 ## Dependencies
 
 Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, pyvips, valis-wsi

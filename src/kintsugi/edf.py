@@ -169,6 +169,8 @@ def extended_depth_of_focus_variance(
     sigma: float = 20.0,
     use_gpu: bool = False,
     device: str = "auto",
+    blend_depth: int = 0,
+    z_smooth_sigma: float = 0.0,
 ) -> np.ndarray:
     """
     Extended depth of focus using local variance projection.
@@ -196,6 +198,15 @@ def extended_depth_of_focus_variance(
     device : str, default='auto'
         Device selection: 'auto', 'gpu', 'cpu', or 'multi-gpu'.
         When 'auto', prioritizes multi-GPU and selects best available GPU.
+    blend_depth : int, default=0
+        Number of z-slices to blend for smooth transitions. When > 0, uses
+        weighted blending of top N z-slices based on variance scores instead
+        of hard argmax selection. This prevents abrupt transitions in areas
+        of changing contrast. Recommended: 2-3 for smooth transitions.
+    z_smooth_sigma : float, default=0.0
+        Gaussian smoothing sigma for the z-index map. When > 0, smooths the
+        selected z-indices spatially to reduce abrupt transitions between
+        regions selecting different z-slices. Recommended: 2-5 pixels.
 
     Returns
     -------
@@ -221,6 +232,11 @@ def extended_depth_of_focus_variance(
     4. Output pixel = input pixel from that Z-slice
 
     The variance is calculated as: Var(X) = E[X^2] - E[X]^2
+
+    For smooth transitions with blend_depth > 0:
+    - Instead of selecting only the best z-slice, blends top N slices
+    - Weights are based on variance scores (softmax normalization)
+    - This eliminates abrupt boundaries in areas of varying contrast
     """
     if stack.ndim != 3:
         raise ValueError(f"Expected 3D stack, got shape {stack.shape}")
@@ -274,14 +290,57 @@ def extended_depth_of_focus_variance(
         local_mean_sq = uf(smoothed**2, size=window_size)
         variances[z] = local_mean_sq - local_mean**2
 
-    # Find Z-index with maximum variance at each (x,y)
-    max_var_idx = xp.argmax(variances, axis=0)
+    # Determine blending strategy
+    if blend_depth > 1 and blend_depth <= n_slices:
+        # Weighted blending of top N z-slices for smooth transitions
+        logger.info(f"Using weighted blending with depth={blend_depth} for smooth transitions")
 
-    # Create index arrays for advanced indexing
-    y_idx, x_idx = xp.meshgrid(xp.arange(height), xp.arange(width), indexing="ij")
+        # Normalize variances to create weights (softmax-like)
+        # Add small epsilon to avoid division by zero
+        var_sum = xp.sum(variances, axis=0, keepdims=True)
+        var_sum = xp.maximum(var_sum, 1e-10)
+        weights = variances / var_sum
 
-    # Select pixels from best-focus slices
-    result = stack_gpu[max_var_idx, y_idx, x_idx]
+        # Get indices of top N z-slices by variance at each pixel
+        # Use argsort and take the last N (highest variance)
+        sorted_indices = xp.argsort(variances, axis=0)
+        top_indices = sorted_indices[-blend_depth:]  # Shape: (blend_depth, H, W)
+
+        # Initialize result
+        result = xp.zeros((height, width), dtype=xp.float32)
+        weight_sum = xp.zeros((height, width), dtype=xp.float32)
+
+        # Create index arrays
+        y_idx, x_idx = xp.meshgrid(xp.arange(height), xp.arange(width), indexing="ij")
+
+        # Blend top N slices weighted by their variance
+        for i in range(blend_depth):
+            z_idx = top_indices[i]
+            pixel_values = stack_gpu[z_idx, y_idx, x_idx]
+            pixel_weights = weights[z_idx, y_idx, x_idx]
+            result += pixel_values * pixel_weights
+            weight_sum += pixel_weights
+
+        # Normalize
+        result = result / xp.maximum(weight_sum, 1e-10)
+
+    else:
+        # Standard argmax selection
+        max_var_idx = xp.argmax(variances, axis=0)
+
+        # Apply spatial smoothing to z-index map for gradual transitions
+        if z_smooth_sigma > 0:
+            logger.info(f"Applying z-index smoothing with sigma={z_smooth_sigma}")
+            max_var_idx_float = max_var_idx.astype(xp.float32)
+            max_var_idx_smooth = gf(max_var_idx_float, sigma=z_smooth_sigma)
+            # Round to nearest integer and clip to valid range
+            max_var_idx = xp.clip(xp.round(max_var_idx_smooth), 0, n_slices - 1).astype(xp.int32)
+
+        # Create index arrays for advanced indexing
+        y_idx, x_idx = xp.meshgrid(xp.arange(height), xp.arange(width), indexing="ij")
+
+        # Select pixels from best-focus slices
+        result = stack_gpu[max_var_idx, y_idx, x_idx]
 
     # Convert back to numpy if using GPU
     if detected_gpu:
@@ -407,6 +466,8 @@ def edf_tiled(
     overlap: int = 50,
     method: Literal["variance", "laplacian"] = "variance",
     device: str = "auto",
+    blend_depth: int = 0,
+    z_smooth_sigma: float = 0.0,
     **kwargs,
 ) -> np.ndarray:
     """
@@ -428,6 +489,15 @@ def edf_tiled(
     device : str, default='auto'
         Device selection: 'auto', 'gpu', 'cpu', or 'multi-gpu'.
         When 'auto', prioritizes multi-GPU and selects best available GPU.
+    blend_depth : int, default=0
+        Number of z-slices to blend for smooth transitions. When > 0, uses
+        weighted blending of top N z-slices based on variance scores instead
+        of hard argmax selection. This prevents abrupt transitions in areas
+        of changing contrast. Recommended: 2-3 for smooth transitions.
+    z_smooth_sigma : float, default=0.0
+        Gaussian smoothing sigma for the z-index map. When > 0, smooths the
+        selected z-indices spatially to reduce abrupt transitions between
+        regions selecting different z-slices. Recommended: 2-5 pixels.
     **kwargs
         Additional arguments passed to the EDF function
 
@@ -447,7 +517,8 @@ def edf_tiled(
     ...     method='variance',
     ...     radius_x=5,
     ...     radius_y=5,
-    ...     sigma=20.0
+    ...     sigma=20.0,
+    ...     blend_depth=2  # Smooth transitions
     ... )
     """
     if stack.ndim != 3:
@@ -504,8 +575,14 @@ def edf_tiled(
             # Extract tile
             tile = stack[:, y_start:y_end, x_start:x_end]
 
-            # Process tile (pass device parameter explicitly)
-            tile_result = edf_func(tile, device=device, **kwargs)
+            # Process tile (pass device and smooth transition parameters explicitly)
+            if method == "variance":
+                tile_result = edf_func(
+                    tile, device=device, blend_depth=blend_depth,
+                    z_smooth_sigma=z_smooth_sigma, **kwargs
+                )
+            else:
+                tile_result = edf_func(tile, device=device, **kwargs)
 
             # Create blending weights for this tile
             tile_blend = create_blend_weights(y_end - y_start, x_end - x_start, overlap)
@@ -621,6 +698,8 @@ class EDFProcessor:
         tile_size: tuple[int, int] | None = None,
         ij_instance=None,
         device: str = None,
+        blend_depth: int = 0,
+        z_smooth_sigma: float = 0.0,
     ) -> np.ndarray:
         """
         Process a 3D stack to produce a 2D EDF image.
@@ -650,6 +729,15 @@ class EDFProcessor:
             Device selection: 'auto', 'gpu', 'cpu', or 'multi-gpu'.
             For CLIJ2 backend, this is the OpenCL device name.
             For CuPy/NumPy backends, 'auto' prioritizes multi-GPU.
+        blend_depth : int, default=0
+            Number of z-slices to blend for smooth transitions. When > 0, uses
+            weighted blending of top N z-slices based on variance scores.
+            This prevents abrupt transitions in areas of changing contrast.
+            Recommended: 2-3 for smooth transitions.
+        z_smooth_sigma : float, default=0.0
+            Gaussian smoothing sigma for the z-index map. When > 0, smooths the
+            selected z-indices spatially to reduce abrupt transitions.
+            Recommended: 2-5 pixels.
 
         Returns
         -------
@@ -689,6 +777,8 @@ class EDFProcessor:
                     tile_size=tile_size,
                     method=self.method,
                     device=device,
+                    blend_depth=blend_depth,
+                    z_smooth_sigma=z_smooth_sigma,
                     radius_x=radius_x,
                     radius_y=radius_y,
                     sigma=sigma,
@@ -696,7 +786,8 @@ class EDFProcessor:
             else:
                 if self.method == "variance":
                     return extended_depth_of_focus_variance(
-                        stack, radius_x, radius_y, sigma, device=device
+                        stack, radius_x, radius_y, sigma, device=device,
+                        blend_depth=blend_depth, z_smooth_sigma=z_smooth_sigma
                     )
                 else:
                     return extended_depth_of_focus_laplacian(stack, device=device)

@@ -14,6 +14,7 @@ This guide covers common issues and their solutions when installing or running K
 - [Runtime Issues](#runtime-issues)
   - [Import Errors](#import-errors)
   - [Memory Issues](#memory-issues)
+  - [Stitched Image Quality Issues](#stitched-image-quality-issues)
   - [Registration Failures](#registration-failures)
 - [Platform-Specific Issues](#platform-specific-issues)
   - [Windows](#windows)
@@ -296,6 +297,97 @@ sys.path.insert(0, '/path/to/KINTSUGI/notebooks')
 
 ---
 
+### Stitched Image Quality Issues
+
+**Symptom**: Stitched images appear blank/white (saturated) or show visible tile grid patterns.
+
+#### Diagnosing the Problem
+
+```python
+from skimage.io import imread
+import numpy as np
+
+img = imread('path/to/stitched.tif')
+mean_val = img.mean()
+pct_max = 100.0 * np.sum(img > 64000) / img.size
+std_mean_ratio = img.std() / img.mean()
+
+print(f"Mean: {mean_val:.0f}")
+print(f"Pct at max: {pct_max:.1f}%")
+print(f"Std/Mean ratio: {std_mean_ratio:.2f}")
+
+# Saturation: pct_max > 50%
+# Tile grid: std_mean_ratio > 0.8
+```
+
+#### Saturation Issues (Blank White Images)
+
+**Cause**: BaSiC illumination correction amplifies signal excessively when flatfield values are too low.
+
+**Solutions**:
+
+1. **Ensure flatfield minimum is enforced**:
+   ```python
+   BASIC_FLATFIELD_MIN = 0.1
+   flatfield_safe = np.clip(flatfield, BASIC_FLATFIELD_MIN, None)
+   corrected = (tiles_norm - darkfield) / flatfield_safe
+   ```
+
+2. **Verify input normalization**:
+   ```python
+   # Input must be normalized to [0,1] before BaSiC correction
+   tiles_norm = tiles.astype(np.float64) / 65535
+   ```
+
+3. **Reprocess affected z-planes**:
+   ```bash
+   python notebooks/reprocess_problematic_images.py --dry-run
+   python notebooks/reprocess_problematic_images.py
+   ```
+
+#### Tile Grid Patterns (Visible Seams)
+
+**Cause**: Insufficient blending at tile overlap boundaries or stitch model mismatch.
+
+**Solutions**:
+
+1. **Increase blend sigma**:
+   ```python
+   from kintsugi.stitch_blend import stitch_with_blending_gpu
+   stitched = stitch_with_blending_gpu(
+       tiles, result_df,
+       sigma=10.0,  # Increase from default
+       overlap_fraction=(0.3, 0.3)
+   )
+   ```
+
+2. **Verify stitch model compatibility**:
+   - Stitch model computed from one z-plane may not work for all z-planes
+   - Use consistent reference z-plane across channels
+
+3. **Check overlap settings**:
+   - Ensure overlap_fraction matches actual tile overlap
+   - Typical values: (0.2, 0.2) to (0.3, 0.3)
+
+#### Batch Reprocessing
+
+For multiple problematic images, use the reprocessing script:
+
+```bash
+# First scan for problems
+python -c "
+from Kio import scan_stitched_quality
+issues = scan_stitched_quality('/path/to/stitched')
+print(f'Saturated: {len(issues[\"saturated\"])}')
+print(f'Tile grid: {len(issues[\"tile_grid\"])}')
+"
+
+# Then reprocess
+python notebooks/reprocess_problematic_images.py
+```
+
+---
+
 ### Registration Failures
 
 **Symptom**: Registration produces poor results or fails.
@@ -458,3 +550,5 @@ If you're still experiencing issues:
 | Import errors | `conda activate KINTSUGI && pip install -e .` |
 | Memory errors | Reduce `max_image_dim_px` in config |
 | Environment conflicts | Use `env_streamlined.yml` |
+| Blank white stitched images | Check BaSiC flatfield min (0.1); run `reprocess_problematic_images.py` |
+| Tile grid in stitched images | Increase blend sigma (10.0); verify stitch model compatibility |
