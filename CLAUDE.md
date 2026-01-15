@@ -177,6 +177,23 @@ python -m build
 3. `3_Signal_Isolation_QC.ipynb` - Signal isolation with integrated QC (Claude-guided or interactive)
 4. `4_Segmentation_Analysis.ipynb` - Segmentation, feature extraction, SOM clustering & spatial analysis
 
+## Jupyter Notebook Workflow
+
+**CRITICAL: Autoreload is enabled in all KINTSUGI notebooks:**
+
+```python
+%load_ext autoreload
+%autoreload 2
+```
+
+This means:
+- **NEVER tell the user to restart the kernel** after editing Python modules
+- **NEVER tell the user to reload/reopen the notebook**
+- After editing `.py` files (Kio.py, kintsugi/*.py, etc.), changes take effect automatically on next cell execution
+- Just re-run the relevant cell - no restart needed
+
+Only suggest kernel restart for: new package installation, environment variable changes, or C extension recompilation.
+
 ## Key Patterns
 
 - **Lazy loading**: `__init__.py` uses lazy imports to avoid loading heavy dependencies at startup

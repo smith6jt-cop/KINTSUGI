@@ -331,6 +331,9 @@ Test illumination correction, stitching, deconvolution, and EDoF.
 Batch processing for illumination correction, stitching, deconvolution, EDoF, and registration.
 - [notebooks/2_Cycle_Processing.ipynb](notebooks/2_Cycle_Processing.ipynb)
 - **Requires:** `gpu`
+- **QC Output:** Automatically generates PDF plots to `PROJECT_DIR/qc_plots/` including:
+  - Summary heatmaps (SNR, CV, intensity by cycle/channel)
+  - Z-plane profiles for quality assessment
 
 ### 3. Signal Isolation & Quality Control (NEW)
 Combined signal isolation and quality assessment with Claude Code integration.

@@ -39,9 +39,26 @@ Batch process all channels across multiple cycles.
 2. Set processing parameters
 3. Run illumination correction
 4. Run stitching
-5. Run deconvolution (optional)
-6. Run EDoF (optional)
-7. Run registration
+5. **Quantitative QC analysis (with PDF export)**
+6. Run deconvolution (optional)
+7. Run EDoF (optional)
+8. Run registration
+
+### QC Plot Output
+
+The notebook automatically generates QC plots and saves them as PDFs to `PROJECT_DIR/qc_plots/`:
+
+| File | Description |
+|------|-------------|
+| `raw_summary_heatmaps.pdf` | SNR, CV, and intensity heatmaps for raw data |
+| `stitched_summary_heatmaps.pdf` | Same metrics after stitching |
+| `deconvolved_summary_heatmaps.pdf` | Same metrics after deconvolution |
+| `edf_summary_heatmaps.pdf` | EDF projection statistics |
+| `{stage}_zprofile_cyc{NN}_ch{N}.pdf` | Z-plane profiles for first cycle |
+
+The plotting functions accept optional parameters:
+- `stage_name`: Label for the processing stage (used in PDF filename)
+- `save_pdf`: Whether to save PDF (default: True)
 
 ## Workflow 3: Signal Isolation
 
