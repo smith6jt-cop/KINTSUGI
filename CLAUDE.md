@@ -214,6 +214,14 @@ Only suggest kernel restart for: new package installation, environment variable 
 - Smart padding strategy for optimal FFT performance (power-of-2 friendly sizes)
 - Configurable output directory (`decon_dir` parameter)
 
+**Deconvolution Intensity Scaling (Critical Fix):**
+- Output scaling now preserves original intensity relationships between channels
+- Previously, histogram clipping always stretched output to full 16-bit range (0-65535)
+- This caused artificial saturation and inverted relative intensities between channels
+- Fix: Scale to `raw_max` (input maximum) instead of 65535
+- Critical for quantitative marker expression analysis where relative intensities matter
+- Affected code: `notebooks/Kdecon/main.py` lines 283-288
+
 **BaSiC Illumination Correction:**
 - Flatfield minimum threshold (`BASIC_FLATFIELD_MIN`) prevents division artifacts
 - Default 0.1 limits maximum amplification to 10x, preventing extreme value clipping

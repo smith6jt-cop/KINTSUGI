@@ -55,13 +55,32 @@ class KDecon:
     max_memory_fraction : float
         Max fraction of memory to use per chunk (default 0.8)
     fcyl : float, optional
-        Focal length of cylinder lens (mm) - for metadata only
+        Focal length of cylinder lens (mm). Required for lightsheet PSF.
+        When provided with slitwidth, enables true lightsheet PSF calculation.
     slitwidth : float, optional
-        Slit aperture width (mm) - for metadata only
+        Slit aperture width (mm). Required for lightsheet PSF.
+        When provided with fcyl, enables true lightsheet PSF calculation.
     clipval : float
-        Histogram clipping percentage 0-5 (default 0.01)
+        Histogram clipping percentage 0-5 (default 0.01). Clips the specified
+        percentile from both ends of the histogram, normalizes to 0-1, then
+        scales output to preserve original intensity range (raw_max).
+        This maintains relative intensity relationships between channels,
+        critical for quantitative marker expression analysis.
     verbose : bool
         Print progress information (default True)
+
+    Notes
+    -----
+    Output Scaling:
+        The output is scaled to match the input's maximum value (raw_max),
+        preserving relative intensity relationships between channels. This
+        is essential for quantitative analysis where marker expression
+        levels are compared across channels.
+
+    Lightsheet PSF:
+        When both fcyl and slitwidth are provided, a true lightsheet PSF
+        is calculated with proper coordinate transformation. Without these
+        parameters, a widefield PSF is used which may cause artifacts.
 
     Examples
     --------
@@ -69,6 +88,7 @@ class KDecon:
     ...     dxy=377, dz=1500,
     ...     NA=0.75, rf=1.44,
     ...     lambda_ex=560, lambda_em=575,
+    ...     fcyl=1, slitwidth=6.5,  # Enable lightsheet PSF
     ...     device='GPU'
     ... )
     >>> decon.process('/path/to/input', '/path/to/output')
@@ -280,11 +300,10 @@ class KDecon:
             # Scale to 0-1
             result = (result - deconv_min) / (deconv_max - deconv_min)
 
-        # Scale to output range
-        if raw_max <= 65535:
-            scale = 65535
-        else:
-            scale = raw_max
+        # Scale to output range - preserve original intensity scale
+        # Using raw_max maintains relative intensity relationships between channels,
+        # which is critical for quantitative analysis of marker expression
+        scale = raw_max
 
         result = result * scale
 
@@ -408,7 +427,10 @@ def decon(base_dir: Union[str, Path],
     damping : float
         Damping factor 0-10% (default 0)
     hist_clip : float
-        Histogram clip percentage 0-5% (default 0.01)
+        Histogram clip percentage 0-5% (default 0.01). Clips the specified
+        percentile from both ends, normalizes to 0-1, then scales to the
+        input's maximum value (raw_max) to preserve relative intensity
+        relationships between channels.
     stop_criterion : float
         Stop criterion percentage (default 5.0)
     max_memory : float
@@ -427,6 +449,18 @@ def decon(base_dir: Union[str, Path],
     -------
     str
         Path to output directory
+
+    Notes
+    -----
+    Output Scaling:
+        Output intensity is scaled to preserve the input's maximum value,
+        maintaining relative intensity relationships across channels. This
+        is critical for quantitative marker expression analysis.
+
+    Lightsheet PSF:
+        The slit_aper and f_cyl parameters enable true lightsheet PSF
+        calculation. These are required for proper deconvolution of
+        lightsheet microscopy data and should not be omitted.
     """
     base_dir = Path(base_dir)
     stitch_dir = Path(stitch_dir)
