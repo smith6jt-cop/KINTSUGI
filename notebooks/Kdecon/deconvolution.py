@@ -506,8 +506,13 @@ def deconvolve(stack: np.ndarray, psf: np.ndarray,
         pad_width = [(pb, pa) for pb, pa in zip(pad_before, pad_after)]
         stack_padded = np.pad(stack_float, pad_width, mode='symmetric')
 
+        # Apply Tukey window for edge apodization to prevent Gibbs ringing artifacts
+        # (horizontal banding caused by FFT edge discontinuities)
+        tukey_window = _create_tukey_window_3d(padded_shape, pad_before, pad_after)
+        stack_padded = stack_padded * tukey_window
+
         if verbose:
-            print(f"  Padded from {original_shape} to {padded_shape} for FFT efficiency")
+            print(f"  Padded from {original_shape} to {padded_shape} for FFT efficiency (with edge apodization)")
     else:
         stack_padded = stack_float
         pad_before = (0, 0, 0)

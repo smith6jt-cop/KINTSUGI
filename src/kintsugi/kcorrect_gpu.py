@@ -563,7 +563,21 @@ class KCorrectGPU:
 
         # Resize to original shape
         flatfield = self._resize_single(shading_cpu, original_shape)
-        flatfield = flatfield / (np.mean(flatfield) + 1e-10)
+
+        # CRITICAL FIX: Ensure flatfield is positive before normalization
+        # Negative flatfield values indicate algorithm failure (often from low-signal images)
+        # This can happen with sparse markers or blank channels
+        flatfield_mean = np.mean(flatfield)
+        if flatfield_mean <= 0 or np.min(flatfield) < 0:
+            if self.verbose:
+                print(
+                    f"  WARNING: Flatfield has non-positive values (mean={flatfield_mean:.3f}, "
+                    f"min={np.min(flatfield):.3f}). Using uniform flatfield (no correction)."
+                )
+            # Fall back to uniform flatfield (no correction)
+            flatfield = np.ones(original_shape, dtype=np.float64)
+        else:
+            flatfield = flatfield / (flatfield_mean + 1e-10)
 
         if if_darkfield:
             darkfield = self._resize_single(XAoffset_cpu, original_shape)
@@ -576,7 +590,11 @@ class KCorrectGPU:
         return flatfield.astype(np.float64), darkfield.astype(np.float64)
 
     def transform(
-        self, images: np.ndarray, flatfield: np.ndarray, darkfield: np.ndarray
+        self,
+        images: np.ndarray,
+        flatfield: np.ndarray,
+        darkfield: np.ndarray,
+        flatfield_min: float = 0.1,
     ) -> np.ndarray:
         """
         Apply flatfield and darkfield correction to images.
@@ -589,6 +607,10 @@ class KCorrectGPU:
             Flatfield correction
         darkfield : np.ndarray
             Darkfield correction
+        flatfield_min : float
+            Minimum flatfield value to prevent division artifacts.
+            Default 0.1 limits maximum amplification to 10x.
+            Lower values allow more aggressive correction but risk artifacts.
 
         Returns
         -------
@@ -607,8 +629,22 @@ class KCorrectGPU:
         flatfield_d = self._to_device(flatfield)
         darkfield_d = self._to_device(darkfield)
 
+        # Clamp flatfield to minimum value to prevent extreme amplification
+        # This is CRITICAL for sparse markers and out-of-focus z-planes
+        # where flatfield can have very low values that cause artifacts
+        flatfield_clamped = xp.maximum(flatfield_d, flatfield_min)
+
+        # Check how much clamping was needed (diagnostic)
+        if self.verbose:
+            pct_clamped = 100.0 * float(xp.sum(flatfield_d < flatfield_min)) / flatfield_d.size
+            if pct_clamped > 1.0:
+                print(
+                    f"  Warning: {pct_clamped:.1f}% of flatfield values clamped to {flatfield_min} "
+                    f"(prevents >10x amplification)"
+                )
+
         # Apply correction: (image - darkfield) / flatfield
-        corrected = (images_d - darkfield_d) / (flatfield_d + 1e-10)
+        corrected = (images_d - darkfield_d) / flatfield_clamped
         corrected = xp.clip(corrected, 0, None)
 
         # Move back to CPU

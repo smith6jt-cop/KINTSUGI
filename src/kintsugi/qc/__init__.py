@@ -129,8 +129,17 @@ from kintsugi.qc.stripe_mitigation import (
     interpolate_zplane,
     mitigate_artifact,
 )
+from kintsugi.qc.quality_gate import (
+    QualityGate,
+    QualityGateResult,
+    check_before_processing,
+)
 
 __all__ = [
+    # Quality Gate (pre-processing validation)
+    "QualityGate",
+    "QualityGateResult",
+    "check_before_processing",
     # Artifact Scanner (primary interface)
     "ArtifactScanner",
     "ArtifactReport",

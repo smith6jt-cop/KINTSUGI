@@ -214,6 +214,14 @@ Only suggest kernel restart for: new package installation, environment variable 
 - Smart padding strategy for optimal FFT performance (power-of-2 friendly sizes)
 - Configurable output directory (`decon_dir` parameter)
 
+**Deconvolution Edge Apodization (Critical Fix - Jan 2026):**
+- Fixed severe horizontal banding (Gibbs ringing) artifacts in deconvolution output
+- Root cause: `_create_tukey_window_3d` function existed but was NEVER CALLED
+- The Tukey window provides cosine-tapered edge apodization to prevent FFT artifacts
+- Fix: Added `tukey_window = _create_tukey_window_3d(...)` call before deconvolution
+- Investigation showed raw and stitched images were NORMAL; artifacts introduced during deconvolution
+- Affected code: `notebooks/Kdecon/deconvolution.py` lines 509-512
+
 **Deconvolution Intensity Scaling (Critical Fix):**
 - Output scaling now preserves original intensity relationships between channels
 - Previously, histogram clipping always stretched output to full 16-bit range (0-65535)
@@ -222,11 +230,14 @@ Only suggest kernel restart for: new package installation, environment variable 
 - Critical for quantitative marker expression analysis where relative intensities matter
 - Affected code: `notebooks/Kdecon/main.py` lines 283-288
 
-**BaSiC Illumination Correction:**
-- Flatfield minimum threshold (`BASIC_FLATFIELD_MIN`) prevents division artifacts
-- Default 0.1 limits maximum amplification to 10x, preventing extreme value clipping
-- Diagnostic warning when significant flatfield clamping occurs
-- Particularly important for sparse markers (e.g., CD8) and out-of-focus z-planes
+**BaSiC Illumination Correction (Critical Fixes - Jan 2026):**
+- **Negative flatfield fix**: Algorithm can produce negative flatfield values for low-signal images
+  (sparse markers, blank channels). Now falls back to uniform flatfield (no correction) when detected.
+- **Flatfield minimum threshold**: `flatfield_min` parameter in `transform()` (default 0.1) prevents
+  extreme amplification by clamping flatfield values
+- **Root cause**: Notebook logs showed "WARNING: 94.0% of flatfield clamped (min=-0.4167)" -
+  negative flatfield values were causing severe artifacts
+- Affected code: `src/kintsugi/kcorrect_gpu.py` lines 567-580 (fit), 618-630 (transform)
 
 **Artifact Detection & Mitigation:**
 - Unified `ArtifactScanner` class integrated with project structure
@@ -308,6 +319,35 @@ edf = extended_depth_of_focus_variance(
 - Saturation detection: >50% pixels at maximum value
 - Tile grid detection: std/mean ratio > 0.8
 - See TROUBLESHOOTING.md for detailed diagnostic steps
+
+**Quality Gate (Pre-Processing Validation):**
+- `QualityGate` class detects problematic images before deconvolution/EDF
+- Useful for detecting: stripe artifacts, corruption patterns, saturation, low signal, tile grids
+- **Note**: Most "artifacts" previously attributed to raw data were actually caused by the
+  deconvolution edge apodization bug (now fixed, see above). When investigating image
+  quality issues, always verify raw data is actually bad before attributing to data quality.
+- Usage:
+```python
+from kintsugi.qc import QualityGate, check_before_processing
+
+# Create gate and check z-stack
+gate = QualityGate()
+result = gate.check_zstack(z_stack, channel="CD3", cycle="cyc01")
+
+if result.passed:
+    deconvolved = decon.process_array(z_stack)
+else:
+    print(f"Quality gate failed: {result.issues}")
+    if result.can_mitigate:
+        mitigated = gate.mitigate(z_stack, result)
+        deconvolved = decon.process_array(mitigated)
+
+# Or use convenience function with automatic handling
+stack, result = check_before_processing(
+    z_stack, channel="CD3", cycle="cyc01",
+    fail_action="mitigate"  # Options: 'raise', 'warn', 'skip', 'mitigate'
+)
+```
 
 ## Dependencies
 
