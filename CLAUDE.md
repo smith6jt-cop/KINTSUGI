@@ -54,7 +54,7 @@ Notebooks default to mini_project for testing. Change `PROJECT_DIR` for other pr
 
 **What gets synced:**
 - Notebook modules: `Kdecon/`, `Kstitch/`, `Kreg/`, `Kview/`, `Kview2/`, `Kseg/`
-- Python files: `Kio.py`, `Kutils.py`, `Kpipeline.py`, `Kvis.py`
+- Python files: `Kio.py`, `Kprocess.py`, `Kutils.py`, `Kpipeline.py`, `Kvis.py`
 - Notebooks: `1_Single_Channel_Eval.ipynb`, `2_Cycle_Processing.ipynb`, etc.
 
 **Project folders synced to:**
@@ -192,6 +192,7 @@ python -m build
 - `Kview2/` - 20+ interactive visualization functions for Jupyter
 - `KDecon/` - Deconvolution utilities (pure Python, replaces MATLAB)
 - `Kio.py` - I/O and parallel processing: channel name parsing, OME-TIFF extraction, parallel tile/stack loading, ProcessingConfig dataclass, ProgressCounter
+- `Kprocess.py` - GPU-accelerated QC statistics and visualization: `compute_*_stats_gpu()`, `collect_*_stats_parallel()`, `plot_summary_heatmaps()`, `run_*_qc()` convenience functions
 - `instanseg/` - Instance segmentation models (local customized version)
 - `Kutils.py` - Signal isolation utilities (legacy, used by interactive tuners)
 

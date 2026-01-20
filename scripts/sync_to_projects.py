@@ -44,6 +44,7 @@ SYNC_DIRECTORIES = [
 # Individual files to sync (relative to notebooks/)
 SYNC_FILES = [
     "Kio.py",
+    "Kprocess.py",
     "Kutils.py",
     "Kpipeline.py",
     "Kvis.py",

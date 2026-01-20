@@ -60,6 +60,32 @@ The plotting functions accept optional parameters:
 - `stage_name`: Label for the processing stage (used in PDF filename)
 - `save_pdf`: Whether to save PDF (default: True)
 
+### QC Module
+
+The QC statistics and plotting functions are available in `notebooks/Kprocess.py` for programmatic use:
+
+```python
+from Kprocess import (
+    run_raw_qc,        # Complete raw data QC workflow
+    run_stitched_qc,   # Complete stitched QC with raw comparison
+    run_decon_qc,      # Complete decon QC with stitched comparison
+    run_edf_qc,        # Complete EDF QC with decon comparison
+    plot_summary_heatmaps,  # Individual heatmap plotting
+    plot_zplane_profiles,   # Z-profile plotting
+)
+
+# Example: Run stitched QC programmatically
+stitched_df = run_stitched_qc(
+    stitch_dir=stitch_dir,
+    cache_file=PROJECT_DIR / 'cache' / 'stitched_stats.pkl',
+    start_cycle=1, end_cycle=13,
+    start_channel=1, end_channel=4,
+    n_zplanes=15,
+    qc_output_dir=PROJECT_DIR / 'qc_plots',
+    raw_stats_df=raw_df,  # Optional: for comparison
+)
+```
+
 ## Workflow 3: Signal Isolation
 
 Remove autofluorescence and isolate true signal.
