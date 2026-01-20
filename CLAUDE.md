@@ -49,12 +49,17 @@ Notebooks default to mini_project for testing. Change `PROJECT_DIR` for other pr
 **IMPORTANT**: Changes to notebook modules in the main repo are **automatically synced** to all project folders after every commit via a git post-commit hook.
 
 **Always edit the main repo first** (`KINTSUGI/notebooks/`), never edit project folders directly. The sync happens automatically via:
-- `scripts/sync_to_projects.py` - Sync script
+- `scripts/sync_to_projects.py` - Sync script (uses MD5 checksum comparison)
 - `.git/hooks/post-commit` - Git hook that runs sync after each commit
+
+**Sync uses checksum comparison** (not timestamps) to detect changes. This ensures:
+- Notebooks saved with output in project folders don't block updates
+- Content changes are always detected regardless of file timestamps
+- Network file system timestamp issues don't cause sync failures
 
 **What gets synced:**
 - Notebook modules: `Kdecon/`, `Kstitch/`, `Kreg/`, `Kview/`, `Kview2/`, `Kseg/`
-- Python files: `Kio.py`, `Kprocess.py`, `Kutils.py`, `Kpipeline.py`, `Kvis.py`
+- Python files: `Kio.py`, `Kprocess.py`, `Kutils.py`, `Kview_qc.py`, `Kpipeline.py`, `Kvis.py`
 - Notebooks: `1_Single_Channel_Eval.ipynb`, `2_Cycle_Processing.ipynb`, etc.
 
 **Project folders synced to:**
@@ -66,6 +71,7 @@ Notebooks default to mini_project for testing. Change `PROJECT_DIR` for other pr
 python scripts/sync_to_projects.py           # Sync all projects
 python scripts/sync_to_projects.py --dry-run # Preview changes
 python scripts/sync_to_projects.py --verbose # Show detailed output
+python scripts/sync_to_projects.py --force   # Force sync all files
 ```
 
 ### Adding MCP Support to Existing Projects

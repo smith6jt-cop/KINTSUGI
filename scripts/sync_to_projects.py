@@ -6,16 +6,22 @@ This script copies the latest versions of notebook modules (Kdecon, Kstitch,
 Kreg, Kview, etc.) and key Python files from the main repository to all
 registered project folders.
 
+Uses MD5 checksums for comparison to ensure content changes are detected even
+when destination files have newer timestamps (e.g., from being saved with
+notebook output during processing runs).
+
 Usage:
     python scripts/sync_to_projects.py           # Sync all projects
     python scripts/sync_to_projects.py --dry-run # Preview changes
     python scripts/sync_to_projects.py --verbose # Show detailed output
+    python scripts/sync_to_projects.py --force   # Force sync all files
 
 Project folders are defined in KINTSUGI_PROJECT_DIRS environment variable
 or default to known project locations.
 """
 
 import argparse
+import hashlib
 import os
 import shutil
 import sys
@@ -58,6 +64,36 @@ SYNC_FILES = [
 ]
 
 
+def compute_file_checksum(filepath: Path) -> str:
+    """Compute MD5 checksum of a file."""
+    hasher = hashlib.md5()
+    with open(filepath, 'rb') as f:
+        # Read in chunks for large files
+        for chunk in iter(lambda: f.read(65536), b''):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def files_are_identical(src: Path, dst: Path) -> bool:
+    """
+    Check if two files have identical content using MD5 checksum.
+
+    This is more reliable than timestamp comparison because:
+    - Notebooks saved with output get newer timestamps
+    - Git operations can change timestamps
+    - Network file systems may have timestamp issues
+    """
+    if not dst.exists():
+        return False
+
+    # Quick check: different sizes means definitely different
+    if src.stat().st_size != dst.stat().st_size:
+        return False
+
+    # Compare checksums for definitive answer
+    return compute_file_checksum(src) == compute_file_checksum(dst)
+
+
 def get_repo_root() -> Path:
     """Get the KINTSUGI repository root directory."""
     # Try to find repo root from this script's location
@@ -87,7 +123,13 @@ def get_project_folders() -> list[Path]:
     return [Path(p) for p in DEFAULT_PROJECT_FOLDERS]
 
 
-def sync_directory(src: Path, dst: Path, dry_run: bool = False, verbose: bool = False) -> tuple[int, int]:
+def sync_directory(
+    src: Path,
+    dst: Path,
+    dry_run: bool = False,
+    verbose: bool = False,
+    force: bool = False,
+) -> tuple[int, int]:
     """
     Sync a directory from source to destination.
 
@@ -111,14 +153,8 @@ def sync_directory(src: Path, dst: Path, dry_run: bool = False, verbose: bool = 
         rel_path = src_file.relative_to(src)
         dst_file = dst / rel_path
 
-        # Check if file needs updating
-        needs_update = True
-        if dst_file.exists():
-            src_mtime = src_file.stat().st_mtime
-            dst_mtime = dst_file.stat().st_mtime
-            if src_mtime <= dst_mtime:
-                needs_update = False
-                files_skipped += 1
+        # Check if file needs updating using checksum comparison
+        needs_update = force or not files_are_identical(src_file, dst_file)
 
         if needs_update:
             if dry_run:
@@ -129,13 +165,26 @@ def sync_directory(src: Path, dst: Path, dry_run: bool = False, verbose: bool = 
                 if verbose:
                     print(f"  Copied: {rel_path}")
             files_copied += 1
+        else:
+            if verbose:
+                print(f"  SKIP: Up to date: {rel_path}")
+            files_skipped += 1
 
     return files_copied, files_skipped
 
 
-def sync_file(src: Path, dst: Path, dry_run: bool = False, verbose: bool = False) -> bool:
+def sync_file(
+    src: Path,
+    dst: Path,
+    dry_run: bool = False,
+    verbose: bool = False,
+    force: bool = False,
+) -> bool:
     """
     Sync a single file from source to destination.
+
+    Uses checksum comparison to detect content changes, which is more reliable
+    than timestamp comparison (notebooks saved with output get newer timestamps).
 
     Returns:
         True if file was copied, False if skipped
@@ -145,14 +194,11 @@ def sync_file(src: Path, dst: Path, dry_run: bool = False, verbose: bool = False
             print(f"  SKIP: Source not found: {src.name}")
         return False
 
-    # Check if file needs updating
-    if dst.exists():
-        src_mtime = src.stat().st_mtime
-        dst_mtime = dst.stat().st_mtime
-        if src_mtime <= dst_mtime:
-            if verbose:
-                print(f"  SKIP: Up to date: {src.name}")
-            return False
+    # Check if file needs updating using checksum comparison
+    if not force and files_are_identical(src, dst):
+        if verbose:
+            print(f"  SKIP: Up to date: {src.name}")
+        return False
 
     if dry_run:
         print(f"  Would copy: {src.name}")
@@ -165,7 +211,13 @@ def sync_file(src: Path, dst: Path, dry_run: bool = False, verbose: bool = False
     return True
 
 
-def sync_to_project(repo_root: Path, project_notebooks: Path, dry_run: bool = False, verbose: bool = False) -> dict:
+def sync_to_project(
+    repo_root: Path,
+    project_notebooks: Path,
+    dry_run: bool = False,
+    verbose: bool = False,
+    force: bool = False,
+) -> dict:
     """
     Sync all modules from repo to a single project folder.
 
@@ -185,7 +237,7 @@ def sync_to_project(repo_root: Path, project_notebooks: Path, dry_run: bool = Fa
         dst_dir = project_notebooks / dir_name
 
         if src_dir.exists():
-            copied, skipped = sync_directory(src_dir, dst_dir, dry_run, verbose)
+            copied, skipped = sync_directory(src_dir, dst_dir, dry_run, verbose, force)
             stats["directories"]["copied"] += copied
             stats["directories"]["skipped"] += skipped
 
@@ -194,7 +246,7 @@ def sync_to_project(repo_root: Path, project_notebooks: Path, dry_run: bool = Fa
         src_file = src_notebooks / file_name
         dst_file = project_notebooks / file_name
 
-        if sync_file(src_file, dst_file, dry_run, verbose):
+        if sync_file(src_file, dst_file, dry_run, verbose, force):
             stats["files"]["copied"] += 1
         else:
             stats["files"]["skipped"] += 1
@@ -212,6 +264,8 @@ def main():
                        help="Preview changes without copying")
     parser.add_argument("--verbose", "-v", action="store_true",
                        help="Show detailed output")
+    parser.add_argument("--force", "-f", action="store_true",
+                       help="Force sync all files regardless of checksum")
     parser.add_argument("--project", "-p", type=str, action="append",
                        help="Specific project folder to sync (can be repeated)")
 
@@ -226,7 +280,10 @@ def main():
 
     print(f"KINTSUGI Sync - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Source: {repo_root}/notebooks/")
-    print(f"{'DRY RUN - no changes will be made' if args.dry_run else ''}")
+    if args.dry_run:
+        print("DRY RUN - no changes will be made")
+    if args.force:
+        print("FORCE MODE - syncing all files regardless of content")
     print()
 
     total_copied = 0
@@ -238,7 +295,7 @@ def main():
             continue
 
         print(f"Syncing to: {project_path}")
-        stats = sync_to_project(repo_root, project_path, args.dry_run, args.verbose)
+        stats = sync_to_project(repo_root, project_path, args.dry_run, args.verbose, args.force)
 
         dir_copied = stats["directories"]["copied"]
         dir_skipped = stats["directories"]["skipped"]
@@ -263,7 +320,7 @@ def main():
     else:
         print(f"All {total_skipped} files already up to date across all projects")
 
-    return 0 if total_copied == 0 or args.dry_run else 0
+    return 0
 
 
 if __name__ == "__main__":
