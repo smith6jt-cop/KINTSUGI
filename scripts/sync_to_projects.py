@@ -46,6 +46,7 @@ SYNC_FILES = [
     "Kio.py",
     "Kprocess.py",
     "Kutils.py",
+    "Kview_qc.py",
     "Kpipeline.py",
     "Kvis.py",
     "1_Single_Channel_Eval.ipynb",
