@@ -186,9 +186,10 @@ class QualityGate:
             recommendations.append("Check raw data - may be failed acquisition")
 
         # === Check 3: Per-plane stripe artifact detection ===
+        # Uses HP-FFT detection for improved sensitivity to faint patterns
         from kintsugi.qc.stripe_artifact import scan_zstack
 
-        stripe_affected, stripe_results = scan_zstack(z_stack)
+        stripe_affected, stripe_results = scan_zstack(z_stack, use_hp_fft=True)
         for z_idx in stripe_affected:
             result = stripe_results[z_idx]
             plane_results[z_idx] = {
@@ -199,11 +200,42 @@ class QualityGate:
             if z_idx not in affected_planes:
                 affected_planes.append(z_idx)
 
+        # Track HP-FFT specific detections
+        hp_fft_detected = []
+        for z_idx, result in stripe_results.items():
+            hp_row_sev = result.metrics.get("hp_row_severity", "clean")
+            hp_col_sev = result.metrics.get("hp_col_severity", "clean")
+            if hp_row_sev != "clean" or hp_col_sev != "clean":
+                hp_fft_detected.append(z_idx)
+                # Log HP-FFT specific metrics
+                hp_row_peak = result.metrics.get("hp_row_peak", 0)
+                hp_col_peak = result.metrics.get("hp_col_peak", 0)
+                hp_row_z = result.metrics.get("hp_row_zscore", 0)
+                hp_col_z = result.metrics.get("hp_col_zscore", 0)
+                if z_idx not in plane_results:
+                    plane_results[z_idx] = {}
+                plane_results[z_idx]["hp_row_peak"] = hp_row_peak
+                plane_results[z_idx]["hp_col_peak"] = hp_col_peak
+                plane_results[z_idx]["hp_row_zscore"] = hp_row_z
+                plane_results[z_idx]["hp_col_zscore"] = hp_col_z
+
+        if hp_fft_detected:
+            metrics["hp_fft_detected_planes"] = len(hp_fft_detected)
+
         if stripe_affected:
             worst_stripe = max(stripe_results[z].severity for z in stripe_affected)
             metrics["stripe_affected_planes"] = len(stripe_affected)
             metrics["stripe_worst_severity"] = worst_stripe
-            issues.append(f"stripe_artifact ({len(stripe_affected)} planes, {worst_stripe})")
+
+            # Check if any detections were HP-FFT only (faint patterns)
+            hp_fft_only = set(hp_fft_detected) - set(stripe_affected)
+            if hp_fft_only:
+                issues.append(
+                    f"stripe_artifact ({len(stripe_affected)} planes, {worst_stripe}; "
+                    f"+{len(hp_fft_only)} faint via HP-FFT)"
+                )
+            else:
+                issues.append(f"stripe_artifact ({len(stripe_affected)} planes, {worst_stripe})")
 
             if worst_stripe == "severe":
                 recommendations.append(

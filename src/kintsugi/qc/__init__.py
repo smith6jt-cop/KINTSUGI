@@ -70,6 +70,8 @@ from kintsugi.qc.marker_qc import (
 )
 from kintsugi.qc.stripe_artifact import (
     StripeArtifactResult,
+    classify_hp_fft_severity,
+    compute_hp_fft_peak_strength,
     compute_zstack_baseline,
     detect_stripe_artifact,
     scan_zstack,
@@ -164,6 +166,8 @@ __all__ = [
     "detect_stripe_artifact",
     "scan_zstack",
     "compute_zstack_baseline",
+    "compute_hp_fft_peak_strength",
+    "classify_hp_fft_severity",
     # Deprecated aliases (backwards compatibility)
     "detect_stripe_artifacts",
     "scan_zstack_for_artifacts",

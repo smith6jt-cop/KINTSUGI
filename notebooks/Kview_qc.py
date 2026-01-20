@@ -13,6 +13,8 @@ Usage:
         view_raw_tiles,
         view_zstack,
         view_edf,
+        view_all_edf,
+        view_all_edf_interactive,
         view_pipeline_comparison
     )
 
@@ -22,8 +24,14 @@ Usage:
     # View stitched or deconvolved z-stack
     view_zstack(stitched_dir / "cyc01" / "CH3", title="Stitched cyc01 CH3")
 
-    # View EDF output
+    # View single EDF output
     view_edf(edf_path)
+
+    # Browse ALL EDF images in project (animation slider)
+    view_all_edf(project_dir)
+
+    # Browse ALL EDF images with ipywidgets (dropdown + nav buttons)
+    view_all_edf_interactive(project_dir)
 
     # Compare all stages side-by-side
     view_pipeline_comparison(project_dir, cycle=1, channel=3)
@@ -471,6 +479,314 @@ def view_edf(
         height=height,
         yaxis=dict(scaleanchor='x', scaleratio=1, autorange='reversed'),
     )
+
+    return fig
+
+
+# =============================================================================
+# ALL EDF VIEWER (Browse all EDF images)
+# =============================================================================
+
+def view_all_edf(
+    project_dir: str | Path,
+    max_display_size: int = 1000,
+    height: int = 700,
+) -> go.Figure:
+    """
+    Interactive viewer to scroll through ALL EDF images in a project.
+
+    Discovers all EDF images across all cycles and channels and provides
+    a slider to browse through them.
+
+    Parameters
+    ----------
+    project_dir : Path
+        Project directory containing data/processed/edf/
+    max_display_size : int
+        Maximum dimension for downsampled display
+    height : int
+        Figure height in pixels
+
+    Returns
+    -------
+    go.Figure
+        Plotly figure with animation slider to browse all EDF images
+    """
+    _check_deps()
+
+    project_dir = Path(project_dir)
+    edf_dir = project_dir / "data" / "processed" / "edf"
+
+    if not edf_dir.exists():
+        raise FileNotFoundError(f"EDF directory not found: {edf_dir}")
+
+    # Find all EDF files across all cycles and channels
+    # Pattern: edf/cyc##/CH#/edf.tif
+    edf_files = sorted(edf_dir.glob("**/edf.tif"))
+
+    if not edf_files:
+        # Try alternative patterns
+        edf_files = sorted(edf_dir.glob("**/*.tif"))
+
+    if not edf_files:
+        raise FileNotFoundError(f"No EDF files found in {edf_dir}")
+
+    print(f"Found {len(edf_files)} EDF images")
+
+    # Parse cycle/channel info from paths
+    edf_info = []
+    for f in edf_files:
+        # Extract cycle and channel from path
+        parts = f.relative_to(edf_dir).parts
+        if len(parts) >= 2:
+            cycle_str = parts[0]  # e.g., "cyc01"
+            channel_str = parts[1]  # e.g., "CH3"
+            label = f"{cycle_str} {channel_str}"
+        else:
+            label = f.stem
+        edf_info.append({'path': f, 'label': label})
+
+    # Load all images (downsampled) for smooth slider interaction
+    print("Loading and downsampling images...")
+    images = []
+    stats_list = []
+    labels = []
+
+    for info in edf_info:
+        img = tifffile.imread(info['path'])
+        stats_list.append(_compute_stats(img))
+        img_small = _downsample(img, max_display_size)
+        img_norm = _normalize_for_display(img_small)
+        images.append(img_norm)
+        labels.append(info['label'])
+
+    print(f"Loaded {len(images)} EDF images")
+
+    n_images = len(images)
+
+    # Create frames for animation
+    frames = []
+    for i, (img, stats, label) in enumerate(zip(images, stats_list, labels)):
+        frames.append(go.Frame(
+            data=[go.Heatmap(z=img, colorscale='gray', showscale=False)],
+            name=str(i),
+            layout=go.Layout(
+                title=dict(
+                    text=f"EDF: {label} ({i+1}/{n_images})<br><sub>{_stats_text(stats)}</sub>",
+                    x=0.5
+                )
+            )
+        ))
+
+    # Initial figure
+    initial_idx = 0
+    fig = go.Figure(
+        data=[go.Heatmap(
+            z=images[initial_idx],
+            colorscale='gray',
+            showscale=False,
+            hovertemplate='x: %{x}<br>y: %{y}<br>value: %{z}<extra></extra>'
+        )],
+        frames=frames
+    )
+
+    # Slider steps
+    slider_steps = []
+    for i, label in enumerate(labels):
+        slider_steps.append({
+            'args': [
+                [str(i)],
+                {'frame': {'duration': 0, 'redraw': True}, 'mode': 'immediate'}
+            ],
+            'label': label,
+            'method': 'animate'
+        })
+
+    fig.update_layout(
+        title=dict(
+            text=f"EDF: {labels[initial_idx]} ({initial_idx+1}/{n_images})<br><sub>{_stats_text(stats_list[initial_idx])}</sub>",
+            x=0.5
+        ),
+        height=height,
+        yaxis=dict(scaleanchor='x', scaleratio=1, autorange='reversed'),
+        sliders=[{
+            'active': initial_idx,
+            'currentvalue': {'prefix': 'Image: ', 'visible': True},
+            'pad': {'t': 50, 'b': 10},
+            'steps': slider_steps,
+            'transition': {'duration': 0}
+        }],
+        updatemenus=[{
+            'type': 'buttons',
+            'showactive': False,
+            'y': 0,
+            'x': 0.1,
+            'xanchor': 'right',
+            'yanchor': 'top',
+            'buttons': [
+                {
+                    'label': '> Play',
+                    'method': 'animate',
+                    'args': [None, {
+                        'frame': {'duration': 500, 'redraw': True},
+                        'fromcurrent': True,
+                        'mode': 'immediate'
+                    }]
+                },
+                {
+                    'label': '|| Pause',
+                    'method': 'animate',
+                    'args': [[None], {
+                        'frame': {'duration': 0, 'redraw': False},
+                        'mode': 'immediate'
+                    }]
+                }
+            ]
+        }]
+    )
+
+    return fig
+
+
+def view_all_edf_interactive(
+    project_dir: str | Path,
+    max_display_size: int = 800,
+) -> "go.FigureWidget":
+    """
+    Interactive viewer to scroll through ALL EDF images using ipywidgets.
+
+    Provides a dropdown to select cycle/channel and displays the EDF image.
+    More responsive than animation-based slider for large numbers of images.
+
+    Parameters
+    ----------
+    project_dir : Path
+        Project directory containing data/processed/edf/
+    max_display_size : int
+        Maximum dimension for downsampled display
+
+    Returns
+    -------
+    go.FigureWidget or display
+        Interactive widget (displays automatically in Jupyter)
+    """
+    _check_deps()
+
+    try:
+        import ipywidgets as widgets
+        from IPython.display import display
+    except ImportError:
+        print("ipywidgets required. Install with: pip install ipywidgets")
+        print("Falling back to animation-based viewer...")
+        return view_all_edf(project_dir, max_display_size)
+
+    project_dir = Path(project_dir)
+    edf_dir = project_dir / "data" / "processed" / "edf"
+
+    if not edf_dir.exists():
+        raise FileNotFoundError(f"EDF directory not found: {edf_dir}")
+
+    # Find all EDF files
+    edf_files = sorted(edf_dir.glob("**/edf.tif"))
+    if not edf_files:
+        edf_files = sorted(edf_dir.glob("**/*.tif"))
+
+    if not edf_files:
+        raise FileNotFoundError(f"No EDF files found in {edf_dir}")
+
+    print(f"Found {len(edf_files)} EDF images")
+
+    # Build options list
+    options = []
+    for f in edf_files:
+        parts = f.relative_to(edf_dir).parts
+        if len(parts) >= 2:
+            label = f"{parts[0]} {parts[1]}"
+        else:
+            label = f.stem
+        options.append((label, str(f)))
+
+    # Create dropdown
+    dropdown = widgets.Dropdown(
+        options=options,
+        value=options[0][1] if options else None,
+        description='EDF Image:',
+        style={'description_width': 'initial'},
+        layout=widgets.Layout(width='300px')
+    )
+
+    # Navigation buttons
+    prev_btn = widgets.Button(description='< Prev', layout=widgets.Layout(width='80px'))
+    next_btn = widgets.Button(description='Next >', layout=widgets.Layout(width='80px'))
+    counter_label = widgets.HTML(value=f"1 / {len(options)}")
+
+    # Stats display
+    stats_html = widgets.HTML(value="")
+
+    # Create figure widget
+    fig = go.FigureWidget(
+        data=[go.Heatmap(
+            z=np.zeros((100, 100)),
+            colorscale='gray',
+            showscale=True,
+            colorbar=dict(title='Intensity'),
+            hovertemplate='x: %{x}<br>y: %{y}<br>value: %{z}<extra></extra>'
+        )]
+    )
+
+    fig.update_layout(
+        title="EDF Viewer",
+        height=600,
+        yaxis=dict(scaleanchor='x', scaleratio=1, autorange='reversed')
+    )
+
+    def load_and_display(path_str):
+        """Load image and update display."""
+        path = Path(path_str)
+        img = tifffile.imread(path)
+        stats = _compute_stats(img)
+        img_display = _normalize_for_display(_downsample(img, max_display_size))
+
+        # Get label from path
+        parts = path.relative_to(edf_dir).parts
+        label = f"{parts[0]} {parts[1]}" if len(parts) >= 2 else path.stem
+
+        # Find current index
+        current_idx = next((i for i, (_, v) in enumerate(options) if v == path_str), 0)
+
+        with fig.batch_update():
+            fig.data[0].z = img_display
+            fig.layout.title = f"EDF: {label}"
+
+        stats_html.value = _stats_text(stats).replace('<br>', ' | ')
+        counter_label.value = f"<b>{current_idx + 1}</b> / {len(options)}"
+
+    def on_dropdown_change(change):
+        load_and_display(change['new'])
+
+    def on_prev_click(b):
+        current_idx = next((i for i, (_, v) in enumerate(options) if v == dropdown.value), 0)
+        if current_idx > 0:
+            dropdown.value = options[current_idx - 1][1]
+
+    def on_next_click(b):
+        current_idx = next((i for i, (_, v) in enumerate(options) if v == dropdown.value), 0)
+        if current_idx < len(options) - 1:
+            dropdown.value = options[current_idx + 1][1]
+
+    dropdown.observe(on_dropdown_change, names='value')
+    prev_btn.on_click(on_prev_click)
+    next_btn.on_click(on_next_click)
+
+    # Initial load
+    load_and_display(dropdown.value)
+
+    # Display
+    display(widgets.VBox([
+        widgets.HBox([prev_btn, dropdown, next_btn, counter_label]),
+        stats_html,
+        fig
+    ]))
 
     return fig
 
