@@ -44,6 +44,30 @@ Use the VS Code multi-root workspace (`kintsugi-dev.code-workspace`) which combi
 
 Notebooks default to mini_project for testing. Change `PROJECT_DIR` for other projects.
 
+### Automatic Project Sync
+
+**IMPORTANT**: Changes to notebook modules in the main repo are **automatically synced** to all project folders after every commit via a git post-commit hook.
+
+**Always edit the main repo first** (`KINTSUGI/notebooks/`), never edit project folders directly. The sync happens automatically via:
+- `scripts/sync_to_projects.py` - Sync script
+- `.git/hooks/post-commit` - Git hook that runs sync after each commit
+
+**What gets synced:**
+- Notebook modules: `Kdecon/`, `Kstitch/`, `Kreg/`, `Kview/`, `Kview2/`, `Kseg/`
+- Python files: `Kio.py`, `Kutils.py`, `Kpipeline.py`, `Kvis.py`
+- Notebooks: `1_Single_Channel_Eval.ipynb`, `2_Cycle_Processing.ipynb`, etc.
+
+**Project folders synced to:**
+- Test project: `KINTSUGI/test_data/mini_project/notebooks/`
+- Full project: `KINTSUGI_Projects/CODEX_SP_LN/1904CC1-1L/notebooks/`
+
+**Manual sync** (if needed):
+```bash
+python scripts/sync_to_projects.py           # Sync all projects
+python scripts/sync_to_projects.py --dry-run # Preview changes
+python scripts/sync_to_projects.py --verbose # Show detailed output
+```
+
 ### Adding MCP Support to Existing Projects
 
 If you're not using `kintsugi init`, or need to add MCP support to an existing project, run:
