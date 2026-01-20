@@ -270,6 +270,15 @@ Only suggest kernel restart for: new package installation, environment variable 
   negative flatfield values were causing severe artifacts
 - Affected code: `src/kintsugi/kcorrect_gpu.py` lines 567-580 (fit), 618-630 (transform)
 
+**Stitching Stripe Artifacts (Critical Finding - Jan 2026):**
+- Vertical stripe patterns (~30px spacing) can appear in stitched images
+- **IMPORTANT**: Stripes are NOT caused by raw data quality - investigation confirmed raw tiles are clean
+- Root cause: Stripes introduced during stitching by buggy pipeline code
+- Fix: Reprocess affected z-planes with current code using `scripts/reprocess_striped_zplanes.py`
+- Typical improvement: 2.8-5.5x reduction in stripe metrics after reprocessing
+- Diagnostic scripts: `scripts/check_raw_stripe_pattern.py`, `scripts/check_correction_vs_stitching.py`
+- When investigating stripe artifacts, always compare fresh reprocessing vs existing files first
+
 **Artifact Detection & Mitigation:**
 - Unified `ArtifactScanner` class integrated with project structure
 - Comparative z-stack analysis for robust detection (avoids dataset-specific threshold issues)
