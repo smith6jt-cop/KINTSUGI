@@ -411,6 +411,22 @@ def apply_processed_data_decisions(
                                 deleted_zarr = True
                             shutil.rmtree(zarr_stage_path)
 
+            # Delete associated checkpoint files to prevent stale progress tracking
+            cache_dir = project_paths.root / "cache"
+            if cache_dir.exists():
+                # Map stage names to their checkpoint file names
+                checkpoint_map = {
+                    "stitched": "stitching_checkpoint.json",
+                    "deconvolved": "deconvolution_checkpoint.json",
+                    "edf": "edf_checkpoint.json",
+                    "registered": "registration_checkpoint.json",
+                }
+                if stage_name in checkpoint_map:
+                    checkpoint_file = cache_dir / checkpoint_map[stage_name]
+                    if checkpoint_file.exists():
+                        print(f"  Clearing {stage_name} checkpoint...")
+                        checkpoint_file.unlink()
+
     return True
 
 

@@ -134,8 +134,21 @@ from kintsugi.qc.quality_gate import (
     QualityGateResult,
     check_before_processing,
 )
+from kintsugi.qc.quick_metrics import (
+    QuickQCResult,
+    average_with_neighbors,
+    compute_quick_qc_metrics,
+    fix_bad_zplanes_in_tiff,
+    fix_bad_zplanes_in_zarr,
+)
 
 __all__ = [
+    # Quick QC Metrics (inline stitching pipeline)
+    "QuickQCResult",
+    "compute_quick_qc_metrics",
+    "average_with_neighbors",
+    "fix_bad_zplanes_in_zarr",
+    "fix_bad_zplanes_in_tiff",
     # Quality Gate (pre-processing validation)
     "QualityGate",
     "QualityGateResult",
