@@ -225,6 +225,36 @@ This means:
 
 Only suggest kernel restart for: new package installation, environment variable changes, or C extension recompilation.
 
+### Troubleshooting "Function Not Found" Errors
+
+When users report `NameError: name 'function_name' is not defined`:
+
+1. **Check if function is defined in a notebook cell** (not a module):
+   - Some functions like `run_deconvolution` are defined inside the notebook, not imported from modules
+   - These require running the definition cell before the cell that uses them
+
+2. **Verify cell execution order**:
+   ```python
+   # Use this to analyze notebook cell order
+   import json
+   with open('notebook.ipynb') as f:
+       nb = json.load(f)
+   for i, cell in enumerate(nb['cells']):
+       source = ''.join(cell.get('source', []))
+       if 'function_name' in source:
+           is_def = 'def function_name' in source
+           print(f"Cell {i}: {'DEFINES' if is_def else 'CALLS'} function_name")
+   ```
+
+3. **Common patterns in 2_Cycle_Processing.ipynb**:
+   | Function | Defined In | Called In |
+   |----------|------------|-----------|
+   | `run_deconvolution` | Cell 24 | Cell 25 |
+   | `process_edf_tiff` | Cell 31 | Cell 32 |
+   | `visualize_deconvolution` | Cell 27 | (manual) |
+
+4. **Solution**: Run cells sequentially from the top, or at minimum run the definition cell before the calling cell.
+
 ## Key Patterns
 
 - **Lazy loading**: `__init__.py` uses lazy imports to avoid loading heavy dependencies at startup
