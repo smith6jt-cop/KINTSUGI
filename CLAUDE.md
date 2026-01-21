@@ -368,6 +368,15 @@ result = quantify_processing_pipeline(
 print(f"Pipeline SNR improvement: {result['pipeline_snr_improvement']:.1f}x")
 ```
 
+**EDF Sigma Fix (Critical Fix - Jan 2026):**
+- Fixed significant detail loss caused by incorrect sigma parameter application
+- Root cause: sigma was smoothing the INPUT IMAGE before variance calculation (destroying detail)
+- Fix: sigma now smooths the VARIANCE MAP after variance calculation (matching CLIJ2 behavior)
+- This preserves high-frequency detail while regularizing focus selection
+- Default parameters updated to match CLIJ2: radius=2, sigma=10 (was radius=5, sigma=20)
+- The "altitude map" (variance surface) is smoothed, NOT the image content
+- Affected code: `src/kintsugi/edf.py` lines 284-296
+
 **EDF Smooth Transitions:**
 - `blend_depth` parameter - Number of adjacent z-slices to blend for smooth transitions
 - `z_smooth_sigma` parameter - Gaussian smoothing for z-index map
@@ -378,6 +387,9 @@ from kintsugi.edf import extended_depth_of_focus_variance
 
 edf = extended_depth_of_focus_variance(
     stack,
+    radius_x=2,         # CLIJ2 default (was 5)
+    radius_y=2,         # CLIJ2 default (was 5)
+    sigma=10.0,         # CLIJ2 default (was 20)
     blend_depth=2,      # Blend 2 adjacent slices
     z_smooth_sigma=1.0  # Smooth z-index map
 )

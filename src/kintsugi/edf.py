@@ -164,9 +164,9 @@ def _check_clij2_available() -> bool:
 
 def extended_depth_of_focus_variance(
     stack: np.ndarray,
-    radius_x: int = 5,
-    radius_y: int = 5,
-    sigma: float = 20.0,
+    radius_x: int = 2,
+    radius_y: int = 2,
+    sigma: float = 10.0,
     use_gpu: bool = False,
     device: str = "auto",
     blend_depth: int = 0,
@@ -189,9 +189,10 @@ def extended_depth_of_focus_variance(
     radius_y : int, default=5
         Half-height of variance calculation window in Y direction.
         Window height = 2 * radius_y + 1
-    sigma : float, default=20.0
-        Gaussian smoothing sigma applied before variance calculation.
-        Larger values = more smoothing = less noise sensitivity.
+    sigma : float, default=10.0
+        Gaussian smoothing sigma applied to the variance map (altitude map)
+        after variance calculation. Regularizes focus selection by smoothing
+        the variance surface. Matches CLIJ2 behavior.
     use_gpu : bool, default=False
         If True and CuPy is available, use GPU acceleration.
         Deprecated: Use `device` parameter instead.
@@ -219,19 +220,22 @@ def extended_depth_of_focus_variance(
     >>> from kintsugi.edf import extended_depth_of_focus_variance
     >>> # Create a test stack (17 z-slices, 1000x1000 pixels)
     >>> stack = np.random.randint(0, 65535, (17, 1000, 1000), dtype=np.uint16)
-    >>> result = extended_depth_of_focus_variance(stack, radius_x=5, radius_y=5, sigma=20.0)
+    >>> result = extended_depth_of_focus_variance(stack, radius_x=2, radius_y=2, sigma=10.0)
     >>> result.shape
     (1000, 1000)
 
     Notes
     -----
-    Algorithm:
-    1. For each Z-slice, apply Gaussian smoothing with sigma
-    2. Calculate local variance in a (2*radius_y+1) x (2*radius_x+1) window
-    3. For each (x,y), find the Z-slice with maximum variance
+    Algorithm (matches CLIJ2 extendedDepthOfFocusVarianceProjection):
+    1. For each Z-slice, calculate local variance in window (no pre-smoothing)
+    2. Apply Gaussian smoothing (sigma) to 3D variance map (x,y only, not z)
+    3. For each (x,y), find Z-slice with maximum smoothed variance
     4. Output pixel = input pixel from that Z-slice
 
     The variance is calculated as: Var(X) = E[X^2] - E[X]^2
+
+    IMPORTANT: Sigma smooths the "altitude map" (variance surface), NOT the
+    input image. This preserves image detail while regularizing focus selection.
 
     For smooth transitions with blend_depth > 0:
     - Instead of selecting only the best z-slice, blends top N slices
@@ -278,17 +282,22 @@ def extended_depth_of_focus_variance(
     # Window size for variance calculation
     window_size = (2 * radius_y + 1, 2 * radius_x + 1)
 
-    # Calculate variance for each slice
+    # Calculate variance for each slice (on RAW image, no pre-smoothing)
     variances = xp.zeros((n_slices, height, width), dtype=xp.float32)
 
     for z in range(n_slices):
-        # Apply Gaussian smoothing
-        smoothed = gf(stack_gpu[z], sigma=sigma)
-
-        # Calculate local variance: Var(X) = E[X^2] - E[X]^2
-        local_mean = uf(smoothed, size=window_size)
-        local_mean_sq = uf(smoothed**2, size=window_size)
+        # Calculate local variance on raw image: Var(X) = E[X^2] - E[X]^2
+        # No Gaussian pre-smoothing - this preserves high-frequency detail
+        slice_data = stack_gpu[z]
+        local_mean = uf(slice_data, size=window_size)
+        local_mean_sq = uf(slice_data**2, size=window_size)
         variances[z] = local_mean_sq - local_mean**2
+
+    # Smooth variance map (altitude map), NOT the image - matches CLIJ2
+    # This regularizes focus selection without destroying image detail
+    if sigma > 0:
+        # Apply Gaussian smoothing to variance map in x,y only (not z)
+        variances = gf(variances, sigma=(0, sigma, sigma))
 
     # Determine blending strategy
     if blend_depth > 1 and blend_depth <= n_slices:
@@ -515,9 +524,9 @@ def edf_tiled(
     ...     tile_size=(3000, 3000),
     ...     overlap=100,
     ...     method='variance',
-    ...     radius_x=5,
-    ...     radius_y=5,
-    ...     sigma=20.0,
+    ...     radius_x=2,
+    ...     radius_y=2,
+    ...     sigma=10.0,
     ...     blend_depth=2  # Smooth transitions
     ... )
     """
@@ -637,9 +646,9 @@ class EDFProcessor:
     >>> processor = EDFProcessor(backend='auto')
     >>> result = processor.process(
     ...     stack,
-    ...     radius_x=5,
-    ...     radius_y=5,
-    ...     sigma=20.0,
+    ...     radius_x=2,
+    ...     radius_y=2,
+    ...     sigma=10.0,
     ...     tiles=(3, 3)
     ... )
     """
@@ -689,9 +698,9 @@ class EDFProcessor:
     def process(
         self,
         stack: np.ndarray,
-        radius_x: int = 5,
-        radius_y: int = 5,
-        sigma: float = 20.0,
+        radius_x: int = 2,
+        radius_y: int = 2,
+        sigma: float = 10.0,
         z_start: int | None = None,
         z_end: int | None = None,
         tiles: tuple[int, int] | None = None,
@@ -870,9 +879,9 @@ class EDFProcessor:
 
 def process_edf(
     stack: np.ndarray,
-    radius_x: int = 5,
-    radius_y: int = 5,
-    sigma: float = 20.0,
+    radius_x: int = 2,
+    radius_y: int = 2,
+    sigma: float = 10.0,
     backend: BackendType = "auto",
     **kwargs,
 ) -> np.ndarray:
@@ -900,7 +909,7 @@ def process_edf(
     Examples
     --------
     >>> from kintsugi.edf import process_edf
-    >>> result = process_edf(stack, radius_x=5, radius_y=5, sigma=20.0)
+    >>> result = process_edf(stack, radius_x=2, radius_y=2, sigma=10.0)
     """
     processor = EDFProcessor(backend=backend)
     return processor.process(stack, radius_x, radius_y, sigma, **kwargs)
