@@ -105,6 +105,124 @@ def _stats_text(stats: dict) -> str:
     )
 
 
+def _find_edf_file(
+    edf_base_dir: Path,
+    cycle: int,
+    channel: int | None = None,
+    channel_name: str | None = None,
+) -> Path | None:
+    """
+    Find EDF file with flexible path matching.
+
+    Supports multiple EDF output structures:
+    - edf/cyc##/MARKER_NAME.tif (marker-named files directly in cycle dir)
+    - edf/cyc##/CH#/edf.tif (channel subdirectories with edf.tif)
+    - edf/cyc##/CH#.tif (channel-numbered files)
+
+    Parameters
+    ----------
+    edf_base_dir : Path
+        Base EDF directory (e.g., project/data/processed/edf)
+    cycle : int
+        Cycle number (1-based)
+    channel : int, optional
+        Channel number (1-based) for matching
+    channel_name : str, optional
+        Channel/marker name for direct matching (e.g., "CD45", "DAPI")
+
+    Returns
+    -------
+    Path or None
+        Path to EDF file if found, None otherwise
+    """
+    cycle_dir = edf_base_dir / f"cyc{cycle:02d}"
+
+    if not cycle_dir.exists():
+        return None
+
+    # Strategy 1: Direct channel name match
+    if channel_name:
+        # Try exact match first
+        for pattern in [f"{channel_name}.tif", f"{channel_name}*.tif", f"*{channel_name}*.tif"]:
+            matches = list(cycle_dir.glob(pattern))
+            if matches:
+                return matches[0]
+
+    # Strategy 2: CH# subdirectory structure (legacy)
+    if channel is not None:
+        ch_dir = cycle_dir / f"CH{channel}"
+        if ch_dir.exists():
+            edf_file = ch_dir / "edf.tif"
+            if edf_file.exists():
+                return edf_file
+            # Try any .tif in the channel directory
+            tifs = list(ch_dir.glob("*.tif"))
+            if tifs:
+                return tifs[0]
+
+    # Strategy 3: Channel-numbered files
+    if channel is not None:
+        for pattern in [f"CH{channel}.tif", f"*_CH{channel}.tif", f"*_ch{channel}.tif"]:
+            matches = list(cycle_dir.glob(pattern))
+            if matches:
+                return matches[0]
+
+    # Strategy 4: Get nth file (by channel index) from sorted list
+    if channel is not None:
+        all_tifs = sorted(cycle_dir.glob("*.tif"))
+        # Filter out DAPI files for non-DAPI channels
+        non_dapi = [f for f in all_tifs if "DAPI" not in f.name.upper()]
+        dapi = [f for f in all_tifs if "DAPI" in f.name.upper()]
+
+        # Channel 1 is typically DAPI
+        if channel == 1 and dapi:
+            return dapi[0]
+        elif channel > 1 and len(non_dapi) >= channel - 1:
+            return non_dapi[channel - 2]  # -2 because channel is 1-based and we skip DAPI
+
+    # Strategy 5: Return first available file
+    all_tifs = sorted(cycle_dir.glob("*.tif"))
+    if all_tifs:
+        return all_tifs[0]
+
+    return None
+
+
+def _list_edf_files(edf_base_dir: Path, cycle: int) -> list[Path]:
+    """
+    List all EDF files for a cycle.
+
+    Parameters
+    ----------
+    edf_base_dir : Path
+        Base EDF directory
+    cycle : int
+        Cycle number (1-based)
+
+    Returns
+    -------
+    list of Path
+        All EDF files found for this cycle
+    """
+    cycle_dir = edf_base_dir / f"cyc{cycle:02d}"
+
+    if not cycle_dir.exists():
+        return []
+
+    # Check for files directly in cycle directory
+    direct_files = list(cycle_dir.glob("*.tif"))
+    if direct_files:
+        return sorted(direct_files)
+
+    # Check for CH# subdirectory structure
+    all_files = []
+    for ch_dir in sorted(cycle_dir.glob("CH*")):
+        if ch_dir.is_dir():
+            all_files.extend(ch_dir.glob("*.tif"))
+
+    return sorted(all_files)
+
+
 # =============================================================================
 # RAW TILE VIEWER
 # =============================================================================
@@ -802,6 +920,7 @@ def view_pipeline_comparison(
     z_plane: int | None = None,
     max_display_size: int = 600,
     height: int = 500,
+    channel_name: str | None = None,
 ) -> go.Figure:
     """
     Side-by-side comparison of all pipeline stages.
@@ -820,6 +939,9 @@ def view_pipeline_comparison(
         Maximum dimension for each image
     height : int
         Figure height in pixels
+    channel_name : str, optional
+        Channel/marker name (e.g., "CD45", "DAPI") for EDF file matching.
+        If not provided, falls back to channel number matching.
 
     Returns
     -------
@@ -834,7 +956,7 @@ def view_pipeline_comparison(
     # Find paths
     stitch_dir = proc_dir / "stitched" / f"cyc{cycle:02d}" / f"CH{channel}"
     decon_dir = proc_dir / "deconvolved" / f"cyc{cycle:02d}" / f"CH{channel}"
-    edf_dir = proc_dir / "edf" / f"cyc{cycle:02d}" / f"CH{channel}"
+    edf_base_dir = proc_dir / "edf"
 
     # Determine z-plane
     if stitch_dir.exists():
@@ -871,13 +993,14 @@ def view_pipeline_comparison(
     else:
         titles.append("Deconvolved (not found)")
 
-    # EDF
-    edf_path = edf_dir / "edf.tif"
-    if edf_path.exists():
+    # EDF - use flexible path matching
+    edf_path = _find_edf_file(edf_base_dir, cycle, channel, channel_name)
+    if edf_path and edf_path.exists():
         img = tifffile.imread(edf_path)
         images['edf'] = _normalize_for_display(_downsample(img, max_display_size))
         stats = _compute_stats(img)
-        titles.append(f"EDF<br><sub>Mean: {stats['mean']:.0f}</sub>")
+        edf_label = edf_path.stem if edf_path else "EDF"
+        titles.append(f"EDF ({edf_label})<br><sub>Mean: {stats['mean']:.0f}</sub>")
     else:
         titles.append("EDF (not found)")
 
@@ -1022,6 +1145,7 @@ def create_qc_panel(
     cycle: int,
     channel: int,
     stage: Literal['raw', 'stitched', 'deconvolved', 'edf'] = 'stitched',
+    channel_name: str | None = None,
 ) -> "QCPanel":
     """
     Create an interactive QC panel with ipywidgets for full interactivity.
@@ -1036,13 +1160,15 @@ def create_qc_panel(
         Channel number
     stage : str
         Pipeline stage to view
+    channel_name : str, optional
+        Channel/marker name for EDF file matching
 
     Returns
     -------
     QCPanel
         Interactive panel object with .show() method
     """
-    return QCPanel(project_dir, cycle, channel, stage)
+    return QCPanel(project_dir, cycle, channel, stage, channel_name=channel_name)
 
 
 class QCPanel:
@@ -1059,11 +1185,13 @@ class QCPanel:
         channel: int,
         stage: str = 'stitched',
         max_display_size: int = 800,
+        channel_name: str | None = None,
     ):
         self.project_dir = Path(project_dir)
         self.cycle = cycle
         self.channel = channel
         self.stage = stage
+        self.channel_name = channel_name
         self.max_display_size = max_display_size
 
         self._setup_paths()
@@ -1078,33 +1206,42 @@ class QCPanel:
             'raw': raw_dir / f"cyc{self.cycle:03d}",
             'stitched': proc_dir / "stitched" / f"cyc{self.cycle:02d}" / f"CH{self.channel}",
             'deconvolved': proc_dir / "deconvolved" / f"cyc{self.cycle:02d}" / f"CH{self.channel}",
-            'edf': proc_dir / "edf" / f"cyc{self.cycle:02d}" / f"CH{self.channel}",
+            'edf_base': proc_dir / "edf",  # Base directory for flexible matching
         }
 
     def _load_data(self):
         """Load image data for current stage."""
         self.images = []
         self.stats = []
-
-        path = self.paths[self.stage]
+        self.edf_file_path = None  # Store for fallback view
 
         if self.stage == 'edf':
-            edf_file = path / "edf.tif"
-            if edf_file.exists():
+            # Use flexible EDF file finding
+            edf_file = _find_edf_file(
+                self.paths['edf_base'],
+                self.cycle,
+                self.channel,
+                self.channel_name
+            )
+            if edf_file and edf_file.exists():
+                self.edf_file_path = edf_file
                 img = tifffile.imread(edf_file)
                 self.images.append(_downsample(img, self.max_display_size))
                 self.stats.append(_compute_stats(img))
         else:
-            if self.stage == 'deconvolved':
-                pattern = "deconv_*.tif"
-            else:
-                pattern = "*.tif"
+            # Get path for non-EDF stages
+            stage_path = self.paths.get(self.stage)
+            if stage_path and stage_path.exists():
+                if self.stage == 'deconvolved':
+                    pattern = "deconv_*.tif"
+                else:
+                    pattern = "*.tif"
 
-            files = sorted(path.glob(pattern))
-            for f in files:
-                img = tifffile.imread(f)
-                self.images.append(_downsample(img, self.max_display_size))
-                self.stats.append(_compute_stats(img))
+                files = sorted(stage_path.glob(pattern))
+                for f in files:
+                    img = tifffile.imread(f)
+                    self.images.append(_downsample(img, self.max_display_size))
+                    self.stats.append(_compute_stats(img))
 
         self.n_images = len(self.images)
         print(f"Loaded {self.n_images} images from {self.stage}")
@@ -1117,10 +1254,13 @@ class QCPanel:
         except ImportError:
             print("ipywidgets required for interactive panel. Install with: pip install ipywidgets")
             # Fall back to static view
-            if self.stage == 'edf':
-                return view_edf(self.paths['edf'] / "edf.tif")
-            else:
-                return view_zstack(self.paths[self.stage], title=f"{self.stage.title()} cyc{self.cycle:02d} CH{self.channel}")
+            if self.stage == 'edf' and self.edf_file_path:
+                return view_edf(self.edf_file_path)
+            elif self.stage != 'edf':
+                stage_path = self.paths.get(self.stage)
+                if stage_path:
+                    return view_zstack(stage_path, title=f"{self.stage.title()} cyc{self.cycle:02d} CH{self.channel}")
+            return None
 
         # Create figure widget
         initial_idx = min(self.n_images // 2, self.n_images - 1) if self.n_images > 0 else 0
