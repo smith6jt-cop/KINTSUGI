@@ -578,6 +578,7 @@ def discover_edf_files(
     edf_directory: Union[str, Path],
     start_cycle: int,
     end_cycle: int,
+    channel_name_dict: Dict[int, List[str]] = None,
 ) -> Dict[Tuple[int, int], Tuple[str, str]]:
     """Discover actual EDF files and build a mapping of cycle/channel to file paths.
 
@@ -587,6 +588,10 @@ def discover_edf_files(
         Directory containing EDF output
     start_cycle, end_cycle : int
         Cycle range to search
+    channel_name_dict : dict, optional
+        Mapping of cycle -> list of channel names. Used to determine correct
+        channel index from marker name. If not provided, channel index is
+        assigned based on alphabetical file order (may be incorrect).
 
     Returns
     -------
@@ -603,9 +608,26 @@ def discover_edf_files(
         # Get all .tif files in this cycle directory
         tif_files = sorted(cycle_dir.glob("*.tif"))
 
-        for channel_idx, tif_path in enumerate(tif_files, start=1):
+        # Get channel names for this cycle if available
+        cycle_channels = channel_name_dict.get(cycle, []) if channel_name_dict else []
+
+        for tif_path in tif_files:
             # Extract marker name from filename (remove .tif extension)
             marker_name = tif_path.stem
+
+            # Try to find the actual channel index from channel_name_dict
+            channel_idx = None
+            if cycle_channels:
+                # Look for this marker in the channel list
+                for idx, ch_name in enumerate(cycle_channels, start=1):
+                    if ch_name == marker_name:
+                        channel_idx = idx
+                        break
+
+            # If not found in dict, fall back to position in sorted list
+            if channel_idx is None:
+                channel_idx = list(tif_files).index(tif_path) + 1
+
             file_map[(cycle, channel_idx)] = (str(tif_path), marker_name)
 
     return file_map
@@ -1289,6 +1311,7 @@ def run_edf_qc(
     gpu_device_ids: List[int] = None,
     io_workers: int = 4,
     zplanes_per_gpu: int = 2,
+    channel_name_dict: Dict[int, List[str]] = None,
 ) -> pd.DataFrame:
     """Run complete EDF data QC analysis with caching and comparison."""
     print("="*70)
@@ -1304,7 +1327,7 @@ def run_edf_qc(
 
     # Discover actual EDF files
     print("Discovering EDF files...")
-    file_map = discover_edf_files(actual_edf_dir, start_cycle, end_cycle)
+    file_map = discover_edf_files(actual_edf_dir, start_cycle, end_cycle, channel_name_dict)
     print(f"  Found {len(file_map)} EDF files")
 
     cache_path = Path(cache_file)
