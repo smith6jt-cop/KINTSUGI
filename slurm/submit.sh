@@ -184,12 +184,18 @@ submit_job() {
 
     local job_name="kintsugi_${step_name}_${PROJECT_NAME}"
 
+    # Ensure log and QC directories exist (sbatch validates paths at submission time)
+    mkdir -p "${LOG_DIR}"
+    mkdir -p "${QC_DIR}/${step_name}"
+
     local cmd="sbatch"
     cmd="${cmd} --job-name=${job_name}"
     cmd="${cmd} --output=${LOG_DIR}/${step_name}_%A_%a.out"
     cmd="${cmd} --error=${LOG_DIR}/${step_name}_%A_%a.err"
     cmd="${cmd} --partition=${PARTITION}"
-    cmd="${cmd} --qos=${QOS}"
+    if [ -n "${QOS}" ]; then
+        cmd="${cmd} --qos=${QOS}"
+    fi
     cmd="${cmd} --account=${ACCOUNT}"
     cmd="${cmd} --nodes=1"
     cmd="${cmd} --ntasks=1"
@@ -213,13 +219,19 @@ submit_job() {
     cmd="${cmd} ${script}"
 
     if [ "${DRY_RUN}" = true ]; then
-        echo "[DRY RUN] ${cmd}"
+        # Print to stderr so it's visible (stdout is captured for job ID)
+        echo "[DRY RUN] ${cmd}" >&2
         echo "DRY_${step_name}_JOB"
     else
-        echo "Submitting ${step_name}..."
-        result=$(${cmd})
+        echo "Submitting ${step_name}..." >&2
+        result=$(${cmd} 2>&1)
+        if [ $? -ne 0 ]; then
+            echo "ERROR: sbatch failed: ${result}" >&2
+            echo ""
+            return 1
+        fi
         jobid=$(echo ${result} | grep -oP '\d+$')
-        echo "  Job ID: ${jobid}"
+        echo "  Job ID: ${jobid}" >&2
         echo "${jobid}"
     fi
 }
