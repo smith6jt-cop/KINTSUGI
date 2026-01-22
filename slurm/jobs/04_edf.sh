@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # KINTSUGI Extended Depth of Focus (EDF) Job
-# Multi-GPU EDF processing with logging and QC
+# Multi-GPU EDF processing with quality gate and logging
 # =============================================================================
 
 # Source utilities
@@ -29,6 +29,7 @@ python << 'PYTHON_SCRIPT'
 import sys
 import os
 import time
+import gc
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from itertools import cycle as iter_cycle
@@ -55,6 +56,27 @@ EDF_DIR = DATA_DIR / 'processed' / 'edf'
 EDF_DIR.mkdir(parents=True, exist_ok=True)
 QC_DIR.mkdir(parents=True, exist_ok=True)
 
+# =============================================================================
+# EDF PARAMETERS - Updated to exclude edge z-planes and prevent distortion
+# =============================================================================
+EDF_PARAMS = {
+    'radius_x': 2,
+    'radius_y': 2,
+    'sigma': 10.0,
+    'tiles': (3, 3),      # Process in 9 tiles to fit in GPU memory
+    'backend': 'auto',
+    'device': 'gpu',
+    'blend_depth': 0,
+    'z_smooth_sigma': 1.0
+}
+
+# Quality gate thresholds
+QUALITY_GATE = {
+    'max_zero_pct': 0.10,    # Exclude slices with >10% zeros
+    'max_sat_pct': 0.05,     # Exclude slices with >5% saturation
+    'min_valid_slices': 3,   # Need at least 3 valid slices
+}
+
 n_gpus = cp.cuda.runtime.getDeviceCount()
 GPU_IDS = list(range(n_gpus))
 
@@ -67,8 +89,50 @@ print(f"GPUs: {n_gpus}")
 print(f"Input: {DECON_DIR}")
 print(f"Output: {EDF_DIR}")
 print(f"QC output: {QC_DIR}")
+print(f"EDF params: z exclusion enabled, quality gate enabled")
 
 channels = list(range(START_CHANNEL, END_CHANNEL + 1))
+
+def load_stack_parallel(tiff_files):
+    """Load z-stack from TIFF files with parallel I/O."""
+    from concurrent.futures import ThreadPoolExecutor
+    from skimage.io import imread
+
+    def load_single(f):
+        return imread(str(f))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        slices = list(executor.map(load_single, tiff_files))
+
+    return np.stack(slices, axis=0)
+
+def quality_gate_zstack(stack, channel_name):
+    """
+    Quality gate: detect and exclude corrupted z-slices.
+
+    Returns tuple of (valid_indices, excluded_reasons)
+    """
+    valid_z_indices = []
+    excluded_reasons = []
+
+    for z_idx in range(stack.shape[0]):
+        slice_data = stack[z_idx]
+        total_pixels = slice_data.size
+
+        pct_zero = np.sum(slice_data == 0) / total_pixels
+        pct_sat = np.sum(slice_data >= 64000) / total_pixels
+
+        if pct_zero > QUALITY_GATE['max_zero_pct']:
+            excluded_reasons.append(f"z={z_idx+1}: {pct_zero*100:.1f}% zeros")
+            continue
+
+        if pct_sat > QUALITY_GATE['max_sat_pct']:
+            excluded_reasons.append(f"z={z_idx+1}: {pct_sat*100:.1f}% saturated")
+            continue
+
+        valid_z_indices.append(z_idx)
+
+    return valid_z_indices, excluded_reasons
 
 def save_qc_image(data, output_path, title=""):
     """Save EDF result as QC image."""
@@ -78,7 +142,6 @@ def save_qc_image(data, output_path, title=""):
         import matplotlib.pyplot as plt
 
         fig, ax = plt.subplots(figsize=(8, 8))
-        # Auto-contrast
         vmin, vmax = np.percentile(data, [1, 99])
         im = ax.imshow(data, cmap='gray', vmin=vmin, vmax=vmax)
         ax.set_title(title)
@@ -87,19 +150,19 @@ def save_qc_image(data, output_path, title=""):
         plt.tight_layout()
         plt.savefig(output_path, dpi=100, bbox_inches='tight')
         plt.close()
-        print(f"  QC saved: {output_path}")
+        print(f"    QC saved: {output_path.name}")
     except Exception as e:
-        print(f"  QC save failed: {e}")
+        print(f"    QC save failed: {e}")
 
 def process_edf(args):
-    """Process EDF for one channel."""
+    """Process EDF for one channel with quality gate."""
     ch, gpu_id = args
     print(f"\n  [GPU{gpu_id}] Channel {ch} starting...")
 
     try:
         cp.cuda.Device(gpu_id).use()
 
-        processor = EDFProcessor(device='gpu')
+        processor = EDFProcessor(backend=EDF_PARAMS['backend'], method='variance')
 
         input_path = DECON_DIR / f"cyc{CYCLE:02d}" / f"CH{ch}"
         output_path = EDF_DIR / f"cyc{CYCLE:02d}"
@@ -108,32 +171,85 @@ def process_edf(args):
         # Find input files
         input_files = sorted(input_path.glob("*.tif"))
         if not input_files:
-            print(f"  [GPU{gpu_id}] No input files found for channel {ch}")
-            return ch, False
+            print(f"    No input files found for channel {ch}")
+            return ch, False, "No input files"
 
-        # Load z-stack
-        from skimage.io import imread, imsave
-        stack = np.array([imread(str(f)) for f in input_files])
+        # Load z-stack with parallel I/O
+        print(f"    Loading {len(input_files)} z-slices...")
+        stack = load_stack_parallel(input_files)
+        n_zplanes = stack.shape[0]
+        print(f"    Stack shape: {stack.shape}")
 
-        # Run EDF
-        edf_result = processor.process(stack)
+        # ======== QUALITY GATE ========
+        valid_z_indices, excluded_reasons = quality_gate_zstack(stack, f"CH{ch}")
+
+        if excluded_reasons:
+            print(f"    Quality gate excluded z-slices:")
+            for reason in excluded_reasons:
+                print(f"      - {reason}")
+
+        if len(valid_z_indices) < QUALITY_GATE['min_valid_slices']:
+            msg = f"Only {len(valid_z_indices)} valid z-slices, need at least {QUALITY_GATE['min_valid_slices']}"
+            print(f"    ERROR: {msg}")
+            return ch, False, msg
+
+        # Filter to valid slices
+        stack_filtered = stack[valid_z_indices]
+        print(f"    Valid z-slices: {len(valid_z_indices)}/{n_zplanes}")
+
+        # Apply z_start/z_end bounds (exclude first and last of remaining)
+        if len(valid_z_indices) > 4:
+            z_start = 2  # 1-indexed, skip first valid slice
+            z_end = len(valid_z_indices) - 1  # Skip last valid slice
+        else:
+            z_start = 1
+            z_end = len(valid_z_indices)
+
+        print(f"    Using z_start={z_start}, z_end={z_end}")
+
+        # ======== RUN EDF ========
+        edf_result = processor.process(
+            stack_filtered,
+            radius_x=EDF_PARAMS['radius_x'],
+            radius_y=EDF_PARAMS['radius_y'],
+            sigma=EDF_PARAMS['sigma'],
+            z_start=z_start,
+            z_end=z_end,
+            tiles=EDF_PARAMS['tiles'],
+            device=EDF_PARAMS['device'],
+            blend_depth=EDF_PARAMS.get('blend_depth', 0),
+            z_smooth_sigma=EDF_PARAMS.get('z_smooth_sigma', 0.0)
+        )
 
         # Save result
+        from skimage.io import imsave
         output_file = output_path / f"CH{ch}_edf.tif"
-        imsave(str(output_file), edf_result.astype(np.uint16))
+        imsave(str(output_file), edf_result.astype(np.uint16), check_contrast=False)
+
+        # Verify output quality
+        pct_zero = 100 * np.sum(edf_result == 0) / edf_result.size
+        print(f"    Output: {pct_zero:.2f}% zeros (should be <5%)")
+
+        if pct_zero > 5:
+            print(f"    WARNING: High zero percentage in output")
 
         # Generate QC image
         qc_path = QC_DIR / f"cyc{CYCLE:02d}_CH{ch}_edf.png"
-        save_qc_image(edf_result, str(qc_path), f"Cycle {CYCLE} Channel {ch} - EDF")
+        save_qc_image(edf_result, qc_path, f"Cycle {CYCLE} CH{ch} EDF ({pct_zero:.1f}% zeros)")
 
-        print(f"  [GPU{gpu_id}] Channel {ch} complete -> {output_file}")
-        return ch, True
+        print(f"  [GPU{gpu_id}] Channel {ch} complete -> {output_file.name}")
+
+        # Cleanup
+        del stack, stack_filtered, edf_result
+        gc.collect()
+
+        return ch, True, None
 
     except Exception as e:
         print(f"  [GPU{gpu_id}] Channel {ch} FAILED: {e}")
         import traceback
         traceback.print_exc()
-        return ch, False
+        return ch, False, str(e)
     finally:
         cleanup_gpu_memory()
 
@@ -148,7 +264,7 @@ if n_gpus >= 2 and len(channels) >= 2:
 else:
     results = [process_edf((ch, 0)) for ch in channels]
 
-successful = sum(1 for _, ok in results if ok)
+successful = sum(1 for _, ok, _ in results if ok)
 elapsed = (time.time() - start_time) / 60
 
 print(f"\n{'='*60}")
@@ -159,7 +275,12 @@ print(f"Time: {elapsed:.1f} minutes")
 print(f"Output: {EDF_DIR}")
 print(f"QC images: {QC_DIR}")
 
-if successful < len(channels):
+# Report any failures
+failed = [(ch, err) for ch, ok, err in results if not ok]
+if failed:
+    print(f"\nFailed channels:")
+    for ch, err in failed:
+        print(f"  CH{ch}: {err}")
     sys.exit(1)
 PYTHON_SCRIPT
 
