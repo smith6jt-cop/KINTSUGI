@@ -32,6 +32,46 @@ my_project/
 
 The `.claude/settings.local.json` file is **automatically created** with the MCP server configuration.
 
+### SLURM Job Submission (HPC)
+
+For HPC clusters with SLURM, add job submission support during project creation:
+
+```bash
+kintsugi init /path/to/project --name "My Experiment" --slurm
+```
+
+This creates an additional `slurm/` directory:
+```
+my_project/
+└── slurm/
+    ├── config.sh      ← Pre-populated with auto-detected HPC settings
+    ├── jobs/          ← Symlink to KINTSUGI job scripts
+    └── README.md      ← Quick-start guide
+```
+
+**Auto-detection**: The system automatically detects:
+- SLURM account from `SLURM_ACCOUNT` or `SBATCH_ACCOUNT` environment variables
+- GPU type from `nvidia-smi`
+- Conda environment from `CONDA_DEFAULT_ENV`
+
+**Add SLURM to existing project**:
+```bash
+kintsugi slurm init /path/to/project
+```
+
+**Submit jobs**:
+```bash
+kintsugi slurm submit /path/to/project              # All steps
+kintsugi slurm submit . --steps decon,edf           # Specific steps
+kintsugi slurm submit . --cycles 1-5                # Specific cycles
+kintsugi slurm submit . --dry-run                   # Preview commands
+```
+
+**Check status**:
+```bash
+kintsugi slurm status .
+```
+
 ## Development Workspace
 
 Use the VS Code multi-root workspace (`kintsugi-dev.code-workspace`) which combines:
