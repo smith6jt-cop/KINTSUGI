@@ -26,6 +26,7 @@ Smith, J. A. et al. Protocol for processing and analyzing multiplexed images imp
   - [Command Line Interface](#command-line-interface)
   - [Python API](#python-api)
 - [Notebooks](#notebooks)
+- [HPC/SLURM Job Submission](#hpcslurm-job-submission)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 
@@ -362,6 +363,143 @@ code .
 ```
 
 **Important**: Always launch VS Code from the activated conda environment to ensure all packages are available.
+
+## HPC/SLURM Job Submission
+
+KINTSUGI includes a SLURM submission system for running batch processing on HPC clusters. The scripts are located in the `slurm/` directory.
+
+### Quick Start
+
+```bash
+# Submit full pipeline for a project
+./slurm/submit.sh --project /path/to/your/project
+
+# Preview commands without submitting (dry run)
+./slurm/submit.sh --project /path/to/your/project --dry-run
+
+# Run specific steps only
+./slurm/submit.sh --project /path/to/your/project --steps decon,edf
+
+# Process specific cycles
+./slurm/submit.sh --project /path/to/your/project --cycles 1-3
+```
+
+### Pipeline Steps
+
+The SLURM pipeline runs four processing steps with automatic dependencies:
+
+| Step | Description | Default Memory | Default Time |
+|------|-------------|----------------|--------------|
+| `correction` | GPU-accelerated BaSiC illumination correction | 64 GB | 4 hours |
+| `stitch` | Image stitching with phase correlation | 128 GB | 6 hours |
+| `decon` | Lucy-Richardson deconvolution | 192 GB | 8 hours |
+| `edf` | Extended depth of focus projection | 64 GB | 2 hours |
+
+Jobs are submitted as SLURM arrays (one task per cycle) with automatic dependencies between steps.
+
+### Configuration
+
+On first run, a configuration file is created at `PROJECT_DIR/slurm/config.sh`. Edit this file to customize:
+
+```bash
+# Key settings in config.sh
+
+# Processing parameters
+export START_CYCLE=1
+export END_CYCLE=7
+export OUTPUT_FORMAT="zarr"  # or "tiff"
+
+# Microscope parameters (for deconvolution)
+export XY_VOX=377          # nm per pixel
+export Z_VOX=1500          # nm per z-slice
+export MIC_NA=0.75         # Numerical aperture
+
+# HPC resources
+export PARTITION="gpu"
+export QOS="maigan-b"
+export ACCOUNT="maigan"
+export GPU_TYPE="b200"
+export GPUS_PER_NODE=2
+
+# Email notifications (optional)
+export EMAIL="your.email@example.com"
+export MAIL_TYPE="END,FAIL"
+```
+
+### Batch Processing Multiple Projects
+
+Process multiple datasets at once:
+
+```bash
+# From a project list file
+./slurm/submit_batch.sh projects.txt
+
+# Specify projects directly
+./slurm/submit_batch.sh --list /path/to/project1 /path/to/project2
+
+# Auto-discover projects under a directory
+./slurm/submit_batch.sh --find /path/to/KINTSUGI_Projects
+
+# Run sequentially (wait for each project to complete)
+./slurm/submit_batch.sh --sequential projects.txt
+```
+
+### Monitoring Jobs
+
+```bash
+# View your queued/running jobs
+squeue -u $USER
+
+# View jobs for a specific project
+squeue -u $USER -n "kintsugi_*_ProjectName"
+
+# Cancel all KINTSUGI jobs
+scancel -u $USER -n "kintsugi_*"
+
+# View job output in real-time
+tail -f PROJECT_DIR/slurm/runs/RUNID/logs/step_JOBID_CYCLE.out
+```
+
+### Output Structure
+
+Each run creates a timestamped directory with logs, QC images, and summaries:
+
+```
+PROJECT_DIR/slurm/runs/20250122_143052/
+├── run_info.txt          # Run configuration
+├── logs/                 # SLURM output logs
+│   ├── correct_12345_1.out
+│   ├── stitch_12346_1.out
+│   └── ...
+├── qc/                   # QC images per step
+│   ├── correction/
+│   ├── stitch/
+│   ├── decon/
+│   └── edf/
+└── summaries/            # Before/after data summaries
+```
+
+### Example Workflow
+
+```bash
+# 1. Create/verify project structure
+kintsugi init /blue/maigan/smith6jt/KINTSUGI_Projects/MyExperiment
+
+# 2. Copy raw data to data/raw/cyc001/, cyc002/, etc.
+
+# 3. Submit pipeline (creates config on first run)
+./slurm/submit.sh --project /blue/maigan/smith6jt/KINTSUGI_Projects/MyExperiment
+
+# 4. Edit the generated config if needed
+nano /blue/maigan/smith6jt/KINTSUGI_Projects/MyExperiment/slurm/config.sh
+
+# 5. Re-submit with updated config
+./slurm/submit.sh --project /blue/maigan/smith6jt/KINTSUGI_Projects/MyExperiment
+
+# 6. Monitor progress
+squeue -u $USER
+tail -f /blue/maigan/smith6jt/KINTSUGI_Projects/MyExperiment/slurm/runs/*/logs/*.out
+```
 
 ## Troubleshooting
 
