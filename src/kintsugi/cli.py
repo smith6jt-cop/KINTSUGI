@@ -9,6 +9,7 @@ Provides CLI entry points for:
 """
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -469,6 +470,197 @@ def config(project_path: str, print_only: bool):
 
 
 # ============================================================================
+# SLURM Commands for HPC Job Submission
+# ============================================================================
+
+
+@main.group()
+def slurm():
+    """SLURM job submission commands for HPC clusters."""
+    pass
+
+
+@slurm.command("init")
+@click.argument("project_dir", type=click.Path(exists=True))
+@click.option("--account", "-a", help="HPC account name (auto-detected if not provided)")
+@click.option("--partition", "-p", default=None, help="SLURM partition (default: gpu)")
+@click.option("--qos", "-q", default=None, help="SLURM Quality of Service")
+@click.option("--gpu-type", "-g", default=None, help="GPU type for constraints (auto-detected)")
+def slurm_init(
+    project_dir: str,
+    account: str | None,
+    partition: str | None,
+    qos: str | None,
+    gpu_type: str | None,
+):
+    """
+    Add SLURM support to an existing KINTSUGI project.
+
+    Creates the slurm/ directory with configuration files and job script
+    symlinks. Auto-detects HPC settings from the environment when possible.
+
+    PROJECT_DIR is the path to your existing KINTSUGI project directory.
+
+    \b
+    Examples:
+        kintsugi slurm init .                     # Current directory
+        kintsugi slurm init /path/to/project      # Specific project
+        kintsugi slurm init . --account myacct    # With explicit account
+    """
+    from pathlib import Path
+
+    from kintsugi.project import KintsugiProject
+
+    project_dir = Path(project_dir).resolve()
+    config_file = project_dir / "kintsugi_project.json"
+
+    if not config_file.exists():
+        console.print(f"[red]Not a KINTSUGI project: {project_dir}[/red]")
+        console.print("Run 'kintsugi init' first to create a project.")
+        raise SystemExit(1)
+
+    try:
+        project = KintsugiProject.load(project_dir)
+        slurm_dir = project.setup_slurm(
+            account=account,
+            partition=partition,
+            qos=qos,
+            gpu_type=gpu_type,
+        )
+
+        console.print(f"\n[green]SLURM support added to {project_dir}[/green]")
+        console.print(f"\n[bold]Next steps:[/bold]")
+        console.print(f"  1. Review and edit: {slurm_dir / 'config.sh'}")
+        console.print(f"  2. Submit jobs: kintsugi slurm submit {project_dir}")
+        console.print(f"  3. Or directly: {project._kintsugi_path}/slurm/submit.sh --project {project_dir}")
+
+    except Exception as e:
+        console.print(f"[red]Failed to add SLURM support: {e}[/red]")
+        raise SystemExit(1)
+
+
+@slurm.command("submit")
+@click.argument("project_dir", type=click.Path(exists=True))
+@click.option(
+    "--steps", "-s", default="all",
+    help="Comma-separated steps: correction,stitch,decon,edf,all (default: all)"
+)
+@click.option("--cycles", "-c", default=None, help="Override cycles: '1-7' or '1,2,5'")
+@click.option("--dry-run", "-n", is_flag=True, help="Show commands without submitting")
+def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool):
+    """
+    Submit SLURM jobs for a KINTSUGI project.
+
+    This is a convenience wrapper around the submit.sh script. It will use
+    the configuration from PROJECT_DIR/slurm/config.sh.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory.
+
+    \b
+    Examples:
+        kintsugi slurm submit .                   # Submit all steps
+        kintsugi slurm submit . --steps decon     # Just deconvolution
+        kintsugi slurm submit . --cycles 1-3      # Specific cycles
+        kintsugi slurm submit . --dry-run         # Preview commands
+    """
+    from pathlib import Path
+
+    project_dir = Path(project_dir).resolve()
+
+    # Validate project
+    if not (project_dir / "kintsugi_project.json").exists():
+        console.print(f"[red]Not a KINTSUGI project: {project_dir}[/red]")
+        console.print("Run 'kintsugi init' first to create a project.")
+        raise SystemExit(1)
+
+    # Check for SLURM config
+    config_file = project_dir / "slurm" / "config.sh"
+    if not config_file.exists():
+        console.print(f"[red]SLURM not configured for this project.[/red]")
+        console.print("Run 'kintsugi slurm init' first to add SLURM support.")
+        raise SystemExit(1)
+
+    # Find submit.sh script
+    try:
+        from kintsugi.project import KintsugiProject
+        project = KintsugiProject.load(project_dir)
+        submit_script = project._kintsugi_path / "slurm" / "submit.sh"
+    except Exception:
+        # Fallback: try to find it relative to this file
+        submit_script = Path(__file__).parent.parent.parent / "slurm" / "submit.sh"
+
+    if not submit_script.exists():
+        console.print(f"[red]Submit script not found: {submit_script}[/red]")
+        raise SystemExit(1)
+
+    # Build command
+    cmd = [str(submit_script), "--project", str(project_dir), "--steps", steps]
+
+    if cycles:
+        cmd.extend(["--cycles", cycles])
+
+    if dry_run:
+        cmd.append("--dry-run")
+
+    console.print(f"[bold]Running:[/bold] {' '.join(cmd)}")
+    console.print()
+
+    try:
+        result = subprocess.run(cmd, check=False)
+        if result.returncode != 0:
+            raise SystemExit(result.returncode)
+    except FileNotFoundError:
+        console.print(f"[red]Could not execute submit script[/red]")
+        raise SystemExit(1)
+
+
+@slurm.command("status")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+def slurm_status(project_dir: str):
+    """
+    Show status of SLURM jobs for a project.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    """
+    from pathlib import Path
+
+    project_dir = Path(project_dir).resolve()
+    project_name = project_dir.name
+
+    # Run squeue to get job status
+    cmd = [
+        "squeue",
+        "-u", os.environ.get("USER", ""),
+        "-n", f"kintsugi_*_{project_name}",
+        "--format=%.18i %.9P %.30j %.8u %.2t %.10M %.6D %R"
+    ]
+
+    console.print(f"[bold]SLURM jobs for:[/bold] {project_name}")
+    console.print()
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.stdout.strip():
+            console.print(result.stdout)
+        else:
+            console.print("[dim]No running jobs found.[/dim]")
+
+        # Also show recent runs
+        runs_dir = project_dir / "slurm" / "runs"
+        if runs_dir.exists():
+            runs = sorted(runs_dir.iterdir(), reverse=True)[:5]
+            if runs:
+                console.print(f"\n[bold]Recent runs:[/bold]")
+                for run in runs:
+                    console.print(f"  {run.name}")
+
+    except FileNotFoundError:
+        console.print("[yellow]squeue not available (not on a SLURM cluster?)[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error checking status: {e}[/red]")
+
+
+# ============================================================================
 # Project Commands
 # ============================================================================
 
@@ -483,7 +675,25 @@ def config(project_path: str, print_only: bool):
 @click.option(
     "--adopt-data", is_flag=True, help="Automatically organize existing data into project structure"
 )
-def init(project_path: str, name: str | None, description: str, force: bool, adopt_data: bool):
+@click.option(
+    "--slurm", is_flag=True, help="Initialize SLURM job submission support"
+)
+@click.option("--slurm-account", help="HPC account for SLURM (auto-detected if not provided)")
+@click.option("--slurm-partition", default=None, help="SLURM partition (default: gpu)")
+@click.option("--slurm-qos", default=None, help="SLURM Quality of Service")
+@click.option("--slurm-gpu-type", default=None, help="GPU type for SLURM (auto-detected)")
+def init(
+    project_path: str,
+    name: str | None,
+    description: str,
+    force: bool,
+    adopt_data: bool,
+    slurm: bool,
+    slurm_account: str | None,
+    slurm_partition: str | None,
+    slurm_qos: str | None,
+    slurm_gpu_type: str | None,
+):
     """
     Initialize a new KINTSUGI project.
 
@@ -493,6 +703,9 @@ def init(project_path: str, name: str | None, description: str, force: bool, ado
     directory, you will be prompted to review it before proceeding.
 
     Use --force to skip directory scanning (faster for large existing datasets).
+
+    Use --slurm to add SLURM job submission support (creates slurm/ directory
+    with config.sh, job script symlinks, and README).
     """
     from pathlib import Path
 
@@ -512,6 +725,13 @@ def init(project_path: str, name: str | None, description: str, force: bool, ado
         project.setup_notebooks(overwrite=True)
         project._create_claude_config()
         project._create_vscode_config()
+        if slurm:
+            project.setup_slurm(
+                account=slurm_account,
+                partition=slurm_partition,
+                qos=slurm_qos,
+                gpu_type=slurm_gpu_type,
+            )
         project.save()
         console.print("\n[green]Project updated from KINTSUGI templates.[/green]")
         return
@@ -603,6 +823,11 @@ def init(project_path: str, name: str | None, description: str, force: bool, ado
             description=description,
             existing_data_report=report,
             adopt_existing_data=adopt_data,
+            slurm=slurm,
+            slurm_account=slurm_account,
+            slurm_partition=slurm_partition,
+            slurm_qos=slurm_qos,
+            slurm_gpu_type=slurm_gpu_type,
         )
         console.print("\n[green]Project created successfully![/green]")
 

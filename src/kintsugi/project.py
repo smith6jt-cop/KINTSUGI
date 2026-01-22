@@ -918,6 +918,11 @@ class KintsugiProject:
         setup_notebooks: bool = True,
         existing_data_report: ExistingDataReport | None = None,
         adopt_existing_data: bool = False,
+        slurm: bool = False,
+        slurm_account: str | None = None,
+        slurm_partition: str | None = None,
+        slurm_qos: str | None = None,
+        slurm_gpu_type: str | None = None,
     ) -> KintsugiProject:
         """
         Create a new KINTSUGI project.
@@ -942,6 +947,16 @@ class KintsugiProject:
         adopt_existing_data : bool
             If True and existing data is found, automatically organize it
             into the project structure (move to data/raw/)
+        slurm : bool
+            If True, set up SLURM job submission infrastructure
+        slurm_account : str, optional
+            HPC account name for SLURM. Auto-detected if not provided.
+        slurm_partition : str, optional
+            SLURM partition. Defaults to 'gpu'.
+        slurm_qos : str, optional
+            Quality of Service for SLURM.
+        slurm_gpu_type : str, optional
+            GPU type for SLURM constraints. Auto-detected from nvidia-smi.
 
         Returns
         -------
@@ -996,6 +1011,15 @@ class KintsugiProject:
         # Create default config files
         project._create_default_configs()
 
+        # Set up SLURM if requested
+        if slurm:
+            project.setup_slurm(
+                account=slurm_account,
+                partition=slurm_partition,
+                qos=slurm_qos,
+                gpu_type=slurm_gpu_type,
+            )
+
         # Save project
         project.save()
 
@@ -1012,6 +1036,8 @@ class KintsugiProject:
         print("  +-- configs/          <- Processing configs")
         print("  +-- meta/             <- Metadata files")
         print("  +-- logs/             <- Processing logs")
+        if slurm:
+            print("  +-- slurm/            <- SLURM job submission")
         print("  +-- .claude/          <- Claude Code config")
         print("  +-- .vscode/          <- VS Code config")
         print()
@@ -1272,6 +1298,113 @@ class KintsugiProject:
             with open(settings_file, "w") as f:
                 json.dump(vscode_config, f, indent=2)
             print("  Created .vscode/settings.json")
+
+    def setup_slurm(
+        self,
+        account: str | None = None,
+        partition: str | None = None,
+        qos: str | None = None,
+        gpu_type: str | None = None,
+        auto_detect: bool = True,
+    ) -> Path:
+        """
+        Set up SLURM job submission infrastructure for the project.
+
+        Creates the slurm/ directory with:
+        - config.sh: Pre-populated configuration file
+        - jobs/: Symlink to KINTSUGI job scripts
+        - README.md: Quick-start guide
+
+        Parameters
+        ----------
+        account : str, optional
+            HPC account name. Auto-detected if not provided.
+        partition : str, optional
+            SLURM partition. Auto-detected or defaults to 'gpu'.
+        qos : str, optional
+            Quality of Service. Auto-detected if not provided.
+        gpu_type : str, optional
+            GPU type for constraints. Auto-detected from nvidia-smi.
+        auto_detect : bool
+            Whether to auto-detect settings from environment (default: True)
+
+        Returns
+        -------
+        Path
+            Path to the created slurm directory
+        """
+        from kintsugi.hpc import (
+            detect_hpc_settings,
+            generate_slurm_config,
+            generate_slurm_readme,
+        )
+
+        slurm_dir = self.root / "slurm"
+        slurm_dir.mkdir(exist_ok=True)
+
+        # Auto-detect HPC settings if requested
+        detected: dict[str, Any] = {}
+        if auto_detect:
+            detected = detect_hpc_settings()
+
+        # Build user settings from provided arguments
+        user_settings: dict[str, Any] = {}
+        if account is not None:
+            user_settings["account"] = account
+        if partition is not None:
+            user_settings["partition"] = partition
+        if qos is not None:
+            user_settings["qos"] = qos
+        if gpu_type is not None:
+            user_settings["gpu_type"] = gpu_type
+
+        # Generate config.sh
+        config_content = generate_slurm_config(
+            project_name=self.config.name,
+            project_dir=str(self.root),
+            kintsugi_dir=str(self._kintsugi_path),
+            detected_settings=detected,
+            user_settings=user_settings,
+        )
+
+        config_file = slurm_dir / "config.sh"
+        with open(config_file, "w") as f:
+            f.write(config_content)
+        print(f"  Created slurm/config.sh")
+
+        # Create symlink to job scripts
+        jobs_link = slurm_dir / "jobs"
+        jobs_source = self._kintsugi_path / "slurm" / "jobs"
+
+        if jobs_source.exists():
+            if jobs_link.exists() or jobs_link.is_symlink():
+                jobs_link.unlink()
+            try:
+                jobs_link.symlink_to(jobs_source)
+                print(f"  Created slurm/jobs -> {jobs_source}")
+            except OSError as e:
+                # Symlink may fail on Windows without admin rights
+                print(f"  Warning: Could not create symlink for jobs: {e}")
+                print(f"  Job scripts are at: {jobs_source}")
+
+        # Generate README
+        readme_content = generate_slurm_readme(
+            project_name=self.config.name,
+            kintsugi_dir=str(self._kintsugi_path),
+        )
+
+        readme_file = slurm_dir / "README.md"
+        with open(readme_file, "w") as f:
+            f.write(readme_content)
+        print(f"  Created slurm/README.md")
+
+        # Log detected settings
+        if detected:
+            detected_items = [f"{k}={v}" for k, v in detected.items() if v]
+            if detected_items:
+                print(f"  Auto-detected: {', '.join(detected_items)}")
+
+        return slurm_dir
 
     # -------------------------------------------------------------------------
     # Convenience properties for common paths
