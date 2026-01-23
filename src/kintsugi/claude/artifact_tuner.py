@@ -82,7 +82,6 @@ def artifact_detection_tuner(
     # Local helper for FFT visualization (simplified)
     def get_fft_visualization(image, result):
         """Get FFT visualization data."""
-        height = image.shape[0]
         row_means = np.mean(image, axis=1)
         fft_1d = np.fft.rfft(row_means - row_means.mean())
         power_1d = np.abs(fft_1d) ** 2

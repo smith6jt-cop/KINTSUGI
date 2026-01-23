@@ -529,7 +529,7 @@ def slurm_init(
         )
 
         console.print(f"\n[green]SLURM support added to {project_dir}[/green]")
-        console.print(f"\n[bold]Next steps:[/bold]")
+        console.print("\n[bold]Next steps:[/bold]")
         console.print(f"  1. Review and edit: {slurm_dir / 'config.sh'}")
         console.print(f"  2. Submit jobs: kintsugi slurm submit {project_dir}")
         console.print(f"  3. Or directly: {project._kintsugi_path}/slurm/submit.sh --project {project_dir}")
@@ -576,7 +576,7 @@ def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool
     # Check for SLURM config
     config_file = project_dir / "slurm" / "config.sh"
     if not config_file.exists():
-        console.print(f"[red]SLURM not configured for this project.[/red]")
+        console.print("[red]SLURM not configured for this project.[/red]")
         console.print("Run 'kintsugi slurm init' first to add SLURM support.")
         raise SystemExit(1)
 
@@ -610,7 +610,7 @@ def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool
         if result.returncode != 0:
             raise SystemExit(result.returncode)
     except FileNotFoundError:
-        console.print(f"[red]Could not execute submit script[/red]")
+        console.print("[red]Could not execute submit script[/red]")
         raise SystemExit(1)
 
 
@@ -650,7 +650,7 @@ def slurm_status(project_dir: str):
         if runs_dir.exists():
             runs = sorted(runs_dir.iterdir(), reverse=True)[:5]
             if runs:
-                console.print(f"\n[bold]Recent runs:[/bold]")
+                console.print("\n[bold]Recent runs:[/bold]")
                 for run in runs:
                     console.print(f"  {run.name}")
 

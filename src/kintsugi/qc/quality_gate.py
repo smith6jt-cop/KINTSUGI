@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, Callable
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -537,9 +537,8 @@ class QualityGate:
             return z_stack
 
         from kintsugi.qc.stripe_mitigation import (
-            interpolate_zplane,
             apply_directional_filter,
-            get_recommended_method,
+            interpolate_zplane,
         )
 
         mitigated = z_stack.copy()

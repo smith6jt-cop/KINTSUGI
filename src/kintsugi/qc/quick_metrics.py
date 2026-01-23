@@ -244,7 +244,6 @@ def fix_bad_zplanes_in_zarr(
     >>> fixes = fix_bad_zplanes_in_zarr(zarr_store, cycle=1, channel=3,
     ...                                  flagged_zplanes=[1, 7], n_zplanes=15)
     """
-    import numpy as np
 
     fixes = []
 
@@ -336,7 +335,6 @@ def fix_bad_zplanes_in_tiff(
     """
     import os
 
-    import numpy as np
     from skimage.io import imread, imsave
 
     fixes = []

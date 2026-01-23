@@ -1370,7 +1370,7 @@ class KintsugiProject:
         config_file = slurm_dir / "config.sh"
         with open(config_file, "w") as f:
             f.write(config_content)
-        print(f"  Created slurm/config.sh")
+        print("  Created slurm/config.sh")
 
         # Create symlink to job scripts
         jobs_link = slurm_dir / "jobs"
@@ -1396,7 +1396,7 @@ class KintsugiProject:
         readme_file = slurm_dir / "README.md"
         with open(readme_file, "w") as f:
             f.write(readme_content)
-        print(f"  Created slurm/README.md")
+        print("  Created slurm/README.md")
 
         # Log detected settings
         if detected:
