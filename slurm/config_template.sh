@@ -57,6 +57,12 @@ export ACCOUNT="maigan"
 export GPU_TYPE="b200"
 export GPUS_PER_NODE=2
 
+# Fallback GPU settings (used when primary GPU is unavailable)
+# Leave empty to disable fallback and fail if primary not available
+export GPU_TYPE_FALLBACK="geforce"
+export PARTITION_FALLBACK="hpg-turin"
+export QOS_FALLBACK=""
+
 # Memory per job (GB)
 export MEM_CORRECTION=64
 export MEM_STITCH=128
