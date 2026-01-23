@@ -448,11 +448,11 @@ submit_job() {
         if [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
             term_info "Attempting fallback submission to ${PARTITION_FALLBACK} with ${GPU_TYPE_FALLBACK} GPU..."
 
-            local fallback_cmd
-            fallback_cmd=$(build_sbatch_cmd "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
-                "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}" "${QOS_FALLBACK}")
+            local -a fallback_cmd
+            read -r -a fallback_cmd <<<"$(build_sbatch_cmd "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
+                "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}" "${QOS_FALLBACK}")"
 
-            result=$(${fallback_cmd} 2>&1)
+            result=$("${fallback_cmd[@]}" 2>&1)
             exit_code=$?
 
             if [ ${exit_code} -eq 0 ]; then
