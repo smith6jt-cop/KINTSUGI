@@ -91,11 +91,15 @@ check_gpu_availability() {
     fi
 
     # Also check via squeue for pending jobs which might indicate resource contention
-    local queue_count
-    queue_count=$(squeue -p "${partition}" --gres="gpu:${gpu_type}" -h 2>/dev/null | wc -l || echo "0")
+    local queue_count=0
+    if command -v squeue &> /dev/null; then
+        queue_count=$(squeue -p "${partition}" --gres="gpu:${gpu_type}" -h 2>/dev/null | wc -l || echo "0")
 
-    if [ "${queue_count}" -gt 10 ]; then
-        term_warn "High queue depth (${queue_count} jobs) for ${gpu_type} on ${partition} - jobs may wait"
+        if [ "${queue_count}" -gt 10 ]; then
+            term_warn "High queue depth (${queue_count} jobs) for ${gpu_type} on ${partition} - jobs may wait"
+        fi
+    else
+        term_warn "squeue command not found - skipping queue depth check for ${gpu_type} on ${partition}"
     fi
 
     # Check if any nodes with this GPU type exist at all
