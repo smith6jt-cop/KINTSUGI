@@ -112,7 +112,7 @@ check_gpu_availability() {
     fi
 
     term_warn "All ${gpu_type} nodes on ${partition} appear busy - job will be queued"
-    return 0
+    return 2
 }
 
 # Get current GPU resource status
