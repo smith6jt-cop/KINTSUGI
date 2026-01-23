@@ -57,11 +57,13 @@ export ACCOUNT="maigan"
 export GPU_TYPE="b200"
 export GPUS_PER_NODE=2
 
-# Fallback GPU settings (used when primary GPU is unavailable)
-# Leave empty to disable fallback and fail if primary not available
+# Fallback GPU settings (used when submit.sh determines the primary config
+# cannot be used, not merely when resources are busy/queued)
 export GPU_TYPE_FALLBACK="geforce"
 export PARTITION_FALLBACK="hpg-turin"
 export QOS_FALLBACK=""
+# Leave fallback values empty to disable automatic fallback retries; jobs will
+# continue using the primary settings and may remain queued per Slurm behavior.
 
 # Memory per job (GB)
 export MEM_CORRECTION=64
