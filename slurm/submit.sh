@@ -298,11 +298,19 @@ if ! check_gpu_availability "${PARTITION}" "${GPU_TYPE}"; then
             term_error "Neither primary nor fallback GPU resources appear available"
             term_error "Jobs will likely fail or wait indefinitely"
             if [ "${DRY_RUN}" != true ]; then
-                echo ""
-                read -p "Continue anyway? [y/N] " -n 1 -r
-                echo ""
-                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                    term_info "Submission cancelled"
+                # Only prompt if running interactively (stdin is a TTY)
+                if [ -t 0 ]; then
+                    echo ""
+                    read -p "Continue anyway? [y/N] " -n 1 -r
+                    echo ""
+                    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                        term_info "Submission cancelled"
+                        exit 1
+                    fi
+                else
+                    # Non-interactive mode: abort by default for safety
+                    term_error "Non-interactive mode: aborting due to unavailable resources"
+                    term_error "Use --dry-run to preview or ensure resources are available"
                     exit 1
                 fi
             fi
@@ -320,8 +328,9 @@ term_info "  QC Images:  ${QC_DIR}/"
 term_info "  Summaries:  ${SUMMARY_DIR}/"
 term_info "============================================================"
 
-# Build sbatch command with specified GPU settings
-build_sbatch_cmd() {
+# Build sbatch command array with specified GPU settings
+# Sets SBATCH_CMD array as output (global)
+build_sbatch_cmd_array() {
     local step_name=$1
     local script=$2
     local mem=$3
@@ -334,36 +343,44 @@ build_sbatch_cmd() {
 
     local job_name="kintsugi_${step_name}_${PROJECT_NAME}"
 
-    local cmd="sbatch"
-    cmd="${cmd} --job-name=${job_name}"
-    cmd="${cmd} --output=${LOG_DIR}/${step_name}_%A_%a.out"
-    cmd="${cmd} --error=${LOG_DIR}/${step_name}_%A_%a.err"
-    cmd="${cmd} --partition=${use_partition}"
-    if [ -n "${use_qos}" ]; then
-        cmd="${cmd} --qos=${use_qos}"
-    fi
-    cmd="${cmd} --account=${ACCOUNT}"
-    cmd="${cmd} --nodes=1"
-    cmd="${cmd} --ntasks=1"
-    cmd="${cmd} --cpus-per-task=8"
-    cmd="${cmd} --mem=${mem}gb"
-    cmd="${cmd} --gpus=${use_gpu_type}:${GPUS_PER_NODE}"
-    cmd="${cmd} --time=${time}"
-    cmd="${cmd} --array=${ARRAY_SPEC}"
+    SBATCH_CMD=(
+        sbatch
+        "--job-name=${job_name}"
+        "--output=${LOG_DIR}/${step_name}_%A_%a.out"
+        "--error=${LOG_DIR}/${step_name}_%A_%a.err"
+        "--partition=${use_partition}"
+    )
 
-    # Export all config variables including RUN_ID for unified logging
-    cmd="${cmd} --export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name}"
+    if [ -n "${use_qos}" ]; then
+        SBATCH_CMD+=("--qos=${use_qos}")
+    fi
+
+    SBATCH_CMD+=(
+        "--account=${ACCOUNT}"
+        "--nodes=1"
+        "--ntasks=1"
+        "--cpus-per-task=8"
+        "--mem=${mem}gb"
+        "--gpus=${use_gpu_type}:${GPUS_PER_NODE}"
+        "--time=${time}"
+        "--array=${ARRAY_SPEC}"
+        "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name}"
+    )
 
     if [ -n "${dep_jobid}" ]; then
-        cmd="${cmd} --dependency=${dep_type}:${dep_jobid}"
+        SBATCH_CMD+=("--dependency=${dep_type}:${dep_jobid}")
     fi
 
     if [ -n "${EMAIL}" ]; then
-        cmd="${cmd} --mail-user=${EMAIL} --mail-type=${MAIL_TYPE}"
+        SBATCH_CMD+=("--mail-user=${EMAIL}" "--mail-type=${MAIL_TYPE}")
     fi
 
-    cmd="${cmd} ${script}"
-    echo "${cmd}"
+    SBATCH_CMD+=("${script}")
+}
+
+# Format command array as string for display
+format_cmd_for_display() {
+    printf '%q ' "${SBATCH_CMD[@]}"
 }
 
 # Submit job function with fallback support
@@ -384,6 +401,12 @@ submit_job() {
     term_info "Preparing job submission for ${step_name}..."
     term_info "  Partition: ${PARTITION}, GPU: ${GPU_TYPE}, Memory: ${mem}GB, Time: ${time}"
 
+    # Determine which GPU configuration to use
+    local use_partition="${PARTITION}"
+    local use_gpu_type="${GPU_TYPE}"
+    local use_qos="${QOS}"
+    local using_fallback=false
+
     # Check primary GPU availability
     if ! check_gpu_availability "${PARTITION}" "${GPU_TYPE}"; then
         term_warn "Primary GPU (${GPU_TYPE}) not available on partition ${PARTITION}"
@@ -392,7 +415,11 @@ submit_job() {
         if [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
             term_info "Checking fallback: ${GPU_TYPE_FALLBACK} on partition ${PARTITION_FALLBACK}..."
             if check_gpu_availability "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}"; then
-                term_info "Using fallback GPU configuration"
+                term_info "Switching to fallback GPU configuration"
+                use_partition="${PARTITION_FALLBACK}"
+                use_gpu_type="${GPU_TYPE_FALLBACK}"
+                use_qos="${QOS_FALLBACK}"
+                using_fallback=true
             else
                 term_error "Fallback GPU (${GPU_TYPE_FALLBACK}) also not available on ${PARTITION_FALLBACK}"
                 term_error "No GPU resources available. Aborting submission."
@@ -406,77 +433,80 @@ submit_job() {
         fi
     fi
 
-    # Build primary command
-    local cmd
-    cmd=$(build_sbatch_cmd "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
-        "${PARTITION}" "${GPU_TYPE}" "${QOS}")
+    # Build command with selected GPU configuration
+    build_sbatch_cmd_array "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
+        "${use_partition}" "${use_gpu_type}" "${use_qos}"
 
     if [ "${DRY_RUN}" = true ]; then
         # Print to stderr so it's visible (stdout is captured for job ID)
-        term_info "DRY RUN - would execute:"
-        echo "  ${cmd}" >&2
-        if [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
-            local fallback_cmd
-            fallback_cmd=$(build_sbatch_cmd "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
-                "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}" "${QOS_FALLBACK}")
-            term_info "Fallback command (if primary fails):"
-            echo "  ${fallback_cmd}" >&2
+        if [ "${using_fallback}" = true ]; then
+            term_info "DRY RUN - would execute (using fallback configuration):"
+        else
+            term_info "DRY RUN - would execute:"
         fi
+        echo "  $(format_cmd_for_display)" >&2
         echo "DRY_${step_name}_JOB"
         return 0
     fi
 
-    # Try primary submission
-    term_info "Submitting ${step_name} to ${PARTITION} with ${GPU_TYPE} GPU..."
+    # Submit job
+    if [ "${using_fallback}" = true ]; then
+        term_info "Submitting ${step_name} to ${use_partition} with ${use_gpu_type} GPU (fallback)..."
+    else
+        term_info "Submitting ${step_name} to ${use_partition} with ${use_gpu_type} GPU..."
+    fi
     local result
     local exit_code
-    result=$(${cmd} 2>&1)
+    result=$("${SBATCH_CMD[@]}" 2>&1)
     exit_code=$?
 
     if [ ${exit_code} -eq 0 ]; then
         local jobid
-        jobid=$(echo "${result}" | grep -oP '\d+$')
+        jobid=$(echo "${result}" | grep -Eo '[0-9]+$' | tail -1)
         term_info "Successfully submitted ${step_name} - Job ID: ${jobid}"
         echo "${jobid}"
         return 0
     fi
 
-    # Primary submission failed - check if it's a resource error
-    term_warn "Primary submission failed: ${result}"
+    # Primary submission failed - preserve error for reporting
+    local primary_error="${result}"
+    term_warn "Primary submission failed: ${primary_error}"
 
     # Common resource-related error patterns
-    if echo "${result}" | grep -qiE "(invalid|unavailable|not available|no nodes|cannot satisfy|partition.*invalid|gres.*invalid|constraint.*invalid)"; then
+    if echo "${primary_error}" | grep -qiE "(invalid|unavailable|not available|no nodes|cannot satisfy|partition.*invalid|gres.*invalid|constraint.*invalid)"; then
         term_warn "Submission failed due to resource unavailability"
 
-        # Try fallback if configured
-        if [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
+        # Try fallback if configured and not already using it
+        if [ "${using_fallback}" = false ] && [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
             term_info "Attempting fallback submission to ${PARTITION_FALLBACK} with ${GPU_TYPE_FALLBACK} GPU..."
 
-            local -a fallback_cmd
-            read -r -a fallback_cmd <<<"$(build_sbatch_cmd "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
-                "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}" "${QOS_FALLBACK}")"
+            build_sbatch_cmd_array "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
+                "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}" "${QOS_FALLBACK}"
 
-            result=$("${fallback_cmd[@]}" 2>&1)
+            local fallback_result
+            fallback_result=$("${SBATCH_CMD[@]}" 2>&1)
             exit_code=$?
 
             if [ ${exit_code} -eq 0 ]; then
                 local jobid
-                jobid=$(echo "${result}" | grep -oP '\d+$')
+                jobid=$(echo "${fallback_result}" | grep -Eo '[0-9]+$' | tail -1)
                 term_info "Fallback submission successful - Job ID: ${jobid}"
                 term_info "NOTE: Using ${GPU_TYPE_FALLBACK} GPU instead of ${GPU_TYPE}"
                 echo "${jobid}"
                 return 0
             else
-                term_error "Fallback submission also failed: ${result}"
+                term_error "Fallback submission also failed: ${fallback_result}"
             fi
+        elif [ "${using_fallback}" = true ]; then
+            term_error "Already using fallback configuration, no further options available"
         else
             term_error "No fallback GPU configured. Set GPU_TYPE_FALLBACK and PARTITION_FALLBACK in config.sh"
         fi
     fi
 
-    # Both primary and fallback failed
+    # Submission failed
     term_error "Job submission failed for ${step_name}"
-    term_error "Primary error: $(echo "${result}" | head -1)"
+    term_error "Error: $(echo "${primary_error}" | head -1)"
     term_error ""
     term_error "Troubleshooting:"
     term_error "  1. Check available partitions: sinfo"

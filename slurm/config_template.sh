@@ -57,8 +57,8 @@ export ACCOUNT="maigan"
 export GPU_TYPE="b200"
 export GPUS_PER_NODE=2
 
-# Fallback GPU settings (used when submit.sh determines the primary config
-# cannot be used, not merely when resources are busy/queued)
+# Fallback GPU settings (used when primary GPU partition has no available nodes)
+# When set: script checks availability and switches to fallback if primary unavailable
 export GPU_TYPE_FALLBACK="geforce"
 export PARTITION_FALLBACK="hpg-turin"
 export QOS_FALLBACK=""
