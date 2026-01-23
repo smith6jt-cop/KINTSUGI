@@ -55,7 +55,6 @@ export PARTITION="gpu"
 export QOS="maigan-b"
 export ACCOUNT="maigan"
 export GPU_TYPE="b200"
-export GPUS_PER_NODE=2
 
 # Fallback GPU settings (used when primary GPU partition has no available nodes)
 # When set: script checks availability and switches to fallback if primary unavailable
@@ -65,11 +64,37 @@ export QOS_FALLBACK=""
 # Leave fallback values empty to disable automatic fallback retries; jobs will
 # continue using the primary settings and may remain queued per Slurm behavior.
 
-# Memory per job (GB)
-export MEM_CORRECTION=64
-export MEM_STITCH=128
-export MEM_DECON=192
-export MEM_EDF=64
+# -----------------------------------------------------------------------------
+# ALLOCATION LIMITS (shared allocation - total resources available to you)
+# These are used to automatically calculate safe concurrency levels.
+# Set these to match your actual SLURM allocation to prevent over-subscription.
+# -----------------------------------------------------------------------------
+export ALLOC_CPUS=64       # Total CPUs in your allocation
+export ALLOC_MEM=600       # Total memory (GB) in your allocation
+export ALLOC_GPUS=2        # Total GPUs in your allocation
+
+# -----------------------------------------------------------------------------
+# Per-Job Resource Requests
+# The script automatically calculates max concurrent jobs based on:
+#   max_concurrent = min(ALLOC_CPUS/CPUS_PER_TASK, ALLOC_MEM/max_mem, ALLOC_GPUS/GPUS_PER_NODE)
+# -----------------------------------------------------------------------------
+
+# CPUs per job
+export CPUS_PER_TASK=4
+
+# GPUs per job
+export GPUS_PER_NODE=1
+
+# Memory per job (GB) - per processing step
+export MEM_CORRECTION=32
+export MEM_STITCH=64
+export MEM_DECON=96
+export MEM_EDF=32
+
+# Manual override for max concurrent cycles (optional)
+# Leave empty or set to "auto" for automatic calculation based on allocation limits
+# Set to a number to force a specific concurrency level
+export MAX_CONCURRENT_CYCLES="auto"
 
 # Time limits (HH:MM:SS)
 export TIME_CORRECTION="04:00:00"

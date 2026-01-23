@@ -130,6 +130,123 @@ show_gpu_status() {
         echo "  No specific GPU info available" >&2
 }
 
+# =============================================================================
+# RESOURCE CALCULATION
+# =============================================================================
+
+# Calculate optimal max concurrent cycles based on allocation limits
+# Sets COMPUTED_MAX_CONCURRENT as output (global)
+calculate_max_concurrent() {
+    local cpus_per_task=${CPUS_PER_TASK:-4}
+    local gpus_per_node=${GPUS_PER_NODE:-1}
+    local alloc_cpus=${ALLOC_CPUS:-64}
+    local alloc_mem=${ALLOC_MEM:-600}
+    local alloc_gpus=${ALLOC_GPUS:-2}
+
+    # Find max memory requirement across all steps
+    local max_mem=${MEM_DECON:-96}
+    [ "${MEM_STITCH:-64}" -gt "${max_mem}" ] && max_mem=${MEM_STITCH:-64}
+    [ "${MEM_CORRECTION:-32}" -gt "${max_mem}" ] && max_mem=${MEM_CORRECTION:-32}
+    [ "${MEM_EDF:-32}" -gt "${max_mem}" ] && max_mem=${MEM_EDF:-32}
+
+    # Calculate limits from each resource
+    local max_by_cpu=$((alloc_cpus / cpus_per_task))
+    local max_by_mem=$((alloc_mem / max_mem))
+    local max_by_gpu=$((alloc_gpus / gpus_per_node))
+
+    # Find minimum (limiting factor)
+    COMPUTED_MAX_CONCURRENT=${max_by_cpu}
+    LIMITING_RESOURCE="CPUs"
+
+    if [ ${max_by_mem} -lt ${COMPUTED_MAX_CONCURRENT} ]; then
+        COMPUTED_MAX_CONCURRENT=${max_by_mem}
+        LIMITING_RESOURCE="Memory"
+    fi
+
+    if [ ${max_by_gpu} -lt ${COMPUTED_MAX_CONCURRENT} ]; then
+        COMPUTED_MAX_CONCURRENT=${max_by_gpu}
+        LIMITING_RESOURCE="GPUs"
+    fi
+
+    # Store calculation details for display
+    RESOURCE_CALC_DETAILS="CPU: ${alloc_cpus}/${cpus_per_task}=${max_by_cpu}, MEM: ${alloc_mem}/${max_mem}=${max_by_mem}, GPU: ${alloc_gpus}/${gpus_per_node}=${max_by_gpu}"
+
+    # Validate we can run at least 1 job
+    if [ ${COMPUTED_MAX_CONCURRENT} -lt 1 ]; then
+        term_error "============================================================"
+        term_error "RESOURCE VALIDATION FAILED"
+        term_error "============================================================"
+        term_error "Cannot fit even 1 job within allocation limits!"
+        term_error ""
+        term_error "Allocation limits:"
+        term_error "  CPUs:   ${alloc_cpus}"
+        term_error "  Memory: ${alloc_mem} GB"
+        term_error "  GPUs:   ${alloc_gpus}"
+        term_error ""
+        term_error "Per-job requirements:"
+        term_error "  CPUs:   ${cpus_per_task}"
+        term_error "  Memory: ${max_mem} GB (max across steps)"
+        term_error "  GPUs:   ${gpus_per_node}"
+        term_error ""
+        term_error "Options:"
+        term_error "  1. Reduce per-job resources in config.sh"
+        term_error "  2. Increase allocation limits (if possible)"
+        term_error "  3. Request a larger allocation from your HPC admin"
+        term_error "============================================================"
+        return 1
+    fi
+
+    return 0
+}
+
+# Resolve MAX_CONCURRENT_CYCLES (auto or manual)
+# Sets EFFECTIVE_MAX_CONCURRENT as output (global)
+resolve_max_concurrent() {
+    local configured=${MAX_CONCURRENT_CYCLES:-auto}
+
+    # Calculate optimal value
+    if ! calculate_max_concurrent; then
+        return 1
+    fi
+
+    if [ "${configured}" = "auto" ] || [ -z "${configured}" ]; then
+        EFFECTIVE_MAX_CONCURRENT=${COMPUTED_MAX_CONCURRENT}
+        term_info "Auto-calculated max concurrent cycles: ${EFFECTIVE_MAX_CONCURRENT}"
+        term_info "  Calculation: ${RESOURCE_CALC_DETAILS}"
+        term_info "  Limiting factor: ${LIMITING_RESOURCE}"
+    else
+        # Manual override - validate it
+        EFFECTIVE_MAX_CONCURRENT=${configured}
+        if [ ${EFFECTIVE_MAX_CONCURRENT} -gt ${COMPUTED_MAX_CONCURRENT} ]; then
+            term_warn "Manual MAX_CONCURRENT_CYCLES=${EFFECTIVE_MAX_CONCURRENT} exceeds safe limit of ${COMPUTED_MAX_CONCURRENT}"
+            term_warn "  Calculation: ${RESOURCE_CALC_DETAILS}"
+            term_warn "  This may cause job failures due to resource over-subscription!"
+            term_warn ""
+            if [ "${DRY_RUN}" != true ] && [ -t 0 ]; then
+                read -p "Continue with potentially unsafe concurrency? [y/N] " -n 1 -r
+                echo ""
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    term_info "Submission cancelled. Set MAX_CONCURRENT_CYCLES=auto for safe defaults."
+                    return 1
+                fi
+            fi
+        else
+            term_info "Using configured MAX_CONCURRENT_CYCLES=${EFFECTIVE_MAX_CONCURRENT} (safe limit: ${COMPUTED_MAX_CONCURRENT})"
+        fi
+    fi
+
+    # Calculate actual resource usage with this concurrency
+    local cpus_per_task=${CPUS_PER_TASK:-4}
+    local gpus_per_node=${GPUS_PER_NODE:-1}
+    local max_mem=${MEM_DECON:-96}
+
+    TOTAL_CPUS_USED=$((EFFECTIVE_MAX_CONCURRENT * cpus_per_task))
+    TOTAL_MEM_USED=$((EFFECTIVE_MAX_CONCURRENT * max_mem))
+    TOTAL_GPUS_USED=$((EFFECTIVE_MAX_CONCURRENT * gpus_per_node))
+
+    return 0
+}
+
 usage() {
     cat << EOF
 KINTSUGI SLURM Pipeline Submission
@@ -284,6 +401,20 @@ if [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
 else
     term_info "  Fallback: (not configured)"
 fi
+term_info "------------------------------------------------------------"
+
+# Calculate optimal concurrency based on allocation limits
+term_info "Calculating resource allocation..."
+if ! resolve_max_concurrent; then
+    exit 1
+fi
+
+term_info "------------------------------------------------------------"
+term_info "Resource Allocation:"
+term_info "  Allocation limits: ${ALLOC_CPUS:-64} CPUs, ${ALLOC_MEM:-600}GB mem, ${ALLOC_GPUS:-2} GPUs"
+term_info "  Per-job request:   ${CPUS_PER_TASK:-4} CPUs, ${MEM_DECON:-96}GB mem, ${GPUS_PER_NODE:-1} GPU"
+term_info "  Max concurrent:    ${EFFECTIVE_MAX_CONCURRENT} cycles (limited by ${LIMITING_RESOURCE})"
+term_info "  Total usage:       ${TOTAL_CPUS_USED} CPUs, ${TOTAL_MEM_USED}GB mem, ${TOTAL_GPUS_USED} GPUs"
 term_info "============================================================"
 echo ""
 
@@ -359,11 +490,11 @@ build_sbatch_cmd_array() {
         "--account=${ACCOUNT}"
         "--nodes=1"
         "--ntasks=1"
-        "--cpus-per-task=8"
+        "--cpus-per-task=${CPUS_PER_TASK:-4}"
         "--mem=${mem}gb"
-        "--gpus=${use_gpu_type}:${GPUS_PER_NODE}"
+        "--gpus=${use_gpu_type}:${GPUS_PER_NODE:-1}"
         "--time=${time}"
-        "--array=${ARRAY_SPEC}"
+        "--array=${ARRAY_SPEC}%${EFFECTIVE_MAX_CONCURRENT}"
         "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name}"
     )
 
