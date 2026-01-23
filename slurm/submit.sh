@@ -402,9 +402,10 @@ submit_job() {
             term_info "Checking fallback: ${GPU_TYPE_FALLBACK} on partition ${PARTITION_FALLBACK}..."
             check_gpu_availability "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}"
             local fallback_status=$?
-            
+            # Accept fallback if GPUs are available (0) or busy (2)
+            # We only reject if the GPU type doesn't exist at all (1)
             if [ ${fallback_status} -eq 0 ] || [ ${fallback_status} -eq 2 ]; then
-                # Fallback GPUs exist (either available or busy)
+                # Fallback GPUs exist (either available or busy) - use them
                 term_info "Using fallback GPU configuration"
                 effective_partition="${PARTITION_FALLBACK}"
                 effective_gpu="${GPU_TYPE_FALLBACK}"
@@ -489,11 +490,11 @@ submit_job() {
         if [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
             term_info "Attempting fallback submission to ${PARTITION_FALLBACK} with ${GPU_TYPE_FALLBACK} GPU..."
 
-            local -a fallback_cmd
-            read -r -a fallback_cmd <<<"$(build_sbatch_cmd "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
-                "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}" "${QOS_FALLBACK}")"
+            local fallback_cmd
+            fallback_cmd=$(build_sbatch_cmd "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
+                "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}" "${QOS_FALLBACK}")
 
-            result=$("${fallback_cmd[@]}" 2>&1)
+            result=$(${fallback_cmd} 2>&1)
             exit_code=$?
 
             if [ ${exit_code} -eq 0 ]; then
