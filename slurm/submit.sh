@@ -431,7 +431,7 @@ submit_job() {
 
     if [ ${exit_code} -eq 0 ]; then
         local jobid
-        jobid=$(echo "${result}" | grep -oP '\d+$')
+        jobid=$(echo "${result}" | grep -Eo '[0-9]+$')
         term_info "Successfully submitted ${step_name} - Job ID: ${jobid}"
         echo "${jobid}"
         return 0
@@ -457,7 +457,7 @@ submit_job() {
 
             if [ ${exit_code} -eq 0 ]; then
                 local jobid
-                jobid=$(echo "${result}" | grep -oP '\d+$')
+                jobid=$(echo "${result}" | grep -Eo '[0-9]+$')
                 term_info "Fallback submission successful - Job ID: ${jobid}"
                 term_info "NOTE: Using ${GPU_TYPE_FALLBACK} GPU instead of ${GPU_TYPE}"
                 echo "${jobid}"
