@@ -532,7 +532,9 @@ def slurm_init(
         console.print("\n[bold]Next steps:[/bold]")
         console.print(f"  1. Review and edit: {slurm_dir / 'config.sh'}")
         console.print(f"  2. Submit jobs: kintsugi slurm submit {project_dir}")
-        console.print(f"  3. Or directly: {project._kintsugi_path}/slurm/submit.sh --project {project_dir}")
+        console.print(
+            f"  3. Or directly: {project._kintsugi_path}/slurm/submit.sh --project {project_dir}"
+        )
 
     except Exception as e:
         console.print(f"[red]Failed to add SLURM support: {e}[/red]")
@@ -542,8 +544,10 @@ def slurm_init(
 @slurm.command("submit")
 @click.argument("project_dir", type=click.Path(exists=True))
 @click.option(
-    "--steps", "-s", default="all",
-    help="Comma-separated steps: correction,stitch,decon,edf,all (default: all)"
+    "--steps",
+    "-s",
+    default="all",
+    help="Comma-separated steps: correction,stitch,decon,edf,all (default: all)",
 )
 @click.option("--cycles", "-c", default=None, help="Override cycles: '1-7' or '1,2,5'")
 @click.option("--dry-run", "-n", is_flag=True, help="Show commands without submitting")
@@ -583,6 +587,7 @@ def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool
     # Find submit.sh script
     try:
         from kintsugi.project import KintsugiProject
+
         project = KintsugiProject.load(project_dir)
         submit_script = project._kintsugi_path / "slurm" / "submit.sh"
     except Exception:
@@ -630,9 +635,11 @@ def slurm_status(project_dir: str):
     # Run squeue to get job status
     cmd = [
         "squeue",
-        "-u", os.environ.get("USER", ""),
-        "-n", f"kintsugi_*_{project_name}",
-        "--format=%.18i %.9P %.30j %.8u %.2t %.10M %.6D %R"
+        "-u",
+        os.environ.get("USER", ""),
+        "-n",
+        f"kintsugi_*_{project_name}",
+        "--format=%.18i %.9P %.30j %.8u %.2t %.10M %.6D %R",
     ]
 
     console.print(f"[bold]SLURM jobs for:[/bold] {project_name}")
@@ -675,9 +682,7 @@ def slurm_status(project_dir: str):
 @click.option(
     "--adopt-data", is_flag=True, help="Automatically organize existing data into project structure"
 )
-@click.option(
-    "--slurm", is_flag=True, help="Initialize SLURM job submission support"
-)
+@click.option("--slurm", is_flag=True, help="Initialize SLURM job submission support")
 @click.option("--slurm-account", help="HPC account for SLURM (auto-detected if not provided)")
 @click.option("--slurm-partition", default=None, help="SLURM partition (default: gpu)")
 @click.option("--slurm-qos", default=None, help="SLURM Quality of Service")

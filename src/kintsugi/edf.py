@@ -587,8 +587,11 @@ def edf_tiled(
             # Process tile (pass device and smooth transition parameters explicitly)
             if method == "variance":
                 tile_result = edf_func(
-                    tile, device=device, blend_depth=blend_depth,
-                    z_smooth_sigma=z_smooth_sigma, **kwargs
+                    tile,
+                    device=device,
+                    blend_depth=blend_depth,
+                    z_smooth_sigma=z_smooth_sigma,
+                    **kwargs,
                 )
             else:
                 tile_result = edf_func(tile, device=device, **kwargs)
@@ -795,8 +798,13 @@ class EDFProcessor:
             else:
                 if self.method == "variance":
                     return extended_depth_of_focus_variance(
-                        stack, radius_x, radius_y, sigma, device=device,
-                        blend_depth=blend_depth, z_smooth_sigma=z_smooth_sigma
+                        stack,
+                        radius_x,
+                        radius_y,
+                        sigma,
+                        device=device,
+                        blend_depth=blend_depth,
+                        z_smooth_sigma=z_smooth_sigma,
                     )
                 else:
                     return extended_depth_of_focus_laplacian(stack, device=device)

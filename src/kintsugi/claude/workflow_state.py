@@ -129,8 +129,7 @@ class WorkflowState:
         conn = sqlite3.connect(str(self.db_path))
         cursor = conn.cursor()
 
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -140,11 +139,9 @@ class WorkflowState:
                 details TEXT,
                 user_decision TEXT
             )
-        """
-        )
+        """)
 
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS channel_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -155,8 +152,7 @@ class WorkflowState:
                 quality_before REAL,
                 quality_after REAL
             )
-        """
-        )
+        """)
 
         conn.commit()
         conn.close()

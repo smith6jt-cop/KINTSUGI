@@ -297,7 +297,9 @@ def fix_bad_zplanes_in_zarr(
         fixes.append(fix_record)
 
         if verbose:
-            print(f"  [QC FIX] Cyc{cycle} CH{channel} Z{z:02d}: replaced with avg({', '.join(neighbors_used)})")
+            print(
+                f"  [QC FIX] Cyc{cycle} CH{channel} Z{z:02d}: replaced with avg({', '.join(neighbors_used)})"
+            )
 
     return fixes
 
@@ -389,6 +391,8 @@ def fix_bad_zplanes_in_tiff(
         fixes.append(fix_record)
 
         if verbose:
-            print(f"  [QC FIX] Cyc{cycle} CH{channel} Z{z:02d}: replaced with avg({', '.join(neighbors_used)})")
+            print(
+                f"  [QC FIX] Cyc{cycle} CH{channel} Z{z:02d}: replaced with avg({', '.join(neighbors_used)})"
+            )
 
     return fixes

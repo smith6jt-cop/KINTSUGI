@@ -103,6 +103,7 @@ def detect_stripe_artifacts(image, sensitivity=0.5, **kwargs):
     """Deprecated: Use detect_stripe_artifact() instead."""
     return detect_stripe_artifact(image, **kwargs)
 
+
 def scan_zstack_for_artifacts(z_stack, sensitivity=0.5, verbose=True, **kwargs):
     """Deprecated: Use scan_zstack() instead."""
     affected, results = scan_zstack(z_stack, **kwargs)
@@ -142,7 +143,7 @@ def scan_zstack_for_artifacts(z_stack, sensitivity=0.5, verbose=True, **kwargs):
         affected_planes=affected,
         results=results,
         worst_severity=worst,
-        summary=f"Detected {len(affected)}/{len(results)} affected planes"
+        summary=f"Detected {len(affected)}/{len(results)} affected planes",
     )
 
 

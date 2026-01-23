@@ -85,9 +85,7 @@ def _timed_step(
             status = "✓" if elapsed < threshold_warn else "⚠"
             print(f" {status} ({elapsed:.1f}s)")
         elif elapsed > threshold_warn:
-            warnings.warn(
-                f"GPU detection step '{step_name}' took {elapsed:.1f}s", stacklevel=3
-            )
+            warnings.warn(f"GPU detection step '{step_name}' took {elapsed:.1f}s", stacklevel=3)
 
         return result, elapsed
 
@@ -96,6 +94,7 @@ def _timed_step(
         if verbose:
             print(f" ✗ ({elapsed:.1f}s) - {type(e).__name__}")
         raise
+
 
 # Global singleton
 _gpu_manager: GPUManager | None = None
@@ -240,8 +239,7 @@ class GPUManager:
 
                     # Skip integrated GPUs (Intel, AMD APU, etc.)
                     is_integrated = any(
-                        x in name
-                        for x in ["intel", "integrated", "amd radeon graphics", "vega"]
+                        x in name for x in ["intel", "integrated", "amd radeon graphics", "vega"]
                     )
 
                     if is_integrated:
