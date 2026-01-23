@@ -76,13 +76,13 @@ def _compute_highfreq_stripe_metric(img: np.ndarray) -> float:
 
     for y in y_steps:
         for x in x_steps:
-            mask_patch = low_mask[y:y + patch_size, x:x + patch_size]
+            mask_patch = low_mask[y : y + patch_size, x : x + patch_size]
 
             # Only analyze if >50% of patch is low-intensity
             if np.mean(mask_patch) < 0.5:
                 continue
 
-            patch = img_ds[y:y + patch_size, x:x + patch_size]
+            patch = img_ds[y : y + patch_size, x : x + patch_size]
 
             # 2D FFT of this patch
             fft_result = fftshift(fft2(patch))
@@ -94,14 +94,14 @@ def _compute_highfreq_stripe_metric(img: np.ndarray) -> float:
             # Horizontal stripe energy (vertical axis in FFT, excludes DC)
             fx_band = 3
             fy_high_start = ph // 4
-            h_stripe = power[cy + fy_high_start:, cx - fx_band:cx + fx_band].sum()
-            h_stripe += power[:cy - fy_high_start, cx - fx_band:cx + fx_band].sum()
+            h_stripe = power[cy + fy_high_start :, cx - fx_band : cx + fx_band].sum()
+            h_stripe += power[: cy - fy_high_start, cx - fx_band : cx + fx_band].sum()
 
             # Vertical stripe energy (horizontal axis in FFT)
             fy_band = 3
             fx_high_start = pw // 4
-            v_stripe = power[cy - fy_band:cy + fy_band, cx + fx_high_start:].sum()
-            v_stripe += power[cy - fy_band:cy + fy_band, :cx - fx_high_start].sum()
+            v_stripe = power[cy - fy_band : cy + fy_band, cx + fx_high_start :].sum()
+            v_stripe += power[cy - fy_band : cy + fy_band, : cx - fx_high_start].sum()
 
             # Ratio of horizontal to vertical stripe energy
             if v_stripe > 0:
@@ -171,7 +171,7 @@ def compute_hp_fft_peak_strength(
     # Compute FFT magnitude
     fft_row = np.abs(np.fft.fft(row_diffs))
     # Skip DC component (index 0) and take positive frequencies only
-    fft_row = fft_row[1:len(fft_row) // 2]
+    fft_row = fft_row[1 : len(fft_row) // 2]
 
     # Peak-to-mean ratio (higher = more periodic structure)
     if fft_row.mean() > 0:
@@ -185,7 +185,7 @@ def compute_hp_fft_peak_strength(
     col_diffs = np.diff(col_hp)
 
     fft_col = np.abs(np.fft.fft(col_diffs))
-    fft_col = fft_col[1:len(fft_col) // 2]
+    fft_col = fft_col[1 : len(fft_col) // 2]
 
     if fft_col.mean() > 0:
         col_peak_strength = float(fft_col.max() / fft_col.mean())
@@ -193,8 +193,8 @@ def compute_hp_fft_peak_strength(
         col_peak_strength = 0.0
 
     return {
-        'row_peak_strength': row_peak_strength,
-        'col_peak_strength': col_peak_strength,
+        "row_peak_strength": row_peak_strength,
+        "col_peak_strength": col_peak_strength,
     }
 
 
@@ -413,15 +413,13 @@ def compute_zstack_baseline(z_stack: np.ndarray, include_hp_fft: bool = True) ->
         lowfreq_metrics = row_diff_stds / (signal_stds + 1e-10)
 
     # Compute high-frequency metric for each plane
-    highfreq_metrics = np.array([
-        _compute_highfreq_stripe_metric(stack[z]) for z in range(nz)
-    ])
+    highfreq_metrics = np.array([_compute_highfreq_stripe_metric(stack[z]) for z in range(nz)])
 
     baseline = {
-        'lowfreq_mean': float(np.mean(lowfreq_metrics)),
-        'lowfreq_std': float(np.std(lowfreq_metrics)),
-        'highfreq_mean': float(np.mean(highfreq_metrics)),
-        'highfreq_std': float(np.std(highfreq_metrics)),
+        "lowfreq_mean": float(np.mean(lowfreq_metrics)),
+        "lowfreq_std": float(np.std(lowfreq_metrics)),
+        "highfreq_mean": float(np.mean(highfreq_metrics)),
+        "highfreq_std": float(np.std(highfreq_metrics)),
     }
 
     # Compute HP-FFT metrics for more sensitive detection
@@ -430,16 +428,16 @@ def compute_zstack_baseline(z_stack: np.ndarray, include_hp_fft: bool = True) ->
         hp_col_peaks = []
         for z in range(nz):
             hp_metrics = compute_hp_fft_peak_strength(stack[z])
-            hp_row_peaks.append(hp_metrics['row_peak_strength'])
-            hp_col_peaks.append(hp_metrics['col_peak_strength'])
+            hp_row_peaks.append(hp_metrics["row_peak_strength"])
+            hp_col_peaks.append(hp_metrics["col_peak_strength"])
 
         # Use median for robustness to outliers (affected planes)
-        baseline['hp_row_median'] = float(np.median(hp_row_peaks))
-        baseline['hp_row_std'] = float(np.std(hp_row_peaks))
-        baseline['hp_col_median'] = float(np.median(hp_col_peaks))
-        baseline['hp_col_std'] = float(np.std(hp_col_peaks))
-        baseline['hp_row_peaks'] = hp_row_peaks
-        baseline['hp_col_peaks'] = hp_col_peaks
+        baseline["hp_row_median"] = float(np.median(hp_row_peaks))
+        baseline["hp_row_std"] = float(np.std(hp_row_peaks))
+        baseline["hp_col_median"] = float(np.median(hp_col_peaks))
+        baseline["hp_col_std"] = float(np.std(hp_col_peaks))
+        baseline["hp_row_peaks"] = hp_row_peaks
+        baseline["hp_col_peaks"] = hp_col_peaks
 
     return baseline
 
@@ -487,7 +485,7 @@ def scan_zstack(
 
     # Use both comparative threshold AND minimum absolute threshold
     # to avoid false positives when baseline variance is very tight
-    lowfreq_comparative = baseline['lowfreq_mean'] + threshold_sigma * baseline['lowfreq_std']
+    lowfreq_comparative = baseline["lowfreq_mean"] + threshold_sigma * baseline["lowfreq_std"]
     lowfreq_absolute_min = 0.012  # Minimum to flag as artifact
     lowfreq_threshold = max(lowfreq_comparative, lowfreq_absolute_min)
 
@@ -502,7 +500,7 @@ def scan_zstack(
     for z in range(nz):
         result = detect_stripe_artifact(
             z_stack[z],
-            baseline_row_diff=baseline['lowfreq_mean'],
+            baseline_row_diff=baseline["lowfreq_mean"],
             baseline_highfreq=None,  # Use absolute thresholds
             threshold_sigma=threshold_sigma,
         )
@@ -522,21 +520,21 @@ def scan_zstack(
         hp_row_zscore = 0.0
         hp_col_zscore = 0.0
 
-        if use_hp_fft and 'hp_row_peaks' in baseline:
-            row_peak = baseline['hp_row_peaks'][z]
-            col_peak = baseline['hp_col_peaks'][z]
+        if use_hp_fft and "hp_row_peaks" in baseline:
+            row_peak = baseline["hp_row_peaks"][z]
+            col_peak = baseline["hp_col_peaks"][z]
 
             # Classify severity using comparative approach
             hp_row_severity, hp_row_zscore = classify_hp_fft_severity(
                 row_peak,
-                baseline['hp_row_median'],
-                baseline['hp_row_std'],
+                baseline["hp_row_median"],
+                baseline["hp_row_std"],
                 metric_type="row",
             )
             hp_col_severity, hp_col_zscore = classify_hp_fft_severity(
                 col_peak,
-                baseline['hp_col_median'],
-                baseline['hp_col_std'],
+                baseline["hp_col_median"],
+                baseline["hp_col_std"],
                 metric_type="col",
             )
 
@@ -552,14 +550,14 @@ def scan_zstack(
             result.metrics["hp_col_severity"] = hp_col_severity
 
         # Determine if artifact detected by any method
-        artifact_detected = (
-            lowfreq_exceeds or highfreq_exceeds or hp_row_exceeds or hp_col_exceeds
-        )
+        artifact_detected = lowfreq_exceeds or highfreq_exceeds or hp_row_exceeds or hp_col_exceeds
 
         if artifact_detected:
             # Determine severity based on all metrics
             # Low-frequency: use comparative deviation
-            lowfreq_dev = (lowfreq_metric - baseline['lowfreq_mean']) / (baseline['lowfreq_std'] + 1e-10)
+            lowfreq_dev = (lowfreq_metric - baseline["lowfreq_mean"]) / (
+                baseline["lowfreq_std"] + 1e-10
+            )
 
             # High-frequency: use absolute thresholds
             if highfreq_metric > 30:

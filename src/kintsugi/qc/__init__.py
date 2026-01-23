@@ -68,6 +68,18 @@ from kintsugi.qc.marker_qc import (
     detect_crosstalk,
     validate_marker_expression,
 )
+from kintsugi.qc.quality_gate import (
+    QualityGate,
+    QualityGateResult,
+    check_before_processing,
+)
+from kintsugi.qc.quick_metrics import (
+    QuickQCResult,
+    average_with_neighbors,
+    compute_quick_qc_metrics,
+    fix_bad_zplanes_in_tiff,
+    fix_bad_zplanes_in_zarr,
+)
 from kintsugi.qc.stripe_artifact import (
     StripeArtifactResult,
     classify_hp_fft_severity,
@@ -76,11 +88,21 @@ from kintsugi.qc.stripe_artifact import (
     detect_stripe_artifact,
     scan_zstack,
 )
+from kintsugi.qc.stripe_mitigation import (
+    MitigationResult,
+    apply_directional_filter,
+    apply_notch_filter,
+    get_recommended_method,
+    interpolate_zplane,
+    mitigate_artifact,
+)
+
 
 # Backwards compatibility aliases (deprecated)
 def detect_stripe_artifacts(image, sensitivity=0.5, **kwargs):
     """Deprecated: Use detect_stripe_artifact() instead."""
     return detect_stripe_artifact(image, **kwargs)
+
 
 def scan_zstack_for_artifacts(z_stack, sensitivity=0.5, verbose=True, **kwargs):
     """Deprecated: Use scan_zstack() instead."""
@@ -121,28 +143,9 @@ def scan_zstack_for_artifacts(z_stack, sensitivity=0.5, verbose=True, **kwargs):
         affected_planes=affected,
         results=results,
         worst_severity=worst,
-        summary=f"Detected {len(affected)}/{len(results)} affected planes"
+        summary=f"Detected {len(affected)}/{len(results)} affected planes",
     )
-from kintsugi.qc.stripe_mitigation import (
-    MitigationResult,
-    apply_directional_filter,
-    apply_notch_filter,
-    get_recommended_method,
-    interpolate_zplane,
-    mitigate_artifact,
-)
-from kintsugi.qc.quality_gate import (
-    QualityGate,
-    QualityGateResult,
-    check_before_processing,
-)
-from kintsugi.qc.quick_metrics import (
-    QuickQCResult,
-    average_with_neighbors,
-    compute_quick_qc_metrics,
-    fix_bad_zplanes_in_tiff,
-    fix_bad_zplanes_in_zarr,
-)
+
 
 __all__ = [
     # Quick QC Metrics (inline stitching pipeline)

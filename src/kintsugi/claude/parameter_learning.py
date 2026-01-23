@@ -295,8 +295,7 @@ class ParameterLearningEngine:
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
 
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS parameter_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -320,23 +319,18 @@ class ParameterLearningEngine:
                 project_path TEXT,
                 channel_name TEXT
             )
-        """
-        )
+        """)
 
         # Index for fast lookups
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_tissue_marker
             ON parameter_records(tissue_type_normalized, marker_name_normalized, operation)
-        """
-        )
+        """)
 
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_approved
             ON parameter_records(user_approved, quality_improvement)
-        """
-        )
+        """)
 
         conn.commit()
         conn.close()
@@ -844,13 +838,11 @@ class ParameterLearningEngine:
                 cursor.execute("SELECT DISTINCT marker_name_normalized FROM parameter_records")
                 stats["unique_markers"].update(r[0] for r in cursor.fetchall() if r[0])
 
-                cursor.execute(
-                    """
+                cursor.execute("""
                     SELECT operation, COUNT(*), AVG(quality_improvement)
                     FROM parameter_records
                     GROUP BY operation
-                """
-                )
+                """)
                 for op, count, avg_improvement in cursor.fetchall():
                     if op not in stats["operations"]:
                         stats["operations"][op] = {"count": 0, "avg_improvement": 0}

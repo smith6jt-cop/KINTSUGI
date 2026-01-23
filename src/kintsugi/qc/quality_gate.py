@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, Callable
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -71,10 +71,7 @@ class QualityGateResult:
     def __str__(self) -> str:
         if self.passed:
             return f"Quality gate PASSED (score={self.quality_score:.2f})"
-        return (
-            f"Quality gate FAILED (score={self.quality_score:.2f}): "
-            f"{'; '.join(self.issues)}"
-        )
+        return f"Quality gate FAILED (score={self.quality_score:.2f}): " f"{'; '.join(self.issues)}"
 
 
 class QualityGate:
@@ -299,7 +296,9 @@ class QualityGate:
         worst_severity = "none"
         for pr in plane_results.values():
             if "stripe_severity" in pr:
-                if severity_order.get(pr["stripe_severity"], 0) > severity_order.get(worst_severity, 0):
+                if severity_order.get(pr["stripe_severity"], 0) > severity_order.get(
+                    worst_severity, 0
+                ):
                     worst_severity = pr["stripe_severity"]
             if pr.get("corruption_score", 0) > 0.6:
                 worst_severity = "severe"
@@ -308,9 +307,8 @@ class QualityGate:
                     worst_severity = "moderate"
 
         # Pass/fail decision
-        passed = (
-            len(issues) == 0
-            or (quality_score > 0.7 and n_clean_planes >= self.min_planes_required)
+        passed = len(issues) == 0 or (
+            quality_score > 0.7 and n_clean_planes >= self.min_planes_required
         )
 
         # Adjust pass for severe issues
@@ -399,7 +397,7 @@ class QualityGate:
         from scipy.ndimage import uniform_filter
 
         dir_local_mean = uniform_filter(direction, size=kernel_size)
-        dir_local_var = uniform_filter((direction - dir_local_mean)**2, size=kernel_size)
+        dir_local_var = uniform_filter((direction - dir_local_mean) ** 2, size=kernel_size)
 
         # Corrupted: low variance (coherent) but high magnitude
         coherence = 1.0 - np.clip(dir_local_var.mean() / (np.pi**2 / 3), 0, 1)
@@ -409,7 +407,7 @@ class QualityGate:
         from scipy.fft import fft2, fftshift
 
         fft = fftshift(fft2(small))
-        power = np.abs(fft)**2
+        power = np.abs(fft) ** 2
 
         h, w = power.shape
         cy, cx = h // 2, w // 2
@@ -419,8 +417,8 @@ class QualityGate:
         r_high = min(h, w) // 4
 
         y, x = np.ogrid[:h, :w]
-        low_mask = ((y - cy)**2 + (x - cx)**2) < r_low**2
-        high_mask = ((y - cy)**2 + (x - cx)**2) > r_high**2
+        low_mask = ((y - cy) ** 2 + (x - cx) ** 2) < r_low**2
+        high_mask = ((y - cy) ** 2 + (x - cx) ** 2) > r_high**2
 
         low_energy = power[low_mask].sum()
         high_energy = power[high_mask].sum()
@@ -433,7 +431,7 @@ class QualityGate:
         # Combine metrics
         # Normal images: coherence < 0.3, freq_ratio < 0.7
         # Corrupted: coherence > 0.4 or freq_ratio > 0.85
-        corruption_score = (coherence * 0.5 + max(0, freq_ratio - 0.5) * 1.0)
+        corruption_score = coherence * 0.5 + max(0, freq_ratio - 0.5) * 1.0
         return float(np.clip(corruption_score, 0, 1))
 
     def _detect_tile_grid(self, image: np.ndarray) -> float:
@@ -537,9 +535,8 @@ class QualityGate:
             return z_stack
 
         from kintsugi.qc.stripe_mitigation import (
-            interpolate_zplane,
             apply_directional_filter,
-            get_recommended_method,
+            interpolate_zplane,
         )
 
         mitigated = z_stack.copy()
@@ -620,8 +617,7 @@ def check_before_processing(
 
     if fail_action == "raise":
         raise ValueError(
-            f"Quality gate failed for {cycle or ''}/{channel or ''}: "
-            f"{'; '.join(result.issues)}"
+            f"Quality gate failed for {cycle or ''}/{channel or ''}: " f"{'; '.join(result.issues)}"
         )
     elif fail_action == "skip":
         logger.warning(f"Skipping {cycle or ''}/{channel or ''}: {result}")

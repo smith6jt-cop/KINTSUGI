@@ -30,7 +30,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
@@ -46,6 +46,7 @@ def _get_tifffile():
     global _tifffile
     if _tifffile is None:
         import tifffile
+
         _tifffile = tifffile
     return _tifffile
 
@@ -54,6 +55,7 @@ def _get_zarr():
     global _zarr
     if _zarr is None:
         import zarr
+
         _zarr = zarr
     return _zarr
 
@@ -210,9 +212,7 @@ class ArtifactReport:
             total_planes_scanned=data["summary"]["total_planes_scanned"],
             total_artifacts_found=data["summary"]["total_artifacts_found"],
         )
-        report.affected_items = [
-            ArtifactItem.from_dict(item) for item in data["affected_items"]
-        ]
+        report.affected_items = [ArtifactItem.from_dict(item) for item in data["affected_items"]]
         return report
 
 
@@ -283,7 +283,9 @@ class ArtifactScanner:
         if cycles is None:
             cycle_dirs = self._find_cycle_dirs(self.project.paths.raw)
         else:
-            cycle_dirs = [self.project.paths.raw / c for c in cycles if (self.project.paths.raw / c).exists()]
+            cycle_dirs = [
+                self.project.paths.raw / c for c in cycles if (self.project.paths.raw / c).exists()
+            ]
 
         if not cycle_dirs:
             return report
@@ -320,7 +322,7 @@ class ArtifactScanner:
                 # Add affected items
                 for z_idx in result.affected_planes:
                     z_plane = z_planes[z_idx]
-                    deviation = (result.plane_metrics[z_idx] - result.baseline_metric)
+                    deviation = result.plane_metrics[z_idx] - result.baseline_metric
                     deviation /= max(0.0001, result.threshold - result.baseline_metric)
 
                     if deviation > 2:
@@ -421,18 +423,22 @@ class ArtifactScanner:
                     report.channel_results.append(result)
 
                     for z_idx in result.affected_planes:
-                        deviation = (result.plane_metrics[z_idx] - result.baseline_metric)
+                        deviation = result.plane_metrics[z_idx] - result.baseline_metric
                         deviation /= max(0.0001, result.threshold - result.baseline_metric)
 
-                        severity = "severe" if deviation > 2 else ("moderate" if deviation > 1 else "mild")
+                        severity = (
+                            "severe" if deviation > 2 else ("moderate" if deviation > 1 else "mild")
+                        )
 
-                        report.affected_items.append(ArtifactItem(
-                            cycle=cycle_name,
-                            channel=channel,
-                            z_plane=z_planes[z_idx],
-                            severity=severity,
-                            score=min(1.0, deviation / 3.0),
-                        ))
+                        report.affected_items.append(
+                            ArtifactItem(
+                                cycle=cycle_name,
+                                channel=channel,
+                                z_plane=z_planes[z_idx],
+                                severity=severity,
+                                score=min(1.0, deviation / 3.0),
+                            )
+                        )
                         report.total_artifacts_found += 1
 
         return report
@@ -478,7 +484,9 @@ class ArtifactScanner:
         if not affected_indices:
             worst_severity = "none"
         else:
-            max_deviation = max((metrics[i] - baseline_mean) / (baseline_std + 1e-10) for i in affected_indices)
+            max_deviation = max(
+                (metrics[i] - baseline_mean) / (baseline_std + 1e-10) for i in affected_indices
+            )
             if max_deviation > 4:
                 worst_severity = "severe"
             elif max_deviation > 3:

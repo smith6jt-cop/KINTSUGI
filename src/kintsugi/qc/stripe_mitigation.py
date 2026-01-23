@@ -83,12 +83,12 @@ def apply_notch_filter(
 
             if 0 <= y_pos_upper < height:
                 # Gaussian roll-off for smooth transition
-                weight = np.exp(-(dy ** 2) / (2 * (notch_width / 2) ** 2))
+                weight = np.exp(-(dy**2) / (2 * (notch_width / 2) ** 2))
                 attenuation = 1.0 - weight
                 mask[y_pos_upper, :] *= attenuation
 
             if 0 <= y_pos_lower < height:
-                weight = np.exp(-(dy ** 2) / (2 * (notch_width / 2) ** 2))
+                weight = np.exp(-(dy**2) / (2 * (notch_width / 2) ** 2))
                 attenuation = 1.0 - weight
                 mask[y_pos_lower, :] *= attenuation
 
@@ -326,7 +326,9 @@ def mitigate_artifact(
     if success:
         message = f"Mitigation successful: score reduced from {original_score:.3f} to {mitigated_score:.3f}"
     else:
-        message = f"Mitigation may not be effective: score {original_score:.3f} → {mitigated_score:.3f}"
+        message = (
+            f"Mitigation may not be effective: score {original_score:.3f} → {mitigated_score:.3f}"
+        )
 
     return MitigationResult(
         method=method,

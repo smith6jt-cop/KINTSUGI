@@ -15,12 +15,14 @@ import numpy as np
 try:
     import ipywidgets as widgets
     from IPython.display import clear_output, display
+
     WIDGETS_AVAILABLE = True
 except ImportError:
     WIDGETS_AVAILABLE = False
 
 try:
     import matplotlib.pyplot as plt
+
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
@@ -82,7 +84,6 @@ def artifact_detection_tuner(
     # Local helper for FFT visualization (simplified)
     def get_fft_visualization(image, result):
         """Get FFT visualization data."""
-        height = image.shape[0]
         row_means = np.mean(image, axis=1)
         fft_1d = np.fft.rfft(row_means - row_means.mean())
         power_1d = np.abs(fft_1d) ** 2
@@ -92,7 +93,7 @@ def artifact_detection_tuner(
         fft_2d = np.fft.fft2(image.astype(np.float64))
         fft_shifted = np.fft.fftshift(fft_2d)
         log_power = np.log1p(np.abs(fft_shifted) ** 2)
-        return log_power, power_1d, result.metrics.get('peak_indices', [])
+        return log_power, power_1d, result.metrics.get("peak_indices", [])
 
     # Scan for artifacts
     print(f"Scanning {channel_name} for artifacts (sensitivity={sensitivity})...")
@@ -125,19 +126,19 @@ def artifact_detection_tuner(
         min=0,
         max=nz - 1,
         step=1,
-        description='Z-plane:',
+        description="Z-plane:",
         continuous_update=False,
     )
 
     method_dropdown = widgets.Dropdown(
         options=[
-            ('Notch Filter (Recommended)', 'notch'),
-            ('Directional Blur', 'directional'),
-            ('Interpolate from neighbors', 'interpolate'),
-            ('Keep as-is (no artifact)', 'keep_as_is'),
+            ("Notch Filter (Recommended)", "notch"),
+            ("Directional Blur", "directional"),
+            ("Interpolate from neighbors", "interpolate"),
+            ("Keep as-is (no artifact)", "keep_as_is"),
         ],
-        value='notch',
-        description='Method:',
+        value="notch",
+        description="Method:",
     )
 
     sensitivity_slider = widgets.FloatSlider(
@@ -145,15 +146,15 @@ def artifact_detection_tuner(
         min=0.1,
         max=1.0,
         step=0.1,
-        description='Sensitivity:',
+        description="Sensitivity:",
         continuous_update=False,
     )
 
-    apply_btn = widgets.Button(description='Apply Mitigation', button_style='primary')
-    approve_btn = widgets.Button(description='Approve All', button_style='success')
-    redetect_btn = widgets.Button(description='Re-detect', button_style='info')
+    apply_btn = widgets.Button(description="Apply Mitigation", button_style="primary")
+    approve_btn = widgets.Button(description="Approve All", button_style="success")
+    redetect_btn = widgets.Button(description="Re-detect", button_style="info")
 
-    status_label = widgets.Label(value='')
+    status_label = widgets.Label(value="")
     output_area = widgets.Output()
 
     def update_display(z_index=None):
@@ -168,8 +169,8 @@ def artifact_detection_tuner(
 
             # Original image
             ax1 = axes[0, 0]
-            im1 = ax1.imshow(z_stack[z_index], cmap='gray')
-            ax1.set_title(f'Original Z-plane {z_index}')
+            im1 = ax1.imshow(z_stack[z_index], cmap="gray")
+            ax1.set_title(f"Original Z-plane {z_index}")
             plt.colorbar(im1, ax=ax1, fraction=0.046)
 
             # FFT visualization
@@ -179,32 +180,40 @@ def artifact_detection_tuner(
 
             # Show log power spectrum (center crop for visibility)
             h, w = log_power.shape
-            crop = log_power[h//4:3*h//4, w//4:3*w//4]
-            ax2.imshow(crop, cmap='viridis', aspect='auto')
-            ax2.set_title(f'FFT Power Spectrum\nStripe Score: {detection.stripe_score:.3f} ({detection.severity})')
+            crop = log_power[h // 4 : 3 * h // 4, w // 4 : 3 * w // 4]
+            ax2.imshow(crop, cmap="viridis", aspect="auto")
+            ax2.set_title(
+                f"FFT Power Spectrum\nStripe Score: {detection.stripe_score:.3f} ({detection.severity})"
+            )
 
             # Vertical frequency profile
             ax3 = axes[1, 0]
-            ax3.plot(profile, 'b-', linewidth=0.5)
+            ax3.plot(profile, "b-", linewidth=0.5)
             if peaks:
-                peak_values = [profile[min(p, len(profile)-1)] for p in peaks if p < len(profile)]
+                peak_values = [profile[min(p, len(profile) - 1)] for p in peaks if p < len(profile)]
                 valid_peaks = [p for p in peaks if p < len(profile)]
-                ax3.plot(valid_peaks, peak_values, 'ro', markersize=8, label='Detected peaks')
-            ax3.set_xlabel('Frequency (positive half)')
-            ax3.set_ylabel('Normalized Power')
-            ax3.set_title('Vertical Frequency Profile')
+                ax3.plot(valid_peaks, peak_values, "ro", markersize=8, label="Detected peaks")
+            ax3.set_xlabel("Frequency (positive half)")
+            ax3.set_ylabel("Normalized Power")
+            ax3.set_title("Vertical Frequency Profile")
             ax3.legend()
 
             # Mitigated image (if available)
             ax4 = axes[1, 1]
             if z_index in current_mitigated:
-                im4 = ax4.imshow(current_mitigated[z_index], cmap='gray')
+                im4 = ax4.imshow(current_mitigated[z_index], cmap="gray")
                 ax4.set_title(f'Mitigated ({current_decisions.get(z_index, "?")})')
                 plt.colorbar(im4, ax=ax4, fraction=0.046)
             else:
-                ax4.text(0.5, 0.5, 'No mitigation applied yet',
-                        ha='center', va='center', transform=ax4.transAxes)
-                ax4.set_title('Mitigated (pending)')
+                ax4.text(
+                    0.5,
+                    0.5,
+                    "No mitigation applied yet",
+                    ha="center",
+                    va="center",
+                    transform=ax4.transAxes,
+                )
+                ax4.set_title("Mitigated (pending)")
 
             plt.tight_layout()
             display(fig)
@@ -214,7 +223,7 @@ def artifact_detection_tuner(
             if detection.has_artifact:
                 status = f"⚠️ Artifact detected: {detection.severity} (score={detection.stripe_score:.3f})"
                 if detection.frequency_peaks:
-                    freqs = ', '.join([f'{f:.3f}' for f in detection.frequency_peaks[:3]])
+                    freqs = ", ".join([f"{f:.3f}" for f in detection.frequency_peaks[:3]])
                     status += f"\nPeak frequencies: {freqs}"
             else:
                 status = "✓ No artifact detected in this plane"
@@ -226,7 +235,7 @@ def artifact_detection_tuner(
 
     def on_z_change(change):
         """Handle z-plane slider change."""
-        z_index = change['new']
+        z_index = change["new"]
         detection = report.results.get(z_index, detect_stripe_artifacts(z_stack[z_index]))
 
         # Update recommended method
@@ -242,8 +251,8 @@ def artifact_detection_tuner(
         method = method_dropdown.value
         detection = report.results.get(z_index, detect_stripe_artifacts(z_stack[z_index]))
 
-        if method == 'keep_as_is':
-            current_decisions[z_index] = 'keep_as_is'
+        if method == "keep_as_is":
+            current_decisions[z_index] = "keep_as_is"
             if z_index in current_mitigated:
                 del current_mitigated[z_index]
         else:
@@ -269,14 +278,16 @@ def artifact_detection_tuner(
         """Approve all decisions and close."""
         result.decisions = current_decisions.copy()
         result.mitigated_planes = current_mitigated.copy()
-        result.skipped_planes = [z for z, m in current_decisions.items() if m == 'keep_as_is']
+        result.skipped_planes = [z for z, m in current_decisions.items() if m == "keep_as_is"]
         result.approved = True
 
         # Save report if output_dir provided
         if output_dir:
             _save_artifact_report(output_dir, channel_name, report, current_decisions, sensitivity)
 
-        print(f"\n✓ Approved. {len(current_mitigated)} planes mitigated, {len(result.skipped_planes)} kept as-is.")
+        print(
+            f"\n✓ Approved. {len(current_mitigated)} planes mitigated, {len(result.skipped_planes)} kept as-is."
+        )
 
     def on_redetect(btn):
         """Re-run detection with new sensitivity."""
@@ -288,17 +299,19 @@ def artifact_detection_tuner(
         update_display()
 
     # Connect events
-    z_slider.observe(on_z_change, names='value')
+    z_slider.observe(on_z_change, names="value")
     apply_btn.on_click(on_apply)
     approve_btn.on_click(on_approve)
     redetect_btn.on_click(on_redetect)
 
     # Layout
-    controls = widgets.VBox([
-        widgets.HBox([z_slider, sensitivity_slider, redetect_btn]),
-        widgets.HBox([method_dropdown, apply_btn, approve_btn]),
-        status_label,
-    ])
+    controls = widgets.VBox(
+        [
+            widgets.HBox([z_slider, sensitivity_slider, redetect_btn]),
+            widgets.HBox([method_dropdown, apply_btn, approve_btn]),
+            status_label,
+        ]
+    )
 
     # Display
     display(widgets.VBox([controls, output_area]))
@@ -325,8 +338,8 @@ def _auto_mitigate(
         has_neighbors = 0 < z_index < nz - 1
         method = get_recommended_method(detection, has_neighbors)
 
-        if method == 'keep_as_is':
-            result.decisions[z_index] = 'keep_as_is'
+        if method == "keep_as_is":
+            result.decisions[z_index] = "keep_as_is"
             result.skipped_planes.append(z_index)
         else:
             mit_result = mitigate_artifact(
@@ -360,32 +373,32 @@ def _save_artifact_report(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     report_data = {
-        'scan_timestamp': datetime.now().isoformat(),
-        'channel': channel_name,
-        'sensitivity': sensitivity,
-        'total_planes': report.total_planes,
-        'affected_planes': report.affected_planes,
-        'worst_severity': report.worst_severity,
-        'planes': {}
+        "scan_timestamp": datetime.now().isoformat(),
+        "channel": channel_name,
+        "sensitivity": sensitivity,
+        "total_planes": report.total_planes,
+        "affected_planes": report.affected_planes,
+        "worst_severity": report.worst_severity,
+        "planes": {},
     }
 
     for z_index, detection in report.results.items():
         plane_data = {
-            'has_artifact': detection.has_artifact,
-            'severity': detection.severity,
-            'stripe_score': detection.stripe_score,
-            'frequency_peaks': detection.frequency_peaks,
+            "has_artifact": detection.has_artifact,
+            "severity": detection.severity,
+            "stripe_score": detection.stripe_score,
+            "frequency_peaks": detection.frequency_peaks,
         }
 
         if z_index in decisions:
-            plane_data['mitigation'] = decisions[z_index]
-            if decisions[z_index] != 'keep_as_is':
-                plane_data['mitigated_file'] = f'mitigated/{z_index:03d}.tif'
+            plane_data["mitigation"] = decisions[z_index]
+            if decisions[z_index] != "keep_as_is":
+                plane_data["mitigated_file"] = f"mitigated/{z_index:03d}.tif"
 
-        report_data['planes'][str(z_index)] = plane_data
+        report_data["planes"][str(z_index)] = plane_data
 
-    report_path = output_dir / 'artifact_report.json'
-    with open(report_path, 'w') as f:
+    report_path = output_dir / "artifact_report.json"
+    with open(report_path, "w") as f:
         json.dump(report_data, f, indent=2)
 
     print(f"  Saved artifact report to {report_path}")
@@ -415,13 +428,13 @@ def save_mitigated_stack(
     """
     from skimage.io import imsave
 
-    mitigated_dir = Path(output_dir) / 'mitigated'
+    mitigated_dir = Path(output_dir) / "mitigated"
     mitigated_dir.mkdir(parents=True, exist_ok=True)
 
     saved_files = {}
 
     for z_index, image in result.mitigated_planes.items():
-        filename = f'{z_index:03d}.tif'
+        filename = f"{z_index:03d}.tif"
         filepath = mitigated_dir / filename
         imsave(filepath, image, check_contrast=False)
         saved_files[z_index] = filepath
@@ -459,18 +472,18 @@ def visualize_artifact_comparison(
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
     # Original
-    axes[0].imshow(original, cmap='gray')
-    axes[0].set_title(f'Original\nScore: {orig_result.stripe_score:.3f} ({orig_result.severity})')
+    axes[0].imshow(original, cmap="gray")
+    axes[0].set_title(f"Original\nScore: {orig_result.stripe_score:.3f} ({orig_result.severity})")
 
     # Mitigated
-    axes[1].imshow(mitigated, cmap='gray')
-    axes[1].set_title(f'Mitigated\nScore: {mit_result.stripe_score:.3f} ({mit_result.severity})')
+    axes[1].imshow(mitigated, cmap="gray")
+    axes[1].set_title(f"Mitigated\nScore: {mit_result.stripe_score:.3f} ({mit_result.severity})")
 
     # Difference
     diff = original.astype(np.float64) - mitigated.astype(np.float64)
     vmax = np.percentile(np.abs(diff), 99)
-    axes[2].imshow(diff, cmap='RdBu', vmin=-vmax, vmax=vmax)
-    axes[2].set_title('Difference (removed artifact)')
+    axes[2].imshow(diff, cmap="RdBu", vmin=-vmax, vmax=vmax)
+    axes[2].set_title("Difference (removed artifact)")
 
     if title:
         fig.suptitle(title, fontsize=14)

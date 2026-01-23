@@ -186,7 +186,9 @@ class ProcessedDataReport:
             lines.append("No processed data found.")
             return "\n".join(lines)
 
-        lines.append(f"Found {self.total_files} files ({self.total_size_mb:.1f} MB) in processed directories:")
+        lines.append(
+            f"Found {self.total_files} files ({self.total_size_mb:.1f} MB) in processed directories:"
+        )
         for name in PROCESSING_STAGES:
             if name in self.stages:
                 lines.append(self.stages[name].summary())
@@ -250,7 +252,7 @@ def scan_processed_data(project_paths: ProjectPaths) -> ProcessedDataReport:
         # Scan Zarr for this stage (in each cycle)
         if zarr_path.exists():
             for cycle_dir in zarr_path.iterdir():
-                if cycle_dir.is_dir() and not cycle_dir.name.startswith('.'):
+                if cycle_dir.is_dir() and not cycle_dir.name.startswith("."):
                     zarr_stage_path = cycle_dir / stage_name
                     if zarr_stage_path.exists():
                         zarr_stage_exists = True
@@ -321,7 +323,11 @@ def prompt_for_processed_data(
                 print("Keeping all existing data.")
                 return dict.fromkeys(stages_with_data, "keep")
             elif choice == "2":
-                confirm = input("Are you sure you want to delete ALL processed data? [y/N]: ").strip().lower()
+                confirm = (
+                    input("Are you sure you want to delete ALL processed data? [y/N]: ")
+                    .strip()
+                    .lower()
+                )
                 if confirm == "y":
                     print("Will delete all processed data.")
                     return dict.fromkeys(stages_with_data, "delete")
@@ -334,7 +340,14 @@ def prompt_for_processed_data(
                 for stage in stages_with_data:
                     info = report.stages[stage]
                     while True:
-                        action = input(f"  {stage} ({info.file_count} files, {info.total_size_mb:.1f} MB) [k/d]: ").strip().lower() or "k"
+                        action = (
+                            input(
+                                f"  {stage} ({info.file_count} files, {info.total_size_mb:.1f} MB) [k/d]: "
+                            )
+                            .strip()
+                            .lower()
+                            or "k"
+                        )
                         if action == "k":
                             decisions[stage] = "keep"
                             break
@@ -403,7 +416,7 @@ def apply_processed_data_decisions(
             if zarr_path.exists():
                 deleted_zarr = False
                 for cycle_dir in zarr_path.iterdir():
-                    if cycle_dir.is_dir() and not cycle_dir.name.startswith('.'):
+                    if cycle_dir.is_dir() and not cycle_dir.name.startswith("."):
                         zarr_stage_path = cycle_dir / stage_name
                         if zarr_stage_path.exists():
                             if not deleted_zarr:
@@ -1370,7 +1383,7 @@ class KintsugiProject:
         config_file = slurm_dir / "config.sh"
         with open(config_file, "w") as f:
             f.write(config_content)
-        print(f"  Created slurm/config.sh")
+        print("  Created slurm/config.sh")
 
         # Create symlink to job scripts
         jobs_link = slurm_dir / "jobs"
@@ -1396,7 +1409,7 @@ class KintsugiProject:
         readme_file = slurm_dir / "README.md"
         with open(readme_file, "w") as f:
             f.write(readme_content)
-        print(f"  Created slurm/README.md")
+        print("  Created slurm/README.md")
 
         # Log detected settings
         if detected:
@@ -1893,9 +1906,13 @@ def prompt_for_existing_directory(
                 return "keep"
             elif response == "c" or response == "clear":
                 # Double-check for clear operation
-                confirm = input(
-                    f"Are you sure you want to DELETE all {contents['file_count']} files? [y/N]: "
-                ).strip().lower()
+                confirm = (
+                    input(
+                        f"Are you sure you want to DELETE all {contents['file_count']} files? [y/N]: "
+                    )
+                    .strip()
+                    .lower()
+                )
                 if confirm == "y" or confirm == "yes":
                     print("Clearing directory...")
                     return "clear"
