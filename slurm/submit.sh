@@ -121,8 +121,9 @@ show_gpu_status() {
     fi
 
     term_info "Current GPU status for ${gpu_type} on ${partition}:"
-    sinfo -p "${partition}" -N -o "  %N %G %t %C" 2>/dev/null | head -10 | grep -i "${gpu_type}" || \
-        echo "  No specific GPU info available"
+    sinfo -p "${partition}" -N -o "  %N %G %t %C" 2>/dev/null | \
+        grep -i "${gpu_type}" | head -10 >&2 || \
+        echo "  No specific GPU info available" >&2
 }
 
 usage() {
