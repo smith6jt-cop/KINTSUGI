@@ -71,6 +71,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # Ensure temp directory exists
+          if (!(Test-Path $env:TEMP)) {
+            New-Item -ItemType Directory -Path $env:TEMP -Force | Out-Null
+          }
+
           $zipPath = Join-Path $env:TEMP "vips-dev.zip"
           $dest = "C:\vips"
 
@@ -104,7 +109,11 @@ jobs:
           Write-Output "Downloading asset $($asset.name)..."
           Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -Headers $headers -UseBasicParsing
 
+          # Ensure destination directory exists and is clean
           if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+          New-Item -ItemType Directory -Path $dest -Force | Out-Null
+
+          Write-Output "Extracting to $dest..."
           Expand-Archive -Path $zipPath -DestinationPath $dest -Force
 
           $binDir = Get-ChildItem $dest -Recurse -Directory | Where-Object { $_.Name -eq 'bin' } | Select-Object -First 1
