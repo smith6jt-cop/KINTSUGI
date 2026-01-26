@@ -499,6 +499,11 @@ build_sbatch_cmd_array() {
     )
 
     if [ -n "${dep_jobid}" ]; then
+        # Validate dependency job ID is numeric to prevent "Badly formatted array jobid" errors
+        if ! [[ "${dep_jobid}" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: Invalid dependency job ID '${dep_jobid}' - must be numeric" >&2
+            return 1
+        fi
         SBATCH_CMD+=("--dependency=${dep_type}:${dep_jobid}")
     fi
 
@@ -593,7 +598,22 @@ submit_job() {
 
     if [ ${exit_code} -eq 0 ]; then
         local jobid
-        jobid=$(echo "${result}" | grep -Eo '[0-9]+$' | tail -1)
+        # Extract job ID from "Submitted batch job XXXXXXXX" message
+        # More robust pattern that handles array job output and edge cases
+        jobid=$(echo "${result}" | grep -oP 'Submitted batch job \K[0-9]+' | head -1)
+
+        # Fallback to simpler pattern if grep -P not available
+        if [ -z "${jobid}" ]; then
+            jobid=$(echo "${result}" | grep "Submitted batch job" | head -1 | sed 's/.*Submitted batch job //' | tr -d '[:space:]')
+        fi
+
+        # Validate job ID is numeric and non-empty
+        if [ -z "${jobid}" ] || ! [[ "${jobid}" =~ ^[0-9]+$ ]]; then
+            term_error "Failed to extract job ID from sbatch output:"
+            term_error "  Output: ${result}"
+            return 1
+        fi
+
         term_info "Successfully submitted ${step_name} - Job ID: ${jobid}"
         echo "${jobid}"
         return 0
@@ -620,7 +640,18 @@ submit_job() {
 
             if [ ${exit_code} -eq 0 ]; then
                 local jobid
-                jobid=$(echo "${fallback_result}" | grep -Eo '[0-9]+$' | tail -1)
+                # Extract job ID using same robust pattern as primary submission
+                jobid=$(echo "${fallback_result}" | grep -oP 'Submitted batch job \K[0-9]+' | head -1)
+                if [ -z "${jobid}" ]; then
+                    jobid=$(echo "${fallback_result}" | grep "Submitted batch job" | head -1 | sed 's/.*Submitted batch job //' | tr -d '[:space:]')
+                fi
+
+                if [ -z "${jobid}" ] || ! [[ "${jobid}" =~ ^[0-9]+$ ]]; then
+                    term_error "Failed to extract job ID from fallback sbatch output:"
+                    term_error "  Output: ${fallback_result}"
+                    return 1
+                fi
+
                 term_info "Fallback submission successful - Job ID: ${jobid}"
                 term_info "NOTE: Using ${GPU_TYPE_FALLBACK} GPU instead of ${GPU_TYPE}"
                 echo "${jobid}"
@@ -664,21 +695,37 @@ run_step() {
             echo "--- Step 1: Illumination Correction ---"
             JOB_CORRECTION=$(submit_job "correct" "${KINTSUGI_SLURM}/jobs/01_correction.sh" \
                 "${MEM_CORRECTION}" "${TIME_CORRECTION}" "" "")
+            if [ -z "${JOB_CORRECTION}" ]; then
+                term_error "Failed to submit correction job - aborting pipeline"
+                exit 1
+            fi
             ;;
         stitch)
             echo "--- Step 2: Stitching ---"
             JOB_STITCH=$(submit_job "stitch" "${KINTSUGI_SLURM}/jobs/02_stitching.sh" \
                 "${MEM_STITCH}" "${TIME_STITCH}" "afterok" "${JOB_CORRECTION}")
+            if [ -z "${JOB_STITCH}" ]; then
+                term_error "Failed to submit stitching job - aborting pipeline"
+                exit 1
+            fi
             ;;
         decon)
             echo "--- Step 3: Deconvolution ---"
             JOB_DECON=$(submit_job "decon" "${KINTSUGI_SLURM}/jobs/03_deconvolution.sh" \
                 "${MEM_DECON}" "${TIME_DECON}" "afterok" "${JOB_STITCH}")
+            if [ -z "${JOB_DECON}" ]; then
+                term_error "Failed to submit deconvolution job - aborting pipeline"
+                exit 1
+            fi
             ;;
         edf)
             echo "--- Step 4: Extended Depth of Focus ---"
             JOB_EDF=$(submit_job "edf" "${KINTSUGI_SLURM}/jobs/04_edf.sh" \
                 "${MEM_EDF}" "${TIME_EDF}" "afterok" "${JOB_DECON}")
+            if [ -z "${JOB_EDF}" ]; then
+                term_error "Failed to submit EDF job - aborting pipeline"
+                exit 1
+            fi
             ;;
     esac
 }
