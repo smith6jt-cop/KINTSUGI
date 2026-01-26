@@ -604,7 +604,7 @@ submit_job() {
 
         # Fallback to simpler pattern if grep -P not available
         if [ -z "${jobid}" ]; then
-            jobid=$(echo "${result}" | grep "Submitted batch job" | sed 's/.*Submitted batch job //' | tr -d '[:space:]')
+            jobid=$(echo "${result}" | grep "Submitted batch job" | head -1 | sed 's/.*Submitted batch job //' | tr -d '[:space:]')
         fi
 
         # Validate job ID is numeric and non-empty
