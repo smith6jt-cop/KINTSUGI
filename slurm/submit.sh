@@ -643,7 +643,7 @@ submit_job() {
                 # Extract job ID using same robust pattern as primary submission
                 jobid=$(echo "${fallback_result}" | grep -oP 'Submitted batch job \K[0-9]+' | head -1)
                 if [ -z "${jobid}" ]; then
-                    jobid=$(echo "${fallback_result}" | grep "Submitted batch job" | sed 's/.*Submitted batch job //' | tr -d '[:space:]')
+                    jobid=$(echo "${fallback_result}" | grep "Submitted batch job" | head -1 | sed 's/.*Submitted batch job //' | tr -d '[:space:]')
                 fi
 
                 if [ -z "${jobid}" ] || ! [[ "${jobid}" =~ ^[0-9]+$ ]]; then
