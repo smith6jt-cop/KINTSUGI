@@ -142,14 +142,15 @@ def get_slurm_defaults() -> dict[str, Any]:
         Default SLURM configuration values
     """
     return {
-        # HPC resources
-        "partition": "gpu",
+        # HPC resources (HiPerGator RHEL9+)
+        # GPU Partition Selection:
+        #   - hpg-b200:  NVIDIA B200 GPUs (180GB VRAM, 8/node)
+        #   - hpg-turin: NVIDIA L4 GPUs (24GB VRAM, 3/node)
+        "partition": "hpg-b200",
         "qos": "",
         "account": "",
-        "gpu_type": "a100",
         "gpus_per_node": 2,
-        # Fallback GPU settings (for high-demand GPUs like b200)
-        "gpu_type_fallback": "geforce",
+        # Fallback partition settings (for high-demand partitions like hpg-b200)
         "partition_fallback": "hpg-turin",
         "qos_fallback": "",
         # Memory per job (GB)
@@ -331,15 +332,17 @@ export WAVELENGTHS="{config["wavelengths"]}"
 # =============================================================================
 # HPC RESOURCES
 # =============================================================================
+# GPU Partition Selection (HiPerGator RHEL9+):
+#   - hpg-b200:  NVIDIA B200 GPUs (180GB VRAM, 8/node) - for large models/extreme performance
+#   - hpg-turin: NVIDIA L4 GPUs (24GB VRAM, 3/node) - for standard GPU workloads
+# See: https://docs.rc.ufl.edu/scheduler/gpu_access/
 export PARTITION="{config["partition"]}"
 export QOS="{config["qos"]}"
 export ACCOUNT="{config["account"]}"
-export GPU_TYPE="{config["gpu_type"]}"
 export GPUS_PER_NODE={config["gpus_per_node"]}
 
-# Fallback GPU settings (used when primary GPU is unavailable)
+# Fallback partition settings (used when primary partition is unavailable)
 # Leave empty to disable fallback and fail if primary not available
-export GPU_TYPE_FALLBACK="{config.get("gpu_type_fallback", "")}"
 export PARTITION_FALLBACK="{config.get("partition_fallback", "")}"
 export QOS_FALLBACK="{config.get("qos_fallback", "")}"
 
@@ -443,20 +446,19 @@ kintsugi slurm submit . --cycles 1-3
 kintsugi slurm submit . --dry-run
 ```
 
-## GPU Fallback
+## Partition Fallback
 
-If the primary GPU (e.g., b200) is in high demand, configure a fallback:
+If the primary partition (e.g., hpg-b200) is in high demand, configure a fallback:
 
 ```bash
 # In slurm/config.sh:
-export GPU_TYPE_FALLBACK="geforce"
 export PARTITION_FALLBACK="hpg-turin"
 export QOS_FALLBACK=""
 ```
 
 The submission script will:
-1. Check primary GPU availability
-2. If unavailable, automatically try the fallback
+1. Check primary partition availability
+2. If unavailable, automatically try the fallback partition
 3. Report clear errors if neither is available
 
 ## Troubleshooting
@@ -464,7 +466,7 @@ The submission script will:
 - **Job fails immediately**: Check `slurm/runs/*/logs/*.err` for error details
 - **Out of memory**: Increase `MEM_*` values in config.sh
 - **Time limit exceeded**: Increase `TIME_*` values in config.sh
-- **GPU not found**: Verify `GPU_TYPE` matches available hardware
-- **Resource unavailable**: Check `sinfo -p gpu` and consider configuring fallback GPU
+- **Partition not found**: Verify `PARTITION` setting (hpg-b200, hpg-turin)
+- **Resource unavailable**: Check `sinfo -p hpg-b200` and consider configuring fallback partition
 - **Silent failures**: Run with `--dry-run` first to verify commands
 """

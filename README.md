@@ -414,11 +414,11 @@ export XY_VOX=377          # nm per pixel
 export Z_VOX=1500          # nm per z-slice
 export MIC_NA=0.75         # Numerical aperture
 
-# HPC resources
-export PARTITION="gpu"
+# HPC resources (HiPerGator RHEL9+)
+# GPU Partition: hpg-b200 (B200), hpg-turin (L4)
+export PARTITION="hpg-b200"
 export QOS="maigan-b"
 export ACCOUNT="maigan"
-export GPU_TYPE="b200"
 export GPUS_PER_NODE=2
 
 # Email notifications (optional)

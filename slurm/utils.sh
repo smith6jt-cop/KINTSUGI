@@ -348,7 +348,7 @@ Configuration:
   Cycles:    ${START_CYCLE:-?} - ${END_CYCLE:-?}
   Channels:  ${START_CHANNEL:-?} - ${END_CHANNEL:-?}
   Format:    ${OUTPUT_FORMAT:-tiff}
-  GPU Type:  ${GPU_TYPE:-auto}
+  Partition: ${PARTITION:-unset}
 EOF
 
     echo "${run_dir}"

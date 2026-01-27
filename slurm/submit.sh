@@ -60,14 +60,13 @@ term_error() { term_log ERROR "$@"; }
 # GPU RESOURCE CHECKING
 # =============================================================================
 
-# Check if a GPU type is available in a partition
-# Returns: 0 if available, 1 if not available
+# Check if GPU resources are available in a partition
+# Returns: 0 if available, 1 if partition invalid, 2 if resources busy
 check_gpu_availability() {
     local partition=$1
-    local gpu_type=$2
 
     if [ "${DRY_RUN}" = true ]; then
-        term_info "DRY RUN: Skipping GPU availability check for ${gpu_type} on ${partition}"
+        term_info "DRY RUN: Skipping GPU availability check for partition ${partition}"
         return 0
     fi
 
@@ -77,57 +76,52 @@ check_gpu_availability() {
         return 0  # Proceed anyway, let sbatch handle it
     fi
 
-    term_info "Checking availability of ${gpu_type} GPUs on partition ${partition}..."
+    term_info "Checking GPU availability on partition ${partition}..."
 
-    # Query SLURM for available GPUs of the specified type
-    # Using sinfo to check if the partition has idle/mix nodes with the GPU
-    local gres_info
-    gres_info=$(sinfo -p "${partition}" -N -o "%N %G %t" 2>/dev/null | grep -i "${gpu_type}" | grep -E "(idle|mix)" || true)
+    # Query SLURM for available nodes in the partition
+    local available_info
+    available_info=$(sinfo -p "${partition}" -N -o "%N %G %t" 2>/dev/null | grep -E "(idle|mix)" || true)
 
-    if [ -n "${gres_info}" ]; then
-        local available_nodes=$(echo "${gres_info}" | wc -l)
-        term_info "Found ${available_nodes} node(s) with ${gpu_type} GPUs available/mixed on ${partition}"
+    if [ -n "${available_info}" ]; then
+        local available_nodes=$(echo "${available_info}" | wc -l)
+        term_info "Found ${available_nodes} node(s) available/mixed on ${partition}"
         return 0
     fi
 
-    # Also check via squeue for pending jobs which might indicate resource contention
+    # Check queue depth for this partition
     local queue_count=0
     if command -v squeue &> /dev/null; then
-        queue_count=$(squeue -p "${partition}" --gres="gpu:${gpu_type}" -h 2>/dev/null | wc -l || echo "0")
+        queue_count=$(squeue -p "${partition}" -h 2>/dev/null | wc -l || echo "0")
 
         if [ "${queue_count}" -gt 10 ]; then
-            term_warn "High queue depth (${queue_count} jobs) for ${gpu_type} on ${partition} - jobs may wait"
+            term_warn "High queue depth (${queue_count} jobs) on ${partition} - jobs may wait"
         fi
-    else
-        term_warn "squeue command not found - skipping queue depth check for ${gpu_type} on ${partition}"
     fi
 
-    # Check if any nodes with this GPU type exist at all
+    # Check if partition exists at all
     local total_nodes
-    total_nodes=$(sinfo -p "${partition}" -N -o "%N %G" 2>/dev/null | grep -i "${gpu_type}" | wc -l || echo "0")
+    total_nodes=$(sinfo -p "${partition}" -N -o "%N" 2>/dev/null | wc -l || echo "0")
 
     if [ "${total_nodes}" -eq 0 ]; then
-        term_error "No nodes with ${gpu_type} GPUs found on partition ${partition}"
+        term_error "Partition ${partition} not found or has no nodes"
         return 1
     fi
 
-    term_warn "All ${gpu_type} nodes on ${partition} appear busy - job will be queued"
+    term_warn "All nodes on ${partition} appear busy - job will be queued"
     return 2
 }
 
 # Get current GPU resource status
 show_gpu_status() {
     local partition=$1
-    local gpu_type=$2
 
     if ! command -v sinfo &> /dev/null; then
         return
     fi
 
-    term_info "Current GPU status for ${gpu_type} on ${partition}:"
-    sinfo -p "${partition}" -N -o "  %N %G %t %C" 2>/dev/null | \
-        grep -i "${gpu_type}" | head -10 >&2 || \
-        echo "  No specific GPU info available" >&2
+    term_info "Current node status on partition ${partition}:"
+    sinfo -p "${partition}" -N -o "  %N %G %t %C" 2>/dev/null | head -10 >&2 || \
+        echo "  No node info available" >&2
 }
 
 # =============================================================================
@@ -395,11 +389,11 @@ term_info "Format:   ${OUTPUT_FORMAT}"
 term_info "Dry run:  ${DRY_RUN}"
 term_info "------------------------------------------------------------"
 term_info "GPU Configuration:"
-term_info "  Primary:  ${GPU_TYPE} on ${PARTITION}"
-if [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
-    term_info "  Fallback: ${GPU_TYPE_FALLBACK} on ${PARTITION_FALLBACK}"
+term_info "  Primary partition:  ${PARTITION}"
+if [ -n "${PARTITION_FALLBACK}" ]; then
+    term_info "  Fallback partition: ${PARTITION_FALLBACK}"
 else
-    term_info "  Fallback: (not configured)"
+    term_info "  Fallback partition: (not configured)"
 fi
 term_info "------------------------------------------------------------"
 
@@ -420,13 +414,13 @@ echo ""
 
 # Initial resource availability check
 term_info "Checking cluster resource availability..."
-if ! check_gpu_availability "${PARTITION}" "${GPU_TYPE}"; then
-    term_warn "Primary GPU resources may not be immediately available"
-    if [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
-        if check_gpu_availability "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}"; then
-            term_info "Fallback GPU resources are available - will use if primary fails"
+if ! check_gpu_availability "${PARTITION}"; then
+    term_warn "Primary partition resources may not be immediately available"
+    if [ -n "${PARTITION_FALLBACK}" ]; then
+        if check_gpu_availability "${PARTITION_FALLBACK}"; then
+            term_info "Fallback partition resources are available - will use if primary fails"
         else
-            term_error "Neither primary nor fallback GPU resources appear available"
+            term_error "Neither primary nor fallback partition resources appear available"
             term_error "Jobs will likely fail or wait indefinitely"
             if [ "${DRY_RUN}" != true ]; then
                 # Only prompt if running interactively (stdin is a TTY)
@@ -447,10 +441,10 @@ if ! check_gpu_availability "${PARTITION}" "${GPU_TYPE}"; then
             fi
         fi
     else
-        term_warn "No fallback GPU configured - jobs will wait for primary resources"
+        term_warn "No fallback partition configured - jobs will wait for primary resources"
     fi
 else
-    term_info "Primary GPU resources appear available"
+    term_info "Primary partition resources appear available"
 fi
 
 term_info "Output structure:"
@@ -459,8 +453,9 @@ term_info "  QC Images:  ${QC_DIR}/"
 term_info "  Summaries:  ${SUMMARY_DIR}/"
 term_info "============================================================"
 
-# Build sbatch command array with specified GPU settings
+# Build sbatch command array with specified partition settings
 # Sets SBATCH_CMD array as output (global)
+# Note: GPU type is determined by partition (hpg-b200 = B200, hpg-turin = L4)
 build_sbatch_cmd_array() {
     local step_name=$1
     local script=$2
@@ -469,8 +464,7 @@ build_sbatch_cmd_array() {
     local dep_type=$5
     local dep_jobid=$6
     local use_partition=$7
-    local use_gpu_type=$8
-    local use_qos=$9
+    local use_qos=$8
 
     local job_name="kintsugi_${step_name}_${PROJECT_NAME}"
 
@@ -492,7 +486,7 @@ build_sbatch_cmd_array() {
         "--ntasks=1"
         "--cpus-per-task=${CPUS_PER_TASK:-4}"
         "--mem=${mem}gb"
-        "--gpus=${use_gpu_type}:${GPUS_PER_NODE:-1}"
+        "--gpus=${GPUS_PER_NODE:-1}"
         "--time=${time}"
         "--array=${ARRAY_SPEC}%${EFFECTIVE_MAX_CONCURRENT}"
         "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name}"
@@ -535,48 +529,46 @@ submit_job() {
     mkdir -p "${QC_DIR}/${step_name}"
 
     term_info "Preparing job submission for ${step_name}..."
-    term_info "  Partition: ${PARTITION}, GPU: ${GPU_TYPE}, Memory: ${mem}GB, Time: ${time}"
+    term_info "  Partition: ${PARTITION}, Memory: ${mem}GB, Time: ${time}"
 
-    # Determine which GPU configuration to use
+    # Determine which partition to use
     local use_partition="${PARTITION}"
-    local use_gpu_type="${GPU_TYPE}"
     local use_qos="${QOS}"
     local using_fallback=false
 
-    # Check primary GPU availability
-    if ! check_gpu_availability "${PARTITION}" "${GPU_TYPE}"; then
-        term_warn "Primary GPU (${GPU_TYPE}) not available on partition ${PARTITION}"
+    # Check primary partition availability
+    if ! check_gpu_availability "${PARTITION}"; then
+        term_warn "Primary partition ${PARTITION} not available"
 
         # Check if fallback is configured
-        if [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
-            term_info "Checking fallback: ${GPU_TYPE_FALLBACK} on partition ${PARTITION_FALLBACK}..."
-            if check_gpu_availability "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}"; then
-                term_info "Switching to fallback GPU configuration"
+        if [ -n "${PARTITION_FALLBACK}" ]; then
+            term_info "Checking fallback partition: ${PARTITION_FALLBACK}..."
+            if check_gpu_availability "${PARTITION_FALLBACK}"; then
+                term_info "Switching to fallback partition"
                 use_partition="${PARTITION_FALLBACK}"
-                use_gpu_type="${GPU_TYPE_FALLBACK}"
                 use_qos="${QOS_FALLBACK}"
                 using_fallback=true
             else
-                term_error "Fallback GPU (${GPU_TYPE_FALLBACK}) also not available on ${PARTITION_FALLBACK}"
+                term_error "Fallback partition ${PARTITION_FALLBACK} also not available"
                 term_error "No GPU resources available. Aborting submission."
-                show_gpu_status "${PARTITION}" "${GPU_TYPE}"
+                show_gpu_status "${PARTITION}"
                 return 1
             fi
         else
-            term_error "No fallback GPU configured and primary GPU unavailable. Aborting."
-            term_error "Configure GPU_TYPE_FALLBACK and PARTITION_FALLBACK in config.sh to enable fallback."
+            term_error "No fallback partition configured and primary partition unavailable. Aborting."
+            term_error "Configure PARTITION_FALLBACK in config.sh to enable fallback."
             return 1
         fi
     fi
 
-    # Build command with selected GPU configuration
+    # Build command with selected partition configuration
     build_sbatch_cmd_array "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
-        "${use_partition}" "${use_gpu_type}" "${use_qos}"
+        "${use_partition}" "${use_qos}"
 
     if [ "${DRY_RUN}" = true ]; then
         # Print to stderr so it's visible (stdout is captured for job ID)
         if [ "${using_fallback}" = true ]; then
-            term_info "DRY RUN - would execute (using fallback configuration):"
+            term_info "DRY RUN - would execute (using fallback partition):"
         else
             term_info "DRY RUN - would execute:"
         fi
@@ -587,9 +579,9 @@ submit_job() {
 
     # Submit job
     if [ "${using_fallback}" = true ]; then
-        term_info "Submitting ${step_name} to ${use_partition} with ${use_gpu_type} GPU (fallback)..."
+        term_info "Submitting ${step_name} to ${use_partition} (fallback)..."
     else
-        term_info "Submitting ${step_name} to ${use_partition} with ${use_gpu_type} GPU..."
+        term_info "Submitting ${step_name} to ${use_partition}..."
     fi
     local result
     local exit_code
@@ -628,11 +620,11 @@ submit_job() {
         term_warn "Submission failed due to resource unavailability"
 
         # Try fallback if configured and not already using it
-        if [ "${using_fallback}" = false ] && [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
-            term_info "Attempting fallback submission to ${PARTITION_FALLBACK} with ${GPU_TYPE_FALLBACK} GPU..."
+        if [ "${using_fallback}" = false ] && [ -n "${PARTITION_FALLBACK}" ]; then
+            term_info "Attempting fallback submission to ${PARTITION_FALLBACK}..."
 
             build_sbatch_cmd_array "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
-                "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}" "${QOS_FALLBACK}"
+                "${PARTITION_FALLBACK}" "${QOS_FALLBACK}"
 
             local fallback_result
             fallback_result=$("${SBATCH_CMD[@]}" 2>&1)
@@ -653,16 +645,16 @@ submit_job() {
                 fi
 
                 term_info "Fallback submission successful - Job ID: ${jobid}"
-                term_info "NOTE: Using ${GPU_TYPE_FALLBACK} GPU instead of ${GPU_TYPE}"
+                term_info "NOTE: Using fallback partition ${PARTITION_FALLBACK} instead of ${PARTITION}"
                 echo "${jobid}"
                 return 0
             else
                 term_error "Fallback submission also failed: ${fallback_result}"
             fi
         elif [ "${using_fallback}" = true ]; then
-            term_error "Already using fallback configuration, no further options available"
+            term_error "Already using fallback partition, no further options available"
         else
-            term_error "No fallback GPU configured. Set GPU_TYPE_FALLBACK and PARTITION_FALLBACK in config.sh"
+            term_error "No fallback partition configured. Set PARTITION_FALLBACK in config.sh"
         fi
     fi
 

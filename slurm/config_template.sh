@@ -51,14 +51,16 @@ export WAVELENGTHS="1:358:461,2:753:775,3:560:575,4:648:668"
 # =============================================================================
 # HPC RESOURCES
 # =============================================================================
-export PARTITION="gpu"
+# GPU Partition Selection (HiPerGator RHEL9+):
+#   - hpg-b200:  NVIDIA B200 GPUs (180GB VRAM, 8/node) - for large models/extreme performance
+#   - hpg-turin: NVIDIA L4 GPUs (24GB VRAM, 3/node) - for standard GPU workloads
+# See: https://docs.rc.ufl.edu/scheduler/gpu_access/
+export PARTITION="hpg-b200"
 export QOS="maigan-b"
 export ACCOUNT="maigan"
-export GPU_TYPE="b200"
 
 # Fallback GPU settings (used when primary GPU partition has no available nodes)
 # When set: script checks availability and switches to fallback if primary unavailable
-export GPU_TYPE_FALLBACK="geforce"
 export PARTITION_FALLBACK="hpg-turin"
 export QOS_FALLBACK=""
 # Leave fallback values empty to disable automatic fallback retries; jobs will
@@ -79,10 +81,10 @@ export ALLOC_GPUS=2        # Total GPUs in your allocation
 #   max_concurrent = min(ALLOC_CPUS/CPUS_PER_TASK, ALLOC_MEM/max_mem, ALLOC_GPUS/GPUS_PER_NODE)
 # -----------------------------------------------------------------------------
 
-# CPUs per job
+# CPUs per job (must request at least 1 CPU per GPU on HiPerGator)
 export CPUS_PER_TASK=4
 
-# GPUs per job
+# GPUs per job (GPU type is determined by PARTITION setting)
 export GPUS_PER_NODE=1
 
 # Memory per job (GB) - per processing step
