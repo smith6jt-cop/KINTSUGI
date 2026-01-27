@@ -543,14 +543,23 @@ submit_job() {
     local use_qos="${QOS}"
     local using_fallback=false
 
-    # Check primary GPU availability
-    if ! check_gpu_availability "${PARTITION}" "${GPU_TYPE}"; then
+    # Check primary GPU availability and determine which resources to use
+    check_gpu_availability "${PARTITION}" "${GPU_TYPE}"
+    local gpu_check_status=$?
+
+    if [ ${gpu_check_status} -eq 1 ]; then
+        # GPU type doesn't exist on primary partition - try fallback
         term_warn "Primary GPU (${GPU_TYPE}) not available on partition ${PARTITION}"
 
         # Check if fallback is configured
         if [ -n "${GPU_TYPE_FALLBACK}" ] && [ -n "${PARTITION_FALLBACK}" ]; then
             term_info "Checking fallback: ${GPU_TYPE_FALLBACK} on partition ${PARTITION_FALLBACK}..."
-            if check_gpu_availability "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}"; then
+            check_gpu_availability "${PARTITION_FALLBACK}" "${GPU_TYPE_FALLBACK}"
+            local fallback_status=$?
+            # Accept fallback if GPUs are available (0) or busy (2)
+            # We only reject if the GPU type doesn't exist at all (1)
+            if [ ${fallback_status} -eq 0 ] || [ ${fallback_status} -eq 2 ]; then
+                # Fallback GPUs exist (either available or busy) - use them
                 term_info "Switching to fallback GPU configuration"
                 use_partition="${PARTITION_FALLBACK}"
                 use_gpu_type="${GPU_TYPE_FALLBACK}"
@@ -567,6 +576,9 @@ submit_job() {
             term_error "Configure GPU_TYPE_FALLBACK and PARTITION_FALLBACK in config.sh to enable fallback."
             return 1
         fi
+    elif [ ${gpu_check_status} -eq 2 ]; then
+        # GPUs exist but are busy - queue on primary partition
+        term_info "Primary GPUs are busy but available - job will be queued on ${PARTITION}"
     fi
 
     # Build command with selected GPU configuration
