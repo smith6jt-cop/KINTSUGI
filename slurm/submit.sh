@@ -536,14 +536,23 @@ submit_job() {
     local use_qos="${QOS}"
     local using_fallback=false
 
-    # Check primary partition availability
-    if ! check_gpu_availability "${PARTITION}"; then
+    # Check primary GPU availability and determine which resources to use
+    check_gpu_availability "${PARTITION}"
+    local gpu_check_status=$?
+
+    if [ ${gpu_check_status} -eq 1 ]; then
+        # Partition doesn't exist or has no nodes - try fallback
         term_warn "Primary partition ${PARTITION} not available"
 
         # Check if fallback is configured
         if [ -n "${PARTITION_FALLBACK}" ]; then
             term_info "Checking fallback partition: ${PARTITION_FALLBACK}..."
-            if check_gpu_availability "${PARTITION_FALLBACK}"; then
+            check_gpu_availability "${PARTITION_FALLBACK}"
+            local fallback_status=$?
+            # Accept fallback if GPUs are available (0) or busy (2)
+            # We only reject if the partition doesn't exist at all (1)
+            if [ ${fallback_status} -eq 0 ] || [ ${fallback_status} -eq 2 ]; then
+                # Fallback partition exists (either available or busy) - use it
                 term_info "Switching to fallback partition"
                 use_partition="${PARTITION_FALLBACK}"
                 use_qos="${QOS_FALLBACK}"
@@ -559,6 +568,9 @@ submit_job() {
             term_error "Configure PARTITION_FALLBACK in config.sh to enable fallback."
             return 1
         fi
+    elif [ ${gpu_check_status} -eq 2 ]; then
+        # GPUs exist but are busy - queue on primary partition
+        term_info "Primary GPUs are busy but available - job will be queued on ${PARTITION}"
     fi
 
     # Build command with selected partition configuration
