@@ -54,10 +54,10 @@ BASIC_FLATFIELD_MIN = 0.1
 BASIC_MAX_ITERATIONS = 500
 BASIC_OPTIMIZATION_TOLERANCE = 1e-6
 
-# Stitching parameters
+# Stitching parameters (read from environment or use notebook-tuned defaults)
 OVERLAP_PERCENTAGE = TILE_OVERLAP * 100
-INITIAL_NCC_THRESHOLD = 0.5
-POU = 3
+INITIAL_NCC_THRESHOLD = float(os.environ.get('NCC_THRESHOLD', 0.078))
+POU = float(os.environ.get('POU', 0.5))
 BLEND_SIGMA = 15.0
 
 # Paths

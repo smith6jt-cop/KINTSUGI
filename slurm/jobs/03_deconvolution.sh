@@ -4,9 +4,20 @@
 # Multi-GPU deconvolution for one cycle with logging and QC
 # =============================================================================
 
-# Source utilities
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../utils.sh"
+# Source utilities (use KINTSUGI_DIR from environment, not relative path)
+KINTSUGI_SLURM="${KINTSUGI_DIR}/slurm"
+if [ -f "${KINTSUGI_SLURM}/utils.sh" ]; then
+    source "${KINTSUGI_SLURM}/utils.sh"
+else
+    # Fallback: define minimal stubs if utils.sh not found
+    log_info() { echo "[INFO] $*"; }
+    log_error() { echo "[ERROR] $*" >&2; }
+    init_logging() { :; }
+    summary_before() { :; }
+    summary_after() { :; }
+    log_footer() { :; }
+    generate_run_id() { date '+%Y%m%d_%H%M%S'; }
+fi
 
 # Initialize logging
 init_logging "decon" "${RUN_ID:-$(generate_run_id)}"
@@ -31,8 +42,6 @@ import sys
 import os
 import time
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
-from itertools import cycle as iter_cycle
 
 # Setup paths
 PROJECT_DIR = Path(os.environ['PROJECT_DIR'])
@@ -43,7 +52,6 @@ sys.path.insert(0, str(KINTSUGI_DIR))
 
 from Kdecon import decon
 from kintsugi.gpu import cleanup_gpu_memory
-import cupy as cp
 import numpy as np
 
 # Get configuration from environment
@@ -74,9 +82,24 @@ DECON_DIR = DATA_DIR / 'processed' / 'deconvolved'
 DECON_DIR.mkdir(parents=True, exist_ok=True)
 QC_DIR.mkdir(parents=True, exist_ok=True)
 
-# Detect GPUs
-n_gpus = cp.cuda.runtime.getDeviceCount()
-GPU_IDS = list(range(n_gpus))
+# Initialize CUDA properly - let CuPy auto-detect and initialize
+# Don't explicitly set device_id to avoid context conflicts
+try:
+    import cupy as cp
+    # Initialize CUDA context on device 0 (SLURM sets CUDA_VISIBLE_DEVICES)
+    cp.cuda.Device(0).use()
+    # Verify GPU is accessible with a simple operation
+    _ = cp.zeros(1)
+    n_gpus = 1  # SLURM allocates specific GPUs, we see them as device 0
+    GPU_IDS = [0]
+    print(f"CUDA initialized successfully on device 0")
+    print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
+except Exception as e:
+    print(f"WARNING: CUDA initialization failed: {e}")
+    print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
+    print("Falling back to CPU processing")
+    n_gpus = 0
+    GPU_IDS = []
 
 print(f"\n{'='*60}")
 print(f"Deconvolution - Cycle {CYCLE}")
@@ -115,14 +138,14 @@ def save_qc_slice(data, output_path, title=""):
     except Exception as e:
         print(f"  QC save failed: {e}")
 
-def process_channel(args):
-    """Deconvolve one channel on assigned GPU."""
-    ch, gpu_id = args
-    print(f"\n  [GPU{gpu_id}] Channel {ch} starting...")
+def process_channel(ch):
+    """Deconvolve one channel (device auto-detected from CUDA context)."""
+    print(f"\n  Channel {ch} starting...")
 
     try:
         lambda_ex, lambda_em = WAVELENGTHS.get(ch, (560, 575))
 
+        # Don't pass device_id - let decon auto-detect from initialized context
         decon(
             base_dir=str(PROJECT_DIR),
             stitch_dir=str(STITCH_DIR),
@@ -135,8 +158,8 @@ def process_channel(args):
             tissue_RI=TISSUE_RI,
             damping=0,
             stop_criterion=5.0,
-            device='gpu',
-            device_id=gpu_id,
+            device='gpu' if n_gpus > 0 else 'cpu',
+            device_id=None,  # Let decon auto-detect
             wavelengths=WAVELENGTHS,
             decon_dir=str(DECON_DIR)
         )
@@ -151,29 +174,22 @@ def process_channel(args):
             qc_path = QC_DIR / f"cyc{CYCLE:02d}_CH{ch}_decon.png"
             save_qc_slice(data, str(qc_path), f"Cycle {CYCLE} Channel {ch} - Deconvolved")
 
-        print(f"  [GPU{gpu_id}] Channel {ch} complete")
+        print(f"  Channel {ch} complete")
         return ch, True
 
     except Exception as e:
-        print(f"  [GPU{gpu_id}] Channel {ch} FAILED: {e}")
+        print(f"  Channel {ch} FAILED: {e}")
         import traceback
         traceback.print_exc()
         return ch, False
     finally:
         cleanup_gpu_memory()
 
-# Process channels across GPUs
+# Process channels sequentially (one GPU per SLURM job)
 start_time = time.time()
 
-if n_gpus >= 2 and len(channels) >= 2:
-    print(f"\n[MULTI-GPU] {len(channels)} channels across {n_gpus} GPUs")
-    pairs = list(zip(channels, iter_cycle(GPU_IDS)))
-
-    with ThreadPoolExecutor(max_workers=n_gpus) as executor:
-        results = list(executor.map(process_channel, pairs))
-else:
-    print(f"\n[SINGLE-GPU] Processing {len(channels)} channels")
-    results = [process_channel((ch, 0)) for ch in channels]
+print(f"\nProcessing {len(channels)} channels sequentially")
+results = [process_channel(ch) for ch in channels]
 
 # Summary
 successful = sum(1 for _, ok in results if ok)

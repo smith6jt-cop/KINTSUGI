@@ -4,9 +4,20 @@
 # Multi-GPU EDF processing with quality gate and logging
 # =============================================================================
 
-# Source utilities
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../utils.sh"
+# Source utilities (use KINTSUGI_DIR from environment, not relative path)
+KINTSUGI_SLURM="${KINTSUGI_DIR}/slurm"
+if [ -f "${KINTSUGI_SLURM}/utils.sh" ]; then
+    source "${KINTSUGI_SLURM}/utils.sh"
+else
+    # Fallback: define minimal stubs if utils.sh not found
+    log_info() { echo "[INFO] $*"; }
+    log_error() { echo "[ERROR] $*" >&2; }
+    init_logging() { :; }
+    summary_before() { :; }
+    summary_after() { :; }
+    log_footer() { :; }
+    generate_run_id() { date '+%Y%m%d_%H%M%S'; }
+fi
 
 # Initialize logging
 init_logging "edf" "${RUN_ID:-$(generate_run_id)}"
