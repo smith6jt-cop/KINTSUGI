@@ -1111,9 +1111,22 @@ class TestMCPServer:
 
     def test_server_creation_without_mcp(self):
         """Test server behavior when MCP package is not available."""
-        with patch.dict("sys.modules", {"mcp": None, "mcp.server": None}):
-            # Reload to pick up the mocked import state
-            pass  # Server creation would raise ImportError
+        # Test that MCP_AVAILABLE flag controls server creation
+        from kintsugi.mcp import server
+
+        # Store original value
+        original_mcp_available = server.MCP_AVAILABLE
+
+        try:
+            # Simulate MCP not being available
+            server.MCP_AVAILABLE = False
+
+            # Verify create_server raises ImportError when MCP is unavailable
+            with pytest.raises(ImportError, match="MCP package not installed"):
+                server.create_server()
+        finally:
+            # Restore original value
+            server.MCP_AVAILABLE = original_mcp_available
 
     def test_tool_routing(self):
         """Test that all tools are properly routed."""
