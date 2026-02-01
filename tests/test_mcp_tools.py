@@ -14,22 +14,17 @@ Coverage: pytest tests/test_mcp_tools.py --cov=src/kintsugi/mcp --cov-report=htm
 
 from __future__ import annotations
 
-import asyncio
+import importlib.util
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-import importlib.util
 
-# Check for optional dependencies
+# Check for optional dependencies using importlib
 HAS_ZARR = importlib.util.find_spec("zarr") is not None
-
-try:
-    import dask_image
-    HAS_DASK_IMAGE = True
-except ImportError:
-    HAS_DASK_IMAGE = False
+HAS_DASK_IMAGE = importlib.util.find_spec("dask_image") is not None
 
 # Skip markers for tests requiring optional dependencies
 requires_zarr = pytest.mark.skipif(not HAS_ZARR, reason="zarr not installed")
@@ -548,8 +543,8 @@ class TestQualityAssessment:
     @pytest.mark.asyncio
     async def test_assess_quality_success(self, sample_uint16_image, clear_mcp_state):
         """Test quality assessment returns expected metrics."""
-        from kintsugi.mcp.tools.signal_isolation import _store_image
         from kintsugi.mcp.tools.quality_assessment import assess_quality
+        from kintsugi.mcp.tools.signal_isolation import _store_image
 
         _store_image("test_ch", sample_uint16_image)
 
@@ -578,8 +573,8 @@ class TestQualityAssessment:
     @pytest.mark.asyncio
     async def test_compute_snr_success(self, sample_uint16_image, clear_mcp_state):
         """Test SNR computation."""
-        from kintsugi.mcp.tools.signal_isolation import _store_image
         from kintsugi.mcp.tools.quality_assessment import compute_snr
+        from kintsugi.mcp.tools.signal_isolation import _store_image
 
         _store_image("test_ch", sample_uint16_image)
 
@@ -594,8 +589,8 @@ class TestQualityAssessment:
     @pytest.mark.asyncio
     async def test_batch_assess_quality(self, sample_uint16_image, sample_noisy_image, clear_mcp_state):
         """Test batch quality assessment."""
-        from kintsugi.mcp.tools.signal_isolation import _store_image
         from kintsugi.mcp.tools.quality_assessment import batch_assess_quality
+        from kintsugi.mcp.tools.signal_isolation import _store_image
 
         _store_image("ch1", sample_uint16_image)
         _store_image("ch2", sample_noisy_image)
@@ -881,8 +876,8 @@ class TestLearning:
     @pytest.mark.asyncio
     async def test_record_successful_parameters(self, mock_learning_engine, sample_uint16_image, clear_mcp_state):
         """Test recording successful parameters."""
-        from kintsugi.mcp.tools.signal_isolation import _store_image
         from kintsugi.mcp.tools.learning import record_successful_parameters
+        from kintsugi.mcp.tools.signal_isolation import _store_image
 
         _store_image("test_ch", sample_uint16_image)
 
@@ -926,7 +921,6 @@ class TestIntegration:
     ):
         """Test a complete processing pipeline: load -> subtract -> denoise -> save."""
         from kintsugi.mcp.tools.signal_isolation import (
-            _loaded_images,
             _store_image,
             denoise,
             subtract_blank,
@@ -982,8 +976,8 @@ class TestIntegration:
     @pytest.mark.asyncio
     async def test_cross_module_state_sharing(self, sample_uint16_image, clear_mcp_state):
         """Test that state is properly shared across modules."""
-        from kintsugi.mcp.tools.signal_isolation import _loaded_images, _store_image
         from kintsugi.mcp.tools.quality_assessment import assess_quality
+        from kintsugi.mcp.tools.signal_isolation import _store_image
         from kintsugi.mcp.tools.visualization import get_image_stats
         from kintsugi.mcp.tools.workflow import get_session_state
 
