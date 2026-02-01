@@ -223,11 +223,16 @@ class TestLoadChannel:
 
         assert "error" in result
         # Accept either "not found" or "Missing dependency" errors
-        assert "not found" in result["error"].lower() or "missing dependency" in result["error"].lower()
+        assert (
+            "not found" in result["error"].lower()
+            or "missing dependency" in result["error"].lower()
+        )
 
     @requires_zarr
     @pytest.mark.asyncio
-    async def test_load_channel_cycle_normalization(self, temp_project_with_images, clear_mcp_state):
+    async def test_load_channel_cycle_normalization(
+        self, temp_project_with_images, clear_mcp_state
+    ):
         """Test that cycle names are properly normalized."""
         from kintsugi.mcp.tools.signal_isolation import load_channel
 
@@ -251,7 +256,9 @@ class TestSubtractBlank:
 
     @requires_dask_image
     @pytest.mark.asyncio
-    async def test_subtract_blank_success(self, sample_uint16_image, sample_blank_image, clear_mcp_state):
+    async def test_subtract_blank_success(
+        self, sample_uint16_image, sample_blank_image, clear_mcp_state
+    ):
         """Test successful blank subtraction."""
         from kintsugi.mcp.tools.signal_isolation import (
             _loaded_images,
@@ -295,11 +302,16 @@ class TestSubtractBlank:
 
         assert "error" in result
         # Accept either "not loaded" or "Missing dependency" errors
-        assert "not loaded" in result["error"].lower() or "missing dependency" in result["error"].lower()
+        assert (
+            "not loaded" in result["error"].lower()
+            or "missing dependency" in result["error"].lower()
+        )
 
     @requires_dask_image
     @pytest.mark.asyncio
-    async def test_subtract_blank_records_history(self, sample_uint16_image, sample_blank_image, clear_mcp_state):
+    async def test_subtract_blank_records_history(
+        self, sample_uint16_image, sample_blank_image, clear_mcp_state
+    ):
         """Test that blank subtraction records processing history."""
         from kintsugi.mcp.tools.signal_isolation import (
             _processing_history,
@@ -587,7 +599,9 @@ class TestQualityAssessment:
         assert isinstance(result["snr"], float)
 
     @pytest.mark.asyncio
-    async def test_batch_assess_quality(self, sample_uint16_image, sample_noisy_image, clear_mcp_state):
+    async def test_batch_assess_quality(
+        self, sample_uint16_image, sample_noisy_image, clear_mcp_state
+    ):
         """Test batch quality assessment."""
         from kintsugi.mcp.tools.quality_assessment import batch_assess_quality
         from kintsugi.mcp.tools.signal_isolation import _store_image
@@ -751,7 +765,9 @@ class TestWorkflow:
         )
 
         # Handle missing dependency error
-        if "error" in result and ("zarr" in result["error"].lower() or "Missing dependency" in result["error"]):
+        if "error" in result and (
+            "zarr" in result["error"].lower() or "Missing dependency" in result["error"]
+        ):
             pytest.skip(f"Zarr dependency not available: {result.get('error', '')}")
 
         assert result["status"] == "success"
@@ -777,7 +793,9 @@ class TestWorkflow:
         assert len(result["steps"]) == 2
 
     @pytest.mark.asyncio
-    async def test_suggest_parameters(self, sample_uint16_image, sample_blank_image, clear_mcp_state):
+    async def test_suggest_parameters(
+        self, sample_uint16_image, sample_blank_image, clear_mcp_state
+    ):
         """Test parameter suggestion."""
         from kintsugi.mcp.tools.signal_isolation import _store_image
         from kintsugi.mcp.tools.workflow import suggest_parameters
@@ -874,7 +892,9 @@ class TestLearning:
         assert "recommended_parameters" in result
 
     @pytest.mark.asyncio
-    async def test_record_successful_parameters(self, mock_learning_engine, sample_uint16_image, clear_mcp_state):
+    async def test_record_successful_parameters(
+        self, mock_learning_engine, sample_uint16_image, clear_mcp_state
+    ):
         """Test recording successful parameters."""
         from kintsugi.mcp.tools.learning import record_successful_parameters
         from kintsugi.mcp.tools.signal_isolation import _store_image
