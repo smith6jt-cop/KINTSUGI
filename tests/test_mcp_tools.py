@@ -1066,8 +1066,6 @@ class TestCrossPlatform:
 
     def test_json_serialization(self, sample_uint16_image, clear_mcp_state):
         """Test that all return values are JSON serializable."""
-        import json
-
         from kintsugi.mcp.tools.signal_isolation import _store_image, get_loaded_images
 
         _store_image("test_ch", sample_uint16_image)
