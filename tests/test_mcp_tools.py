@@ -15,7 +15,6 @@ Coverage: pytest tests/test_mcp_tools.py --cov=src/kintsugi/mcp --cov-report=htm
 from __future__ import annotations
 
 import asyncio
-import tempfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
