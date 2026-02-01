@@ -125,11 +125,6 @@ def clear_mcp_state():
     _processing_history.clear()
 
 
-def run_async(coro):
-    """Helper to run async coroutines in sync tests."""
-    return asyncio.get_event_loop().run_until_complete(coro)
-
-
 # =============================================================================
 # Signal Isolation Tests
 # =============================================================================
