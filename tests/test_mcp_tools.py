@@ -22,13 +22,10 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+import importlib.util
 
 # Check for optional dependencies
-try:
-    import zarr
-    HAS_ZARR = True
-except ImportError:
-    HAS_ZARR = False
+HAS_ZARR = importlib.util.find_spec("zarr") is not None
 
 try:
     import dask_image
