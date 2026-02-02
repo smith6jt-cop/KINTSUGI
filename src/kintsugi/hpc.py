@@ -153,16 +153,27 @@ def get_slurm_defaults() -> dict[str, Any]:
         # Fallback partition settings (for high-demand partitions like hpg-b200)
         "partition_fallback": "hpg-turin",
         "qos_fallback": "",
-        # Memory per job (GB)
-        "mem_correction": 64,
-        "mem_stitch": 128,
-        "mem_decon": 192,
-        "mem_edf": 64,
+        # Account chain settings (multi-account with GPU/CPU fallback)
+        "account_chain": "",  # Comma-separated: GPU accounts first, then burst
+        "cpu_only_accounts": "",  # Accounts that cannot request GPUs
+        "partition_cpu": "hpg-default",  # Partition for CPU-only accounts
+        # CPU resource adjustments (for burst accounts)
+        "cpu_time_multiplier": 5,  # CPU processing is slower
+        "cpu_cpus_per_task": 8,
+        "cpu_mem_correction": 16,
+        "cpu_mem_stitch": 48,
+        "cpu_mem_decon": 48,
+        "cpu_mem_edf": 16,
+        # Memory per job (GB) - GPU mode
+        "mem_correction": 16,
+        "mem_stitch": 48,
+        "mem_decon": 48,
+        "mem_edf": 16,
         # Time limits
-        "time_correction": "04:00:00",
-        "time_stitch": "06:00:00",
-        "time_decon": "08:00:00",
-        "time_edf": "02:00:00",
+        "time_correction": "02:00:00",
+        "time_stitch": "04:00:00",
+        "time_decon": "04:00:00",
+        "time_edf": "01:00:00",
         # Processing parameters
         "start_cycle": 1,
         "end_cycle": 1,
@@ -233,6 +244,45 @@ def get_user_slurm_accounts() -> list[str]:
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
         pass
     return []
+
+
+def get_account_chain_from_user() -> str:
+    """
+    Get comma-separated account chain, with GPU accounts first.
+
+    Orders accounts with GPU-enabled accounts first, followed by
+    CPU-only burst accounts (accounts ending in '-b').
+
+    Returns
+    -------
+    str
+        Comma-separated account chain, or empty string if detection fails
+    """
+    accounts = get_user_slurm_accounts()
+    if accounts:
+        # GPU accounts first (no -b suffix), then burst accounts (-b suffix)
+        gpu_accounts = [a for a in accounts if not a.endswith("-b")]
+        burst_accounts = [a for a in accounts if a.endswith("-b")]
+        return ",".join(gpu_accounts + burst_accounts)
+    return ""
+
+
+def get_cpu_only_accounts_from_user() -> str:
+    """
+    Get comma-separated list of CPU-only accounts.
+
+    Detects burst accounts (ending in '-b') which typically don't have GPU access.
+
+    Returns
+    -------
+    str
+        Comma-separated list of CPU-only accounts
+    """
+    accounts = get_user_slurm_accounts()
+    if accounts:
+        burst_accounts = [a for a in accounts if a.endswith("-b")]
+        return ",".join(burst_accounts)
+    return ""
 
 
 def generate_slurm_config(
@@ -345,6 +395,28 @@ export GPUS_PER_NODE={config["gpus_per_node"]}
 # Leave empty to disable fallback and fail if primary not available
 export PARTITION_FALLBACK="{config.get("partition_fallback", "")}"
 export QOS_FALLBACK="{config.get("qos_fallback", "")}"
+
+# =============================================================================
+# ACCOUNT CHAIN (for multi-account GPU/CPU fallback)
+# =============================================================================
+# Comma-separated list of accounts to try in order
+# GPU accounts first, then CPU-only burst accounts for fallback
+export ACCOUNT_CHAIN="{config.get("account_chain", "")}"
+
+# CPU-only accounts (cannot request GPUs)
+# Auto-detected: accounts ending in -b are assumed CPU-only if this is empty
+export CPU_ONLY_ACCOUNTS="{config.get("cpu_only_accounts", "")}"
+
+# CPU-only partition (used with burst accounts)
+export PARTITION_CPU="{config.get("partition_cpu", "hpg-default")}"
+
+# CPU resource adjustments (CPU processing is slower than GPU)
+export CPU_TIME_MULTIPLIER={config.get("cpu_time_multiplier", 5)}
+export CPU_CPUS_PER_TASK={config.get("cpu_cpus_per_task", 8)}
+export CPU_MEM_CORRECTION={config.get("cpu_mem_correction", 16)}
+export CPU_MEM_STITCH={config.get("cpu_mem_stitch", 48)}
+export CPU_MEM_DECON={config.get("cpu_mem_decon", 48)}
+export CPU_MEM_EDF={config.get("cpu_mem_edf", 16)}
 
 # Memory per job (GB)
 export MEM_CORRECTION={config["mem_correction"]}
@@ -460,6 +532,28 @@ The submission script will:
 1. Check primary partition availability
 2. If unavailable, automatically try the fallback partition
 3. Report clear errors if neither is available
+
+## Multi-Account GPU/CPU Fallback
+
+For users with both GPU and CPU-only (burst) accounts, configure an account chain:
+
+```bash
+# In slurm/config.sh:
+export ACCOUNT_CHAIN="maigan,clive,maigan-b,clive-b"
+export CPU_ONLY_ACCOUNTS="maigan-b,clive-b"  # Optional: auto-detected by -b suffix
+export PARTITION_CPU="hpg-default"
+```
+
+The submission script will:
+1. Try accounts in order from the chain
+2. Automatically detect if account is GPU or CPU-only
+3. Adjust resources (no GPUs, more CPUs, longer time limits) for CPU mode
+4. Set `KINTSUGI_DEVICE_MODE=cpu` in job environment for CPU accounts
+
+CPU mode uses these adjusted settings:
+- `CPU_TIME_MULTIPLIER=5` - Time limits multiplied (CPU is slower)
+- `CPU_CPUS_PER_TASK=8` - More CPUs to compensate
+- `CPU_MEM_*` - Reduced memory (no GPU memory needed)
 
 ## Troubleshooting
 

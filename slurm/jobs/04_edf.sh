@@ -53,8 +53,31 @@ sys.path.insert(0, str(KINTSUGI_DIR))
 
 from kintsugi.edf import EDFProcessor
 from kintsugi.gpu import cleanup_gpu_memory
-import cupy as cp
 import numpy as np
+
+# Check device mode from environment (set by submit.sh based on account type)
+DEVICE_MODE = os.environ.get('KINTSUGI_DEVICE_MODE', 'gpu')
+print(f"Device mode from environment: {DEVICE_MODE}")
+
+# Initialize GPU if in GPU mode
+if DEVICE_MODE != 'cpu':
+    try:
+        import cupy as cp
+        cp.cuda.Device(0).use()
+        _ = cp.zeros(1)  # Test GPU access
+        n_gpus = cp.cuda.runtime.getDeviceCount()
+        GPU_IDS = list(range(n_gpus))
+        print(f"CUDA initialized: {n_gpus} GPU(s) available")
+    except Exception as e:
+        print(f"WARNING: CUDA initialization failed: {e}")
+        print("Falling back to CPU mode")
+        DEVICE_MODE = 'cpu'
+        n_gpus = 0
+        GPU_IDS = []
+else:
+    print("Running in CPU mode (CPU-only burst account)")
+    n_gpus = 0
+    GPU_IDS = []
 
 CYCLE = int(os.environ.get('SLURM_ARRAY_TASK_ID', 1))
 START_CHANNEL = int(os.environ.get('START_CHANNEL', 1))
@@ -75,8 +98,8 @@ EDF_PARAMS = {
     'radius_y': 2,
     'sigma': 10.0,
     'tiles': (3, 3),      # Process in 9 tiles to fit in GPU memory
-    'backend': 'auto',
-    'device': 'gpu',
+    'backend': 'numpy' if DEVICE_MODE == 'cpu' else 'auto',
+    'device': DEVICE_MODE,
     'blend_depth': 0,
     'z_smooth_sigma': 1.0
 }
@@ -88,15 +111,16 @@ QUALITY_GATE = {
     'min_valid_slices': 3,   # Need at least 3 valid slices
 }
 
-n_gpus = cp.cuda.runtime.getDeviceCount()
-GPU_IDS = list(range(n_gpus))
-
 print(f"\n{'='*60}")
 print(f"EDF Processing - Cycle {CYCLE}")
 print(f"{'='*60}")
 print(f"Project: {PROJECT_DIR.name}")
 print(f"Channels: {START_CHANNEL}-{END_CHANNEL}")
-print(f"GPUs: {n_gpus}")
+print(f"Device mode: {DEVICE_MODE}")
+if DEVICE_MODE == 'gpu':
+    print(f"GPUs: {n_gpus}")
+else:
+    print("Running on CPU (burst account)")
 print(f"Input: {DECON_DIR}")
 print(f"Output: {EDF_DIR}")
 print(f"QC output: {QC_DIR}")
@@ -168,10 +192,15 @@ def save_qc_image(data, output_path, title=""):
 def process_edf(args):
     """Process EDF for one channel with quality gate."""
     ch, gpu_id = args
-    print(f"\n  [GPU{gpu_id}] Channel {ch} starting...")
+    if DEVICE_MODE == 'gpu':
+        print(f"\n  [GPU{gpu_id}] Channel {ch} starting...")
+    else:
+        print(f"\n  [CPU] Channel {ch} starting...")
 
     try:
-        cp.cuda.Device(gpu_id).use()
+        if DEVICE_MODE == 'gpu' and n_gpus > 0:
+            import cupy as cp
+            cp.cuda.Device(gpu_id).use()
 
         processor = EDFProcessor(backend=EDF_PARAMS['backend'], method='variance')
 
@@ -248,7 +277,10 @@ def process_edf(args):
         qc_path = QC_DIR / f"cyc{CYCLE:02d}_CH{ch}_edf.png"
         save_qc_image(edf_result, qc_path, f"Cycle {CYCLE} CH{ch} EDF ({pct_zero:.1f}% zeros)")
 
-        print(f"  [GPU{gpu_id}] Channel {ch} complete -> {output_file.name}")
+        if DEVICE_MODE == 'gpu':
+            print(f"  [GPU{gpu_id}] Channel {ch} complete -> {output_file.name}")
+        else:
+            print(f"  [CPU] Channel {ch} complete -> {output_file.name}")
 
         # Cleanup
         del stack, stack_filtered, edf_result
@@ -257,7 +289,10 @@ def process_edf(args):
         return ch, True, None
 
     except Exception as e:
-        print(f"  [GPU{gpu_id}] Channel {ch} FAILED: {e}")
+        if DEVICE_MODE == 'gpu':
+            print(f"  [GPU{gpu_id}] Channel {ch} FAILED: {e}")
+        else:
+            print(f"  [CPU] Channel {ch} FAILED: {e}")
         import traceback
         traceback.print_exc()
         return ch, False, str(e)
@@ -267,12 +302,19 @@ def process_edf(args):
 # Process channels
 start_time = time.time()
 
-if n_gpus >= 2 and len(channels) >= 2:
+if DEVICE_MODE == 'cpu':
+    # CPU mode: process channels sequentially
+    print(f"\n[CPU] Processing {len(channels)} channels sequentially")
+    results = [process_edf((ch, 0)) for ch in channels]
+elif n_gpus >= 2 and len(channels) >= 2:
+    # Multi-GPU mode
     print(f"\n[MULTI-GPU] {len(channels)} channels across {n_gpus} GPUs")
     pairs = list(zip(channels, iter_cycle(GPU_IDS)))
     with ThreadPoolExecutor(max_workers=n_gpus) as executor:
         results = list(executor.map(process_edf, pairs))
 else:
+    # Single GPU mode
+    print(f"\n[GPU] Processing {len(channels)} channels on GPU 0")
     results = [process_edf((ch, 0)) for ch in channels]
 
 successful = sum(1 for _, ok, _ in results if ok)

@@ -66,6 +66,31 @@ export QOS_FALLBACK=""
 # Leave fallback values empty to disable automatic fallback retries; jobs will
 # continue using the primary settings and may remain queued per Slurm behavior.
 
+# =============================================================================
+# ACCOUNT CHAIN (checked in order until one succeeds)
+# GPU accounts first, then CPU-only burst accounts for fallback
+# =============================================================================
+# Comma-separated list of accounts to try in order
+# Example: "maigan,clive,maigan-b,clive-b"
+export ACCOUNT_CHAIN=""
+
+# CPU-only accounts (cannot request GPUs)
+# Auto-detected: accounts ending in -b are assumed CPU-only if this is empty
+export CPU_ONLY_ACCOUNTS=""
+
+# CPU-only partition (used with burst accounts)
+export PARTITION_CPU="hpg-default"
+
+# CPU resource adjustments (CPU processing is slower than GPU)
+# Time multiplier: CPU-only processing takes ~5x longer than GPU
+# Memory: CPU doesn't need GPU memory overhead, but needs RAM for data
+export CPU_TIME_MULTIPLIER=5
+export CPU_CPUS_PER_TASK=8
+export CPU_MEM_CORRECTION=16
+export CPU_MEM_STITCH=48
+export CPU_MEM_DECON=48
+export CPU_MEM_EDF=16
+
 # -----------------------------------------------------------------------------
 # ALLOCATION LIMITS (shared allocation - total resources available to you)
 # These are used to automatically calculate safe concurrency levels.
@@ -88,10 +113,16 @@ export CPUS_PER_TASK=4
 export GPUS_PER_NODE=1
 
 # Memory per job (GB) - per processing step
-export MEM_CORRECTION=32
-export MEM_STITCH=64
-export MEM_DECON=96
-export MEM_EDF=32
+# Sizing guide (for 5x5 tile grid, 2048x2048 images):
+#   - Correction: ~8GB actual, 16GB with buffer
+#   - Stitching:  ~24GB actual (holds multiple tiles), 48GB with buffer
+#   - Deconvolution: ~24GB actual + GPU memory, 48GB with buffer
+#   - EDF: ~8GB actual, 16GB with buffer
+# Reduce these for smaller datasets (2x2 mini: use 4/16/16/4)
+export MEM_CORRECTION=16
+export MEM_STITCH=48
+export MEM_DECON=48
+export MEM_EDF=16
 
 # Manual override for max concurrent cycles (optional)
 # Leave empty or set to "auto" for automatic calculation based on allocation limits
@@ -99,10 +130,16 @@ export MEM_EDF=32
 export MAX_CONCURRENT_CYCLES="auto"
 
 # Time limits (HH:MM:SS)
-export TIME_CORRECTION="04:00:00"
-export TIME_STITCH="06:00:00"
-export TIME_DECON="08:00:00"
-export TIME_EDF="02:00:00"
+# Sizing guide (for 5x5 tile grid):
+#   - Correction: ~30min actual, 2hr with buffer
+#   - Stitching:  ~1hr actual, 4hr with buffer
+#   - Deconvolution: ~1hr actual (GPU), 4hr with buffer
+#   - EDF: ~15min actual, 1hr with buffer
+# Reduce these for smaller datasets (2x2 mini: use 00:10:00)
+export TIME_CORRECTION="02:00:00"
+export TIME_STITCH="04:00:00"
+export TIME_DECON="04:00:00"
+export TIME_EDF="01:00:00"
 
 # =============================================================================
 # CONDA ENVIRONMENT

@@ -125,6 +125,149 @@ show_gpu_status() {
 }
 
 # =============================================================================
+# ACCOUNT CHAIN SELECTION
+# =============================================================================
+
+# Check if account is CPU-only (burst account)
+# Returns: 0 if CPU-only, 1 if GPU-enabled
+is_cpu_only_account() {
+    local account=$1
+    local cpu_only="${CPU_ONLY_ACCOUNTS:-}"
+
+    # If CPU_ONLY_ACCOUNTS is set, check against it
+    if [ -n "${cpu_only}" ]; then
+        IFS=',' read -ra CPU_ACCOUNTS <<< "${cpu_only}"
+        for cpu_acct in "${CPU_ACCOUNTS[@]}"; do
+            cpu_acct=$(echo "${cpu_acct}" | xargs)
+            [ "${account}" = "${cpu_acct}" ] && return 0
+        done
+        return 1
+    fi
+
+    # Default heuristic: accounts ending in -b are CPU-only burst accounts
+    [[ "${account}" == *-b ]] && return 0 || return 1
+}
+
+# Get account chain (backward compatible with single ACCOUNT)
+get_account_chain() {
+    if [ -n "${ACCOUNT_CHAIN:-}" ]; then
+        echo "${ACCOUNT_CHAIN}"
+    elif [ -n "${ACCOUNT:-}" ]; then
+        echo "${ACCOUNT}"
+    else
+        echo ""
+    fi
+}
+
+# Select first available account from chain
+# Sets global: SELECTED_ACCOUNT, SELECTED_MODE
+select_account() {
+    local chain
+    chain=$(get_account_chain)
+
+    if [ -z "${chain}" ]; then
+        term_error "No accounts configured. Set ACCOUNT or ACCOUNT_CHAIN in config.sh"
+        return 1
+    fi
+
+    IFS=',' read -ra ACCOUNTS <<< "${chain}"
+
+    # For now, select the first account in the chain
+    # Future enhancement: check account availability with sacctmgr
+    for account in "${ACCOUNTS[@]}"; do
+        account=$(echo "${account}" | xargs)  # Trim whitespace
+
+        if is_cpu_only_account "${account}"; then
+            SELECTED_ACCOUNT="${account}"
+            SELECTED_MODE="cpu"
+            term_info "Selected account: ${account} (CPU-only burst)"
+            return 0
+        else
+            SELECTED_ACCOUNT="${account}"
+            SELECTED_MODE="gpu"
+            term_info "Selected account: ${account} (GPU-enabled)"
+            return 0
+        fi
+    done
+
+    term_error "No available accounts in chain: ${chain}"
+    return 1
+}
+
+# Calculate effective resources based on GPU or CPU mode
+# Sets globals: EFFECTIVE_GPUS, EFFECTIVE_CPUS_PER_TASK, EFFECTIVE_MEM_*, EFFECTIVE_TIME_*
+calculate_resources_for_mode() {
+    local mode=$1
+
+    if [ "${mode}" = "cpu" ]; then
+        # CPU mode: no GPUs, more CPUs, adjusted memory
+        EFFECTIVE_GPUS=0
+        EFFECTIVE_CPUS_PER_TASK=${CPU_CPUS_PER_TASK:-8}
+        EFFECTIVE_MEM_CORRECTION=${CPU_MEM_CORRECTION:-32}
+        EFFECTIVE_MEM_STITCH=${CPU_MEM_STITCH:-48}
+        EFFECTIVE_MEM_DECON=${CPU_MEM_DECON:-64}
+        EFFECTIVE_MEM_EDF=${CPU_MEM_EDF:-24}
+        EFFECTIVE_PARTITION=${PARTITION_CPU:-hpg-default}
+
+        # Apply time multiplier for CPU mode
+        local multiplier=${CPU_TIME_MULTIPLIER:-5}
+        EFFECTIVE_TIME_CORRECTION=$(multiply_time "${TIME_CORRECTION}" "${multiplier}")
+        EFFECTIVE_TIME_STITCH=$(multiply_time "${TIME_STITCH}" "${multiplier}")
+        EFFECTIVE_TIME_DECON=$(multiply_time "${TIME_DECON}" "${multiplier}")
+        EFFECTIVE_TIME_EDF=$(multiply_time "${TIME_EDF}" "${multiplier}")
+
+        term_info "CPU mode resources:"
+        term_info "  CPUs per task: ${EFFECTIVE_CPUS_PER_TASK}"
+        term_info "  Partition: ${EFFECTIVE_PARTITION}"
+        term_info "  Time multiplier: ${multiplier}x"
+    else
+        # GPU mode: use standard settings
+        EFFECTIVE_GPUS=${GPUS_PER_NODE:-1}
+        EFFECTIVE_CPUS_PER_TASK=${CPUS_PER_TASK:-4}
+        EFFECTIVE_MEM_CORRECTION=${MEM_CORRECTION:-32}
+        EFFECTIVE_MEM_STITCH=${MEM_STITCH:-64}
+        EFFECTIVE_MEM_DECON=${MEM_DECON:-96}
+        EFFECTIVE_MEM_EDF=${MEM_EDF:-32}
+        EFFECTIVE_PARTITION=${PARTITION}
+        EFFECTIVE_TIME_CORRECTION=${TIME_CORRECTION}
+        EFFECTIVE_TIME_STITCH=${TIME_STITCH}
+        EFFECTIVE_TIME_DECON=${TIME_DECON}
+        EFFECTIVE_TIME_EDF=${TIME_EDF}
+    fi
+}
+
+# Multiply time string by a factor
+# Usage: multiply_time "04:00:00" 5 -> "20:00:00"
+multiply_time() {
+    local time_str=$1
+    local multiplier=$2
+
+    # Parse HH:MM:SS
+    local hours=$(echo "${time_str}" | cut -d: -f1 | sed 's/^0*//')
+    local mins=$(echo "${time_str}" | cut -d: -f2 | sed 's/^0*//')
+    local secs=$(echo "${time_str}" | cut -d: -f3 | sed 's/^0*//')
+
+    # Handle empty values
+    [ -z "${hours}" ] && hours=0
+    [ -z "${mins}" ] && mins=0
+    [ -z "${secs}" ] && secs=0
+
+    # Calculate total seconds and multiply
+    local total_secs=$(( (hours * 3600 + mins * 60 + secs) * multiplier ))
+
+    # Cap at 7 days (SLURM limit for most queues)
+    local max_secs=$((7 * 24 * 3600))
+    [ ${total_secs} -gt ${max_secs} ] && total_secs=${max_secs}
+
+    # Convert back to HH:MM:SS
+    local new_hours=$((total_secs / 3600))
+    local new_mins=$(((total_secs % 3600) / 60))
+    local new_secs=$((total_secs % 60))
+
+    printf "%02d:%02d:%02d" ${new_hours} ${new_mins} ${new_secs}
+}
+
+# =============================================================================
 # RESOURCE CALCULATION
 # =============================================================================
 
@@ -465,6 +608,10 @@ build_sbatch_cmd_array() {
     local dep_jobid=$6
     local use_partition=$7
     local use_qos=$8
+    local use_account=$9
+    local use_mode=${10:-gpu}
+    local use_cpus=${11:-${CPUS_PER_TASK:-4}}
+    local use_gpus=${12:-${GPUS_PER_NODE:-1}}
 
     local job_name="kintsugi_${step_name}_${PROJECT_NAME}"
 
@@ -481,15 +628,22 @@ build_sbatch_cmd_array() {
     fi
 
     SBATCH_CMD+=(
-        "--account=${ACCOUNT}"
+        "--account=${use_account}"
         "--nodes=1"
         "--ntasks=1"
-        "--cpus-per-task=${CPUS_PER_TASK:-4}"
+        "--cpus-per-task=${use_cpus}"
         "--mem=${mem}gb"
-        "--gpus=${GPUS_PER_NODE:-1}"
+    )
+
+    # Only request GPUs in GPU mode
+    if [ "${use_mode}" = "gpu" ] && [ "${use_gpus}" -gt 0 ]; then
+        SBATCH_CMD+=("--gpus=${use_gpus}")
+    fi
+
+    SBATCH_CMD+=(
         "--time=${time}"
         "--array=${ARRAY_SPEC}%${EFFECTIVE_MAX_CONCURRENT}"
-        "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name}"
+        "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name},KINTSUGI_DEVICE_MODE=${use_mode}"
     )
 
     if [ -n "${dep_jobid}" ]; then
@@ -513,7 +667,7 @@ format_cmd_for_display() {
     printf '%q ' "${SBATCH_CMD[@]}"
 }
 
-# Submit job function with fallback support
+# Submit job function with account chain and fallback support
 submit_job() {
     local step_name=$1
     local script=$2
@@ -528,54 +682,94 @@ submit_job() {
     mkdir -p "${LOG_DIR}"
     mkdir -p "${QC_DIR}/${step_name}"
 
+    # Select account from chain (sets SELECTED_ACCOUNT and SELECTED_MODE)
+    if ! select_account; then
+        term_error "Failed to select account - aborting"
+        return 1
+    fi
+
+    # Calculate effective resources based on mode
+    calculate_resources_for_mode "${SELECTED_MODE}"
+
+    # Get step-specific memory and time based on mode
+    local effective_mem effective_time
+    case ${step_name} in
+        correct)
+            effective_mem=${EFFECTIVE_MEM_CORRECTION}
+            effective_time=${EFFECTIVE_TIME_CORRECTION}
+            ;;
+        stitch)
+            effective_mem=${EFFECTIVE_MEM_STITCH}
+            effective_time=${EFFECTIVE_TIME_STITCH}
+            ;;
+        decon)
+            effective_mem=${EFFECTIVE_MEM_DECON}
+            effective_time=${EFFECTIVE_TIME_DECON}
+            ;;
+        edf)
+            effective_mem=${EFFECTIVE_MEM_EDF}
+            effective_time=${EFFECTIVE_TIME_EDF}
+            ;;
+        *)
+            effective_mem=${mem}
+            effective_time=${time}
+            ;;
+    esac
+
     term_info "Preparing job submission for ${step_name}..."
-    term_info "  Partition: ${PARTITION}, Memory: ${mem}GB, Time: ${time}"
+    term_info "  Account: ${SELECTED_ACCOUNT} (${SELECTED_MODE} mode)"
+    term_info "  Partition: ${EFFECTIVE_PARTITION}, Memory: ${effective_mem}GB, Time: ${effective_time}"
+    if [ "${SELECTED_MODE}" = "gpu" ]; then
+        term_info "  GPUs: ${EFFECTIVE_GPUS}, CPUs: ${EFFECTIVE_CPUS_PER_TASK}"
+    else
+        term_info "  CPUs: ${EFFECTIVE_CPUS_PER_TASK} (no GPUs - CPU-only account)"
+    fi
 
     # Determine which partition to use
-    local use_partition="${PARTITION}"
+    local use_partition="${EFFECTIVE_PARTITION}"
     local use_qos="${QOS}"
     local using_fallback=false
 
-    # Check primary GPU availability and determine which resources to use
-    check_gpu_availability "${PARTITION}"
-    local gpu_check_status=$?
+    # For GPU mode, check availability and potentially fallback
+    if [ "${SELECTED_MODE}" = "gpu" ]; then
+        check_gpu_availability "${use_partition}"
+        local gpu_check_status=$?
 
-    if [ ${gpu_check_status} -eq 1 ]; then
-        # Partition doesn't exist or has no nodes - try fallback
-        term_warn "Primary partition ${PARTITION} not available"
+        if [ ${gpu_check_status} -eq 1 ]; then
+            # Partition doesn't exist or has no nodes - try fallback
+            term_warn "Primary partition ${use_partition} not available"
 
-        # Check if fallback is configured
-        if [ -n "${PARTITION_FALLBACK}" ]; then
-            term_info "Checking fallback partition: ${PARTITION_FALLBACK}..."
-            check_gpu_availability "${PARTITION_FALLBACK}"
-            local fallback_status=$?
-            # Accept fallback if GPUs are available (0) or busy (2)
-            # We only reject if the partition doesn't exist at all (1)
-            if [ ${fallback_status} -eq 0 ] || [ ${fallback_status} -eq 2 ]; then
-                # Fallback partition exists (either available or busy) - use it
-                term_info "Switching to fallback partition"
-                use_partition="${PARTITION_FALLBACK}"
-                use_qos="${QOS_FALLBACK}"
-                using_fallback=true
+            # Check if fallback is configured
+            if [ -n "${PARTITION_FALLBACK}" ]; then
+                term_info "Checking fallback partition: ${PARTITION_FALLBACK}..."
+                check_gpu_availability "${PARTITION_FALLBACK}"
+                local fallback_status=$?
+                # Accept fallback if GPUs are available (0) or busy (2)
+                if [ ${fallback_status} -eq 0 ] || [ ${fallback_status} -eq 2 ]; then
+                    term_info "Switching to fallback partition"
+                    use_partition="${PARTITION_FALLBACK}"
+                    use_qos="${QOS_FALLBACK}"
+                    using_fallback=true
+                else
+                    term_error "Fallback partition ${PARTITION_FALLBACK} also not available"
+                    term_error "No GPU resources available. Aborting submission."
+                    show_gpu_status "${EFFECTIVE_PARTITION}"
+                    return 1
+                fi
             else
-                term_error "Fallback partition ${PARTITION_FALLBACK} also not available"
-                term_error "No GPU resources available. Aborting submission."
-                show_gpu_status "${PARTITION}"
+                term_error "No fallback partition configured and primary partition unavailable. Aborting."
+                term_error "Configure PARTITION_FALLBACK in config.sh to enable fallback."
                 return 1
             fi
-        else
-            term_error "No fallback partition configured and primary partition unavailable. Aborting."
-            term_error "Configure PARTITION_FALLBACK in config.sh to enable fallback."
-            return 1
+        elif [ ${gpu_check_status} -eq 2 ]; then
+            term_info "Primary GPUs are busy but available - job will be queued on ${use_partition}"
         fi
-    elif [ ${gpu_check_status} -eq 2 ]; then
-        # GPUs exist but are busy - queue on primary partition
-        term_info "Primary GPUs are busy but available - job will be queued on ${PARTITION}"
     fi
 
-    # Build command with selected partition configuration
-    build_sbatch_cmd_array "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
-        "${use_partition}" "${use_qos}"
+    # Build command with selected partition configuration and mode
+    build_sbatch_cmd_array "${step_name}" "${script}" "${effective_mem}" "${effective_time}" \
+        "${dep_type}" "${dep_jobid}" "${use_partition}" "${use_qos}" "${SELECTED_ACCOUNT}" \
+        "${SELECTED_MODE}" "${EFFECTIVE_CPUS_PER_TASK}" "${EFFECTIVE_GPUS}"
 
     if [ "${DRY_RUN}" = true ]; then
         # Print to stderr so it's visible (stdout is captured for job ID)
@@ -635,8 +829,9 @@ submit_job() {
         if [ "${using_fallback}" = false ] && [ -n "${PARTITION_FALLBACK}" ]; then
             term_info "Attempting fallback submission to ${PARTITION_FALLBACK}..."
 
-            build_sbatch_cmd_array "${step_name}" "${script}" "${mem}" "${time}" "${dep_type}" "${dep_jobid}" \
-                "${PARTITION_FALLBACK}" "${QOS_FALLBACK}"
+            build_sbatch_cmd_array "${step_name}" "${script}" "${effective_mem}" "${effective_time}" \
+                "${dep_type}" "${dep_jobid}" "${PARTITION_FALLBACK}" "${QOS_FALLBACK}" \
+                "${SELECTED_ACCOUNT}" "${SELECTED_MODE}" "${EFFECTIVE_CPUS_PER_TASK}" "${EFFECTIVE_GPUS}"
 
             local fallback_result
             fallback_result=$("${SBATCH_CMD[@]}" 2>&1)

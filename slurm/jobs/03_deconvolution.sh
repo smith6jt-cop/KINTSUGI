@@ -54,6 +54,10 @@ from Kdecon import decon
 from kintsugi.gpu import cleanup_gpu_memory
 import numpy as np
 
+# Check device mode from environment (set by submit.sh based on account type)
+DEVICE_MODE = os.environ.get('KINTSUGI_DEVICE_MODE', 'gpu')
+print(f"Device mode from environment: {DEVICE_MODE}")
+
 # Get configuration from environment
 CYCLE = int(os.environ.get('SLURM_ARRAY_TASK_ID', 1))
 START_CHANNEL = int(os.environ.get('START_CHANNEL', 1))
@@ -82,22 +86,27 @@ DECON_DIR = DATA_DIR / 'processed' / 'deconvolved'
 DECON_DIR.mkdir(parents=True, exist_ok=True)
 QC_DIR.mkdir(parents=True, exist_ok=True)
 
-# Initialize CUDA properly - let CuPy auto-detect and initialize
-# Don't explicitly set device_id to avoid context conflicts
-try:
-    import cupy as cp
-    # Initialize CUDA context on device 0 (SLURM sets CUDA_VISIBLE_DEVICES)
-    cp.cuda.Device(0).use()
-    # Verify GPU is accessible with a simple operation
-    _ = cp.zeros(1)
-    n_gpus = 1  # SLURM allocates specific GPUs, we see them as device 0
-    GPU_IDS = [0]
-    print(f"CUDA initialized successfully on device 0")
-    print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
-except Exception as e:
-    print(f"WARNING: CUDA initialization failed: {e}")
-    print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
-    print("Falling back to CPU processing")
+# Initialize CUDA if in GPU mode
+if DEVICE_MODE != 'cpu':
+    try:
+        import cupy as cp
+        # Initialize CUDA context on device 0 (SLURM sets CUDA_VISIBLE_DEVICES)
+        cp.cuda.Device(0).use()
+        # Verify GPU is accessible with a simple operation
+        _ = cp.zeros(1)
+        n_gpus = 1  # SLURM allocates specific GPUs, we see them as device 0
+        GPU_IDS = [0]
+        print(f"CUDA initialized successfully on device 0")
+        print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
+    except Exception as e:
+        print(f"WARNING: CUDA initialization failed: {e}")
+        print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
+        print("Falling back to CPU processing")
+        DEVICE_MODE = 'cpu'
+        n_gpus = 0
+        GPU_IDS = []
+else:
+    print("Running in CPU mode (CPU-only burst account)")
     n_gpus = 0
     GPU_IDS = []
 
@@ -106,7 +115,11 @@ print(f"Deconvolution - Cycle {CYCLE}")
 print(f"{'='*60}")
 print(f"Project: {PROJECT_DIR.name}")
 print(f"Channels: {START_CHANNEL}-{END_CHANNEL}")
-print(f"GPUs: {n_gpus} devices")
+print(f"Device mode: {DEVICE_MODE}")
+if DEVICE_MODE == 'gpu':
+    print(f"GPUs: {n_gpus} devices")
+else:
+    print("Running on CPU (burst account)")
 print(f"Output: {OUTPUT_FORMAT}")
 print(f"Voxel size: {XY_VOX}x{XY_VOX}x{Z_VOX} nm")
 print(f"QC output: {QC_DIR}")
@@ -145,7 +158,7 @@ def process_channel(ch):
     try:
         lambda_ex, lambda_em = WAVELENGTHS.get(ch, (560, 575))
 
-        # Don't pass device_id - let decon auto-detect from initialized context
+        # Use device mode from environment (respects account type)
         decon(
             base_dir=str(PROJECT_DIR),
             stitch_dir=str(STITCH_DIR),
@@ -158,7 +171,7 @@ def process_channel(ch):
             tissue_RI=TISSUE_RI,
             damping=0,
             stop_criterion=5.0,
-            device='gpu' if n_gpus > 0 else 'cpu',
+            device=DEVICE_MODE,
             device_id=None,  # Let decon auto-detect
             wavelengths=WAVELENGTHS,
             decon_dir=str(DECON_DIR)
