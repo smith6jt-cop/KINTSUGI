@@ -140,6 +140,96 @@ PROCESSING_STAGES = [
     "analysis",
 ]
 
+# Experiment metadata filename
+EXPERIMENT_CONFIG_FILE = "experiment.json"
+
+
+@dataclass
+class ExperimentConfig:
+    """
+    Experiment metadata and microscope parameters.
+
+    Stored in /meta/experiment.json and used by processing scripts.
+    """
+
+    # Tile grid configuration
+    tile_rows: int = 5
+    tile_cols: int = 5
+    tile_overlap: float = 0.1  # Fraction (0.1 = 10%)
+
+    # Pixel dimensions (nanometers)
+    xy_pixel_size: float = 377.0  # nm per pixel XY
+    z_step_size: float = 1500.0  # nm per z-slice
+
+    # Optical parameters
+    numerical_aperture: float = 0.75
+    tissue_refractive_index: float = 1.44
+    immersion_medium: str = "air"  # air, water, oil
+
+    # Wavelengths per channel: {channel_num: (excitation_nm, emission_nm)}
+    wavelengths: dict[int, tuple[float, float]] = field(default_factory=lambda: {
+        1: (358.0, 461.0),   # DAPI
+        2: (753.0, 775.0),   # Cy7
+        3: (560.0, 575.0),   # TRITC
+        4: (648.0, 668.0),   # Cy5
+    })
+
+    # Data organization
+    channels_per_cycle: int = 4
+    n_cycles: int | None = None  # Auto-detected if None
+    n_zplanes: int | None = None  # Auto-detected if None
+
+    # Stitching parameters
+    ncc_threshold: float = 0.078
+    pou: float = 0.5  # Percentage of overlap uncertainty
+
+    # Deconvolution parameters
+    decon_iterations: int = 25
+    decon_damping: float = 0.0
+    decon_stop_criterion: float = 5.0
+
+    # Metadata
+    microscope: str = ""
+    acquisition_date: str = ""
+    notes: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        data = asdict(self)
+        # Convert wavelengths dict keys to strings for JSON
+        data["wavelengths"] = {str(k): v for k, v in self.wavelengths.items()}
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ExperimentConfig:
+        """Create from dictionary."""
+        # Convert wavelengths keys back to integers
+        if "wavelengths" in data:
+            data["wavelengths"] = {int(k): tuple(v) for k, v in data["wavelengths"].items()}
+        # Filter to valid fields only
+        valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        return cls(**filtered_data)
+
+    def to_wavelengths_string(self) -> str:
+        """Convert wavelengths to config.sh format: '1:358:461,2:753:775,...'"""
+        parts = []
+        for ch in sorted(self.wavelengths.keys()):
+            ex, em = self.wavelengths[ch]
+            parts.append(f"{ch}:{int(ex)}:{int(em)}")
+        return ",".join(parts)
+
+    @classmethod
+    def from_wavelengths_string(cls, wl_str: str) -> dict[int, tuple[float, float]]:
+        """Parse wavelengths from config.sh format."""
+        wavelengths = {}
+        for item in wl_str.split(","):
+            parts = item.split(":")
+            if len(parts) == 3:
+                ch, ex, em = int(parts[0]), float(parts[1]), float(parts[2])
+                wavelengths[ch] = (ex, em)
+        return wavelengths
+
 
 @dataclass
 class ProcessedStageInfo:
@@ -936,6 +1026,13 @@ class KintsugiProject:
         slurm_partition: str | None = None,
         slurm_qos: str | None = None,
         slurm_gpu_type: str | None = None,
+        # Microscope parameters (stored in /meta/experiment.json)
+        tile_rows: int = 5,
+        tile_cols: int = 5,
+        xy_pixel_size: float = 377.0,
+        z_step_size: float = 1500.0,
+        numerical_aperture: float = 0.75,
+        tissue_refractive_index: float = 1.44,
     ) -> KintsugiProject:
         """
         Create a new KINTSUGI project.
@@ -970,6 +1067,18 @@ class KintsugiProject:
             Quality of Service for SLURM.
         slurm_gpu_type : str, optional
             GPU type for SLURM constraints. Auto-detected from nvidia-smi.
+        tile_rows : int
+            Number of tile rows in the acquisition grid (default: 5)
+        tile_cols : int
+            Number of tile columns in the acquisition grid (default: 5)
+        xy_pixel_size : float
+            XY pixel size in nanometers (default: 377)
+        z_step_size : float
+            Z step size in nanometers (default: 1500)
+        numerical_aperture : float
+            Objective numerical aperture (default: 0.75)
+        tissue_refractive_index : float
+            Tissue refractive index (default: 1.44)
 
         Returns
         -------
@@ -1010,6 +1119,16 @@ class KintsugiProject:
                 "metadata_samples": existing_data_report.metadata_samples,
             }
 
+        # Store microscope parameters for experiment config creation
+        config.parameters["microscope"] = {
+            "tile_rows": tile_rows,
+            "tile_cols": tile_cols,
+            "xy_pixel_size": xy_pixel_size,
+            "z_step_size": z_step_size,
+            "numerical_aperture": numerical_aperture,
+            "tissue_refractive_index": tissue_refractive_index,
+        }
+
         # Create directory structure (uses exist_ok=True, never overwrites)
         project.paths.create_all()
 
@@ -1021,7 +1140,7 @@ class KintsugiProject:
         if setup_notebooks:
             project.setup_notebooks()
 
-        # Create default config files
+        # Create default config files (including experiment.json)
         project._create_default_configs()
 
         # Set up SLURM if requested
@@ -1152,6 +1271,242 @@ class KintsugiProject:
         with open(config_file, "w") as f:
             json.dump(data, f, indent=2)
 
+    # =========================================================================
+    # EXPERIMENT CONFIGURATION
+    # =========================================================================
+
+    def get_experiment_config_path(self) -> Path:
+        """Get path to experiment.json file."""
+        return self.paths.meta / EXPERIMENT_CONFIG_FILE
+
+    def load_experiment_config(self) -> ExperimentConfig | None:
+        """
+        Load experiment configuration from /meta/experiment.json.
+
+        Returns
+        -------
+        ExperimentConfig or None
+            Experiment configuration, or None if file doesn't exist
+        """
+        config_path = self.get_experiment_config_path()
+        if not config_path.exists():
+            return None
+
+        try:
+            with open(config_path) as f:
+                data = json.load(f)
+            return ExperimentConfig.from_dict(data)
+        except (json.JSONDecodeError, TypeError, KeyError) as e:
+            print(f"Warning: Could not load experiment config: {e}")
+            return None
+
+    def save_experiment_config(self, config: ExperimentConfig) -> Path:
+        """
+        Save experiment configuration to /meta/experiment.json.
+
+        Parameters
+        ----------
+        config : ExperimentConfig
+            Configuration to save
+
+        Returns
+        -------
+        Path
+            Path to saved file
+        """
+        self.paths.meta.mkdir(parents=True, exist_ok=True)
+        config_path = self.get_experiment_config_path()
+
+        with open(config_path, "w") as f:
+            json.dump(config.to_dict(), f, indent=2)
+
+        return config_path
+
+    def create_experiment_config(
+        self,
+        tile_rows: int = 5,
+        tile_cols: int = 5,
+        xy_pixel_size: float = 377.0,
+        z_step_size: float = 1500.0,
+        numerical_aperture: float = 0.75,
+        tissue_refractive_index: float = 1.44,
+        wavelengths: dict[int, tuple[float, float]] | None = None,
+        auto_detect: bool = True,
+        overwrite: bool = False,
+        **kwargs,
+    ) -> ExperimentConfig:
+        """
+        Create experiment configuration with optional auto-detection.
+
+        Parameters
+        ----------
+        tile_rows, tile_cols : int
+            Tile grid dimensions
+        xy_pixel_size : float
+            XY pixel size in nanometers
+        z_step_size : float
+            Z step size in nanometers
+        numerical_aperture : float
+            Objective numerical aperture
+        tissue_refractive_index : float
+            Tissue refractive index
+        wavelengths : dict, optional
+            Channel wavelengths {channel: (excitation, emission)}
+        auto_detect : bool
+            If True, auto-detect n_cycles and n_zplanes from raw data
+        overwrite : bool
+            If True, overwrite existing config
+        **kwargs
+            Additional ExperimentConfig fields
+
+        Returns
+        -------
+        ExperimentConfig
+            Created configuration
+        """
+        config_path = self.get_experiment_config_path()
+        if config_path.exists() and not overwrite:
+            existing = self.load_experiment_config()
+            if existing:
+                print(f"  Experiment config already exists: {config_path}")
+                return existing
+
+        # Create config with provided parameters
+        # Use default wavelengths if not provided
+        default_wavelengths = {
+            1: (358.0, 461.0),   # DAPI
+            2: (753.0, 775.0),   # Cy7
+            3: (560.0, 575.0),   # TRITC
+            4: (648.0, 668.0),   # Cy5
+        }
+        config = ExperimentConfig(
+            tile_rows=tile_rows,
+            tile_cols=tile_cols,
+            xy_pixel_size=xy_pixel_size,
+            z_step_size=z_step_size,
+            numerical_aperture=numerical_aperture,
+            tissue_refractive_index=tissue_refractive_index,
+            wavelengths=wavelengths if wavelengths is not None else default_wavelengths,
+            **kwargs,
+        )
+
+        # Auto-detect from raw data if requested
+        if auto_detect:
+            cycles = find_raw_cycles(self.paths.raw)
+            if cycles:
+                config.n_cycles = len(cycles)
+                print(f"  Auto-detected {config.n_cycles} cycles")
+
+                # Try to detect z-planes from first cycle
+                first_cycle = cycles[0]
+                import re
+                z_planes = set()
+                for f in first_cycle.glob("*_Z*_CH1.tif"):
+                    match = re.search(r"_Z(\d+)_", f.name)
+                    if match:
+                        z_planes.add(int(match.group(1)))
+                if z_planes:
+                    config.n_zplanes = len(z_planes)
+                    print(f"  Auto-detected {config.n_zplanes} z-planes")
+
+        # Save config
+        self.save_experiment_config(config)
+        print(f"  Created experiment config: {config_path}")
+
+        return config
+
+    def load_channel_names(self) -> dict[int, list[str]] | None:
+        """
+        Load channel names from /meta/CHANNELNAMES.txt.
+
+        Returns
+        -------
+        dict or None
+            Dictionary mapping cycle number to list of channel names,
+            or None if file not found
+        """
+        # Import from Kio if available, otherwise use inline implementation
+        try:
+            from notebooks.Kio import load_channel_names as kio_load_channel_names
+            return kio_load_channel_names(self.paths.meta)
+        except ImportError:
+            pass
+
+        # Inline implementation (simplified)
+        import re
+        meta_dir = self.paths.meta
+        channel_file = None
+
+        # Try to find channel names file
+        for name in ["CHANNELNAMES.txt", "channelnames.txt", "channel_names.txt", "channels.txt"]:
+            candidate = meta_dir / name
+            if candidate.exists():
+                channel_file = candidate
+                break
+
+        if channel_file is None:
+            return None
+
+        # Read and parse file
+        lines = []
+        with open(channel_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    lines.append(line)
+
+        if not lines:
+            return None
+
+        channel_dict = {}
+        first_line = lines[0]
+
+        # Check if cycle-prefixed format
+        if ":" in first_line or "\t" in first_line or (
+            first_line.split(",")[0].strip().isdigit() and len(first_line.split(",")) > 2
+        ):
+            # Cycle-prefixed format
+            for line in lines:
+                try:
+                    if ":" in line:
+                        cycle_str, names_str = line.split(":", 1)
+                        cycle = int(cycle_str.strip())
+                        names = [n.strip() for n in names_str.split(",")]
+                    elif "\t" in line:
+                        parts = line.split("\t")
+                        cycle = int(parts[0].strip())
+                        names = [n.strip() for n in parts[1:]]
+                    else:
+                        parts = line.split(",")
+                        cycle = int(parts[0].strip())
+                        names = [n.strip() for n in parts[1:]]
+                    channel_dict[cycle] = names
+                except (ValueError, IndexError):
+                    continue
+        else:
+            # Simple list format - detect cycles from DAPI-XX pattern
+            current_cycle = 0
+            cycle_channels = []
+            channels_per_cycle = 4
+
+            for line in lines:
+                dapi_match = re.match(r"DAPI[-_]?(\d+)", line, re.IGNORECASE)
+                if dapi_match:
+                    if cycle_channels and current_cycle > 0:
+                        channel_dict[current_cycle] = cycle_channels
+                    current_cycle = int(dapi_match.group(1))
+                    cycle_channels = [line]
+                elif current_cycle > 0:
+                    cycle_channels.append(line)
+                    if len(cycle_channels) == channels_per_cycle:
+                        channel_dict[current_cycle] = cycle_channels
+                        cycle_channels = []
+
+            if cycle_channels and current_cycle > 0:
+                channel_dict[current_cycle] = cycle_channels
+
+        return channel_dict if channel_dict else None
+
     def setup_notebooks(self, overwrite: bool = False) -> list[Path]:
         """
         Copy notebook templates to project directory.
@@ -1262,6 +1617,20 @@ class KintsugiProject:
         params_file = self.paths.configs / "default_parameters.json"
         with open(params_file, "w") as f:
             json.dump(default_params, f, indent=2)
+
+        # Create experiment configuration with auto-detection
+        # Use microscope parameters from project config if available
+        microscope_params = self.config.parameters.get("microscope", {})
+        self.create_experiment_config(
+            tile_rows=microscope_params.get("tile_rows", 5),
+            tile_cols=microscope_params.get("tile_cols", 5),
+            xy_pixel_size=microscope_params.get("xy_pixel_size", 377.0),
+            z_step_size=microscope_params.get("z_step_size", 1500.0),
+            numerical_aperture=microscope_params.get("numerical_aperture", 0.75),
+            tissue_refractive_index=microscope_params.get("tissue_refractive_index", 1.44),
+            auto_detect=True,
+            overwrite=False,
+        )
 
         # Create Claude Code configuration
         self._create_claude_config()

@@ -460,36 +460,221 @@ def generate_slurm_readme(project_name: str, kintsugi_dir: str | Path) -> str:
     str
         Content for README.md file
     """
-    return f"""# SLURM Job Submission
+    return f"""# SLURM Processing Workflow for {project_name}
 
-## Quick Start
+This guide walks you through the complete workflow from raw data to processed images.
 
-1. Edit configuration:
-   ```bash
-   nano slurm/config.sh
-   ```
+---
 
-2. Submit all steps:
-   ```bash
-   kintsugi slurm submit .
-   # Or directly:
-   {kintsugi_dir}/slurm/submit.sh --project .
-   ```
+## Step 1: Prerequisites
 
-3. Monitor jobs:
-   ```bash
-   squeue -u $USER -n "kintsugi_*_{project_name}"
-   ```
+Before starting, ensure you have:
 
-## Configuration
+- [ ] Project created with `kintsugi init --slurm`
+- [ ] SLURM access configured (account, partition)
+- [ ] Raw microscopy data ready to copy
 
-Edit `slurm/config.sh` to set:
-- `START_CYCLE`, `END_CYCLE` - Cycles to process
-- `TILE_ROWS`, `TILE_COLS` - Tile grid dimensions
-- `XY_VOX`, `Z_VOX` - Voxel sizes (nm)
-- `WAVELENGTHS` - Channel wavelengths
+---
 
-## Processing Steps
+## Step 2: Copy Raw Data
+
+Copy your cycle folders to the `data/raw/` directory:
+
+```bash
+# From your data source:
+cp -r /path/to/cyc001 data/raw/
+cp -r /path/to/cyc002 data/raw/
+# ... continue for all cycles
+```
+
+**Naming conventions** (both supported):
+- Short form: `cyc001/`, `cyc002/`, etc.
+- Long form: `cyc001_DAPI_Blank_Blank_Blank/`, etc.
+
+**Expected structure:**
+```
+data/raw/
+├── cyc001/
+│   └── *.tif (tile images)
+├── cyc002/
+│   └── *.tif
+└── ...
+```
+
+---
+
+## Step 3: Create Channel Names File
+
+Create `meta/CHANNELNAMES.txt` with your marker names:
+
+```bash
+nano meta/CHANNELNAMES.txt
+```
+
+**Simple list format** (one marker per line, cycles in order):
+```
+DAPI-01
+Blank
+Blank
+Blank
+DAPI-02
+CD31
+CD8
+CD45
+```
+
+**Cycle-prefixed format** (alternative):
+```
+1: DAPI, Blank, Blank, Blank
+2: DAPI, CD31, CD8, CD45
+```
+
+---
+
+## Step 4: Configure Experiment Metadata
+
+Edit `meta/experiment.json` with your microscope parameters:
+
+```bash
+nano meta/experiment.json
+```
+
+**Key parameters to verify:**
+
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `tile_rows`, `tile_cols` | Tile grid dimensions | 5, 5 |
+| `xy_pixel_size` | XY voxel size (nm) | 377.0 |
+| `z_step_size` | Z step size (nm) | 1500.0 |
+| `numerical_aperture` | Objective NA | 0.75 |
+| `tissue_refractive_index` | Tissue RI | 1.44 |
+| `wavelengths` | Channel wavelengths | See file |
+| `n_cycles` | Number of cycles | Auto-detected |
+| `n_zplanes` | Z-planes per stack | Auto-detected |
+
+---
+
+## Step 5: Review SLURM Configuration (Optional)
+
+The `slurm/config.sh` file contains HPC-specific settings. Most parameters are
+auto-detected, but you may want to review:
+
+```bash
+nano slurm/config.sh
+```
+
+**Common settings to check:**
+- `ACCOUNT` - Your SLURM account
+- `PARTITION` - GPU partition (e.g., hpg-b200)
+- `TIME_*` - Time limits for each step
+- `MEM_*` - Memory allocation
+
+---
+
+## Step 6: Preview Jobs (Recommended)
+
+Before submitting, preview what will run:
+
+```bash
+kintsugi slurm submit . --dry-run
+```
+
+This shows:
+- Which cycles will be processed
+- Job parameters (partition, memory, time)
+- Commands that will execute
+
+**Verify:**
+- [ ] Correct number of cycles detected
+- [ ] Proper tile grid (e.g., 5x5)
+- [ ] Expected wavelengths
+
+---
+
+## Step 7: Submit Processing Jobs
+
+Submit all processing steps:
+
+```bash
+kintsugi slurm submit .
+```
+
+**Options:**
+```bash
+# Submit specific steps only
+kintsugi slurm submit . --steps correction,stitching
+
+# Submit specific cycles
+kintsugi slurm submit . --cycles 1-3
+
+# Submit single step for testing
+kintsugi slurm submit . --steps correction --cycles 1
+```
+
+---
+
+## Step 8: Monitor Progress
+
+**Check job status:**
+```bash
+squeue -u $USER
+# Or filter by project:
+squeue -u $USER -n "kintsugi_*_{project_name}"
+```
+
+**View logs:**
+```bash
+# Find latest run directory
+ls -lt slurm/runs/
+
+# View stdout/stderr
+tail -f slurm/runs/<timestamp>/logs/*.out
+tail -f slurm/runs/<timestamp>/logs/*.err
+```
+
+**Check completion:**
+```bash
+kintsugi slurm status .
+```
+
+---
+
+## Step 9: Review QC Images
+
+After each step completes, review QC outputs:
+
+**Location:** `slurm/runs/<timestamp>/qc/`
+
+| Step | QC Images | What to Check |
+|------|-----------|---------------|
+| Correction | Flatfield images | Smooth illumination profiles |
+| Stitching | Stitched overviews | Tile alignment, no gaps |
+| Deconvolution | Before/after comparisons | Detail enhancement, no artifacts |
+| EDF | Focus projections | Sharp features, proper z-selection |
+
+---
+
+## Step 10: Evaluate Results & Next Steps
+
+**Output locations:**
+
+| Step | Output Directory |
+|------|------------------|
+| Correction | `data/processed/corrected/` |
+| Stitching | `data/processed/stitched/` |
+| Deconvolution | `data/processed/deconvolved/` |
+| EDF | `data/processed/edf/` |
+
+**Next steps:**
+1. Open `3_Signal_Isolation_QC.ipynb` for signal isolation and QC
+2. Use Claude MCP tools for interactive processing assistance
+3. Proceed to segmentation with `4_Segmentation_Analysis.ipynb`
+
+---
+
+## Quick Reference
+
+### Processing Steps
 
 | Step | Script | Description |
 |------|--------|-------------|
@@ -498,11 +683,7 @@ Edit `slurm/config.sh` to set:
 | 3 | `03_deconvolution.sh` | Richardson-Lucy deconvolution |
 | 4 | `04_edf.sh` | Extended depth of focus |
 
-## Outputs
-
-Logs and QC images are saved to `slurm/runs/<timestamp>/`.
-
-## Commands
+### Common Commands
 
 ```bash
 # Submit all steps
@@ -511,16 +692,23 @@ kintsugi slurm submit .
 # Submit specific steps
 kintsugi slurm submit . --steps decon,edf
 
-# Submit for specific cycles
+# Submit specific cycles
 kintsugi slurm submit . --cycles 1-3
 
 # Preview without submitting
 kintsugi slurm submit . --dry-run
+
+# Check status
+kintsugi slurm status .
 ```
 
-## Partition Fallback
+---
 
-If the primary partition (e.g., hpg-b200) is in high demand, configure a fallback:
+## Advanced Configuration
+
+### Partition Fallback
+
+If the primary partition is busy, configure a fallback:
 
 ```bash
 # In slurm/config.sh:
@@ -528,39 +716,35 @@ export PARTITION_FALLBACK="hpg-turin"
 export QOS_FALLBACK=""
 ```
 
-The submission script will:
-1. Check primary partition availability
-2. If unavailable, automatically try the fallback partition
-3. Report clear errors if neither is available
+### Multi-Account GPU/CPU Fallback
 
-## Multi-Account GPU/CPU Fallback
-
-For users with both GPU and CPU-only (burst) accounts, configure an account chain:
+For users with GPU and CPU-only accounts:
 
 ```bash
 # In slurm/config.sh:
 export ACCOUNT_CHAIN="maigan,clive,maigan-b,clive-b"
-export CPU_ONLY_ACCOUNTS="maigan-b,clive-b"  # Optional: auto-detected by -b suffix
+export CPU_ONLY_ACCOUNTS="maigan-b,clive-b"
 export PARTITION_CPU="hpg-default"
 ```
 
-The submission script will:
-1. Try accounts in order from the chain
-2. Automatically detect if account is GPU or CPU-only
-3. Adjust resources (no GPUs, more CPUs, longer time limits) for CPU mode
-4. Set `KINTSUGI_DEVICE_MODE=cpu` in job environment for CPU accounts
+CPU mode automatically adjusts:
+- No GPUs requested
+- More CPUs allocated
+- Extended time limits
 
-CPU mode uses these adjusted settings:
-- `CPU_TIME_MULTIPLIER=5` - Time limits multiplied (CPU is slower)
-- `CPU_CPUS_PER_TASK=8` - More CPUs to compensate
-- `CPU_MEM_*` - Reduced memory (no GPU memory needed)
+---
 
 ## Troubleshooting
 
-- **Job fails immediately**: Check `slurm/runs/*/logs/*.err` for error details
-- **Out of memory**: Increase `MEM_*` values in config.sh
-- **Time limit exceeded**: Increase `TIME_*` values in config.sh
-- **Partition not found**: Verify `PARTITION` setting (hpg-b200, hpg-turin)
-- **Resource unavailable**: Check `sinfo -p hpg-b200` and consider configuring fallback partition
-- **Silent failures**: Run with `--dry-run` first to verify commands
+| Issue | Solution |
+|-------|----------|
+| Job fails immediately | Check `slurm/runs/*/logs/*.err` |
+| Out of memory | Increase `MEM_*` in config.sh |
+| Time limit exceeded | Increase `TIME_*` in config.sh |
+| Partition not found | Verify `PARTITION` setting |
+| Resource unavailable | Configure fallback partition |
+| Wrong parameters | Verify `meta/experiment.json` |
+| Missing channels | Check `meta/CHANNELNAMES.txt` |
+
+**Debug tip:** Always run `--dry-run` first to verify configuration.
 """

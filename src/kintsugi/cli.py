@@ -687,6 +687,13 @@ def slurm_status(project_dir: str):
 @click.option("--slurm-partition", default=None, help="SLURM partition (default: gpu)")
 @click.option("--slurm-qos", default=None, help="SLURM Quality of Service")
 @click.option("--slurm-gpu-type", default=None, help="GPU type for SLURM (auto-detected)")
+# Microscope parameters (stored in /meta/experiment.json)
+@click.option("--tile-rows", type=int, default=5, help="Number of tile rows (default: 5)")
+@click.option("--tile-cols", type=int, default=5, help="Number of tile columns (default: 5)")
+@click.option("--xy-pixel-size", type=float, default=377.0, help="XY pixel size in nm (default: 377)")
+@click.option("--z-step-size", type=float, default=1500.0, help="Z step size in nm (default: 1500)")
+@click.option("--numerical-aperture", type=float, default=0.75, help="Objective NA (default: 0.75)")
+@click.option("--tissue-ri", type=float, default=1.44, help="Tissue refractive index (default: 1.44)")
 def init(
     project_path: str,
     name: str | None,
@@ -698,6 +705,12 @@ def init(
     slurm_partition: str | None,
     slurm_qos: str | None,
     slurm_gpu_type: str | None,
+    tile_rows: int,
+    tile_cols: int,
+    xy_pixel_size: float,
+    z_step_size: float,
+    numerical_aperture: float,
+    tissue_ri: float,
 ):
     """
     Initialize a new KINTSUGI project.
@@ -833,6 +846,13 @@ def init(
             slurm_partition=slurm_partition,
             slurm_qos=slurm_qos,
             slurm_gpu_type=slurm_gpu_type,
+            # Microscope parameters
+            tile_rows=tile_rows,
+            tile_cols=tile_cols,
+            xy_pixel_size=xy_pixel_size,
+            z_step_size=z_step_size,
+            numerical_aperture=numerical_aperture,
+            tissue_refractive_index=tissue_ri,
         )
         console.print("\n[green]Project created successfully![/green]")
 

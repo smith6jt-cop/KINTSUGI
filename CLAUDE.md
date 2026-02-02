@@ -24,6 +24,9 @@ my_project/
 ├── data/
 │   ├── raw/           ← Put your raw images here (cyc001/, cyc002/, etc.)
 │   └── processed/     ← Outputs go here automatically
+├── meta/              ← Experiment metadata
+│   ├── experiment.json    ← Microscope parameters (auto-generated)
+│   └── CHANNELNAMES.txt   ← Channel/marker names (user-provided)
 ├── notebooks/         ← Working copies of processing notebooks
 ├── configs/           ← Processing configuration files
 ├── .claude/           ← Claude Code MCP config (auto-generated)
@@ -31,6 +34,64 @@ my_project/
 ```
 
 The `.claude/settings.local.json` file is **automatically created** with the MCP server configuration.
+
+### Experiment Metadata
+
+The `/meta/experiment.json` file stores microscope and acquisition parameters. It is **auto-generated** during project creation with sensible defaults and auto-detected values (cycles, z-planes).
+
+**Example experiment.json:**
+```json
+{
+  "tile_rows": 5,
+  "tile_cols": 5,
+  "tile_overlap": 0.1,
+  "xy_pixel_size": 377.0,
+  "z_step_size": 1500.0,
+  "numerical_aperture": 0.75,
+  "tissue_refractive_index": 1.44,
+  "wavelengths": {
+    "1": [358.0, 461.0],
+    "2": [753.0, 775.0],
+    "3": [560.0, 575.0],
+    "4": [648.0, 668.0]
+  },
+  "channels_per_cycle": 4,
+  "n_cycles": 7,
+  "n_zplanes": 15
+}
+```
+
+**CLI options** to customize during init:
+```bash
+kintsugi init /path/to/project --name "My Experiment" \
+    --tile-rows 5 --tile-cols 5 \
+    --xy-pixel-size 377 --z-step-size 1500 \
+    --numerical-aperture 0.75 --tissue-ri 1.44
+```
+
+### Channel Names
+
+Create `/meta/CHANNELNAMES.txt` with marker names for each channel. Supports multiple formats:
+
+**Simple list (CODEX format):**
+```
+DAPI-01
+Blank
+Blank
+Blank
+DAPI-02
+CD31
+CD8
+CD45
+```
+
+**Cycle-prefixed format:**
+```
+1: DAPI, Blank, Blank, Blank
+2: DAPI, CD31, CD8, CD45
+```
+
+SLURM scripts and notebooks automatically load channel names from this file.
 
 ### SLURM Job Submission (HPC)
 
@@ -53,6 +114,13 @@ my_project/
 - SLURM account from `SLURM_ACCOUNT` or `SBATCH_ACCOUNT` environment variables
 - GPU type from `nvidia-smi`
 - Conda environment from `CONDA_DEFAULT_ENV`
+
+**Metadata loading**: SLURM job scripts automatically load parameters from:
+1. `/meta/experiment.json` - Microscope parameters (tile grid, pixel sizes, wavelengths)
+2. `/meta/CHANNELNAMES.txt` - Channel/marker names
+3. `slurm/config.sh` environment variables - Fallback if metadata files don't exist
+
+This eliminates the need to manually configure `config.sh` for most parameters.
 
 **Add SLURM to existing project**:
 ```bash

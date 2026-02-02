@@ -16,6 +16,7 @@ python << 'PYTHON_SCRIPT'
 import sys
 import os
 import gc
+import json
 import time
 from glob import glob
 from pathlib import Path
@@ -38,27 +39,76 @@ from kintsugi.kcorrect_gpu import KCorrectGPU
 from kintsugi.stitch_blend import stitch_with_blending
 from kintsugi.gpu import cleanup_gpu_memory
 
-# Get configuration from environment
+# =============================================================================
+# METADATA LOADING
+# =============================================================================
+
+def load_experiment_config(project_dir):
+    """Load experiment configuration from /meta/experiment.json."""
+    config_path = project_dir / 'meta' / 'experiment.json'
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Could not load experiment.json: {e}")
+    return {}
+
+def load_project_config(project_dir):
+    """Load project configuration from kintsugi_project.json."""
+    config_path = project_dir / 'kintsugi_project.json'
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Could not load kintsugi_project.json: {e}")
+    return {}
+
+# Load metadata files
+experiment_config = load_experiment_config(PROJECT_DIR)
+project_config = load_project_config(PROJECT_DIR)
+
+print("=" * 60)
+print("Metadata Loading")
+print("=" * 60)
+if experiment_config:
+    print(f"  Loaded experiment.json")
+else:
+    print(f"  experiment.json not found, using environment defaults")
+
+# Get configuration: experiment.json -> environment variable -> default
 CYCLE = int(os.environ.get('SLURM_ARRAY_TASK_ID', 1))
 START_CHANNEL = int(os.environ.get('START_CHANNEL', 1))
-END_CHANNEL = int(os.environ.get('END_CHANNEL', 4))
+END_CHANNEL = int(os.environ.get('END_CHANNEL',
+    experiment_config.get('channels_per_cycle', 4)))
 OUTPUT_FORMAT = os.environ.get('OUTPUT_FORMAT', 'tiff')
 
-# Tile grid parameters
-TILE_ROWS = int(os.environ.get('TILE_ROWS', 5))
-TILE_COLS = int(os.environ.get('TILE_COLS', 5))
-TILE_OVERLAP = float(os.environ.get('TILE_OVERLAP', 0.1))
+# Tile grid parameters (from experiment.json or environment)
+TILE_ROWS = int(os.environ.get('TILE_ROWS',
+    experiment_config.get('tile_rows', 5)))
+TILE_COLS = int(os.environ.get('TILE_COLS',
+    experiment_config.get('tile_cols', 5)))
+TILE_OVERLAP = float(os.environ.get('TILE_OVERLAP',
+    experiment_config.get('tile_overlap', 0.1)))
 
 # BaSiC correction parameters
 BASIC_FLATFIELD_MIN = 0.1
 BASIC_MAX_ITERATIONS = 500
 BASIC_OPTIMIZATION_TOLERANCE = 1e-6
 
-# Stitching parameters (read from environment or use notebook-tuned defaults)
+# Stitching parameters (from experiment.json or environment)
 OVERLAP_PERCENTAGE = TILE_OVERLAP * 100
-INITIAL_NCC_THRESHOLD = float(os.environ.get('NCC_THRESHOLD', 0.078))
-POU = float(os.environ.get('POU', 0.5))
+INITIAL_NCC_THRESHOLD = float(os.environ.get('NCC_THRESHOLD',
+    experiment_config.get('ncc_threshold', 0.078)))
+POU = float(os.environ.get('POU',
+    experiment_config.get('pou', 0.5)))
 BLEND_SIGMA = 15.0
+
+print(f"  Tile grid: {TILE_ROWS}x{TILE_COLS}")
+print(f"  Tile overlap: {TILE_OVERLAP*100:.0f}%")
+print(f"  NCC threshold: {INITIAL_NCC_THRESHOLD}")
+print("=" * 60)
 
 # Paths
 DATA_DIR = PROJECT_DIR / 'data'

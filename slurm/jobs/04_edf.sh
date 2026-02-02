@@ -39,6 +39,7 @@ export PYTHONPATH="${KINTSUGI_DIR}:${PROJECT_DIR}/notebooks:${PYTHONPATH}"
 python << 'PYTHON_SCRIPT'
 import sys
 import os
+import json
 import time
 import gc
 from pathlib import Path
@@ -55,9 +56,35 @@ from kintsugi.edf import EDFProcessor
 from kintsugi.gpu import cleanup_gpu_memory
 import numpy as np
 
+# =============================================================================
+# METADATA LOADING
+# =============================================================================
+
+def load_experiment_config(project_dir):
+    """Load experiment configuration from /meta/experiment.json."""
+    config_path = project_dir / 'meta' / 'experiment.json'
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Could not load experiment.json: {e}")
+    return {}
+
+# Load metadata
+experiment_config = load_experiment_config(PROJECT_DIR)
+
+print("=" * 60)
+print("Metadata Loading")
+print("=" * 60)
+if experiment_config:
+    print(f"  Loaded experiment.json")
+else:
+    print(f"  experiment.json not found, using environment defaults")
+
 # Check device mode from environment (set by submit.sh based on account type)
 DEVICE_MODE = os.environ.get('KINTSUGI_DEVICE_MODE', 'gpu')
-print(f"Device mode from environment: {DEVICE_MODE}")
+print(f"  Device mode: {DEVICE_MODE}")
 
 # Initialize GPU if in GPU mode
 if DEVICE_MODE != 'cpu':
@@ -67,7 +94,7 @@ if DEVICE_MODE != 'cpu':
         _ = cp.zeros(1)  # Test GPU access
         n_gpus = cp.cuda.runtime.getDeviceCount()
         GPU_IDS = list(range(n_gpus))
-        print(f"CUDA initialized: {n_gpus} GPU(s) available")
+        print(f"  CUDA initialized: {n_gpus} GPU(s) available")
     except Exception as e:
         print(f"WARNING: CUDA initialization failed: {e}")
         print("Falling back to CPU mode")
@@ -75,14 +102,19 @@ if DEVICE_MODE != 'cpu':
         n_gpus = 0
         GPU_IDS = []
 else:
-    print("Running in CPU mode (CPU-only burst account)")
+    print("  Running in CPU mode (CPU-only burst account)")
     n_gpus = 0
     GPU_IDS = []
 
+# Get configuration: experiment.json -> environment variable -> default
 CYCLE = int(os.environ.get('SLURM_ARRAY_TASK_ID', 1))
 START_CHANNEL = int(os.environ.get('START_CHANNEL', 1))
-END_CHANNEL = int(os.environ.get('END_CHANNEL', 4))
+END_CHANNEL = int(os.environ.get('END_CHANNEL',
+    experiment_config.get('channels_per_cycle', 4)))
 OUTPUT_FORMAT = os.environ.get('OUTPUT_FORMAT', 'zarr')
+
+print(f"  Channels: {START_CHANNEL}-{END_CHANNEL}")
+print("=" * 60)
 
 DATA_DIR = PROJECT_DIR / 'data'
 DECON_DIR = DATA_DIR / 'processed' / 'deconvolved'
