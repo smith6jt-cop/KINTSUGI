@@ -67,19 +67,39 @@ STITCH_DIR = DATA_DIR / 'processed' / 'stitched'
 STITCH_DIR.mkdir(parents=True, exist_ok=True)
 QC_DIR.mkdir(parents=True, exist_ok=True)
 
-# Find cycle directory
-cycle_patterns = [f"cyc{CYCLE:03d}", f"cyc{CYCLE:02d}", f"Cyc{CYCLE:02d}"]
-cycle_dir = None
-for pattern in cycle_patterns:
-    test_dir = RAW_DIR / pattern
-    if test_dir.exists():
-        cycle_dir = test_dir
-        break
+# Find cycle directory (supports long-form names like cyc001_reg001_200210_170925)
+def find_cycle_dir(raw_dir, cycle_num):
+    """Find cycle directory supporting both short and long-form names."""
+    # Try glob patterns for long-form names first (e.g., cyc001_reg001_200210_170925)
+    glob_patterns = [
+        f"cyc{cycle_num:03d}_*",  # cyc001_... (3-digit with suffix)
+        f"cyc{cycle_num:02d}_*",  # cyc01_... (2-digit with suffix)
+        f"Cyc{cycle_num:02d}_*",  # Cyc01_... (capitalized)
+    ]
+    for pattern in glob_patterns:
+        matches = list(raw_dir.glob(pattern))
+        if matches:
+            # Return first match (should be unique per cycle)
+            return matches[0]
+
+    # Fallback to exact short-form names (e.g., cyc001, cyc01)
+    exact_patterns = [f"cyc{cycle_num:03d}", f"cyc{cycle_num:02d}", f"Cyc{cycle_num:02d}"]
+    for pattern in exact_patterns:
+        test_dir = raw_dir / pattern
+        if test_dir.exists():
+            return test_dir
+
+    return None
+
+cycle_dir = find_cycle_dir(RAW_DIR, CYCLE)
 
 if cycle_dir is None:
     print(f"ERROR: Cycle directory not found in {RAW_DIR}")
-    print(f"  Tried patterns: {cycle_patterns}")
+    print(f"  Looking for cycle {CYCLE} (tried cyc{CYCLE:03d}*, cyc{CYCLE:02d}*, etc.)")
+    print(f"  Available directories: {[d.name for d in RAW_DIR.iterdir() if d.is_dir()][:10]}")
     sys.exit(1)
+
+print(f"Found cycle directory: {cycle_dir.name}")
 
 # Detect z-planes from first channel
 sample_files = sorted(cycle_dir.glob("*_Z*_CH1.tif"))
