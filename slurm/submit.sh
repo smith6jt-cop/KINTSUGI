@@ -19,6 +19,7 @@ CYCLES_OVERRIDE=""
 PROJECT_DIR=""
 CONFIG_FILE=""
 RUN_ID=""
+USE_BURST=false
 
 # =============================================================================
 # TERMINAL LOGGING
@@ -191,6 +192,45 @@ select_account() {
     done
 
     term_error "No available accounts in chain: ${chain}"
+    return 1
+}
+
+# Get burst QOS name for an account
+# Adds "-b" suffix if not already present
+get_burst_qos() {
+    local account=$1
+    if [[ "${account}" == *-b ]]; then
+        echo "${account}"
+    else
+        echo "${account}-b"
+    fi
+}
+
+# Check if burst QOS exists for current account
+# Returns 0 if burst QOS is available, 1 otherwise
+burst_qos_available() {
+    local burst_qos
+    burst_qos=$(get_burst_qos "${SELECTED_ACCOUNT}")
+
+    if [ "${DRY_RUN}" = true ]; then
+        # In dry run, assume burst is available
+        return 0
+    fi
+
+    # Check if QOS exists using sacctmgr
+    if command -v sacctmgr &> /dev/null; then
+        if sacctmgr show qos "${burst_qos}" -n 2>/dev/null | grep -q "${burst_qos}"; then
+            return 0
+        fi
+    fi
+
+    # Fallback: check if user has access to burst QOS via association
+    if command -v sacctmgr &> /dev/null; then
+        if sacctmgr show assoc where user="${USER}" format=qos -n 2>/dev/null | grep -q "${burst_qos}"; then
+            return 0
+        fi
+    fi
+
     return 1
 }
 
@@ -398,6 +438,8 @@ Options:
   --config FILE       Custom config file (default: PROJECT_DIR/slurm/config.sh)
   --steps STEPS       Comma-separated: correction,stitch,decon,edf,all (default: all)
   --cycles RANGE      Override cycles: '1-7' or '1,2,5' (default: from config)
+  --use-burst         Also submit overflow cycles to burst QOS for faster processing
+                      (burst jobs are preemptible but utilize idle cluster resources)
   --dry-run           Show commands without submitting
   --help              Show this help
 
@@ -410,6 +452,9 @@ Examples:
 
   # Preview without submitting
   $0 --project ~/my_project --dry-run
+
+  # Use burst resources for faster processing (preemptible overflow)
+  $0 --project ~/my_project --use-burst
 
   # Multiple projects (run separately)
   $0 --project /path/to/project1 &
@@ -438,6 +483,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run|-n)
             DRY_RUN=true
+            shift
+            ;;
+        --use-burst|-b)
+            USE_BURST=true
             shift
             ;;
         --help|-h)
@@ -530,6 +579,7 @@ term_info "Cycles:   ${ARRAY_SPEC}"
 term_info "Steps:    ${STEPS}"
 term_info "Format:   ${OUTPUT_FORMAT}"
 term_info "Dry run:  ${DRY_RUN}"
+term_info "Burst:    ${USE_BURST}"
 term_info "------------------------------------------------------------"
 term_info "GPU Configuration:"
 term_info "  Primary partition:  ${PARTITION}"
@@ -537,6 +587,9 @@ if [ -n "${PARTITION_FALLBACK}" ]; then
     term_info "  Fallback partition: ${PARTITION_FALLBACK}"
 else
     term_info "  Fallback partition: (not configured)"
+fi
+if [ "${USE_BURST}" = true ]; then
+    term_info "  Burst partition:    ${PARTITION_BURST:-hpg-default} (preemptible)"
 fi
 term_info "------------------------------------------------------------"
 
@@ -879,11 +932,129 @@ submit_job() {
     return 1
 }
 
+# Submit burst job (preemptible, opportunistic resources)
+# Called after the main allocated job when --use-burst is enabled
+submit_burst_job() {
+    local step_name=$1
+    local script=$2
+    local mem=$3
+    local time=$4
+    local dep_type=$5
+    local dep_jobid=$6
+
+    # Ensure account is selected (may have been cleared after submit_job)
+    if [ -z "${SELECTED_ACCOUNT}" ]; then
+        if ! select_account; then
+            term_warn "Failed to select account for burst job"
+            return 0
+        fi
+    fi
+
+    # Get burst QOS from the primary account (not a -b account)
+    local base_account="${SELECTED_ACCOUNT}"
+    # If current account ends in -b, strip it to get base
+    if [[ "${base_account}" == *-b ]]; then
+        base_account="${base_account%-b}"
+    fi
+
+    local burst_qos
+    burst_qos=$(get_burst_qos "${base_account}")
+
+    # Check if burst QOS is available
+    if ! burst_qos_available; then
+        term_warn "Burst QOS ${burst_qos} not available - skipping burst submission"
+        return 0
+    fi
+
+    local job_name="kintsugi_${step_name}_burst_${PROJECT_NAME}"
+
+    # Burst jobs use GPU mode (can request GPUs on burst, they're just preemptible)
+    local burst_mode="gpu"
+    local burst_gpus="${GPUS_PER_NODE:-1}"
+    local burst_cpus="${CPUS_PER_TASK:-4}"
+
+    # Use default partition for burst (or configured burst partition)
+    local burst_partition="${PARTITION_BURST:-hpg-default}"
+
+    term_info "Submitting BURST job for ${step_name}..."
+    term_info "  Account: ${base_account}, QOS: ${burst_qos}"
+    term_info "  Partition: ${burst_partition} (preemptible)"
+    term_info "  Note: Burst jobs may be preempted and automatically requeued"
+
+    # Build burst sbatch command (similar to regular but with burst QOS and --requeue)
+    SBATCH_CMD=(
+        sbatch
+        "--job-name=${job_name}"
+        "--output=${LOG_DIR}/${step_name}_burst_%A_%a.out"
+        "--error=${LOG_DIR}/${step_name}_burst_%A_%a.err"
+        "--partition=${burst_partition}"
+        "--qos=${burst_qos}"
+        "--account=${base_account}"
+        "--nodes=1"
+        "--ntasks=1"
+        "--cpus-per-task=${burst_cpus}"
+        "--mem=${mem}gb"
+        "--requeue"  # Automatically requeue if preempted
+    )
+
+    # Request GPUs for burst jobs (preemptible but available when cluster is idle)
+    if [ "${burst_gpus}" -gt 0 ]; then
+        SBATCH_CMD+=("--gpus=${burst_gpus}")
+    fi
+
+    SBATCH_CMD+=(
+        "--time=${time}"
+        "--array=${ARRAY_SPEC}%${EFFECTIVE_MAX_CONCURRENT}"
+        "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name},KINTSUGI_DEVICE_MODE=${burst_mode}"
+    )
+
+    if [ -n "${dep_jobid}" ]; then
+        if [[ "${dep_jobid}" =~ ^[0-9]+$ ]]; then
+            SBATCH_CMD+=("--dependency=${dep_type}:${dep_jobid}")
+        fi
+    fi
+
+    SBATCH_CMD+=("${script}")
+
+    if [ "${DRY_RUN}" = true ]; then
+        term_info "DRY RUN - would execute (burst):"
+        echo "  $(printf '%q ' "${SBATCH_CMD[@]}")" >&2
+        echo "DRY_${step_name}_BURST_JOB"
+        return 0
+    fi
+
+    # Submit burst job
+    local result
+    result=$("${SBATCH_CMD[@]}" 2>&1)
+    local exit_code=$?
+
+    if [ ${exit_code} -eq 0 ]; then
+        local jobid
+        jobid=$(echo "${result}" | grep -oP 'Submitted batch job \K[0-9]+' | head -1)
+        if [ -z "${jobid}" ]; then
+            jobid=$(echo "${result}" | grep "Submitted batch job" | head -1 | sed 's/.*Submitted batch job //' | tr -d '[:space:]')
+        fi
+
+        if [ -n "${jobid}" ] && [[ "${jobid}" =~ ^[0-9]+$ ]]; then
+            term_info "Burst job submitted: ${jobid} (preemptible)"
+            echo "${jobid}"
+            return 0
+        fi
+    fi
+
+    term_warn "Burst job submission failed (non-critical): ${result}"
+    return 0  # Don't fail the pipeline if burst submission fails
+}
+
 # Job IDs for dependencies
 JOB_CORRECTION=""
 JOB_STITCH=""
 JOB_DECON=""
 JOB_EDF=""
+JOB_CORRECTION_BURST=""
+JOB_STITCH_BURST=""
+JOB_DECON_BURST=""
+JOB_EDF_BURST=""
 
 # Run steps
 run_step() {
@@ -898,6 +1069,11 @@ run_step() {
                 term_error "Failed to submit correction job - aborting pipeline"
                 exit 1
             fi
+            # Submit burst job if enabled
+            if [ "${USE_BURST}" = true ]; then
+                JOB_CORRECTION_BURST=$(submit_burst_job "correct" "${KINTSUGI_SLURM}/jobs/01_correction.sh" \
+                    "${MEM_CORRECTION}" "${TIME_CORRECTION}" "" "")
+            fi
             ;;
         stitch)
             echo "--- Step 2: Stitching ---"
@@ -906,6 +1082,12 @@ run_step() {
             if [ -z "${JOB_STITCH}" ]; then
                 term_error "Failed to submit stitching job - aborting pipeline"
                 exit 1
+            fi
+            # Submit burst job if enabled (depends on burst correction if it exists)
+            if [ "${USE_BURST}" = true ]; then
+                local burst_dep="${JOB_CORRECTION_BURST:-${JOB_CORRECTION}}"
+                JOB_STITCH_BURST=$(submit_burst_job "stitch" "${KINTSUGI_SLURM}/jobs/02_stitching.sh" \
+                    "${MEM_STITCH}" "${TIME_STITCH}" "afterok" "${burst_dep}")
             fi
             ;;
         decon)
@@ -916,6 +1098,12 @@ run_step() {
                 term_error "Failed to submit deconvolution job - aborting pipeline"
                 exit 1
             fi
+            # Submit burst job if enabled
+            if [ "${USE_BURST}" = true ]; then
+                local burst_dep="${JOB_STITCH_BURST:-${JOB_STITCH}}"
+                JOB_DECON_BURST=$(submit_burst_job "decon" "${KINTSUGI_SLURM}/jobs/03_deconvolution.sh" \
+                    "${MEM_DECON}" "${TIME_DECON}" "afterok" "${burst_dep}")
+            fi
             ;;
         edf)
             echo "--- Step 4: Extended Depth of Focus ---"
@@ -924,6 +1112,12 @@ run_step() {
             if [ -z "${JOB_EDF}" ]; then
                 term_error "Failed to submit EDF job - aborting pipeline"
                 exit 1
+            fi
+            # Submit burst job if enabled
+            if [ "${USE_BURST}" = true ]; then
+                local burst_dep="${JOB_DECON_BURST:-${JOB_DECON}}"
+                JOB_EDF_BURST=$(submit_burst_job "edf" "${KINTSUGI_SLURM}/jobs/04_edf.sh" \
+                    "${MEM_EDF}" "${TIME_EDF}" "afterok" "${burst_dep}")
             fi
             ;;
     esac

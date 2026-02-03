@@ -551,7 +551,15 @@ def slurm_init(
 )
 @click.option("--cycles", "-c", default=None, help="Override cycles: '1-7' or '1,2,5'")
 @click.option("--dry-run", "-n", is_flag=True, help="Show commands without submitting")
-def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool):
+@click.option(
+    "--use-burst",
+    "-b",
+    is_flag=True,
+    help="Also submit to burst QOS for faster processing (preemptible)",
+)
+def slurm_submit(
+    project_dir: str, steps: str, cycles: str | None, dry_run: bool, use_burst: bool
+):
     """
     Submit SLURM jobs for a KINTSUGI project.
 
@@ -566,6 +574,7 @@ def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool
         kintsugi slurm submit . --steps decon     # Just deconvolution
         kintsugi slurm submit . --cycles 1-3      # Specific cycles
         kintsugi slurm submit . --dry-run         # Preview commands
+        kintsugi slurm submit . --use-burst       # Also submit burst jobs
     """
     from pathlib import Path
 
@@ -606,6 +615,9 @@ def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool
 
     if dry_run:
         cmd.append("--dry-run")
+
+    if use_burst:
+        cmd.append("--use-burst")
 
     console.print(f"[bold]Running:[/bold] {' '.join(cmd)}")
     console.print()

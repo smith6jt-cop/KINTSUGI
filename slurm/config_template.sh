@@ -67,23 +67,36 @@ export QOS_FALLBACK=""
 # continue using the primary settings and may remain queued per Slurm behavior.
 
 # =============================================================================
-# ACCOUNT CHAIN (checked in order until one succeeds)
-# GPU accounts first, then CPU-only burst accounts for fallback
+# CONCURRENT GPU + CPU PROCESSING
+# Maximize throughput by running GPU and CPU jobs simultaneously
 # =============================================================================
+# With limited GPUs (typically 2), CPU cores would otherwise sit idle.
+# Configure an account chain with GPU accounts first, then CPU-only burst
+# accounts. Jobs automatically adapt via KINTSUGI_DEVICE_MODE environment
+# variable, using CuPy for GPU or NumPy/SciPy for CPU processing.
+#
+# Example workflow with account chain "maigan,clive,maigan-b":
+#   - Cycles 1-2: GPU jobs on maigan/clive accounts (fast)
+#   - Cycles 3+: CPU jobs on maigan-b burst account (slower but concurrent)
+#   - Result: More cycles processed simultaneously
+#
 # Comma-separated list of accounts to try in order
 # Example: "maigan,clive,maigan-b,clive-b"
 export ACCOUNT_CHAIN=""
 
-# CPU-only accounts (cannot request GPUs)
+# CPU-only accounts (cannot request GPUs, will use CPU processing)
 # Auto-detected: accounts ending in -b are assumed CPU-only if this is empty
 export CPU_ONLY_ACCOUNTS=""
 
-# CPU-only partition (used with burst accounts)
+# CPU-only partition (used with CPU-only burst accounts)
 export PARTITION_CPU="hpg-default"
 
-# CPU resource adjustments (CPU processing is slower than GPU)
-# Time multiplier: CPU-only processing takes ~5x longer than GPU
-# Memory: CPU doesn't need GPU memory overhead, but needs RAM for data
+# Burst partition (used with --use-burst flag for preemptible jobs)
+# Burst jobs can request GPUs but may be preempted when resources are needed
+export PARTITION_BURST="hpg-default"
+
+# CPU resource adjustments (CPU processing is ~5x slower than GPU)
+# Jobs on CPU-only accounts automatically get extended time limits
 export CPU_TIME_MULTIPLIER=5
 export CPU_CPUS_PER_TASK=8
 export CPU_MEM_CORRECTION=16

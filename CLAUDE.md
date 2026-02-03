@@ -195,6 +195,21 @@ KINTSUGI has two distinct processing modes with different resource utilization s
 
 This allows processing more cycles simultaneously: 2 on GPU + N on CPU cores.
 
+**Using burst resources** (`--use-burst` flag):
+Burst QOS provides access to idle cluster resources but jobs are preemptible. Use burst for faster processing when the cluster has spare capacity:
+
+```bash
+kintsugi slurm submit . --use-burst              # All steps with burst
+kintsugi slurm submit . --steps decon --use-burst # Specific step with burst
+```
+
+When `--use-burst` is enabled:
+1. Primary jobs are submitted to allocated QOS (guaranteed, higher priority)
+2. Duplicate jobs are submitted to burst QOS (preemptible, uses idle resources)
+3. Burst jobs include `--requeue` flag for automatic requeue if preempted
+4. SLURM scheduler prioritizes allocated jobs; burst runs on spare capacity
+5. If both allocated and burst jobs complete the same cycle, one is redundant (harmless)
+
 ## Development Workspace
 
 Use the VS Code multi-root workspace (`kintsugi-dev.code-workspace`) which combines:
