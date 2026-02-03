@@ -69,6 +69,9 @@ def load_project_config(project_dir):
 experiment_config = load_experiment_config(PROJECT_DIR)
 project_config = load_project_config(PROJECT_DIR)
 
+# Check device mode from environment (set by submit.sh based on account type)
+DEVICE_MODE = os.environ.get('KINTSUGI_DEVICE_MODE', 'gpu')
+
 print("=" * 60)
 print("Metadata Loading")
 print("=" * 60)
@@ -76,6 +79,7 @@ if experiment_config:
     print(f"  Loaded experiment.json")
 else:
     print(f"  experiment.json not found, using environment defaults")
+print(f"  Device mode: {DEVICE_MODE}")
 
 # Get configuration: experiment.json -> environment variable -> default
 CYCLE = int(os.environ.get('SLURM_ARRAY_TASK_ID', 1))
@@ -109,6 +113,24 @@ print(f"  Tile grid: {TILE_ROWS}x{TILE_COLS}")
 print(f"  Tile overlap: {TILE_OVERLAP*100:.0f}%")
 print(f"  NCC threshold: {INITIAL_NCC_THRESHOLD}")
 print("=" * 60)
+
+# Initialize GPU with fallback to CPU
+if DEVICE_MODE != 'cpu':
+    try:
+        import cupy as cp
+        # Initialize CUDA context on device 0 (SLURM sets CUDA_VISIBLE_DEVICES)
+        cp.cuda.Device(0).use()
+        # Verify GPU is accessible with a simple operation
+        _ = cp.zeros(1)
+        print(f"CUDA initialized successfully on device 0")
+        print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
+    except Exception as e:
+        print(f"WARNING: CUDA initialization failed: {e}")
+        print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES', 'not set')}")
+        print("Falling back to CPU processing")
+        DEVICE_MODE = 'cpu'
+else:
+    print("Running in CPU mode (CPU-only burst account)")
 
 # Paths
 DATA_DIR = PROJECT_DIR / 'data'
@@ -254,8 +276,9 @@ def process_zplane(cycle, channel, zplane, device_id=0):
     dtype_max = np.iinfo(tiles.dtype).max if np.issubdtype(tiles.dtype, np.integer) else 1.0
     tiles_float = tiles.astype(np.float64) / dtype_max
 
-    # BaSiC illumination correction
-    corrector = KCorrectGPU(use_gpu=True, verbose=False, device_id=device_id)
+    # BaSiC illumination correction (use GPU if available)
+    use_gpu = (DEVICE_MODE == 'gpu')
+    corrector = KCorrectGPU(use_gpu=use_gpu, verbose=False, device_id=device_id if use_gpu else None)
     flatfield, darkfield = corrector.fit(
         tiles_float,
         if_darkfield=True,
@@ -285,7 +308,7 @@ def process_zplane(cycle, channel, zplane, device_id=0):
             overlap_percentage=OVERLAP_PERCENTAGE,
             pou=POU,
             max_cores=4,
-            use_gpu=True
+            use_gpu=use_gpu
         )
         result_df.to_pickle(str(pkl_path))
     elif ch1_pkl.exists():

@@ -679,9 +679,6 @@ def slurm_status(project_dir: str):
 @click.option(
     "--force", "-f", is_flag=True, help="Skip confirmation prompts and directory scanning"
 )
-@click.option(
-    "--adopt-data", is_flag=True, help="Automatically organize existing data into project structure"
-)
 @click.option("--slurm", is_flag=True, help="Initialize SLURM job submission support")
 @click.option("--slurm-account", help="HPC account for SLURM (auto-detected if not provided)")
 @click.option("--slurm-partition", default=None, help="SLURM partition (default: gpu)")
@@ -699,7 +696,6 @@ def init(
     name: str | None,
     description: str,
     force: bool,
-    adopt_data: bool,
     slurm: bool,
     slurm_account: str | None,
     slurm_partition: str | None,
@@ -732,26 +728,54 @@ def init(
     project_path = Path(project_path).resolve()
     config_file = project_path / "kintsugi_project.json"
 
-    # Fast path: refresh existing project assets from the current repo when --force is used
-    if config_file.exists() and force:
-        console.print(f"\n[bold]Updating existing project:[/bold] {project_path}")
+    # Handle existing projects
+    if config_file.exists():
         project = KintsugiProject.load(project_path)
-        # Always use the current installed repo for refresh
-        project._kintsugi_path = project._detect_kintsugi_path()
-        project.config.kintsugi_path = str(project._kintsugi_path)
-        project.paths.create_all()
-        project.setup_notebooks(overwrite=True)
-        project._create_claude_config()
-        project._create_vscode_config()
-        if slurm:
+        slurm_dir = project_path / "slurm"
+
+        if force:
+            # Fast path: refresh all assets from the current repo
+            console.print(f"\n[bold]Updating existing project:[/bold] {project_path}")
+            project._kintsugi_path = project._detect_kintsugi_path()
+            project.config.kintsugi_path = str(project._kintsugi_path)
+            project.paths.create_all()
+            project.setup_notebooks(overwrite=True)
+            project._create_claude_config()
+            project._create_vscode_config()
+            if slurm:
+                project.setup_slurm(
+                    account=slurm_account,
+                    partition=slurm_partition,
+                    qos=slurm_qos,
+                    gpu_type=slurm_gpu_type,
+                )
+            project.save()
+            console.print("\n[green]Project updated from KINTSUGI templates.[/green]")
+            return
+
+        # Check if SLURM was requested but not set up
+        if slurm and not slurm_dir.exists():
+            console.print(f"\n[bold]Project exists:[/bold] {project_path}")
+            console.print("[yellow]SLURM support not configured. Adding now...[/yellow]")
             project.setup_slurm(
                 account=slurm_account,
                 partition=slurm_partition,
                 qos=slurm_qos,
                 gpu_type=slurm_gpu_type,
             )
-        project.save()
-        console.print("\n[green]Project updated from KINTSUGI templates.[/green]")
+            project.save()
+            console.print("\n[green]SLURM support added to existing project.[/green]")
+            return
+
+        # Project exists, no special action needed
+        console.print(f"\n[bold]Project already exists:[/bold] {project_path}")
+        if slurm_dir.exists():
+            console.print("[dim]SLURM support is already configured.[/dim]")
+        else:
+            console.print(
+                "[dim]Use --slurm to add SLURM support, or run: kintsugi slurm init .[/dim]"
+            )
+        console.print("[dim]Use --force to refresh notebooks and configs from KINTSUGI.[/dim]")
         return
 
     try:
@@ -765,16 +789,44 @@ def init(
             console.print(f"\n[bold]Scanning directory:[/bold] {project_path}")
             report = scan_existing_data(project_path)
 
+        # Track which processed stages to delete (if any)
+        stages_to_delete: list[str] = []
+
         if report.has_data:
+            # Build data summary based on raw vs processed
+            summary_lines = []
+
+            if report.has_raw_data:
+                summary_lines.append(
+                    f"[green]Raw data:[/green] {report.raw_image_count} images "
+                    f"({report.raw_size_mb:.1f} MB)"
+                )
+                if report.raw_cycle_folders:
+                    summary_lines.append(
+                        f"  Cycles: {', '.join(report.raw_cycle_folders[:10])}"
+                        + ("..." if len(report.raw_cycle_folders) > 10 else "")
+                    )
+
+            if report.has_processed_data:
+                summary_lines.append(
+                    f"[yellow]Processed data:[/yellow] {report.processed_size_mb:.1f} MB"
+                )
+                for stage, count in report.processed_stages.items():
+                    summary_lines.append(f"  {stage}: {count} files")
+
+            # Determine panel style based on data type
+            if report.has_processed_data:
+                panel_title = "Existing Processed Data Found"
+                panel_style = "yellow"
+            else:
+                panel_title = "Raw Data Found"
+                panel_style = "green"
+
             console.print(
                 Panel(
-                    f"[yellow]Existing data detected![/yellow]\n\n"
-                    f"Image files: {report.image_count}\n"
-                    f"Total size: {report.total_size_mb:.1f} MB\n"
-                    f"Cycle folders: {', '.join(report.cycle_folders) if report.cycle_folders else 'None'}\n"
-                    f"Filename patterns: {', '.join(report.filename_patterns[:5]) if report.filename_patterns else 'None'}",
-                    title="Data Protection Warning",
-                    border_style="yellow",
+                    "\n".join(summary_lines),
+                    title=panel_title,
+                    border_style=panel_style,
                 )
             )
 
@@ -810,29 +862,86 @@ def init(
                     )
                 console.print(meta_table)
 
-            console.print(
-                "\n[bold green]SAFETY GUARANTEE:[/bold green] "
-                "No existing files will be deleted or overwritten."
-            )
-
             if not force:
-                # Ask user to confirm
-                console.print("\n[bold]Options:[/bold]")
-                console.print("  1. Continue - Create project structure around existing data")
-                console.print("  2. Adopt - Move existing data into data/raw/ folder")
-                console.print("  3. Cancel - Exit without making changes")
+                # Different options depending on what data exists
+                if report.has_processed_data:
+                    # Processed data exists - offer delete or keep options
+                    console.print("\n[bold]Options:[/bold]")
+                    console.print(
+                        "  1. Delete processed - Remove all processed data and start fresh"
+                    )
+                    console.print(
+                        "  2. Keep processed - Initialize project keeping existing processed data"
+                    )
+                    console.print("  3. Cancel - Exit without making changes")
 
-                choice = click.prompt(
-                    "\nSelect option",
-                    type=click.Choice(["1", "2", "3", "continue", "adopt", "cancel"]),
-                    default="1",
-                )
+                    choice = click.prompt(
+                        "\nSelect option",
+                        type=click.Choice(["1", "2", "3", "delete", "keep", "cancel"]),
+                        default="2",
+                    )
 
-                if choice in ["3", "cancel"]:
-                    console.print("[yellow]Cancelled. No changes made.[/yellow]")
-                    return
+                    if choice in ["3", "cancel"]:
+                        console.print("[yellow]Cancelled. No changes made.[/yellow]")
+                        return
 
-                adopt_data = choice in ["2", "adopt"]
+                    if choice in ["1", "delete"]:
+                        # Ask which stages to delete
+                        stages = list(report.processed_stages.keys())
+                        if len(stages) == 1:
+                            stages_to_delete = stages
+                            console.print(
+                                f"[yellow]Will delete {stages[0]} data after project creation.[/yellow]"
+                            )
+                        else:
+                            console.print(
+                                "\n[bold]Select stages to delete (comma-separated, or 'all'):[/bold]"
+                            )
+                            for i, stage in enumerate(stages, 1):
+                                count = report.processed_stages[stage]
+                                console.print(f"  {i}. {stage} ({count} files)")
+
+                            stage_choice = click.prompt(
+                                "\nStages to delete",
+                                default="all",
+                            )
+
+                            if stage_choice.lower() == "all":
+                                stages_to_delete = stages
+                            else:
+                                # Parse comma-separated list of numbers or names
+                                for item in stage_choice.split(","):
+                                    item = item.strip()
+                                    if item.isdigit():
+                                        idx = int(item) - 1
+                                        if 0 <= idx < len(stages):
+                                            stages_to_delete.append(stages[idx])
+                                    elif item in stages:
+                                        stages_to_delete.append(item)
+
+                            if stages_to_delete:
+                                console.print(
+                                    f"[yellow]Will delete: {', '.join(stages_to_delete)}[/yellow]"
+                                )
+                else:
+                    # Only raw data - simple continue/cancel
+                    console.print(
+                        "\n[bold green]Raw data found in expected location.[/bold green] "
+                        "Project structure will be created around it."
+                    )
+                    console.print("\n[bold]Options:[/bold]")
+                    console.print("  1. Continue - Create project structure")
+                    console.print("  2. Cancel - Exit without making changes")
+
+                    choice = click.prompt(
+                        "\nSelect option",
+                        type=click.Choice(["1", "2", "continue", "cancel"]),
+                        default="1",
+                    )
+
+                    if choice in ["2", "cancel"]:
+                        console.print("[yellow]Cancelled. No changes made.[/yellow]")
+                        return
 
         # Create the project
         KintsugiProject.create(
@@ -840,7 +949,6 @@ def init(
             name=name,
             description=description,
             existing_data_report=report,
-            adopt_existing_data=adopt_data,
             slurm=slurm,
             slurm_account=slurm_account,
             slurm_partition=slurm_partition,
@@ -854,6 +962,19 @@ def init(
             numerical_aperture=numerical_aperture,
             tissue_refractive_index=tissue_ri,
         )
+
+        # Delete processed stages if requested
+        if stages_to_delete:
+            import shutil
+
+            processed_dir = project_path / "data" / "processed"
+            for stage in stages_to_delete:
+                stage_dir = processed_dir / stage
+                if stage_dir.exists():
+                    console.print(f"  Deleting {stage}...")
+                    shutil.rmtree(stage_dir)
+            console.print("[green]Processed data deleted.[/green]")
+
         console.print("\n[green]Project created successfully![/green]")
 
         # Remind about Claude Code
@@ -892,15 +1013,52 @@ def scan(directory: str, depth: int, samples: int):
         console.print("[yellow]No image data found.[/yellow]")
         return
 
-    # Summary panel
+    # Build summary based on raw vs processed data
+    summary_lines = []
+
+    if report.has_raw_data:
+        summary_lines.append(
+            f"[green]Raw data:[/green] {report.raw_image_count} images "
+            f"({report.raw_size_mb:.1f} MB)"
+        )
+        if report.raw_cycle_folders:
+            cycles_str = ", ".join(report.raw_cycle_folders[:10])
+            if len(report.raw_cycle_folders) > 10:
+                cycles_str += f"... (+{len(report.raw_cycle_folders) - 10})"
+            summary_lines.append(f"  Cycles: {cycles_str}")
+
+    if report.has_processed_data:
+        summary_lines.append(
+            f"[yellow]Processed data:[/yellow] {report.processed_size_mb:.1f} MB"
+        )
+        for stage, count in report.processed_stages.items():
+            summary_lines.append(f"  {stage}: {count} files")
+
+    # Add overall totals
+    summary_lines.append("")
+    summary_lines.append(f"Total: {report.image_count} image files ({report.total_size_mb:.1f} MB)")
+    if report.filename_patterns:
+        summary_lines.append(
+            f"Patterns: {', '.join(report.filename_patterns[:5])}"
+            + ("..." if len(report.filename_patterns) > 5 else "")
+        )
+
+    # Determine panel style
+    if report.has_processed_data:
+        panel_title = "Data Summary (Raw + Processed)"
+        panel_style = "yellow"
+    elif report.has_raw_data:
+        panel_title = "Data Summary (Raw)"
+        panel_style = "green"
+    else:
+        panel_title = "Data Summary"
+        panel_style = "blue"
+
     console.print(
         Panel(
-            f"Image files: {report.image_count}\n"
-            f"Total size: {report.total_size_mb:.1f} MB\n"
-            f"Cycle folders: {', '.join(report.cycle_folders) if report.cycle_folders else 'None'}\n"
-            f"Filename patterns: {', '.join(report.filename_patterns[:5]) if report.filename_patterns else 'None'}",
-            title="Data Summary",
-            border_style="blue",
+            "\n".join(summary_lines),
+            title=panel_title,
+            border_style=panel_style,
         )
     )
 

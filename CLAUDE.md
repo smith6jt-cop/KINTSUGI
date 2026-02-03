@@ -93,6 +93,29 @@ CD45
 
 SLURM scripts and notebooks automatically load channel names from this file.
 
+### Project Initialization Behavior
+
+When running `kintsugi init` on a directory with existing data, the command intelligently handles different scenarios:
+
+**Raw data only** (in `data/raw/`):
+- Shows data summary with cycle count
+- Options: Continue or Cancel
+- Raw data stays in place; project structure is created around it
+
+**Processed data exists** (in `data/processed/`):
+- Shows breakdown by processing stage (stitched, deconvolved, edf, etc.)
+- Options: Delete processed data, Keep processed data, or Cancel
+- If deleting, can select which stages to remove
+
+**Existing project** (has `kintsugi_project.json`):
+- If `--slurm` requested but not configured: Automatically adds SLURM
+- Otherwise: Shows status and suggests `--force` to refresh templates
+
+**Scanning data**:
+```bash
+kintsugi scan /path/to/directory   # Preview what init will find
+```
+
 ### SLURM Job Submission (HPC)
 
 For HPC clusters with SLURM, add job submission support during project creation:
@@ -107,7 +130,7 @@ my_project/
 └── slurm/
     ├── config.sh      ← Pre-populated with auto-detected HPC settings
     ├── jobs/          ← Symlink to KINTSUGI job scripts
-    └── README.md      ← Quick-start guide
+    └── README.md      ← Complete 10-step workflow guide
 ```
 
 **Auto-detection**: The system automatically detects:
@@ -122,9 +145,10 @@ my_project/
 
 This eliminates the need to manually configure `config.sh` for most parameters.
 
-**Add SLURM to existing project**:
+**Add SLURM to existing project** (two equivalent methods):
 ```bash
-kintsugi slurm init /path/to/project
+kintsugi init /path/to/project --slurm    # Auto-detects existing project, adds SLURM
+kintsugi slurm init /path/to/project      # Explicit SLURM-only command
 ```
 
 **Submit jobs**:
@@ -139,6 +163,37 @@ kintsugi slurm submit . --dry-run                   # Preview commands
 ```bash
 kintsugi slurm status .
 ```
+
+### Processing Modes: Notebooks vs SLURM
+
+KINTSUGI has two distinct processing modes with different resource utilization strategies:
+
+| Mode | Context | GPU Policy | CPU Policy | Rationale |
+|------|---------|------------|------------|-----------|
+| **Notebook** | Interactive, user watching | GPU required, no fallback | Not used | Quality-first; user can intervene if GPU unavailable |
+| **SLURM** | Headless batch processing | GPU preferred | CPU concurrent | Maximize throughput; use ALL available resources |
+
+**Notebook Processing (Interactive)**:
+- GPU is **required** - fails loudly if unavailable
+- User is present to diagnose and fix GPU issues
+- Quality parameters are non-negotiable (e.g., BaSiC iterations=500)
+- See `gpu-quality-priority` skill for details
+
+**SLURM Processing (Headless)**:
+- Maximizes throughput by running GPU and CPU jobs **concurrently**
+- With only 2 GPUs available, CPU cores would otherwise sit idle
+- Account chain: GPU accounts tried first, CPU-only burst accounts as overflow
+- Jobs automatically adapt via `KINTSUGI_DEVICE_MODE` environment variable
+- Quality parameters remain unchanged - only the compute device differs
+
+**How concurrent GPU/CPU works**:
+1. `submit.sh` detects account type (GPU-enabled vs CPU-only burst)
+2. Sets `KINTSUGI_DEVICE_MODE=gpu` or `KINTSUGI_DEVICE_MODE=cpu`
+3. Job scripts (02_stitching.sh, 03_deconvolution.sh, 04_edf.sh) read this variable
+4. Processing uses appropriate backend (CuPy for GPU, NumPy/SciPy for CPU)
+5. CPU jobs run 5x longer (automatic time multiplier) but free up GPU queue
+
+This allows processing more cycles simultaneously: 2 on GPU + N on CPU cores.
 
 ## Development Workspace
 

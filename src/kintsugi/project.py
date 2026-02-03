@@ -69,6 +69,15 @@ class ExistingDataReport:
     metadata_samples: list[dict[str, Any]] = field(default_factory=list)
     filename_patterns: list[str] = field(default_factory=list)
 
+    # Separate tracking for raw vs processed data
+    has_raw_data: bool = False
+    has_processed_data: bool = False
+    raw_image_count: int = 0
+    raw_size_mb: float = 0.0
+    raw_cycle_folders: list[str] = field(default_factory=list)
+    processed_stages: dict[str, int] = field(default_factory=dict)  # stage_name -> file_count
+    processed_size_mb: float = 0.0
+
     def summary(self) -> str:
         """Generate a human-readable summary."""
         lines = []
@@ -76,10 +85,23 @@ class ExistingDataReport:
             lines.append("No existing data found.")
             return "\n".join(lines)
 
-        lines.append(f"Found {self.image_count} image files ({self.total_size_mb:.1f} MB total)")
+        # Report raw data
+        if self.has_raw_data:
+            lines.append(f"Raw data: {self.raw_image_count} images ({self.raw_size_mb:.1f} MB)")
+            if self.raw_cycle_folders:
+                lines.append(f"  Cycles: {', '.join(self.raw_cycle_folders)}")
 
-        if self.cycle_folders:
-            lines.append(f"Cycle folders detected: {', '.join(self.cycle_folders)}")
+        # Report processed data
+        if self.has_processed_data:
+            lines.append(f"Processed data: {self.processed_size_mb:.1f} MB")
+            for stage, count in self.processed_stages.items():
+                lines.append(f"  {stage}: {count} files")
+
+        # Legacy summary for backwards compatibility
+        if not self.has_raw_data and not self.has_processed_data:
+            lines.append(f"Found {self.image_count} image files ({self.total_size_mb:.1f} MB total)")
+            if self.cycle_folders:
+                lines.append(f"Cycle folders detected: {', '.join(self.cycle_folders)}")
 
         if self.filename_patterns:
             lines.append(f"Filename patterns: {', '.join(self.filename_patterns[:5])}")
@@ -541,6 +563,9 @@ def scan_existing_data(
     """
     Scan a directory for existing data files.
 
+    Differentiates between raw data (in data/raw/) and processed data
+    (in data/processed/).
+
     Parameters
     ----------
     directory : str or Path
@@ -565,10 +590,24 @@ def scan_existing_data(
 
     image_files = []
     other_files = []
-    cycle_pattern = re.compile(r"^cyc\d+$|^cycle\d+$|^Cycle\d+$", re.IGNORECASE)
+    raw_images = []
+    processed_images: dict[str, list[Path]] = {}  # stage -> files
+    cycle_pattern = re.compile(r"^cyc\d+", re.IGNORECASE)  # Matches cyc001, cyc001_DAPI_..., etc.
     filename_bases = set()
 
-    def scan_dir(path: Path, depth: int = 0):
+    # Define expected directory structure
+    raw_dir = directory / "data" / "raw"
+    processed_dir = directory / "data" / "processed"
+
+    def is_image_file(path: Path) -> bool:
+        """Check if file is an image based on extension."""
+        suffix = path.suffix.lower()
+        if path.name.lower().endswith(".ome.tif") or path.name.lower().endswith(".ome.tiff"):
+            suffix = ".ome.tif"
+        return suffix in IMAGE_EXTENSIONS
+
+    def scan_dir(path: Path, depth: int = 0, location: str = "other"):
+        """Scan directory, tracking location (raw, processed stage, or other)."""
         if depth > max_depth:
             return
         try:
@@ -576,34 +615,89 @@ def scan_existing_data(
                 if item.is_dir():
                     # Check for cycle folder pattern
                     if cycle_pattern.match(item.name):
+                        if location == "raw":
+                            report.raw_cycle_folders.append(item.name)
                         report.cycle_folders.append(item.name)
-                    scan_dir(item, depth + 1)
-                elif item.is_file():
-                    # Check file extension
-                    suffix = item.suffix.lower()
-                    # Handle .ome.tif specially
-                    if item.name.lower().endswith(".ome.tif") or item.name.lower().endswith(
-                        ".ome.tiff"
-                    ):
-                        suffix = ".ome.tif"
 
-                    if suffix in IMAGE_EXTENSIONS:
+                    # Determine location for subdirectory
+                    sub_location = location
+                    if location == "processed_root":
+                        # Inside data/processed/, subdirs are processing stages
+                        if item.name in PROCESSING_STAGES:
+                            sub_location = f"processed_{item.name}"
+                        else:
+                            sub_location = "processed_other"
+
+                    scan_dir(item, depth + 1, sub_location)
+                elif item.is_file():
+                    if is_image_file(item):
                         image_files.append(item)
                         # Extract filename pattern (remove numbers)
                         base = re.sub(r"\d+", "#", item.stem)
                         filename_bases.add(base)
-                    elif suffix not in {".pyc", ".log", ".json", ".md", ".txt", ".gitignore"}:
+
+                        # Track by location
+                        if location == "raw":
+                            raw_images.append(item)
+                        elif location.startswith("processed_"):
+                            stage = location.replace("processed_", "")
+                            if stage not in processed_images:
+                                processed_images[stage] = []
+                            processed_images[stage].append(item)
+                    elif item.suffix.lower() not in {
+                        ".pyc",
+                        ".log",
+                        ".json",
+                        ".md",
+                        ".txt",
+                        ".gitignore",
+                    }:
                         other_files.append(item)
         except PermissionError:
             pass
 
-    scan_dir(directory)
+    # Scan raw data directory
+    if raw_dir.exists():
+        scan_dir(raw_dir, depth=0, location="raw")
 
+    # Scan processed data directory
+    if processed_dir.exists():
+        scan_dir(processed_dir, depth=0, location="processed_root")
+
+    # Scan root directory for loose files (not in data/ structure)
+    # This handles legacy layouts or files that haven't been organized
+    for item in directory.iterdir():
+        if item.is_dir() and item.name not in {"data", "meta", "notebooks", "slurm", ".claude", ".vscode", ".git", "__pycache__", "configs"}:
+            # Check for cycle folders at root level (legacy layout)
+            if cycle_pattern.match(item.name):
+                report.cycle_folders.append(item.name)
+            scan_dir(item, depth=1, location="other")
+        elif item.is_file() and is_image_file(item):
+            image_files.append(item)
+
+    # Populate report
     report.image_files = image_files
     report.image_count = len(image_files)
     report.other_files = other_files
     report.has_data = len(image_files) > 0 or len(other_files) > 0
     report.filename_patterns = sorted(filename_bases)[:10]
+
+    # Raw data stats
+    report.has_raw_data = len(raw_images) > 0
+    report.raw_image_count = len(raw_images)
+    try:
+        report.raw_size_mb = sum(f.stat().st_size for f in raw_images) / (1024 * 1024)
+    except (OSError, PermissionError):
+        pass
+
+    # Processed data stats
+    report.has_processed_data = len(processed_images) > 0
+    report.processed_stages = {stage: len(files) for stage, files in processed_images.items()}
+    try:
+        all_processed = [f for files in processed_images.values() for f in files]
+        report.processed_size_mb = sum(f.stat().st_size for f in all_processed) / (1024 * 1024)
+    except (OSError, PermissionError):
+        pass
 
     # Calculate total size
     try:
@@ -613,10 +707,12 @@ def scan_existing_data(
 
     # Sort cycle folders naturally
     report.cycle_folders = sorted(set(report.cycle_folders))
+    report.raw_cycle_folders = sorted(set(report.raw_cycle_folders))
 
-    # Extract metadata from sample images
-    if image_files and sample_count > 0:
-        sample_files = image_files[: min(sample_count, len(image_files))]
+    # Extract metadata from sample images (prefer raw images)
+    sample_source = raw_images if raw_images else image_files
+    if sample_source and sample_count > 0:
+        sample_files = sample_source[: min(sample_count, len(sample_source))]
         for img_path in sample_files:
             try:
                 metadata = extract_image_metadata(img_path)
@@ -1020,7 +1116,6 @@ class KintsugiProject:
         kintsugi_path: str | Path | None = None,
         setup_notebooks: bool = True,
         existing_data_report: ExistingDataReport | None = None,
-        adopt_existing_data: bool = False,
         slurm: bool = False,
         slurm_account: str | None = None,
         slurm_partition: str | None = None,
@@ -1054,9 +1149,6 @@ class KintsugiProject:
             Whether to copy notebook templates
         existing_data_report : ExistingDataReport, optional
             Pre-scanned data report (avoids re-scanning)
-        adopt_existing_data : bool
-            If True and existing data is found, automatically organize it
-            into the project structure (move to data/raw/)
         slurm : bool
             If True, set up SLURM job submission infrastructure
         slurm_account : str, optional
@@ -1132,10 +1224,6 @@ class KintsugiProject:
         # Create directory structure (uses exist_ok=True, never overwrites)
         project.paths.create_all()
 
-        # Handle existing data adoption
-        if adopt_existing_data and existing_data_report.has_data:
-            project._adopt_existing_data(existing_data_report)
-
         # Copy notebooks if requested
         if setup_notebooks:
             project.setup_notebooks()
@@ -1176,15 +1264,19 @@ class KintsugiProject:
 
         if existing_data_report.has_data:
             print("Existing data detected:")
-            print(f"  {existing_data_report.image_count} image files")
-            if existing_data_report.cycle_folders:
-                print(f"  Cycles: {', '.join(existing_data_report.cycle_folders)}")
+            if existing_data_report.has_raw_data:
+                print(f"  Raw: {existing_data_report.raw_image_count} images")
+                if existing_data_report.raw_cycle_folders:
+                    print(f"  Cycles: {', '.join(existing_data_report.raw_cycle_folders)}")
+            if existing_data_report.has_processed_data:
+                print(f"  Processed: {existing_data_report.processed_size_mb:.1f} MB")
+                for stage, count in existing_data_report.processed_stages.items():
+                    print(f"    {stage}: {count} files")
             print()
 
         print("Next steps:")
-        if existing_data_report.has_data and not adopt_existing_data:
-            print("  1. Review existing data locations")
-            print("  2. Move/copy raw images to data/raw/ if needed")
+        if existing_data_report.has_raw_data:
+            print("  1. Raw data found - ready to process")
         else:
             print("  1. Copy raw images to data/raw/")
         print("  2. Open folder in VS Code: code .")
