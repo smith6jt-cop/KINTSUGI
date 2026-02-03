@@ -17,6 +17,16 @@ from scipy.spatial import cKDTree
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 
+# Check if cv2 is available for NLM tests
+try:
+    import cv2
+
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+
+requires_cv2 = pytest.mark.skipif(not HAS_CV2, reason="OpenCV (cv2) not available")
+
 # Import original implementations
 from kintsugi.denoise.patch_based import (
     _dct_2d,
@@ -504,6 +514,7 @@ class TestBM3DLiteKDTree:
             assert result.dtype == dtype, f"Expected {dtype}, got {result.dtype}"
 
 
+@requires_cv2
 class TestNLMOpenCV:
     """Tests for NLM OpenCV replacement."""
 
@@ -615,6 +626,7 @@ class TestScaling:
 
         print(f"\nBM3D-lite KD-tree {size}x{size}: {elapsed:.3f}s")
 
+    @requires_cv2
     @pytest.mark.parametrize("size", [128, 256, 512])
     def test_nlm_opencv_scaling(self, size):
         """Test NLM OpenCV scaling with image size."""

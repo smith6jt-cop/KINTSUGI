@@ -218,6 +218,9 @@ filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::FutureWarning",
 ]
+# Enable pytest-asyncio for async test support
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 # Coverage configuration
 [tool.coverage.run]
