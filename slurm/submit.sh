@@ -779,9 +779,17 @@ build_sbatch_cmd_array() {
         SBATCH_CMD+=("--gpus=${use_gpus}")
     fi
 
+    # Use appropriate array limit based on job mode
+    local array_limit
+    if [ "${use_mode}" = "gpu" ]; then
+        array_limit=${GPU_SLOTS:-${EFFECTIVE_MAX_CONCURRENT}}
+    else
+        array_limit=${CPU_SLOTS:-${EFFECTIVE_MAX_CONCURRENT}}
+    fi
+
     SBATCH_CMD+=(
         "--time=${time}"
-        "--array=${ARRAY_SPEC}%${EFFECTIVE_MAX_CONCURRENT}"
+        "--array=${ARRAY_SPEC}%${array_limit}"
         "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name},KINTSUGI_DEVICE_MODE=${use_mode}"
     )
 
@@ -1154,9 +1162,12 @@ submit_burst_job() {
         SBATCH_CMD+=("--gpus=${burst_gpus}")
     fi
 
+    # Burst jobs are GPU jobs, use GPU_SLOTS limit
+    local burst_array_limit=${GPU_SLOTS:-${EFFECTIVE_MAX_CONCURRENT}}
+
     SBATCH_CMD+=(
         "--time=${time}"
-        "--array=${ARRAY_SPEC}%${EFFECTIVE_MAX_CONCURRENT}"
+        "--array=${ARRAY_SPEC}%${burst_array_limit}"
         "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name},KINTSUGI_DEVICE_MODE=${burst_mode}"
     )
 
@@ -1267,7 +1278,7 @@ submit_cpu_job() {
         "--mem=${cpu_mem}gb"
         "--time=${cpu_time}"
         "--requeue"
-        "--array=${ARRAY_SPEC}%${EFFECTIVE_MAX_CONCURRENT}"
+        "--array=${ARRAY_SPEC}%${CPU_SLOTS:-${EFFECTIVE_MAX_CONCURRENT}}"
         "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name},KINTSUGI_DEVICE_MODE=cpu"
     )
 
