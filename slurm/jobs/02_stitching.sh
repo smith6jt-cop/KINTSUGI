@@ -202,6 +202,39 @@ print(f"Tiles: {TILE_ROWS}x{TILE_COLS} = {n_tiles}")
 print(f"Overlap: {TILE_OVERLAP*100:.0f}%")
 print(f"QC output: {QC_DIR}")
 
+# =============================================================================
+# SKIP-EXISTING CHECK
+# =============================================================================
+def check_cycle_complete(stitch_dir, cycle, start_ch, end_ch, n_zplanes):
+    """Check if cycle output already exists and is complete."""
+    cycle_out = stitch_dir / f"cyc{cycle:02d}"
+    if not cycle_out.exists():
+        return False, "output directory missing"
+
+    for ch in range(start_ch, end_ch + 1):
+        ch_dir = cycle_out / f"CH{ch}"
+        if not ch_dir.exists():
+            return False, f"CH{ch} directory missing"
+
+        # Check for expected z-plane files
+        tif_files = list(ch_dir.glob("*.tif"))
+        if len(tif_files) < n_zplanes:
+            return False, f"CH{ch} has {len(tif_files)}/{n_zplanes} z-planes"
+
+    return True, "complete"
+
+# Check if this cycle is already processed
+is_complete, status = check_cycle_complete(STITCH_DIR, CYCLE, START_CHANNEL, END_CHANNEL, n_zplanes)
+if is_complete:
+    print(f"\n{'='*60}")
+    print(f"SKIP: Cycle {CYCLE} already processed ({status})")
+    print(f"{'='*60}")
+    print(f"Output exists: {STITCH_DIR / f'cyc{CYCLE:02d}'}")
+    print("To reprocess, delete the output directory first.")
+    sys.exit(0)
+else:
+    print(f"\nCycle {CYCLE} needs processing: {status}")
+
 # Generate row/col indices for snake pattern
 rows = []
 cols = []

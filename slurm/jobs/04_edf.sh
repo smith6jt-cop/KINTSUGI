@@ -159,6 +159,34 @@ print(f"Output: {EDF_DIR}")
 print(f"QC output: {QC_DIR}")
 print(f"EDF params: z exclusion enabled, quality gate enabled")
 
+# =============================================================================
+# SKIP-EXISTING CHECK
+# =============================================================================
+def check_cycle_complete(edf_dir, cycle, start_ch, end_ch):
+    """Check if EDF output already exists and is complete."""
+    cycle_out = edf_dir / f"cyc{cycle:02d}"
+    if not cycle_out.exists():
+        return False, "output directory missing"
+
+    for ch in range(start_ch, end_ch + 1):
+        edf_file = cycle_out / f"CH{ch}_edf.tif"
+        if not edf_file.exists():
+            return False, f"CH{ch}_edf.tif missing"
+
+    return True, "complete"
+
+# Check if this cycle is already processed
+is_complete, status = check_cycle_complete(EDF_DIR, CYCLE, START_CHANNEL, END_CHANNEL)
+if is_complete:
+    print(f"\n{'='*60}")
+    print(f"SKIP: Cycle {CYCLE} EDF already complete ({status})")
+    print(f"{'='*60}")
+    print(f"Output exists: {EDF_DIR / f'cyc{CYCLE:02d}'}")
+    print("To reprocess, delete the output directory first.")
+    sys.exit(0)
+else:
+    print(f"\nCycle {CYCLE} needs EDF processing: {status}")
+
 channels = list(range(START_CHANNEL, END_CHANNEL + 1))
 
 def load_stack_parallel(tiff_files):

@@ -170,6 +170,39 @@ print(f"Output: {OUTPUT_FORMAT}")
 print(f"Voxel size: {XY_VOX}x{XY_VOX}x{Z_VOX} nm")
 print(f"QC output: {QC_DIR}")
 
+# =============================================================================
+# SKIP-EXISTING CHECK
+# =============================================================================
+def check_cycle_complete(decon_dir, cycle, start_ch, end_ch):
+    """Check if deconvolution output already exists and is complete."""
+    cycle_out = decon_dir / f"cyc{cycle:02d}"
+    if not cycle_out.exists():
+        return False, "output directory missing"
+
+    for ch in range(start_ch, end_ch + 1):
+        ch_dir = cycle_out / f"CH{ch}"
+        if not ch_dir.exists():
+            return False, f"CH{ch} directory missing"
+
+        # Check for at least one output file
+        tif_files = list(ch_dir.glob("*.tif"))
+        if len(tif_files) == 0:
+            return False, f"CH{ch} has no output files"
+
+    return True, "complete"
+
+# Check if this cycle is already processed
+is_complete, status = check_cycle_complete(DECON_DIR, CYCLE, START_CHANNEL, END_CHANNEL)
+if is_complete:
+    print(f"\n{'='*60}")
+    print(f"SKIP: Cycle {CYCLE} deconvolution already complete ({status})")
+    print(f"{'='*60}")
+    print(f"Output exists: {DECON_DIR / f'cyc{CYCLE:02d}'}")
+    print("To reprocess, delete the output directory first.")
+    sys.exit(0)
+else:
+    print(f"\nCycle {CYCLE} needs deconvolution: {status}")
+
 channels = list(range(START_CHANNEL, END_CHANNEL + 1))
 results = []
 
