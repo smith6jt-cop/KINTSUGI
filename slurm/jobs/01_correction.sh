@@ -5,8 +5,8 @@
 # This script is kept for backward compatibility but simply passes through.
 # =============================================================================
 
-# Get task ID with default for non-array job context
-TASK_ID="${SLURM_ARRAY_TASK_ID:-0}"
+# Get task ID - CYCLE can be passed via --export or derived from SLURM_ARRAY_TASK_ID
+TASK_ID="${CYCLE:-${SLURM_ARRAY_TASK_ID:-0}}"
 
 echo "============================================================"
 echo "Illumination Correction - Cycle ${TASK_ID}"

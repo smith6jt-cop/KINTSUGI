@@ -82,7 +82,8 @@ else:
 print(f"  Device mode: {DEVICE_MODE}")
 
 # Get configuration: experiment.json -> environment variable -> default
-CYCLE = int(os.environ.get('SLURM_ARRAY_TASK_ID', 1))
+# CYCLE can be passed via --export or derived from SLURM_ARRAY_TASK_ID
+CYCLE = int(os.environ.get('CYCLE', os.environ.get('SLURM_ARRAY_TASK_ID', 1)))
 START_CHANNEL = int(os.environ.get('START_CHANNEL', 1))
 END_CHANNEL = int(os.environ.get('END_CHANNEL',
     experiment_config.get('channels_per_cycle', 4)))
