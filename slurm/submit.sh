@@ -1362,7 +1362,7 @@ run_step() {
         stitch)
             echo "--- Step 2: Stitching ---"
             JOB_STITCH=$(submit_job "stitch" "${KINTSUGI_SLURM}/jobs/02_stitching.sh" \
-                "${MEM_STITCH}" "${TIME_STITCH}" "afterok" "${JOB_CORRECTION}")
+                "${MEM_STITCH}" "${TIME_STITCH}" "aftercorr" "${JOB_CORRECTION}")
             if [ -z "${JOB_STITCH}" ]; then
                 term_error "Failed to submit stitching job - aborting pipeline"
                 exit 1
@@ -1370,18 +1370,18 @@ run_step() {
             # Submit concurrent CPU job (depends on CPU correction if it exists)
             local cpu_dep="${JOB_CORRECTION_CPU:-${JOB_CORRECTION}}"
             JOB_STITCH_CPU=$(submit_cpu_job "stitch" "${KINTSUGI_SLURM}/jobs/02_stitching.sh" \
-                "${MEM_STITCH}" "${TIME_STITCH}" "afterok" "${cpu_dep}")
+                "${MEM_STITCH}" "${TIME_STITCH}" "aftercorr" "${cpu_dep}")
             # Submit burst job if enabled (depends on burst correction if it exists)
             if [ "${USE_BURST}" = true ]; then
                 local burst_dep="${JOB_CORRECTION_BURST:-${JOB_CORRECTION}}"
                 JOB_STITCH_BURST=$(submit_burst_job "stitch" "${KINTSUGI_SLURM}/jobs/02_stitching.sh" \
-                    "${MEM_STITCH}" "${TIME_STITCH}" "afterok" "${burst_dep}")
+                    "${MEM_STITCH}" "${TIME_STITCH}" "aftercorr" "${burst_dep}")
             fi
             ;;
         decon)
             echo "--- Step 3: Deconvolution ---"
             JOB_DECON=$(submit_job "decon" "${KINTSUGI_SLURM}/jobs/03_deconvolution.sh" \
-                "${MEM_DECON}" "${TIME_DECON}" "afterok" "${JOB_STITCH}")
+                "${MEM_DECON}" "${TIME_DECON}" "aftercorr" "${JOB_STITCH}")
             if [ -z "${JOB_DECON}" ]; then
                 term_error "Failed to submit deconvolution job - aborting pipeline"
                 exit 1
@@ -1389,18 +1389,18 @@ run_step() {
             # Submit concurrent CPU job
             local cpu_dep="${JOB_STITCH_CPU:-${JOB_STITCH}}"
             JOB_DECON_CPU=$(submit_cpu_job "decon" "${KINTSUGI_SLURM}/jobs/03_deconvolution.sh" \
-                "${MEM_DECON}" "${TIME_DECON}" "afterok" "${cpu_dep}")
+                "${MEM_DECON}" "${TIME_DECON}" "aftercorr" "${cpu_dep}")
             # Submit burst job if enabled
             if [ "${USE_BURST}" = true ]; then
                 local burst_dep="${JOB_STITCH_BURST:-${JOB_STITCH}}"
                 JOB_DECON_BURST=$(submit_burst_job "decon" "${KINTSUGI_SLURM}/jobs/03_deconvolution.sh" \
-                    "${MEM_DECON}" "${TIME_DECON}" "afterok" "${burst_dep}")
+                    "${MEM_DECON}" "${TIME_DECON}" "aftercorr" "${burst_dep}")
             fi
             ;;
         edf)
             echo "--- Step 4: Extended Depth of Focus ---"
             JOB_EDF=$(submit_job "edf" "${KINTSUGI_SLURM}/jobs/04_edf.sh" \
-                "${MEM_EDF}" "${TIME_EDF}" "afterok" "${JOB_DECON}")
+                "${MEM_EDF}" "${TIME_EDF}" "aftercorr" "${JOB_DECON}")
             if [ -z "${JOB_EDF}" ]; then
                 term_error "Failed to submit EDF job - aborting pipeline"
                 exit 1
@@ -1408,12 +1408,12 @@ run_step() {
             # Submit concurrent CPU job
             local cpu_dep="${JOB_DECON_CPU:-${JOB_DECON}}"
             JOB_EDF_CPU=$(submit_cpu_job "edf" "${KINTSUGI_SLURM}/jobs/04_edf.sh" \
-                "${MEM_EDF}" "${TIME_EDF}" "afterok" "${cpu_dep}")
+                "${MEM_EDF}" "${TIME_EDF}" "aftercorr" "${cpu_dep}")
             # Submit burst job if enabled
             if [ "${USE_BURST}" = true ]; then
                 local burst_dep="${JOB_DECON_BURST:-${JOB_DECON}}"
                 JOB_EDF_BURST=$(submit_burst_job "edf" "${KINTSUGI_SLURM}/jobs/04_edf.sh" \
-                    "${MEM_EDF}" "${TIME_EDF}" "afterok" "${burst_dep}")
+                    "${MEM_EDF}" "${TIME_EDF}" "aftercorr" "${burst_dep}")
             fi
             ;;
     esac
