@@ -62,7 +62,7 @@ term_error() { term_log ERROR "$@"; }
 # =============================================================================
 
 # Check if GPU resources are available in a partition
-# Returns: 0 if available, 1 if partition invalid, 2 if resources busy
+# Returns: 0 if idle GPUs available, 1 if partition invalid, 2 if resources busy
 check_gpu_availability() {
     local partition=$1
 
@@ -79,36 +79,36 @@ check_gpu_availability() {
 
     term_info "Checking GPU availability on partition ${partition}..."
 
-    # Query SLURM for available nodes in the partition
-    local available_info
-    available_info=$(sinfo -p "${partition}" -N -o "%N %G %t" 2>/dev/null | grep -E "(idle|mix)" || true)
+    # Check if partition exists and get idle node count
+    # Format: NODES(A/I/O/T) where I = idle nodes
+    local partition_info
+    partition_info=$(sinfo -p "${partition}" -h -o "%F" 2>/dev/null | head -1)
 
-    if [ -n "${available_info}" ]; then
-        local available_nodes=$(echo "${available_info}" | wc -l)
-        term_info "Found ${available_nodes} node(s) available/mixed on ${partition}"
+    if [ -z "${partition_info}" ]; then
+        term_error "Partition ${partition} not found or has no nodes"
+        return 1
+    fi
+
+    # Extract idle count from A/I/O/T format (second field)
+    local idle_nodes
+    idle_nodes=$(echo "${partition_info}" | cut -d'/' -f2)
+
+    if [ "${idle_nodes}" -gt 0 ] 2>/dev/null; then
+        term_info "Found ${idle_nodes} idle node(s) on ${partition}"
         return 0
     fi
 
-    # Check queue depth for this partition
+    # No idle nodes - check queue depth
     local queue_count=0
     if command -v squeue &> /dev/null; then
         queue_count=$(squeue -p "${partition}" -h 2>/dev/null | wc -l || echo "0")
 
         if [ "${queue_count}" -gt 10 ]; then
-            term_warn "High queue depth (${queue_count} jobs) on ${partition} - jobs may wait"
+            term_warn "High queue depth (${queue_count} jobs) on ${partition}"
         fi
     fi
 
-    # Check if partition exists at all
-    local total_nodes
-    total_nodes=$(sinfo -p "${partition}" -N -o "%N" 2>/dev/null | wc -l || echo "0")
-
-    if [ "${total_nodes}" -eq 0 ]; then
-        term_error "Partition ${partition} not found or has no nodes"
-        return 1
-    fi
-
-    term_warn "All nodes on ${partition} appear busy - job will be queued"
+    term_warn "No idle nodes on ${partition} (0 idle, ${queue_count} jobs queued) - partition busy"
     return 2
 }
 
@@ -123,6 +123,34 @@ show_gpu_status() {
     term_info "Current node status on partition ${partition}:"
     sinfo -p "${partition}" -N -o "  %N %G %t %C" 2>/dev/null | head -10 >&2 || \
         echo "  No node info available" >&2
+}
+
+# =============================================================================
+# TIME UTILITIES
+# =============================================================================
+
+# Apply time multiplier to a time string (HH:MM:SS)
+# Usage: apply_time_multiplier "02:00:00" 5 -> "10:00:00"
+apply_time_multiplier() {
+    local time_str=$1
+    local multiplier=${2:-1}
+
+    # Parse HH:MM:SS
+    local hours minutes seconds
+    IFS=':' read -r hours minutes seconds <<< "${time_str}"
+
+    # Convert to total seconds
+    local total_seconds=$(( (10#${hours} * 3600) + (10#${minutes} * 60) + 10#${seconds} ))
+
+    # Apply multiplier
+    total_seconds=$(( total_seconds * multiplier ))
+
+    # Convert back to HH:MM:SS
+    hours=$(( total_seconds / 3600 ))
+    minutes=$(( (total_seconds % 3600) / 60 ))
+    seconds=$(( total_seconds % 60 ))
+
+    printf "%02d:%02d:%02d" ${hours} ${minutes} ${seconds}
 }
 
 # =============================================================================
@@ -209,8 +237,14 @@ get_burst_qos() {
 # Check if burst QOS exists for current account
 # Returns 0 if burst QOS is available, 1 otherwise
 burst_qos_available() {
+    local account_to_check="${1:-${SELECTED_ACCOUNT:-${ACCOUNT:-}}}"
+
+    if [ -z "${account_to_check}" ]; then
+        return 1
+    fi
+
     local burst_qos
-    burst_qos=$(get_burst_qos "${SELECTED_ACCOUNT}")
+    burst_qos=$(get_burst_qos "${account_to_check}")
 
     if [ "${DRY_RUN}" = true ]; then
         # In dry run, assume burst is available
@@ -219,14 +253,18 @@ burst_qos_available() {
 
     # Check if QOS exists using sacctmgr
     if command -v sacctmgr &> /dev/null; then
-        if sacctmgr show qos "${burst_qos}" -n 2>/dev/null | grep -q "${burst_qos}"; then
+        local qos_list
+        qos_list=$(sacctmgr show qos format=name -n 2>/dev/null || true)
+        if [ -n "${qos_list}" ] && echo "${qos_list}" | grep -q "^${burst_qos}$"; then
             return 0
         fi
     fi
 
     # Fallback: check if user has access to burst QOS via association
     if command -v sacctmgr &> /dev/null; then
-        if sacctmgr show assoc where user="${USER}" format=qos -n 2>/dev/null | grep -q "${burst_qos}"; then
+        local assoc_qos
+        assoc_qos=$(sacctmgr show assoc where user="${USER}" format=qos -n 2>/dev/null || true)
+        if [ -n "${assoc_qos}" ] && echo "${assoc_qos}" | grep -q "${burst_qos}"; then
             return 0
         fi
     fi
@@ -311,8 +349,9 @@ multiply_time() {
 # RESOURCE CALCULATION
 # =============================================================================
 
-# Calculate optimal max concurrent cycles based on allocation limits
-# Sets COMPUTED_MAX_CONCURRENT as output (global)
+# Calculate optimal max concurrent jobs based on allocation limits
+# Uses a dual-pool architecture: GPU slots + CPU slots = total concurrent
+# Sets COMPUTED_MAX_CONCURRENT, GPU_SLOTS, CPU_SLOTS as output (globals)
 calculate_max_concurrent() {
     local cpus_per_task=${CPUS_PER_TASK:-4}
     local gpus_per_node=${GPUS_PER_NODE:-1}
@@ -320,33 +359,72 @@ calculate_max_concurrent() {
     local alloc_mem=${ALLOC_MEM:-600}
     local alloc_gpus=${ALLOC_GPUS:-2}
 
-    # Find max memory requirement across all steps
-    local max_mem=${MEM_DECON:-96}
-    [ "${MEM_STITCH:-64}" -gt "${max_mem}" ] && max_mem=${MEM_STITCH:-64}
-    [ "${MEM_CORRECTION:-32}" -gt "${max_mem}" ] && max_mem=${MEM_CORRECTION:-32}
-    [ "${MEM_EDF:-32}" -gt "${max_mem}" ] && max_mem=${MEM_EDF:-32}
+    # CPU job resource requirements
+    local cpu_cpus=${CPU_CPUS_PER_TASK:-8}
+    local cpu_mem=${CPU_MEM_DECON:-48}
 
-    # Calculate limits from each resource
-    local max_by_cpu=$((alloc_cpus / cpus_per_task))
-    local max_by_mem=$((alloc_mem / max_mem))
-    local max_by_gpu=$((alloc_gpus / gpus_per_node))
+    # Find max memory requirement for GPU jobs across all steps
+    local gpu_max_mem=${MEM_DECON:-96}
+    [ "${MEM_STITCH:-64}" -gt "${gpu_max_mem}" ] && gpu_max_mem=${MEM_STITCH:-64}
+    [ "${MEM_CORRECTION:-32}" -gt "${gpu_max_mem}" ] && gpu_max_mem=${MEM_CORRECTION:-32}
+    [ "${MEM_EDF:-32}" -gt "${gpu_max_mem}" ] && gpu_max_mem=${MEM_EDF:-32}
 
-    # Find minimum (limiting factor)
-    COMPUTED_MAX_CONCURRENT=${max_by_cpu}
-    LIMITING_RESOURCE="CPUs"
+    # ==========================================================================
+    # GPU Pool: Limited by allocated GPUs
+    # ==========================================================================
+    local gpu_slots=$((alloc_gpus / gpus_per_node))
 
-    if [ ${max_by_mem} -lt ${COMPUTED_MAX_CONCURRENT} ]; then
-        COMPUTED_MAX_CONCURRENT=${max_by_mem}
-        LIMITING_RESOURCE="Memory"
-    fi
+    # Also check GPU pool against CPU and memory limits
+    local gpu_slots_by_cpu=$((alloc_cpus / cpus_per_task))
+    local gpu_slots_by_mem=$((alloc_mem / gpu_max_mem))
 
-    if [ ${max_by_gpu} -lt ${COMPUTED_MAX_CONCURRENT} ]; then
-        COMPUTED_MAX_CONCURRENT=${max_by_gpu}
-        LIMITING_RESOURCE="GPUs"
-    fi
+    # GPU pool is minimum of GPU, CPU, and memory limits
+    [ "${gpu_slots_by_cpu}" -lt "${gpu_slots}" ] && gpu_slots=${gpu_slots_by_cpu}
+    [ "${gpu_slots_by_mem}" -lt "${gpu_slots}" ] && gpu_slots=${gpu_slots_by_mem}
+    [ "${gpu_slots}" -lt 0 ] && gpu_slots=0
+
+    # ==========================================================================
+    # CPU Pool: Limited by remaining resources after GPU allocation
+    # ==========================================================================
+    # CPUs remaining after GPU jobs
+    local cpus_used_by_gpu=$((gpu_slots * cpus_per_task))
+    local cpus_for_cpu_jobs=$((alloc_cpus - cpus_used_by_gpu))
+    local cpu_slots_by_cpu=$((cpus_for_cpu_jobs / cpu_cpus))
+
+    # Memory remaining after GPU jobs
+    local mem_used_by_gpu=$((gpu_slots * gpu_max_mem))
+    local mem_for_cpu_jobs=$((alloc_mem - mem_used_by_gpu))
+    local cpu_slots_by_mem=$((mem_for_cpu_jobs / cpu_mem))
+
+    # CPU pool is minimum of CPU and memory limits
+    local cpu_slots=${cpu_slots_by_cpu}
+    [ "${cpu_slots_by_mem}" -lt "${cpu_slots}" ] && cpu_slots=${cpu_slots_by_mem}
+    [ "${cpu_slots}" -lt 0 ] && cpu_slots=0
+
+    # ==========================================================================
+    # Total concurrent = GPU slots + CPU slots
+    # ==========================================================================
+    COMPUTED_MAX_CONCURRENT=$((gpu_slots + cpu_slots))
+    GPU_SLOTS=${gpu_slots}
+    CPU_SLOTS=${cpu_slots}
+
+    # Export for use by burst_monitor.sh
+    export GPU_SLOTS
+    export CPU_SLOTS
 
     # Store calculation details for display
-    RESOURCE_CALC_DETAILS="CPU: ${alloc_cpus}/${cpus_per_task}=${max_by_cpu}, MEM: ${alloc_mem}/${max_mem}=${max_by_mem}, GPU: ${alloc_gpus}/${gpus_per_node}=${max_by_gpu}"
+    RESOURCE_CALC_DETAILS="GPU pool: ${gpu_slots} (${alloc_gpus} GPUs), CPU pool: ${cpu_slots} (${cpus_for_cpu_jobs} CPUs, ${mem_for_cpu_jobs}GB remaining)"
+
+    # Determine limiting factor for display
+    if [ "${gpu_slots}" -eq 0 ]; then
+        LIMITING_RESOURCE="GPUs (no GPU slots available)"
+    elif [ "${cpu_slots}" -eq 0 ]; then
+        LIMITING_RESOURCE="remaining resources (no CPU slots after GPU allocation)"
+    elif [ "${cpu_slots_by_mem}" -lt "${cpu_slots_by_cpu}" ]; then
+        LIMITING_RESOURCE="memory for CPU pool"
+    else
+        LIMITING_RESOURCE="CPUs for CPU pool"
+    fi
 
     # Validate we can run at least 1 job
     if [ ${COMPUTED_MAX_CONCURRENT} -lt 1 ]; then
@@ -360,10 +438,14 @@ calculate_max_concurrent() {
         term_error "  Memory: ${alloc_mem} GB"
         term_error "  GPUs:   ${alloc_gpus}"
         term_error ""
-        term_error "Per-job requirements:"
+        term_error "Per-job requirements (GPU):"
         term_error "  CPUs:   ${cpus_per_task}"
-        term_error "  Memory: ${max_mem} GB (max across steps)"
+        term_error "  Memory: ${gpu_max_mem} GB (max across steps)"
         term_error "  GPUs:   ${gpus_per_node}"
+        term_error ""
+        term_error "Per-job requirements (CPU):"
+        term_error "  CPUs:   ${cpu_cpus}"
+        term_error "  Memory: ${cpu_mem} GB"
         term_error ""
         term_error "Options:"
         term_error "  1. Reduce per-job resources in config.sh"
@@ -388,9 +470,11 @@ resolve_max_concurrent() {
 
     if [ "${configured}" = "auto" ] || [ -z "${configured}" ]; then
         EFFECTIVE_MAX_CONCURRENT=${COMPUTED_MAX_CONCURRENT}
-        term_info "Auto-calculated max concurrent cycles: ${EFFECTIVE_MAX_CONCURRENT}"
-        term_info "  Calculation: ${RESOURCE_CALC_DETAILS}"
-        term_info "  Limiting factor: ${LIMITING_RESOURCE}"
+        term_info "Resource pool calculation:"
+        term_info "  GPU job slots: ${GPU_SLOTS} (from ${ALLOC_GPUS:-2} GPUs)"
+        term_info "  CPU job slots: ${CPU_SLOTS} (from remaining resources)"
+        term_info "  Total concurrent jobs: ${EFFECTIVE_MAX_CONCURRENT}"
+        term_info "  ${RESOURCE_CALC_DETAILS}"
     else
         # Manual override - validate it
         EFFECTIVE_MAX_CONCURRENT=${configured}
@@ -600,11 +684,13 @@ if ! resolve_max_concurrent; then
 fi
 
 term_info "------------------------------------------------------------"
-term_info "Resource Allocation:"
+term_info "Resource Allocation (Dual-Pool Architecture):"
 term_info "  Allocation limits: ${ALLOC_CPUS:-64} CPUs, ${ALLOC_MEM:-600}GB mem, ${ALLOC_GPUS:-2} GPUs"
-term_info "  Per-job request:   ${CPUS_PER_TASK:-4} CPUs, ${MEM_DECON:-96}GB mem, ${GPUS_PER_NODE:-1} GPU"
-term_info "  Max concurrent:    ${EFFECTIVE_MAX_CONCURRENT} cycles (limited by ${LIMITING_RESOURCE})"
-term_info "  Total usage:       ${TOTAL_CPUS_USED} CPUs, ${TOTAL_MEM_USED}GB mem, ${TOTAL_GPUS_USED} GPUs"
+term_info "  GPU jobs: ${CPUS_PER_TASK:-4} CPUs, ${MEM_DECON:-96}GB mem, ${GPUS_PER_NODE:-1} GPU each"
+term_info "  CPU jobs: ${CPU_CPUS_PER_TASK:-8} CPUs, ${CPU_MEM_DECON:-48}GB mem each"
+term_info "  GPU slots: ${GPU_SLOTS}, CPU slots: ${CPU_SLOTS}"
+term_info "  Total concurrent: ${EFFECTIVE_MAX_CONCURRENT} jobs"
+term_info "  Total usage: ${TOTAL_CPUS_USED} CPUs, ${TOTAL_MEM_USED}GB mem, ${TOTAL_GPUS_USED} GPUs"
 term_info "============================================================"
 echo ""
 
@@ -700,12 +786,17 @@ build_sbatch_cmd_array() {
     )
 
     if [ -n "${dep_jobid}" ]; then
-        # Validate dependency job ID is numeric to prevent "Badly formatted array jobid" errors
-        if ! [[ "${dep_jobid}" =~ ^[0-9]+$ ]]; then
+        # In dry-run mode, accept placeholder IDs (DRY_*_JOB); in real mode, validate numeric
+        if [[ "${dep_jobid}" =~ ^DRY_ ]]; then
+            # Dry-run placeholder - add dependency for display purposes
+            SBATCH_CMD+=("--dependency=${dep_type}:${dep_jobid}")
+        elif [[ "${dep_jobid}" =~ ^[0-9]+$ ]]; then
+            # Real numeric job ID
+            SBATCH_CMD+=("--dependency=${dep_type}:${dep_jobid}")
+        else
             echo "ERROR: Invalid dependency job ID '${dep_jobid}' - must be numeric" >&2
             return 1
         fi
-        SBATCH_CMD+=("--dependency=${dep_type}:${dep_jobid}")
     fi
 
     if [ -n "${EMAIL}" ]; then
@@ -784,6 +875,9 @@ submit_job() {
     local using_fallback=false
 
     # For GPU mode, check availability and potentially fallback
+    # Strategy: Submit to whichever partition has idle GPUs, or both if both busy
+    local submit_to_fallback_too=false
+
     if [ "${SELECTED_MODE}" = "gpu" ]; then
         check_gpu_availability "${use_partition}"
         local gpu_check_status=$?
@@ -815,7 +909,29 @@ submit_job() {
                 return 1
             fi
         elif [ ${gpu_check_status} -eq 2 ]; then
-            term_info "Primary GPUs are busy but available - job will be queued on ${use_partition}"
+            # Primary GPUs are busy - always queue on primary, optionally also submit to fallback
+            term_info "Primary partition ${use_partition} is busy - jobs will queue"
+
+            if [ -n "${PARTITION_FALLBACK}" ]; then
+                term_info "Checking fallback partition: ${PARTITION_FALLBACK}..."
+                check_gpu_availability "${PARTITION_FALLBACK}"
+                local fallback_status=$?
+
+                if [ ${fallback_status} -eq 0 ]; then
+                    # Fallback has idle GPUs - submit to BOTH (primary queues, fallback may start faster)
+                    term_info "Fallback partition has idle GPUs - will ALSO submit to ${PARTITION_FALLBACK}"
+                    submit_to_fallback_too=true
+                elif [ ${fallback_status} -eq 2 ]; then
+                    # Both partitions busy - submit to BOTH, first to get resources wins
+                    term_info "Both partitions busy - will submit to BOTH (first to start wins)"
+                    submit_to_fallback_too=true
+                else
+                    # Fallback not available, stick with primary only
+                    term_info "Fallback partition not available - queuing on primary ${use_partition} only"
+                fi
+            else
+                term_info "No fallback configured - queuing on primary ${use_partition}"
+            fi
         fi
     fi
 
@@ -832,6 +948,17 @@ submit_job() {
             term_info "DRY RUN - would execute:"
         fi
         echo "  $(format_cmd_for_display)" >&2
+
+        # Show fallback submission if both partitions busy
+        if [ "${submit_to_fallback_too}" = true ]; then
+            term_info "DRY RUN - would ALSO submit to fallback partition (both busy):"
+            build_sbatch_cmd_array "${step_name}" "${script}" "${effective_mem}" "${effective_time}" \
+                "${dep_type}" "${dep_jobid}" "${PARTITION_FALLBACK}" "${QOS_FALLBACK}" \
+                "${SELECTED_ACCOUNT}" "${SELECTED_MODE}" "${EFFECTIVE_CPUS_PER_TASK}" "${EFFECTIVE_GPUS}"
+            echo "  $(format_cmd_for_display)" >&2
+            term_info "NOTE: Both jobs would race - first to get resources wins"
+        fi
+
         echo "DRY_${step_name}_JOB"
         return 0
     fi
@@ -866,6 +993,30 @@ submit_job() {
         fi
 
         term_info "Successfully submitted ${step_name} - Job ID: ${jobid}"
+
+        # If both partitions are busy, also submit to fallback (first to start wins)
+        if [ "${submit_to_fallback_too}" = true ]; then
+            term_info "Also submitting to fallback partition ${PARTITION_FALLBACK}..."
+            build_sbatch_cmd_array "${step_name}" "${script}" "${effective_mem}" "${effective_time}" \
+                "${dep_type}" "${dep_jobid}" "${PARTITION_FALLBACK}" "${QOS_FALLBACK}" \
+                "${SELECTED_ACCOUNT}" "${SELECTED_MODE}" "${EFFECTIVE_CPUS_PER_TASK}" "${EFFECTIVE_GPUS}"
+
+            local fallback_result
+            fallback_result=$("${SBATCH_CMD[@]}" 2>&1)
+            if [ $? -eq 0 ]; then
+                local fallback_jobid
+                fallback_jobid=$(echo "${fallback_result}" | grep -oP 'Submitted batch job \K[0-9]+' | head -1)
+                if [ -z "${fallback_jobid}" ]; then
+                    fallback_jobid=$(echo "${fallback_result}" | grep "Submitted batch job" | head -1 | sed 's/.*Submitted batch job //' | tr -d '[:space:]')
+                fi
+                term_info "Fallback job submitted: ${fallback_jobid} (on ${PARTITION_FALLBACK})"
+                term_info "NOTE: Jobs ${jobid} and ${fallback_jobid} will race - first to get resources wins"
+                term_info "      Cancel the other with: scancel <jobid> once one starts"
+            else
+                term_warn "Fallback submission failed (non-critical): ${fallback_result}"
+            fi
+        fi
+
         echo "${jobid}"
         return 0
     fi
@@ -973,12 +1124,13 @@ submit_burst_job() {
     local burst_gpus="${GPUS_PER_NODE:-1}"
     local burst_cpus="${CPUS_PER_TASK:-4}"
 
-    # Use default partition for burst (or configured burst partition)
-    local burst_partition="${PARTITION_BURST:-hpg-default}"
+    # For GPU burst jobs, use the primary GPU partition with burst QOS
+    # This allows preemptible access to GPU resources on the same partition
+    local burst_partition="${PARTITION}"
 
     term_info "Submitting BURST job for ${step_name}..."
     term_info "  Account: ${base_account}, QOS: ${burst_qos}"
-    term_info "  Partition: ${burst_partition} (preemptible)"
+    term_info "  Partition: ${burst_partition} (preemptible GPU)"
     term_info "  Note: Burst jobs may be preempted and automatically requeued"
 
     # Build burst sbatch command (similar to regular but with burst QOS and --requeue)
@@ -1009,7 +1161,8 @@ submit_burst_job() {
     )
 
     if [ -n "${dep_jobid}" ]; then
-        if [[ "${dep_jobid}" =~ ^[0-9]+$ ]]; then
+        # Accept DRY_ placeholders for dry-run mode, numeric IDs for real runs
+        if [[ "${dep_jobid}" =~ ^DRY_ ]] || [[ "${dep_jobid}" =~ ^[0-9]+$ ]]; then
             SBATCH_CMD+=("--dependency=${dep_type}:${dep_jobid}")
         fi
     fi
@@ -1046,6 +1199,119 @@ submit_burst_job() {
     return 0  # Don't fail the pipeline if burst submission fails
 }
 
+# Submit concurrent CPU job (to supplement GPU processing)
+# Uses burst QOS on CPU partition for parallel processing with GPU jobs
+submit_cpu_job() {
+    local step_name=$1
+    local script=$2
+    local mem=$3
+    local time=$4
+    local dep_type=$5
+    local dep_jobid=$6
+
+    # Get base account (strip -b suffix if present)
+    local base_account="${ACCOUNT:-maigan}"
+    if [[ "${base_account}" == *-b ]]; then
+        base_account="${base_account%-b}"
+    fi
+
+    # Get burst QOS for CPU jobs
+    local cpu_qos
+    cpu_qos=$(get_burst_qos "${base_account}")
+
+    # Check if burst QOS is available
+    if ! burst_qos_available "${base_account}"; then
+        # No burst QOS available - skip CPU job
+        return 0
+    fi
+
+    # Use base account with burst QOS (not a separate account)
+    local cpu_account="${base_account}"
+
+    local job_name="kintsugi_${step_name}_cpu_${PROJECT_NAME}"
+
+    # Get step-specific CPU memory
+    local cpu_mem
+    case ${step_name} in
+        correct) cpu_mem="${CPU_MEM_CORRECTION:-${mem}}" ;;
+        stitch)  cpu_mem="${CPU_MEM_STITCH:-${mem}}" ;;
+        decon)   cpu_mem="${CPU_MEM_DECON:-${mem}}" ;;
+        edf)     cpu_mem="${CPU_MEM_EDF:-${mem}}" ;;
+        *)       cpu_mem="${mem}" ;;
+    esac
+
+    # Apply time multiplier for CPU processing
+    local cpu_time
+    cpu_time=$(apply_time_multiplier "${time}" "${CPU_TIME_MULTIPLIER:-5}")
+
+    local cpu_cpus="${CPU_CPUS_PER_TASK:-8}"
+    local cpu_partition="${PARTITION_CPU:-hpg-default}"
+
+    term_info "Submitting CPU job for ${step_name} (concurrent processing)..."
+    term_info "  Account: ${cpu_account}, QOS: ${cpu_qos}, Partition: ${cpu_partition}"
+    term_info "  CPUs: ${cpu_cpus}, Memory: ${cpu_mem}GB, Time: ${cpu_time}"
+    term_info "  Note: CPU jobs run concurrently with GPU jobs (preemptible)"
+
+    # Build CPU sbatch command with burst QOS
+    SBATCH_CMD=(
+        sbatch
+        "--job-name=${job_name}"
+        "--output=${LOG_DIR}/${step_name}_cpu_%A_%a.out"
+        "--error=${LOG_DIR}/${step_name}_cpu_%A_%a.err"
+        "--partition=${cpu_partition}"
+        "--qos=${cpu_qos}"
+        "--account=${cpu_account}"
+        "--nodes=1"
+        "--ntasks=1"
+        "--cpus-per-task=${cpu_cpus}"
+        "--mem=${cpu_mem}gb"
+        "--time=${cpu_time}"
+        "--requeue"
+        "--array=${ARRAY_SPEC}%${EFFECTIVE_MAX_CONCURRENT}"
+        "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name},KINTSUGI_DEVICE_MODE=cpu"
+    )
+
+    # No GPUs for CPU jobs
+
+    if [ -n "${dep_jobid}" ]; then
+        # Accept DRY_ placeholders for dry-run mode, numeric IDs for real runs
+        if [[ "${dep_jobid}" =~ ^DRY_ ]] || [[ "${dep_jobid}" =~ ^[0-9]+$ ]]; then
+            SBATCH_CMD+=("--dependency=${dep_type}:${dep_jobid}")
+        fi
+    fi
+
+    SBATCH_CMD+=("${script}")
+
+    if [ "${DRY_RUN}" = true ]; then
+        term_info "DRY RUN - would execute (CPU):"
+        echo "  $(printf '%q ' "${SBATCH_CMD[@]}")" >&2
+        echo "DRY_${step_name}_CPU_JOB"
+        return 0
+    fi
+
+    # Submit CPU job
+    local result
+    result=$("${SBATCH_CMD[@]}" 2>&1)
+    local exit_code=$?
+
+    if [ ${exit_code} -eq 0 ]; then
+        local jobid
+        jobid=$(echo "${result}" | grep -oP 'Submitted batch job \K[0-9]+' | head -1)
+        if [ -z "${jobid}" ]; then
+            jobid=$(echo "${result}" | grep "Submitted batch job" | head -1 | sed 's/.*Submitted batch job //' | tr -d '[:space:]')
+        fi
+
+        if [ -n "${jobid}" ] && [[ "${jobid}" =~ ^[0-9]+$ ]]; then
+            term_info "CPU job submitted: ${jobid}"
+            echo "${jobid}"
+            return 0
+        fi
+    fi
+
+    term_warn "CPU job submission failed (non-critical): ${result}"
+    return 0  # Don't fail the pipeline if CPU submission fails
+}
+
 # Job IDs for dependencies
 JOB_CORRECTION=""
 JOB_STITCH=""
@@ -1055,6 +1321,10 @@ JOB_CORRECTION_BURST=""
 JOB_STITCH_BURST=""
 JOB_DECON_BURST=""
 JOB_EDF_BURST=""
+JOB_CORRECTION_CPU=""
+JOB_STITCH_CPU=""
+JOB_DECON_CPU=""
+JOB_EDF_CPU=""
 
 # Run steps
 run_step() {
@@ -1069,6 +1339,9 @@ run_step() {
                 term_error "Failed to submit correction job - aborting pipeline"
                 exit 1
             fi
+            # Submit concurrent CPU job (always, if CPU accounts configured)
+            JOB_CORRECTION_CPU=$(submit_cpu_job "correct" "${KINTSUGI_SLURM}/jobs/01_correction.sh" \
+                "${MEM_CORRECTION}" "${TIME_CORRECTION}" "" "")
             # Submit burst job if enabled
             if [ "${USE_BURST}" = true ]; then
                 JOB_CORRECTION_BURST=$(submit_burst_job "correct" "${KINTSUGI_SLURM}/jobs/01_correction.sh" \
@@ -1083,6 +1356,10 @@ run_step() {
                 term_error "Failed to submit stitching job - aborting pipeline"
                 exit 1
             fi
+            # Submit concurrent CPU job (depends on CPU correction if it exists)
+            local cpu_dep="${JOB_CORRECTION_CPU:-${JOB_CORRECTION}}"
+            JOB_STITCH_CPU=$(submit_cpu_job "stitch" "${KINTSUGI_SLURM}/jobs/02_stitching.sh" \
+                "${MEM_STITCH}" "${TIME_STITCH}" "afterok" "${cpu_dep}")
             # Submit burst job if enabled (depends on burst correction if it exists)
             if [ "${USE_BURST}" = true ]; then
                 local burst_dep="${JOB_CORRECTION_BURST:-${JOB_CORRECTION}}"
@@ -1098,6 +1375,10 @@ run_step() {
                 term_error "Failed to submit deconvolution job - aborting pipeline"
                 exit 1
             fi
+            # Submit concurrent CPU job
+            local cpu_dep="${JOB_STITCH_CPU:-${JOB_STITCH}}"
+            JOB_DECON_CPU=$(submit_cpu_job "decon" "${KINTSUGI_SLURM}/jobs/03_deconvolution.sh" \
+                "${MEM_DECON}" "${TIME_DECON}" "afterok" "${cpu_dep}")
             # Submit burst job if enabled
             if [ "${USE_BURST}" = true ]; then
                 local burst_dep="${JOB_STITCH_BURST:-${JOB_STITCH}}"
@@ -1113,6 +1394,10 @@ run_step() {
                 term_error "Failed to submit EDF job - aborting pipeline"
                 exit 1
             fi
+            # Submit concurrent CPU job
+            local cpu_dep="${JOB_DECON_CPU:-${JOB_DECON}}"
+            JOB_EDF_CPU=$(submit_cpu_job "edf" "${KINTSUGI_SLURM}/jobs/04_edf.sh" \
+                "${MEM_EDF}" "${TIME_EDF}" "afterok" "${cpu_dep}")
             # Submit burst job if enabled
             if [ "${USE_BURST}" = true ]; then
                 local burst_dep="${JOB_DECON_BURST:-${JOB_DECON}}"

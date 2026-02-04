@@ -382,6 +382,9 @@ KINTSUGI includes a SLURM submission system for running batch processing on HPC 
 
 # Process specific cycles
 ./slurm/submit.sh --project /path/to/your/project --cycles 1-3
+
+# Use burst resources for faster processing (preemptible)
+./slurm/submit.sh --project /path/to/your/project --use-burst
 ```
 
 ### Pipeline Steps
@@ -396,6 +399,43 @@ The SLURM pipeline runs four processing steps with automatic dependencies:
 | `edf` | Extended depth of focus projection | 64 GB | 2 hours |
 
 Jobs are submitted as SLURM arrays (one task per cycle) with automatic dependencies between steps.
+
+### Resource Pool Architecture (Dual-Pool)
+
+KINTSUGI maximizes cluster utilization by running **GPU and CPU jobs concurrently**. The system calculates total concurrent jobs from both resource pools:
+
+**GPU Pool**: Limited by allocated GPUs (`ALLOC_GPUS / GPUS_PER_NODE`)
+
+**CPU Pool**: Limited by remaining resources after GPU allocation
+- CPUs remaining: `(ALLOC_CPUS - GPU_CPUs_used) / CPU_CPUS_PER_TASK`
+- Memory remaining: `(ALLOC_MEM - GPU_mem_used) / CPU_MEM_*`
+
+**Total Concurrent** = GPU slots + CPU slots
+
+**Example calculation** (104 CPUs, 812GB memory, 3 GPUs):
+| Resource | GPU Jobs | CPU Jobs | Calculation |
+|----------|----------|----------|-------------|
+| GPUs | 3 | 0 | 3 GPUs / 1 per job |
+| CPUs | 24 | 80 | 104 - (3×8) = 80 remaining |
+| Memory | 540 GB | 272 GB | 812 - (3×180) = 272 remaining |
+| CPU slots | - | 5 | min(80/8, 272/48) = min(10,5) |
+| **Total** | **8** | | 3 GPU + 5 CPU concurrent jobs |
+
+Instead of being limited to 3 concurrent jobs (GPU-only), the system runs 8 jobs concurrently.
+
+### Dynamic Job Promotion
+
+The burst monitor (`burst_monitor.sh`) automatically promotes jobs to better resources when available:
+
+- **Burst → Allocated**: Preemptible GPU jobs promoted to guaranteed QOS
+- **CPU → GPU**: CPU jobs promoted to GPU partition when GPUs free up
+
+Start the monitor after submitting jobs:
+```bash
+./slurm/burst_monitor.sh --project /path/to/your/project
+```
+
+The monitor runs continuously, checking for promotion opportunities every 60 seconds.
 
 ### Configuration
 
@@ -419,7 +459,21 @@ export MIC_NA=0.75         # Numerical aperture
 export PARTITION="hpg-b200"
 export QOS="maigan-b"
 export ACCOUNT="maigan"
-export GPUS_PER_NODE=2
+export GPUS_PER_NODE=1
+
+# Resource allocation limits (for dual-pool calculation)
+export ALLOC_CPUS=104      # Total CPUs in allocation
+export ALLOC_MEM=812       # Total memory (GB) in allocation
+export ALLOC_GPUS=3        # Total GPUs in allocation
+
+# GPU job resources
+export CPUS_PER_TASK=8     # CPUs per GPU job
+export MEM_DECON=180       # Memory per deconvolution job (GB)
+
+# CPU job resources (for concurrent CPU processing)
+export CPU_CPUS_PER_TASK=8 # CPUs per CPU job
+export CPU_MEM_DECON=48    # Memory per CPU deconvolution job (GB)
+export CPU_TIME_MULTIPLIER=5  # CPU jobs run 5x longer than GPU
 
 # Email notifications (optional)
 export EMAIL="your.email@example.com"

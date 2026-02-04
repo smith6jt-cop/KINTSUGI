@@ -171,7 +171,7 @@ KINTSUGI has two distinct processing modes with different resource utilization s
 | Mode | Context | GPU Policy | CPU Policy | Rationale |
 |------|---------|------------|------------|-----------|
 | **Notebook** | Interactive, user watching | GPU required, no fallback | Not used | Quality-first; user can intervene if GPU unavailable |
-| **SLURM** | Headless batch processing | GPU preferred | CPU concurrent | Maximize throughput; use ALL available resources |
+| **SLURM** | Headless batch processing | GPU + CPU concurrent | CPU concurrent | Maximize throughput; use ALL available resources |
 
 **Notebook Processing (Interactive)**:
 - GPU is **required** - fails loudly if unavailable
@@ -181,21 +181,53 @@ KINTSUGI has two distinct processing modes with different resource utilization s
 
 **SLURM Processing (Headless)**:
 - Maximizes throughput by running GPU and CPU jobs **concurrently**
-- With only 2 GPUs available, CPU cores would otherwise sit idle
-- Account chain: GPU accounts tried first, CPU-only burst accounts as overflow
+- Uses a **dual-pool architecture** to calculate total concurrent slots from both GPU and CPU resources
 - Jobs automatically adapt via `KINTSUGI_DEVICE_MODE` environment variable
 - Quality parameters remain unchanged - only the compute device differs
 
-**How concurrent GPU/CPU works**:
-1. `submit.sh` detects account type (GPU-enabled vs CPU-only burst)
-2. Sets `KINTSUGI_DEVICE_MODE=gpu` or `KINTSUGI_DEVICE_MODE=cpu`
-3. Job scripts (02_stitching.sh, 03_deconvolution.sh, 04_edf.sh) read this variable
-4. Processing uses appropriate backend (CuPy for GPU, NumPy/SciPy for CPU)
-5. CPU jobs run 5x longer (automatic time multiplier) but free up GPU queue
+### Resource Pool Calculation (Dual-Pool Architecture)
 
-This allows processing more cycles simultaneously: 2 on GPU + N on CPU cores.
+KINTSUGI calculates total concurrent jobs from both GPU and CPU resources, not just GPUs:
 
-**Using burst resources** (`--use-burst` flag):
+**GPU Pool**: Limited by `ALLOC_GPUS / GPUS_PER_NODE`
+- Also constrained by CPU and memory available for GPU jobs
+
+**CPU Pool**: Limited by remaining resources after GPU allocation
+- CPUs: `(ALLOC_CPUS - GPU_CPUs_used) / CPU_CPUS_PER_TASK`
+- Memory: `(ALLOC_MEM - GPU_mem_used) / CPU_MEM_*`
+
+**Total Concurrent** = GPU slots + CPU slots
+
+**Example calculation** (104 CPUs, 812GB memory, 3 GPUs):
+| Resource | GPU Jobs | CPU Jobs | Calculation |
+|----------|----------|----------|-------------|
+| GPUs | 3 | 0 | 3 GPUs / 1 per job |
+| CPUs | 24 | 80 | 104 - (3×8) = 80 remaining |
+| Memory | 540 GB | 272 GB | 812 - (3×180) = 272 remaining |
+| CPU slots | - | 5 | min(80/8, 272/48) = min(10,5) |
+| **Total** | **8** | | 3 GPU + 5 CPU concurrent jobs |
+
+### How Concurrent GPU/CPU Works
+
+1. `submit.sh` calculates dual-pool resource allocation (GPU slots + CPU slots)
+2. Submits GPU jobs with `KINTSUGI_DEVICE_MODE=gpu`
+3. Submits CPU jobs with `KINTSUGI_DEVICE_MODE=cpu` (use remaining resources)
+4. Job scripts read `KINTSUGI_DEVICE_MODE` and use appropriate backend (CuPy for GPU, NumPy/SciPy for CPU)
+5. CPU jobs run 5x longer (automatic time multiplier) but utilize otherwise idle CPU cores
+
+### Dynamic Job Promotion
+
+The burst monitor (`burst_monitor.sh`) promotes jobs when better resources become available:
+
+**Burst → Allocated**: Preemptible GPU jobs promoted to guaranteed QOS
+**CPU → GPU**: CPU jobs promoted to GPU when GPUs free up
+
+Promotion priority: Burst jobs first (already GPU-ready), then CPU jobs.
+
+This allows flexible resource utilization: jobs start on whatever resources are available (burst or CPU), then get promoted to optimal resources (allocated GPU) as they become free.
+
+### Using Burst Resources (`--use-burst` flag)
+
 Burst QOS provides access to idle cluster resources but jobs are preemptible. Use burst for faster processing when the cluster has spare capacity:
 
 ```bash
