@@ -17,7 +17,7 @@ NOTEBOOKS_PATH = Path(__file__).parent.parent / "notebooks"
 if str(NOTEBOOKS_PATH) not in sys.path:
     sys.path.insert(0, str(NOTEBOOKS_PATH))
 
-from Kdecon.deconvolution import (
+from Kdecon.deconvolution import (  # noqa: E402
     CUPY_AVAILABLE,
     _create_tukey_window_3d,
     _find_good_fft_length,
@@ -25,12 +25,11 @@ from Kdecon.deconvolution import (
     deconvolve,
     lucy_richardson_cpu,
 )
-from Kdecon.psf import (
+from Kdecon.psf import (  # noqa: E402
     _mirror_octant_to_full,
     calculate_psf_size,
     generate_psf,
 )
-
 
 # =============================================================================
 # Fixtures
@@ -274,7 +273,7 @@ class TestLucyRichardsonCPU:
         def track_delta(iteration, delta_rel):
             deltas.append(delta_rel)
 
-        result = lucy_richardson_cpu(
+        lucy_richardson_cpu(
             blurred_stack,
             small_psf,
             iterations=10,
@@ -306,7 +305,7 @@ class TestLucyRichardsonCPU:
             iterations_run[0] = iteration
 
         # Very loose criterion should stop early
-        result = lucy_richardson_cpu(
+        lucy_richardson_cpu(
             blurred_stack,
             small_psf,
             iterations=50,
