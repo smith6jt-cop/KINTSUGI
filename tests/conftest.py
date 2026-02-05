@@ -72,3 +72,33 @@ def sample_config():
         "resolution_xyu": [0.325, 0.325, "um"],
         "channel_names": ["DAPI", "CD31", "CD3e"],
     }
+
+
+@pytest.fixture
+def sample_zstack():
+    """Generate a sample 3D z-stack for testing."""
+    np.random.seed(42)
+    return np.random.randint(0, 65535, (10, 256, 256), dtype=np.uint16)
+
+
+@pytest.fixture
+def sample_tile_stack():
+    """Generate a stack of tile images for illumination correction tests."""
+    np.random.seed(42)
+    return np.random.randint(1000, 10000, (25, 128, 128), dtype=np.float64)
+
+
+@pytest.fixture
+def sample_signal_blank_pair():
+    """Generate a signal/blank image pair for autofluorescence tests."""
+    np.random.seed(42)
+    # Signal with true signal + autofluorescence
+    signal = np.zeros((256, 256), dtype=np.uint16)
+    signal[100:150, 100:150] = 25000  # True signal
+    af_component = np.random.randint(1000, 5000, (256, 256), dtype=np.uint16)
+    signal = (signal + af_component).astype(np.uint16)
+
+    # Blank captures autofluorescence
+    blank = np.random.randint(1000, 5000, (256, 256), dtype=np.uint16)
+
+    return signal, blank
