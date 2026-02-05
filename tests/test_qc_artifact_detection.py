@@ -12,6 +12,11 @@ created in a separate integration test module.
 import numpy as np
 import pytest
 
+from kintsugi.qc.artifact_scanner import (
+    ArtifactItem,
+    ArtifactReport,
+    ChannelScanResult,
+)
 from kintsugi.qc.stripe_artifact import (
     StripeArtifactResult,
     classify_hp_fft_severity,
@@ -20,12 +25,6 @@ from kintsugi.qc.stripe_artifact import (
     detect_stripe_artifact,
     scan_zstack,
 )
-from kintsugi.qc.artifact_scanner import (
-    ArtifactItem,
-    ArtifactReport,
-    ChannelScanResult,
-)
-
 
 # =============================================================================
 # Fixtures
