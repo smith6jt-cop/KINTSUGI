@@ -442,6 +442,33 @@ print(f"Z-planes per channel: {n_zplanes}")
 print(f"Total time: {total_time/60:.1f} minutes")
 print(f"Output: {STITCH_DIR}")
 print(f"{'='*60}")
+
+# =============================================================================
+# WRITE COMPLETION MARKER
+# =============================================================================
+# This marker signals to downstream jobs (deconvolution) that stitching is complete
+# and all output files have been written and flushed to disk/NFS.
+
+output_cycle_dir = STITCH_DIR / f"cyc{CYCLE:02d}"
+marker_file = output_cycle_dir / ".complete"
+
+try:
+    with open(marker_file, 'w') as f:
+        f.write(f"stage=stitch\n")
+        f.write(f"cycle={CYCLE}\n")
+        f.write(f"completed={datetime.now().isoformat()}\n")
+        f.write(f"channels={START_CHANNEL}-{END_CHANNEL}\n")
+        f.write(f"zplanes={n_zplanes}\n")
+        f.write(f"job_id={os.environ.get('SLURM_JOB_ID', 'local')}\n")
+        f.write(f"array_task_id={os.environ.get('SLURM_ARRAY_TASK_ID', '0')}\n")
+        f.write(f"duration_minutes={total_time/60:.1f}\n")
+
+    # Force NFS sync to ensure marker is visible to other nodes
+    os.sync()
+    print(f"Completion marker written: {marker_file}")
+except Exception as e:
+    print(f"WARNING: Failed to write completion marker: {e}")
+    # Don't fail the job if marker write fails - the data is still valid
 PYTHON_SCRIPT
 
 exit $?

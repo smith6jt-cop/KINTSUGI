@@ -312,6 +312,74 @@ PYEOF
 }
 
 # =============================================================================
+# COMPLETION MARKERS - For reliable job handoff
+# =============================================================================
+
+# Write a completion marker after successful processing
+# Usage: write_completion_marker "stitch" "1" "/path/to/output/cyc01"
+write_completion_marker() {
+    local stage=$1
+    local cycle=$2
+    local output_dir=$3
+    local marker="${output_dir}/.complete"
+
+    cat > "${marker}" << EOF
+stage=${stage}
+cycle=${cycle}
+completed=$(date -Iseconds)
+job_id=${SLURM_JOB_ID:-local}
+array_task_id=${SLURM_ARRAY_TASK_ID:-0}
+node=${SLURMD_NODENAME:-$(hostname)}
+EOF
+
+    # Force NFS sync to ensure marker is visible to other nodes
+    sync "${marker}" 2>/dev/null || sync
+    log_info "Completion marker written: ${marker}"
+}
+
+# Wait for input directory to be ready (has .complete marker)
+# Usage: wait_for_input "/path/to/input/cyc01" 3600 30
+# Returns: 0 if ready, 1 if timeout
+wait_for_input() {
+    local input_dir=$1
+    local max_wait=${2:-3600}      # Default 60 min
+    local poll_interval=${3:-30}   # Default 30 sec
+    local marker="${input_dir}/.complete"
+    local elapsed=0
+
+    # Quick check first (no wait if already ready)
+    if [ -f "${marker}" ]; then
+        log_info "Input ready immediately: ${input_dir}"
+        return 0
+    fi
+
+    log_info "Waiting for completion marker: ${marker}"
+    log_info "Timeout: ${max_wait}s, poll interval: ${poll_interval}s"
+
+    while [ ${elapsed} -lt ${max_wait} ]; do
+        sleep ${poll_interval}
+        elapsed=$((elapsed + poll_interval))
+
+        # NFS cache invalidation - stat the directory to refresh metadata
+        ls "${input_dir}" > /dev/null 2>&1
+
+        if [ -f "${marker}" ]; then
+            log_info "Input ready after ${elapsed}s"
+            return 0
+        fi
+
+        # Progress update every 5 minutes
+        if [ $((elapsed % 300)) -eq 0 ]; then
+            log_info "Still waiting (${elapsed}/${max_wait}s)..."
+        fi
+    done
+
+    log_error "Timeout waiting for input: ${input_dir}"
+    log_error "Missing marker: ${marker}"
+    return 1
+}
+
+# =============================================================================
 # RUN MANAGEMENT
 # =============================================================================
 

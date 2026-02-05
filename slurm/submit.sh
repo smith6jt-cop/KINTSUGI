@@ -61,10 +61,59 @@ term_error() { term_log ERROR "$@"; }
 # GPU RESOURCE CHECKING
 # =============================================================================
 
+# Check if user has hit QOS limits on a partition
+# Returns: 0 if no QOS issues, 1 if QOS limits reached
+check_qos_limits() {
+    local partition=$1
+    local account=${2:-${ACCOUNT}}
+
+    if ! command -v squeue &> /dev/null; then
+        return 0  # Can't check, assume OK
+    fi
+
+    # Check for pending jobs with QOS-related reasons
+    # QOSGrpGRES = GPU quota reached, QOSGrpCpuLimit = CPU quota reached
+    local qos_blocked
+    qos_blocked=$(squeue -u "${USER}" -p "${partition}" -A "${account}" -h -t PD \
+        -o "%r" 2>/dev/null | grep -c "QOSGrp" || echo "0")
+
+    if [ "${qos_blocked}" -gt 0 ]; then
+        term_warn "Account ${account} has ${qos_blocked} jobs blocked by QOS limits on ${partition}"
+        return 1
+    fi
+
+    # Also check running+pending GPU count against typical QOS limits
+    # This catches the case where we'd exceed limits with new submission
+    local running_gpus
+    running_gpus=$(squeue -u "${USER}" -p "${partition}" -A "${account}" -h -t R,PD \
+        -o "%b" 2>/dev/null | grep -o "gpu:[0-9]*" | cut -d: -f2 | \
+        awk '{sum+=$1} END {print sum+0}' || echo "0")
+
+    # Get QOS GPU limit if available (requires sacctmgr)
+    local qos_gpu_limit=""
+    if command -v sacctmgr &> /dev/null; then
+        # Try to get the GrpTRES limit for GPUs from the account's QOS
+        local qos_name="${account}"
+        qos_gpu_limit=$(sacctmgr show qos "${qos_name}" format=GrpTRES -n -P 2>/dev/null | \
+            grep -o "gres/gpu=[0-9]*" | cut -d= -f2 || echo "")
+    fi
+
+    if [ -n "${qos_gpu_limit}" ] && [ "${qos_gpu_limit}" -gt 0 ] 2>/dev/null; then
+        if [ "${running_gpus}" -ge "${qos_gpu_limit}" ]; then
+            term_warn "Account ${account} using ${running_gpus}/${qos_gpu_limit} GPUs (at limit)"
+            return 1
+        fi
+        term_info "Account ${account} using ${running_gpus}/${qos_gpu_limit} GPUs"
+    fi
+
+    return 0
+}
+
 # Check if GPU resources are available in a partition
-# Returns: 0 if idle GPUs available, 1 if partition invalid, 2 if resources busy
+# Returns: 0 if idle GPUs available, 1 if partition invalid, 2 if resources busy, 3 if QOS limits reached
 check_gpu_availability() {
     local partition=$1
+    local account=${2:-${ACCOUNT}}
 
     if [ "${DRY_RUN}" = true ]; then
         term_info "DRY RUN: Skipping GPU availability check for partition ${partition}"
@@ -78,6 +127,13 @@ check_gpu_availability() {
     fi
 
     term_info "Checking GPU availability on partition ${partition}..."
+
+    # FIRST: Check QOS limits - this takes priority over node availability
+    # Even if nodes are idle, QOS limits will block jobs
+    if ! check_qos_limits "${partition}" "${account}"; then
+        term_warn "QOS limits reached for account ${account} on ${partition}"
+        return 3
+    fi
 
     # Check if partition exists and get idle node count
     # Format: NODES(A/I/O/T) where I = idle nodes
@@ -696,16 +752,30 @@ echo ""
 
 # Initial resource availability check
 term_info "Checking cluster resource availability..."
-if ! check_gpu_availability "${PARTITION}"; then
-    term_warn "Primary partition resources may not be immediately available"
+check_gpu_availability "${PARTITION}" "${ACCOUNT}"
+initial_check=$?
+if [ ${initial_check} -ne 0 ]; then
+    if [ ${initial_check} -eq 3 ]; then
+        term_warn "QOS limits reached on primary partition ${PARTITION}"
+    else
+        term_warn "Primary partition resources may not be immediately available"
+    fi
     if [ -n "${PARTITION_FALLBACK}" ]; then
-        if check_gpu_availability "${PARTITION_FALLBACK}"; then
-            term_info "Fallback partition resources are available - will use if primary fails"
+        check_gpu_availability "${PARTITION_FALLBACK}" "${ACCOUNT}"
+        fallback_check=$?
+        if [ ${fallback_check} -eq 0 ]; then
+            term_info "Fallback partition ${PARTITION_FALLBACK} has resources - will use automatically"
+        elif [ ${fallback_check} -eq 2 ]; then
+            term_info "Fallback partition ${PARTITION_FALLBACK} busy but available - will queue there"
         else
+            # fallback_check is 1 (invalid) or 3 (QOS limits)
+            if [ ${fallback_check} -eq 3 ]; then
+                term_error "QOS limits also reached on fallback partition ${PARTITION_FALLBACK}"
+            else
+                term_error "Fallback partition ${PARTITION_FALLBACK} not available"
+            fi
             term_error "Neither primary nor fallback partition resources appear available"
-            term_error "Jobs will likely fail or wait indefinitely"
             if [ "${DRY_RUN}" != true ]; then
-                # Only prompt if running interactively (stdin is a TTY)
                 if [ -t 0 ]; then
                     echo ""
                     read -p "Continue anyway? [y/N] " -n 1 -r
@@ -715,7 +785,6 @@ if ! check_gpu_availability "${PARTITION}"; then
                         exit 1
                     fi
                 else
-                    # Non-interactive mode: abort by default for safety
                     term_error "Non-interactive mode: aborting due to unavailable resources"
                     term_error "Use --dry-run to preview or ensure resources are available"
                     exit 1
@@ -887,7 +956,7 @@ submit_job() {
     local submit_to_fallback_too=false
 
     if [ "${SELECTED_MODE}" = "gpu" ]; then
-        check_gpu_availability "${use_partition}"
+        check_gpu_availability "${use_partition}" "${SELECTED_ACCOUNT}"
         local gpu_check_status=$?
 
         if [ ${gpu_check_status} -eq 1 ]; then
@@ -897,7 +966,7 @@ submit_job() {
             # Check if fallback is configured
             if [ -n "${PARTITION_FALLBACK}" ]; then
                 term_info "Checking fallback partition: ${PARTITION_FALLBACK}..."
-                check_gpu_availability "${PARTITION_FALLBACK}"
+                check_gpu_availability "${PARTITION_FALLBACK}" "${SELECTED_ACCOUNT}"
                 local fallback_status=$?
                 # Accept fallback if GPUs are available (0) or busy (2)
                 if [ ${fallback_status} -eq 0 ] || [ ${fallback_status} -eq 2 ]; then
@@ -916,13 +985,44 @@ submit_job() {
                 term_error "Configure PARTITION_FALLBACK in config.sh to enable fallback."
                 return 1
             fi
+        elif [ ${gpu_check_status} -eq 3 ]; then
+            # QOS limits reached on primary partition - switch to fallback
+            term_warn "QOS limits reached on ${use_partition} - switching to fallback"
+
+            if [ -n "${PARTITION_FALLBACK}" ]; then
+                term_info "Checking fallback partition: ${PARTITION_FALLBACK}..."
+                check_gpu_availability "${PARTITION_FALLBACK}" "${SELECTED_ACCOUNT}"
+                local fallback_status=$?
+
+                if [ ${fallback_status} -eq 0 ] || [ ${fallback_status} -eq 2 ]; then
+                    # Fallback available - switch to it (don't submit to primary at all)
+                    term_info "Switching to fallback partition ${PARTITION_FALLBACK}"
+                    use_partition="${PARTITION_FALLBACK}"
+                    use_qos="${QOS_FALLBACK}"
+                    using_fallback=true
+                elif [ ${fallback_status} -eq 3 ]; then
+                    # QOS limits also reached on fallback - submit to fallback anyway (will queue)
+                    term_warn "QOS limits also reached on fallback - jobs will queue on ${PARTITION_FALLBACK}"
+                    use_partition="${PARTITION_FALLBACK}"
+                    use_qos="${QOS_FALLBACK}"
+                    using_fallback=true
+                else
+                    term_error "Fallback partition ${PARTITION_FALLBACK} not available"
+                    term_error "QOS limits reached on primary and fallback unavailable. Aborting."
+                    return 1
+                fi
+            else
+                term_error "QOS limits reached on ${use_partition} and no fallback configured."
+                term_error "Configure PARTITION_FALLBACK in config.sh to enable fallback."
+                return 1
+            fi
         elif [ ${gpu_check_status} -eq 2 ]; then
             # Primary GPUs are busy - always queue on primary, optionally also submit to fallback
             term_info "Primary partition ${use_partition} is busy - jobs will queue"
 
             if [ -n "${PARTITION_FALLBACK}" ]; then
                 term_info "Checking fallback partition: ${PARTITION_FALLBACK}..."
-                check_gpu_availability "${PARTITION_FALLBACK}"
+                check_gpu_availability "${PARTITION_FALLBACK}" "${SELECTED_ACCOUNT}"
                 local fallback_status=$?
 
                 if [ ${fallback_status} -eq 0 ]; then
@@ -933,6 +1033,9 @@ submit_job() {
                     # Both partitions busy - submit to BOTH, first to get resources wins
                     term_info "Both partitions busy - will submit to BOTH (first to start wins)"
                     submit_to_fallback_too=true
+                elif [ ${fallback_status} -eq 3 ]; then
+                    # QOS limits on fallback but primary is just busy - stick with primary
+                    term_info "Fallback has QOS limits - queuing on primary ${use_partition} only"
                 else
                     # Fallback not available, stick with primary only
                     term_info "Fallback partition not available - queuing on primary ${use_partition} only"

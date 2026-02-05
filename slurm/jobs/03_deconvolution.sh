@@ -132,6 +132,70 @@ DECON_DIR = DATA_DIR / 'processed' / 'deconvolved'
 DECON_DIR.mkdir(parents=True, exist_ok=True)
 QC_DIR.mkdir(parents=True, exist_ok=True)
 
+# =============================================================================
+# INPUT VALIDATION - Wait for stitching to complete
+# =============================================================================
+
+def wait_for_input(input_dir: Path, max_wait: int = 3600, poll_interval: int = 30) -> bool:
+    """
+    Wait for input to be ready with polling.
+
+    Checks for a .complete marker file that indicates the upstream job
+    finished successfully and all files are written to disk/NFS.
+
+    Args:
+        input_dir: Directory to check for .complete marker
+        max_wait: Maximum seconds to wait (default 60 min)
+        poll_interval: Seconds between checks (default 30s)
+
+    Returns:
+        True if ready, False if timeout
+    """
+    marker = input_dir / ".complete"
+    elapsed = 0
+    print(f"Checking input readiness: {input_dir}")
+
+    # Quick check first (no wait if already ready)
+    if marker.exists():
+        print(f"Input ready immediately")
+        return True
+
+    print(f"Waiting for completion marker (timeout: {max_wait}s)...")
+    while elapsed < max_wait:
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+
+        # NFS cache invalidation - list directory to refresh metadata
+        try:
+            list(input_dir.iterdir())
+        except Exception:
+            pass
+
+        if marker.exists():
+            print(f"Input ready after {elapsed}s")
+            return True
+
+        if elapsed % 300 == 0:
+            print(f"Still waiting ({elapsed}/{max_wait}s)...")
+
+    return False
+
+# Validate stitching input is ready (wait up to 60 min for NFS delays / slow upstream)
+input_dir = STITCH_DIR / f"cyc{CYCLE:02d}"
+if not input_dir.exists():
+    print(f"ERROR: Stitching output directory does not exist: {input_dir}")
+    print("The stitching job may not have started or failed early.")
+    sys.exit(1)
+
+if not wait_for_input(input_dir, max_wait=3600, poll_interval=30):
+    print(f"ERROR: Stitching incomplete for cycle {CYCLE}")
+    print(f"Missing completion marker: {input_dir / '.complete'}")
+    print(f"Check stitching job status: squeue -u $USER")
+    print(f"Check stitching logs for errors.")
+    sys.exit(1)
+
+print(f"Stitching input validated for cycle {CYCLE}")
+
 # Initialize CUDA if in GPU mode
 if DEVICE_MODE != 'cpu':
     try:
@@ -298,6 +362,35 @@ print(f"QC images: {QC_DIR}")
 # Exit with error if any channels failed
 if successful < len(channels):
     sys.exit(1)
+
+# =============================================================================
+# WRITE COMPLETION MARKER
+# =============================================================================
+# This marker signals to downstream jobs (EDF) that deconvolution is complete
+# and all output files have been written and flushed to disk/NFS.
+
+from datetime import datetime
+
+output_cycle_dir = DECON_DIR / f"cyc{CYCLE:02d}"
+marker_file = output_cycle_dir / ".complete"
+
+try:
+    with open(marker_file, 'w') as f:
+        f.write(f"stage=decon\n")
+        f.write(f"cycle={CYCLE}\n")
+        f.write(f"completed={datetime.now().isoformat()}\n")
+        f.write(f"channels={START_CHANNEL}-{END_CHANNEL}\n")
+        f.write(f"successful={successful}\n")
+        f.write(f"job_id={os.environ.get('SLURM_JOB_ID', 'local')}\n")
+        f.write(f"array_task_id={os.environ.get('SLURM_ARRAY_TASK_ID', '0')}\n")
+        f.write(f"duration_minutes={elapsed:.1f}\n")
+
+    # Force NFS sync to ensure marker is visible to other nodes
+    os.sync()
+    print(f"Completion marker written: {marker_file}")
+except Exception as e:
+    print(f"WARNING: Failed to write completion marker: {e}")
+    # Don't fail the job if marker write fails - the data is still valid
 PYTHON_SCRIPT
 
 EXIT_CODE=$?
