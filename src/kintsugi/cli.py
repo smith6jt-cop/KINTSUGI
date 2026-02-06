@@ -557,9 +557,7 @@ def slurm_init(
     is_flag=True,
     help="Also submit to burst QOS for faster processing (preemptible)",
 )
-def slurm_submit(
-    project_dir: str, steps: str, cycles: str | None, dry_run: bool, use_burst: bool
-):
+def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool, use_burst: bool):
     """
     Submit SLURM jobs for a KINTSUGI project.
 
@@ -711,9 +709,7 @@ def slurm_cancel(project_dir: str, run_id: str | None):
             raise SystemExit(1)
 
         job_ids = [
-            line.strip()
-            for line in job_ids_file.read_text().strip().splitlines()
-            if line.strip()
+            line.strip() for line in job_ids_file.read_text().strip().splitlines() if line.strip()
         ]
 
         if not job_ids:
@@ -746,19 +742,18 @@ def slurm_cancel(project_dir: str, run_id: str | None):
             result = subprocess.run(
                 [
                     "squeue",
-                    "-u", os.environ.get("USER", ""),
-                    "--name", f"kintsugi_%_{project_name}",
+                    "-u",
+                    os.environ.get("USER", ""),
+                    "--name",
+                    f"kintsugi_%_{project_name}",
                     "-h",
-                    "-o", "%i",
+                    "-o",
+                    "%i",
                 ],
                 capture_output=True,
                 text=True,
             )
-            job_ids = [
-                line.strip()
-                for line in result.stdout.strip().splitlines()
-                if line.strip()
-            ]
+            job_ids = [line.strip() for line in result.stdout.strip().splitlines() if line.strip()]
 
             if not job_ids:
                 console.print(f"[dim]No running kintsugi jobs found for {project_name}[/dim]")
@@ -944,7 +939,9 @@ resources:
 @click.option("--dry-run", "-n", is_flag=True, help="Preview without executing")
 @click.option("--local", is_flag=True, help="Run locally instead of via SLURM")
 @click.option("--cores", default=4, type=int, help="CPU cores for local execution (default: 4)")
-@click.option("--forcerun", default=None, help="Force re-run a specific rule (stitch/deconvolve/edf)")
+@click.option(
+    "--forcerun", default=None, help="Force re-run a specific rule (stitch/deconvolve/edf)"
+)
 @click.option("--cycles", "-c", default=None, help="Override cycles: '1-3' or '1,2,5'")
 def workflow_run(
     project_dir: str,
@@ -1024,8 +1021,7 @@ def workflow_run(
                 wf_config = yaml.safe_load(f)
             proj = wf_config["project_dir"]
             targets = [
-                f"{proj}/data/processed/edf/cyc{c:02d}/.snakemake_complete"
-                for c in cycle_nums
+                f"{proj}/data/processed/edf/cyc{c:02d}/.snakemake_complete" for c in cycle_nums
             ]
             cmd.extend(targets)
 
@@ -1062,10 +1058,14 @@ def workflow_run(
 # Microscope parameters (stored in /meta/experiment.json)
 @click.option("--tile-rows", type=int, default=None, help="Number of tile rows (auto-detected)")
 @click.option("--tile-cols", type=int, default=None, help="Number of tile columns (auto-detected)")
-@click.option("--xy-pixel-size", type=float, default=377.0, help="XY pixel size in nm (default: 377)")
+@click.option(
+    "--xy-pixel-size", type=float, default=377.0, help="XY pixel size in nm (default: 377)"
+)
 @click.option("--z-step-size", type=float, default=1500.0, help="Z step size in nm (default: 1500)")
 @click.option("--numerical-aperture", type=float, default=0.75, help="Objective NA (default: 0.75)")
-@click.option("--tissue-ri", type=float, default=1.44, help="Tissue refractive index (default: 1.44)")
+@click.option(
+    "--tissue-ri", type=float, default=1.44, help="Tissue refractive index (default: 1.44)"
+)
 def init(
     project_path: str,
     name: str | None,
@@ -1403,9 +1403,7 @@ def scan(directory: str, depth: int, samples: int):
             summary_lines.append(f"  Cycles: {cycles_str}")
 
     if report.has_processed_data:
-        summary_lines.append(
-            f"[yellow]Processed data:[/yellow] {report.processed_size_mb:.1f} MB"
-        )
+        summary_lines.append(f"[yellow]Processed data:[/yellow] {report.processed_size_mb:.1f} MB")
         for stage, count in report.processed_stages.items():
             summary_lines.append(f"  {stage}: {count} files")
 

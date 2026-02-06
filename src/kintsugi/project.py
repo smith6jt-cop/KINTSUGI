@@ -99,7 +99,9 @@ class ExistingDataReport:
 
         # Legacy summary for backwards compatibility
         if not self.has_raw_data and not self.has_processed_data:
-            lines.append(f"Found {self.image_count} image files ({self.total_size_mb:.1f} MB total)")
+            lines.append(
+                f"Found {self.image_count} image files ({self.total_size_mb:.1f} MB total)"
+            )
             if self.cycle_folders:
                 lines.append(f"Cycle folders detected: {', '.join(self.cycle_folders)}")
 
@@ -189,12 +191,14 @@ class ExperimentConfig:
     immersion_medium: str = "air"  # air, water, oil
 
     # Wavelengths per channel: {channel_num: (excitation_nm, emission_nm)}
-    wavelengths: dict[int, tuple[float, float]] = field(default_factory=lambda: {
-        1: (358.0, 461.0),   # DAPI
-        2: (753.0, 775.0),   # Cy7
-        3: (560.0, 575.0),   # TRITC
-        4: (648.0, 668.0),   # Cy5
-    })
+    wavelengths: dict[int, tuple[float, float]] = field(
+        default_factory=lambda: {
+            1: (358.0, 461.0),  # DAPI
+            2: (753.0, 775.0),  # Cy7
+            3: (560.0, 575.0),  # TRITC
+            4: (648.0, 668.0),  # Cy5
+        }
+    )
 
     # Data organization
     channels_per_cycle: int = 4
@@ -674,7 +678,17 @@ def scan_existing_data(
     # Scan root directory for loose files (not in data/ structure)
     # This handles legacy layouts or files that haven't been organized
     for item in directory.iterdir():
-        if item.is_dir() and item.name not in {"data", "meta", "notebooks", "slurm", ".claude", ".vscode", ".git", "__pycache__", "configs"}:
+        if item.is_dir() and item.name not in {
+            "data",
+            "meta",
+            "notebooks",
+            "slurm",
+            ".claude",
+            ".vscode",
+            ".git",
+            "__pycache__",
+            "configs",
+        }:
             # Check for cycle folders at root level (legacy layout)
             if cycle_pattern.match(item.name):
                 report.cycle_folders.append(item.name)
@@ -1476,10 +1490,10 @@ class KintsugiProject:
         # Create config with provided parameters (use defaults for None)
         # Use default wavelengths if not provided
         default_wavelengths = {
-            1: (358.0, 461.0),   # DAPI
-            2: (753.0, 775.0),   # Cy7
-            3: (560.0, 575.0),   # TRITC
-            4: (648.0, 668.0),   # Cy5
+            1: (358.0, 461.0),  # DAPI
+            2: (753.0, 775.0),  # Cy7
+            3: (560.0, 575.0),  # TRITC
+            4: (648.0, 668.0),  # Cy5
         }
         config = ExperimentConfig(
             tile_rows=tile_rows if tile_rows is not None else 5,
@@ -1531,9 +1545,7 @@ class KintsugiProject:
                             channels.add(int(ch_match.group(1)))
                     if channels:
                         config.channels_per_cycle = len(channels)
-                        print(
-                            f"  Auto-detected {config.channels_per_cycle} channels per cycle"
-                        )
+                        print(f"  Auto-detected {config.channels_per_cycle} channels per cycle")
 
         # Save config
         self.save_experiment_config(config)
@@ -1554,12 +1566,14 @@ class KintsugiProject:
         # Import from Kio if available, otherwise use inline implementation
         try:
             from notebooks.Kio import load_channel_names as kio_load_channel_names
+
             return kio_load_channel_names(self.paths.meta)
         except ImportError:
             pass
 
         # Inline implementation (simplified)
         import re
+
         meta_dir = self.paths.meta
         channel_file = None
 
@@ -1588,8 +1602,10 @@ class KintsugiProject:
         first_line = lines[0]
 
         # Check if cycle-prefixed format
-        if ":" in first_line or "\t" in first_line or (
-            first_line.split(",")[0].strip().isdigit() and len(first_line.split(",")) > 2
+        if (
+            ":" in first_line
+            or "\t" in first_line
+            or (first_line.split(",")[0].strip().isdigit() and len(first_line.split(",")) > 2)
         ):
             # Cycle-prefixed format
             for line in lines:
