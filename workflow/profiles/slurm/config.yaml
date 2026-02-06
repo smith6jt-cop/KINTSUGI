@@ -1,0 +1,39 @@
+# =============================================================================
+# KINTSUGI Snakemake SLURM Profile
+# =============================================================================
+# Configures Snakemake to submit jobs via SLURM.
+# Requires: snakemake >= 8.0, snakemake-executor-plugin-slurm
+#
+# Usage:
+#   snakemake --profile profiles/slurm -j 8
+#   snakemake --profile profiles/slurm -j 8 --resources gpus=3
+# =============================================================================
+
+executor: slurm
+
+# Default SLURM settings (overridden per-rule via resources:)
+default-resources:
+  slurm_account: maigan
+  slurm_partition: hpg-b200
+  mem_mb: 48000
+  runtime: 240           # minutes
+  cpus_per_task: 4
+  gpus: 1
+
+# Maximum concurrent SLURM jobs
+# Set this to your total available job slots (GPU + CPU)
+jobs: 8
+
+# NFS latency tolerance (seconds)
+# Snakemake waits this long for output files to appear after a job completes.
+# Replaces the wait_for_input() polling loops in the old job scripts.
+latency-wait: 120
+
+# Automatic retry on failure (replaces manual resubmission)
+retries: 2
+
+# Continue running independent jobs when one fails
+keep-going: true
+
+# Use conda environments
+use-conda: true

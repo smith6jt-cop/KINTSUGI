@@ -1,0 +1,86 @@
+# =============================================================================
+# KINTSUGI Snakemake Pipeline Configuration
+# =============================================================================
+# This file replaces slurm/config.sh for the Snakemake workflow.
+# Edit the paths and parameters below for your project.
+#
+# Usage:
+#   snakemake --profile profiles/slurm -j 8   # SLURM execution
+#   snakemake --cores 4                        # Local execution
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Paths (REQUIRED - update these for your project)
+# ---------------------------------------------------------------------------
+project_dir: /path/to/my_project
+kintsugi_dir: /path/to/KINTSUGI
+
+# ---------------------------------------------------------------------------
+# Processing scope
+# ---------------------------------------------------------------------------
+# Which cycles to process (list of integers)
+cycles: [1, 2, 3, 4, 5, 6, 7]
+
+# Which channels to process (list of integers)
+channels: [1, 2, 3, 4]
+
+# Output format: tiff or zarr
+output_format: tiff
+
+# ---------------------------------------------------------------------------
+# Tile grid (for stitching)
+# ---------------------------------------------------------------------------
+tile_rows: 5
+tile_cols: 5
+tile_overlap: 0.1
+
+# ---------------------------------------------------------------------------
+# Stitching parameters
+# ---------------------------------------------------------------------------
+ncc_threshold: 0.078
+pou: 0.5
+blend_sigma: 15.0
+
+# BaSiC illumination correction
+basic_flatfield_min: 0.1
+basic_max_iterations: 500
+basic_optimization_tolerance: 1.0e-6
+
+# ---------------------------------------------------------------------------
+# EDF parameters
+# ---------------------------------------------------------------------------
+edf:
+  radius_x: 2
+  radius_y: 2
+  sigma: 10.0
+  tiles: [3, 3]
+  blend_depth: 0
+  z_smooth_sigma: 1.0
+
+# Quality gate thresholds for EDF
+quality_gate:
+  max_zero_pct: 0.10
+  max_sat_pct: 0.05
+  min_valid_slices: 3
+
+# ---------------------------------------------------------------------------
+# SLURM resource defaults
+# ---------------------------------------------------------------------------
+# These are used by the SLURM profile. Microscope parameters are read
+# directly from meta/experiment.json by the processing scripts.
+resources:
+  account: maigan
+  partition_gpu: hpg-b200
+  partition_cpu: hpg-default
+  qos: ""
+  conda_env: kintsugi
+
+  # Memory per step (MB)
+  mem_stitch: 48000
+  mem_decon: 48000
+  mem_edf: 16000
+
+  # Time per step (minutes)
+  time_stitch: 240
+  time_decon: 240
+  time_edf: 60
