@@ -227,7 +227,14 @@ class ExperimentConfig:
         """Create from dictionary."""
         # Convert wavelengths keys back to integers
         if "wavelengths" in data:
-            data["wavelengths"] = {int(k): tuple(v) for k, v in data["wavelengths"].items()}
+            wl = data["wavelengths"]
+            if isinstance(wl, dict):
+                data["wavelengths"] = {int(k): tuple(v) for k, v in wl.items()}
+            elif isinstance(wl, list):
+                # Handle list-of-pairs format: [[1, [358.0, 461.0]], ...]
+                data["wavelengths"] = {int(pair[0]): tuple(pair[1]) for pair in wl}
+            else:
+                del data["wavelengths"]  # Invalid format, use default
         # Filter to valid fields only
         valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_data = {k: v for k, v in data.items() if k in valid_fields}
@@ -1122,8 +1129,8 @@ class KintsugiProject:
         slurm_qos: str | None = None,
         slurm_gpu_type: str | None = None,
         # Microscope parameters (stored in /meta/experiment.json)
-        tile_rows: int = 5,
-        tile_cols: int = 5,
+        tile_rows: int | None = None,
+        tile_cols: int | None = None,
         xy_pixel_size: float = 377.0,
         z_step_size: float = 1500.0,
         numerical_aperture: float = 0.75,
@@ -1388,7 +1395,7 @@ class KintsugiProject:
             with open(config_path) as f:
                 data = json.load(f)
             return ExperimentConfig.from_dict(data)
-        except (json.JSONDecodeError, TypeError, KeyError) as e:
+        except (json.JSONDecodeError, TypeError, KeyError, AttributeError, ValueError) as e:
             print(f"Warning: Could not load experiment config: {e}")
             return None
 
@@ -1416,8 +1423,8 @@ class KintsugiProject:
 
     def create_experiment_config(
         self,
-        tile_rows: int = 5,
-        tile_cols: int = 5,
+        tile_rows: int | None = None,
+        tile_cols: int | None = None,
         xy_pixel_size: float = 377.0,
         z_step_size: float = 1500.0,
         numerical_aperture: float = 0.75,
@@ -1432,8 +1439,8 @@ class KintsugiProject:
 
         Parameters
         ----------
-        tile_rows, tile_cols : int
-            Tile grid dimensions
+        tile_rows, tile_cols : int or None
+            Tile grid dimensions. If None, auto-detected from raw data.
         xy_pixel_size : float
             XY pixel size in nanometers
         z_step_size : float
@@ -1445,7 +1452,7 @@ class KintsugiProject:
         wavelengths : dict, optional
             Channel wavelengths {channel: (excitation, emission)}
         auto_detect : bool
-            If True, auto-detect n_cycles and n_zplanes from raw data
+            If True, auto-detect n_cycles, n_zplanes, tile grid from raw data
         overwrite : bool
             If True, overwrite existing config
         **kwargs
@@ -1463,7 +1470,10 @@ class KintsugiProject:
                 print(f"  Experiment config already exists: {config_path}")
                 return existing
 
-        # Create config with provided parameters
+        # Track whether user explicitly provided tile dimensions
+        user_set_tiles = tile_rows is not None or tile_cols is not None
+
+        # Create config with provided parameters (use defaults for None)
         # Use default wavelengths if not provided
         default_wavelengths = {
             1: (358.0, 461.0),   # DAPI
@@ -1472,8 +1482,8 @@ class KintsugiProject:
             4: (648.0, 668.0),   # Cy5
         }
         config = ExperimentConfig(
-            tile_rows=tile_rows,
-            tile_cols=tile_cols,
+            tile_rows=tile_rows if tile_rows is not None else 5,
+            tile_cols=tile_cols if tile_cols is not None else 5,
             xy_pixel_size=xy_pixel_size,
             z_step_size=z_step_size,
             numerical_aperture=numerical_aperture,
@@ -1484,6 +1494,8 @@ class KintsugiProject:
 
         # Auto-detect from raw data if requested
         if auto_detect:
+            import re
+
             cycles = find_raw_cycles(self.paths.raw)
             if cycles:
                 config.n_cycles = len(cycles)
@@ -1491,7 +1503,6 @@ class KintsugiProject:
 
                 # Try to detect z-planes from first cycle
                 first_cycle = cycles[0]
-                import re
                 z_planes = set()
                 for f in first_cycle.glob("*_Z*_CH1.tif"):
                     match = re.search(r"_Z(\d+)_", f.name)
@@ -1500,6 +1511,29 @@ class KintsugiProject:
                 if z_planes:
                     config.n_zplanes = len(z_planes)
                     print(f"  Auto-detected {config.n_zplanes} z-planes")
+
+                # Auto-detect tile grid and channels_per_cycle
+                # Count tiles at Z001 CH1 to get tile count
+                z001_ch1_files = list(first_cycle.glob("*_Z001_CH1.tif"))
+                if z001_ch1_files:
+                    n_tiles = len(z001_ch1_files)
+                    if not user_set_tiles:
+                        rows, cols = _tile_count_to_grid(n_tiles)
+                        config.tile_rows = rows
+                        config.tile_cols = cols
+                        print(f"  Auto-detected tile grid: {rows}x{cols} ({n_tiles} tiles)")
+
+                    # Detect channels_per_cycle from distinct CH values
+                    channels = set()
+                    for f in first_cycle.glob("*_Z001_CH*.tif"):
+                        ch_match = re.search(r"_CH(\d+)", f.name)
+                        if ch_match:
+                            channels.add(int(ch_match.group(1)))
+                    if channels:
+                        config.channels_per_cycle = len(channels)
+                        print(
+                            f"  Auto-detected {config.channels_per_cycle} channels per cycle"
+                        )
 
         # Save config
         self.save_experiment_config(config)
@@ -1714,8 +1748,8 @@ class KintsugiProject:
         # Use microscope parameters from project config if available
         microscope_params = self.config.parameters.get("microscope", {})
         self.create_experiment_config(
-            tile_rows=microscope_params.get("tile_rows", 5),
-            tile_cols=microscope_params.get("tile_cols", 5),
+            tile_rows=microscope_params.get("tile_rows"),
+            tile_cols=microscope_params.get("tile_cols"),
             xy_pixel_size=microscope_params.get("xy_pixel_size", 377.0),
             z_step_size=microscope_params.get("z_step_size", 1500.0),
             numerical_aperture=microscope_params.get("numerical_aperture", 0.75),
@@ -1832,6 +1866,10 @@ class KintsugiProject:
         if gpu_type is not None:
             user_settings["gpu_type"] = gpu_type
 
+        # Load experiment config to populate processing parameters
+        exp_config = self.load_experiment_config()
+        experiment_dict = exp_config.to_dict() if exp_config else None
+
         # Generate config.sh
         config_content = generate_slurm_config(
             project_name=self.config.name,
@@ -1839,6 +1877,7 @@ class KintsugiProject:
             kintsugi_dir=str(self._kintsugi_path),
             detected_settings=detected,
             user_settings=user_settings,
+            experiment_config=experiment_dict,
         )
 
         config_file = slurm_dir / "config.sh"
@@ -2473,3 +2512,30 @@ def find_raw_cycles(raw_dir: str | Path) -> list[Path]:
         return natsorted(cycles, key=lambda p: p.name)
     except ImportError:
         return sorted(cycles, key=lambda p: p.name)
+
+
+def _tile_count_to_grid(n_tiles: int) -> tuple[int, int]:
+    """
+    Convert a tile count to (rows, cols) by finding the factor pair closest to square.
+
+    Parameters
+    ----------
+    n_tiles : int
+        Total number of tiles
+
+    Returns
+    -------
+    tuple[int, int]
+        (rows, cols) where rows <= cols
+    """
+    if n_tiles <= 0:
+        return (1, 1)
+
+    import math
+
+    sqrt = int(math.isqrt(n_tiles))
+    # Search downward from sqrt for the largest factor
+    for i in range(sqrt, 0, -1):
+        if n_tiles % i == 0:
+            return (i, n_tiles // i)
+    return (1, n_tiles)

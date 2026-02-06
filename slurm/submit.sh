@@ -552,14 +552,16 @@ resolve_max_concurrent() {
         fi
     fi
 
-    # Calculate actual resource usage with this concurrency
+    # Calculate actual resource usage with this concurrency (dual-pool aware)
     local cpus_per_task=${CPUS_PER_TASK:-4}
     local gpus_per_node=${GPUS_PER_NODE:-1}
     local max_mem=${MEM_DECON:-96}
+    local cpu_cpus=${CPU_CPUS_PER_TASK:-8}
+    local cpu_mem=${CPU_MEM_DECON:-48}
 
-    TOTAL_CPUS_USED=$((EFFECTIVE_MAX_CONCURRENT * cpus_per_task))
-    TOTAL_MEM_USED=$((EFFECTIVE_MAX_CONCURRENT * max_mem))
-    TOTAL_GPUS_USED=$((EFFECTIVE_MAX_CONCURRENT * gpus_per_node))
+    TOTAL_CPUS_USED=$(( GPU_SLOTS * cpus_per_task + CPU_SLOTS * cpu_cpus ))
+    TOTAL_MEM_USED=$(( GPU_SLOTS * max_mem + CPU_SLOTS * cpu_mem ))
+    TOTAL_GPUS_USED=$(( GPU_SLOTS * gpus_per_node ))
 
     return 0
 }
@@ -952,14 +954,24 @@ submit_job() {
     local using_fallback=false
 
     # For GPU mode, check availability and potentially fallback
-    # Strategy: Submit to whichever partition has idle GPUs, or both if both busy
+    # Strategy: Always submit to both primary and fallback when fallback is configured
+    # (skip-existing logic in job scripts prevents duplicate work)
     local submit_to_fallback_too=false
 
     if [ "${SELECTED_MODE}" = "gpu" ]; then
         check_gpu_availability "${use_partition}" "${SELECTED_ACCOUNT}"
         local gpu_check_status=$?
 
-        if [ ${gpu_check_status} -eq 1 ]; then
+        if [ ${gpu_check_status} -eq 0 ]; then
+            # Primary GPUs appear idle - submit to primary
+            # Also submit to fallback if configured, since QOS group limits
+            # can still block jobs after submission even when nodes are idle
+            if [ -n "${PARTITION_FALLBACK}" ]; then
+                term_info "Primary partition ${use_partition} has idle GPUs"
+                term_info "Also submitting to fallback ${PARTITION_FALLBACK} (QOS safety net)"
+                submit_to_fallback_too=true
+            fi
+        elif [ ${gpu_check_status} -eq 1 ]; then
             # Partition doesn't exist or has no nodes - try fallback
             term_warn "Primary partition ${use_partition} not available"
 
@@ -1062,7 +1074,7 @@ submit_job() {
 
         # Show fallback submission if both partitions busy
         if [ "${submit_to_fallback_too}" = true ]; then
-            term_info "DRY RUN - would ALSO submit to fallback partition (both busy):"
+            term_info "DRY RUN - would ALSO submit to fallback partition:"
             build_sbatch_cmd_array "${step_name}" "${script}" "${effective_mem}" "${effective_time}" \
                 "${dep_type}" "${dep_jobid}" "${PARTITION_FALLBACK}" "${QOS_FALLBACK}" \
                 "${SELECTED_ACCOUNT}" "${SELECTED_MODE}" "${EFFECTIVE_CPUS_PER_TASK}" "${EFFECTIVE_GPUS}"
@@ -1105,7 +1117,7 @@ submit_job() {
 
         term_info "Successfully submitted ${step_name} - Job ID: ${jobid}"
 
-        # If both partitions are busy, also submit to fallback (first to start wins)
+        # Also submit to fallback partition if configured (first to start wins, skip-existing prevents duplicates)
         if [ "${submit_to_fallback_too}" = true ]; then
             term_info "Also submitting to fallback partition ${PARTITION_FALLBACK}..."
             build_sbatch_cmd_array "${step_name}" "${script}" "${effective_mem}" "${effective_time}" \
@@ -1522,6 +1534,18 @@ run_step() {
     esac
 }
 
+# Cancel stale kintsugi jobs for this project before submitting new ones
+if [ "${DRY_RUN}" != true ]; then
+    existing=$(squeue -u "${USER}" --name="kintsugi_%_${PROJECT_NAME}" -h -o "%i" 2>/dev/null | tr '\n' ' ')
+    if [ -n "$(echo "${existing}" | tr -d '[:space:]')" ]; then
+        term_warn "Found existing kintsugi jobs for ${PROJECT_NAME}: ${existing}"
+        term_warn "Cancelling stale jobs before new submission..."
+        # shellcheck disable=SC2086
+        scancel ${existing}
+        term_info "Cancelled stale jobs"
+    fi
+fi
+
 if [ "${STEPS}" = "all" ]; then
     run_step "correction"
     run_step "stitch"
@@ -1543,6 +1567,7 @@ term_info "Run ID:     ${RUN_ID}"
 term_info "Run Dir:    ${RUN_DIR}"
 echo ""
 term_info "Monitor jobs:  squeue -u \$USER -n kintsugi_*_${PROJECT_NAME}"
+term_info "Cancel jobs:   kintsugi slurm cancel ${PROJECT_DIR}"
 term_info "View logs:     ls ${LOG_DIR}/"
 term_info "View QC:       ls ${QC_DIR}/"
 term_info "View summary:  cat ${RUN_DIR}/run_info.txt"
@@ -1558,4 +1583,32 @@ if [ "${DRY_RUN}" = true ]; then
 else
     term_info "All jobs submitted successfully"
     term_info "Use 'squeue -u \$USER' to monitor job status"
+
+    # Record job IDs in run_info.txt
+    {
+        echo ""
+        echo "Job IDs:"
+        [ -n "${JOB_CORRECTION}" ]       && echo "  correction_gpu:   ${JOB_CORRECTION}"
+        [ -n "${JOB_CORRECTION_CPU}" ]   && echo "  correction_cpu:   ${JOB_CORRECTION_CPU}"
+        [ -n "${JOB_CORRECTION_BURST}" ] && echo "  correction_burst: ${JOB_CORRECTION_BURST}"
+        [ -n "${JOB_STITCH}" ]           && echo "  stitch_gpu:       ${JOB_STITCH}"
+        [ -n "${JOB_STITCH_CPU}" ]       && echo "  stitch_cpu:       ${JOB_STITCH_CPU}"
+        [ -n "${JOB_STITCH_BURST}" ]     && echo "  stitch_burst:     ${JOB_STITCH_BURST}"
+        [ -n "${JOB_DECON}" ]            && echo "  decon_gpu:        ${JOB_DECON}"
+        [ -n "${JOB_DECON_CPU}" ]        && echo "  decon_cpu:        ${JOB_DECON_CPU}"
+        [ -n "${JOB_DECON_BURST}" ]      && echo "  decon_burst:      ${JOB_DECON_BURST}"
+        [ -n "${JOB_EDF}" ]              && echo "  edf_gpu:          ${JOB_EDF}"
+        [ -n "${JOB_EDF_CPU}" ]          && echo "  edf_cpu:          ${JOB_EDF_CPU}"
+        [ -n "${JOB_EDF_BURST}" ]        && echo "  edf_burst:        ${JOB_EDF_BURST}"
+    } >> "${RUN_DIR}/run_info.txt"
+
+    # Write machine-readable job_ids.txt for cancel command
+    for jid in ${JOB_CORRECTION} ${JOB_CORRECTION_CPU} ${JOB_CORRECTION_BURST} \
+               ${JOB_STITCH} ${JOB_STITCH_CPU} ${JOB_STITCH_BURST} \
+               ${JOB_DECON} ${JOB_DECON_CPU} ${JOB_DECON_BURST} \
+               ${JOB_EDF} ${JOB_EDF_CPU} ${JOB_EDF_BURST}; do
+        [ -n "${jid}" ] && echo "${jid}"
+    done > "${RUN_DIR}/job_ids.txt"
+
+    term_info "Job IDs saved to: ${RUN_DIR}/job_ids.txt"
 fi

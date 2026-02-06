@@ -679,6 +679,114 @@ def slurm_status(project_dir: str):
         console.print(f"[red]Error checking status: {e}[/red]")
 
 
+@slurm.command("cancel")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--run-id", default=None, help="Cancel jobs from a specific run ID only")
+def slurm_cancel(project_dir: str, run_id: str | None):
+    """
+    Cancel all SLURM jobs for a project.
+
+    If --run-id is provided, cancels only the jobs from that specific run
+    (reads from slurm/runs/<run-id>/job_ids.txt). Otherwise, cancels all
+    running kintsugi jobs matching this project name.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+
+    \b
+    Examples:
+        kintsugi slurm cancel .                          # Cancel all project jobs
+        kintsugi slurm cancel . --run-id 20260206_143000 # Cancel specific run
+    """
+    from pathlib import Path
+
+    project_dir = Path(project_dir).resolve()
+    project_name = project_dir.name
+
+    if run_id:
+        # Cancel specific run's jobs from job_ids.txt
+        job_ids_file = project_dir / "slurm" / "runs" / run_id / "job_ids.txt"
+        if not job_ids_file.exists():
+            console.print(f"[red]No job_ids.txt found for run {run_id}[/red]")
+            console.print(f"  Expected: {job_ids_file}")
+            raise SystemExit(1)
+
+        job_ids = [
+            line.strip()
+            for line in job_ids_file.read_text().strip().splitlines()
+            if line.strip()
+        ]
+
+        if not job_ids:
+            console.print(f"[yellow]No job IDs recorded for run {run_id}[/yellow]")
+            return
+
+        console.print(f"[bold]Cancelling {len(job_ids)} job(s) from run {run_id}:[/bold]")
+        for jid in job_ids:
+            console.print(f"  {jid}")
+
+        try:
+            result = subprocess.run(
+                ["scancel"] + job_ids,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                console.print(f"[green]Cancelled {len(job_ids)} job(s)[/green]")
+            else:
+                # scancel may warn about already-completed jobs, which is fine
+                stderr = result.stderr.strip()
+                if stderr:
+                    console.print(f"[yellow]{stderr}[/yellow]")
+                console.print("[green]Cancel request sent[/green]")
+        except FileNotFoundError:
+            console.print("[yellow]scancel not available (not on a SLURM cluster?)[/yellow]")
+    else:
+        # Cancel all kintsugi jobs for this project via squeue pattern
+        try:
+            result = subprocess.run(
+                [
+                    "squeue",
+                    "-u", os.environ.get("USER", ""),
+                    "--name", f"kintsugi_%_{project_name}",
+                    "-h",
+                    "-o", "%i",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            job_ids = [
+                line.strip()
+                for line in result.stdout.strip().splitlines()
+                if line.strip()
+            ]
+
+            if not job_ids:
+                console.print(f"[dim]No running kintsugi jobs found for {project_name}[/dim]")
+                return
+
+            console.print(f"[bold]Cancelling {len(job_ids)} job(s) for {project_name}:[/bold]")
+            for jid in job_ids:
+                console.print(f"  {jid}")
+
+            cancel_result = subprocess.run(
+                ["scancel"] + job_ids,
+                capture_output=True,
+                text=True,
+            )
+            if cancel_result.returncode == 0:
+                console.print(f"[green]Cancelled {len(job_ids)} job(s)[/green]")
+            else:
+                stderr = cancel_result.stderr.strip()
+                if stderr:
+                    console.print(f"[yellow]{stderr}[/yellow]")
+                console.print("[green]Cancel request sent[/green]")
+
+        except FileNotFoundError:
+            console.print("[yellow]squeue/scancel not available (not on a SLURM cluster?)[/yellow]")
+        except Exception as e:
+            console.print(f"[red]Error cancelling jobs: {e}[/red]")
+
+
 # ============================================================================
 # Project Commands
 # ============================================================================
@@ -697,8 +805,8 @@ def slurm_status(project_dir: str):
 @click.option("--slurm-qos", default=None, help="SLURM Quality of Service")
 @click.option("--slurm-gpu-type", default=None, help="GPU type for SLURM (auto-detected)")
 # Microscope parameters (stored in /meta/experiment.json)
-@click.option("--tile-rows", type=int, default=5, help="Number of tile rows (default: 5)")
-@click.option("--tile-cols", type=int, default=5, help="Number of tile columns (default: 5)")
+@click.option("--tile-rows", type=int, default=None, help="Number of tile rows (auto-detected)")
+@click.option("--tile-cols", type=int, default=None, help="Number of tile columns (auto-detected)")
 @click.option("--xy-pixel-size", type=float, default=377.0, help="XY pixel size in nm (default: 377)")
 @click.option("--z-step-size", type=float, default=1500.0, help="Z step size in nm (default: 1500)")
 @click.option("--numerical-aperture", type=float, default=0.75, help="Objective NA (default: 0.75)")
@@ -713,8 +821,8 @@ def init(
     slurm_partition: str | None,
     slurm_qos: str | None,
     slurm_gpu_type: str | None,
-    tile_rows: int,
-    tile_cols: int,
+    tile_rows: int | None,
+    tile_cols: int | None,
     xy_pixel_size: float,
     z_step_size: float,
     numerical_aperture: float,
@@ -857,7 +965,7 @@ def init(
                     if len(dims) > 25:
                         dims = dims[:22] + "..."
                     ch_names = sample.get("channel_names", [])
-                    ch_str = str(sample.get("channels", "N/A"))
+                    ch_str = str(sample.get("channels") or "N/A")
                     if ch_names:
                         ch_str = f"{len(ch_names)}: {', '.join(ch_names[:3])}"
                         if len(ch_names) > 3:

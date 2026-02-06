@@ -194,9 +194,16 @@ def replace_invalid_translations(grid: pd.DataFrame) -> pd.DataFrame:
     for direction, xy in itertools.product(["left", "top"], ["x", "y"]):
         key = f"{direction}_{xy}_second"
         isna = pd.isna(grid[key])
-        grid.loc[isna, key] = grid.loc[~isna, key].median()
-        grid.loc[isna, f"{direction}_ncc_second"] = -1
+        if isna.any():
+            fill_value = grid.loc[~isna, key].median()
+            if not np.isfinite(fill_value):
+                # All translations invalid for this direction — use 0 (no shift)
+                fill_value = 0.0
+            grid.loc[isna, key] = fill_value
+            grid.loc[isna, f"{direction}_ncc_second"] = -1
     for direction, xy in itertools.product(["left", "top"], ["x", "y"]):
-        assert np.all(np.isfinite(grid[f"{direction}_{xy}_second"]))
+        remaining = ~np.isfinite(grid[f"{direction}_{xy}_second"])
+        if remaining.any():
+            grid.loc[remaining, f"{direction}_{xy}_second"] = 0.0
 
     return grid

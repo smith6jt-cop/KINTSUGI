@@ -291,9 +291,12 @@ def generate_slurm_config(
     kintsugi_dir: str | Path,
     detected_settings: dict[str, Any] | None = None,
     user_settings: dict[str, Any] | None = None,
+    experiment_config: dict[str, Any] | None = None,
 ) -> str:
     """
     Generate SLURM configuration file content.
+
+    Priority order: hardcoded defaults < experiment_config < detected HPC < user CLI overrides
 
     Parameters
     ----------
@@ -307,6 +310,9 @@ def generate_slurm_config(
         Auto-detected settings from detect_hpc_settings()
     user_settings : dict, optional
         User-provided settings to override defaults
+    experiment_config : dict, optional
+        Experiment config from /meta/experiment.json (ExperimentConfig.to_dict()).
+        Maps experiment.json keys to config.sh keys.
 
     Returns
     -------
@@ -316,7 +322,36 @@ def generate_slurm_config(
     # Start with defaults
     config = get_slurm_defaults()
 
-    # Apply detected settings
+    # Apply experiment config (from /meta/experiment.json)
+    if experiment_config:
+        # Map experiment.json field names to config.sh field names
+        field_map = {
+            "n_cycles": "end_cycle",
+            "channels_per_cycle": "end_channel",
+            "tile_rows": "tile_rows",
+            "tile_cols": "tile_cols",
+            "tile_overlap": "tile_overlap",
+            "xy_pixel_size": "xy_vox",
+            "z_step_size": "z_vox",
+            "numerical_aperture": "mic_na",
+            "tissue_refractive_index": "tissue_ri",
+        }
+        for exp_key, config_key in field_map.items():
+            value = experiment_config.get(exp_key)
+            if value is not None:
+                config[config_key] = value
+
+        # Convert wavelengths dict to string format
+        wl = experiment_config.get("wavelengths")
+        if wl and isinstance(wl, dict):
+            parts = []
+            for ch in sorted(wl.keys(), key=lambda k: int(k)):
+                ex, em = wl[str(ch)] if str(ch) in wl else wl[ch]
+                parts.append(f"{ch}:{int(ex)}:{int(em)}")
+            if parts:
+                config["wavelengths"] = ",".join(parts)
+
+    # Apply detected HPC settings (account, partition, GPU type, etc.)
     if detected_settings:
         for key, value in detected_settings.items():
             if value is not None:
