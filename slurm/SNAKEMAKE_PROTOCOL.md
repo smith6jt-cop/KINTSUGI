@@ -147,22 +147,6 @@ KINTSUGI = config["kintsugi_dir"]
 CYCLES = config["cycles"]
 CHANNELS = config["channels"]
 
-# Auto-detect z-planes from raw data for each cycle
-def get_zplanes(wildcards):
-    """Detect z-plane count from raw cycle directory."""
-    import re
-    raw = Path(PROJECT) / "data" / "raw" / f"cyc{int(wildcards.cycle):02d}"
-    if not raw.exists():
-        # Try 3-digit format
-        raw = Path(PROJECT) / "data" / "raw" / f"cyc{int(wildcards.cycle):03d}"
-    files = list(raw.glob("*_Z*_CH1.tif"))
-    zplanes = set()
-    for f in files:
-        m = re.search(r'_Z(\d+)_', f.name)
-        if m:
-            zplanes.add(int(m.group(1)))
-    return sorted(zplanes)
-
 # Load experiment metadata once
 EXPERIMENT_JSON = Path(PROJECT) / "meta" / "experiment.json"
 if EXPERIMENT_JSON.exists():
@@ -464,12 +448,12 @@ The `resources:` block in each rule maps to SLURM sbatch flags:
 ### Full pipeline
 ```bash
 cd my_project/workflow
-snakemake --profile profiles/slurm -j 8
+snakemake --profile profiles/slurm
 ```
 
 ### Specific cycles
 ```bash
-snakemake --profile profiles/slurm -j 8 \
+snakemake --profile profiles/slurm \
     data/processed/edf/cyc01/CH1_edf.tif \
     data/processed/edf/cyc02/CH1_edf.tif
 ```
@@ -481,13 +465,13 @@ snakemake --profile profiles/slurm -n
 
 ### Just deconvolution + EDF (skip stitching)
 ```bash
-snakemake --profile profiles/slurm -j 8 \
+snakemake --profile profiles/slurm \
     --allowed-rules deconvolve edf
 ```
 
 ### Force re-run of a specific cycle
 ```bash
-snakemake --profile profiles/slurm -j 8 \
+snakemake --profile profiles/slurm \
     --forcerun data/processed/deconvolved/cyc03/.snakemake_complete
 ```
 
@@ -557,8 +541,12 @@ Group multiple cycles into a single SLURM job to reduce scheduler overhead:
 ```python
 rule deconvolve:
     ...
-    group: "cycle_{cycle}"
+    group: "deconvolve"
 ```
+
+Note: Use a fixed group name (not `"cycle_{cycle}"`) so Snakemake can batch
+multiple cycles into one SLURM submission. A per-cycle group name would
+create separate groups per cycle, defeating the batching intent.
 
 ---
 
@@ -570,8 +558,7 @@ QOS. With Snakemake, this is handled differently:
 1. **Retries replace burst**: Set `retries: 2` in the profile. If a burst job
    is preempted, Snakemake automatically resubmits it.
 
-2. **Cluster config for burst partition**: Use Snakemake's `--cluster-config`
-   to submit overflow jobs to the burst partition:
+2. **Burst profile**: Create a separate Snakemake profile for burst jobs:
 
 ```yaml
 # workflow/profiles/slurm-burst/config.yaml
@@ -579,7 +566,7 @@ executor: slurm
 default-resources:
   slurm_account: maigan-b
   slurm_partition: hpg-default
-  slurm_extra: "'--requeue'"
+  slurm_extra: "--requeue"
 retries: 3
 ```
 
