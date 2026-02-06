@@ -557,9 +557,7 @@ def slurm_init(
     is_flag=True,
     help="Also submit to burst QOS for faster processing (preemptible)",
 )
-def slurm_submit(
-    project_dir: str, steps: str, cycles: str | None, dry_run: bool, use_burst: bool
-):
+def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool, use_burst: bool):
     """
     Submit SLURM jobs for a KINTSUGI project.
 
@@ -711,9 +709,7 @@ def slurm_cancel(project_dir: str, run_id: str | None):
             raise SystemExit(1)
 
         job_ids = [
-            line.strip()
-            for line in job_ids_file.read_text().strip().splitlines()
-            if line.strip()
+            line.strip() for line in job_ids_file.read_text().strip().splitlines() if line.strip()
         ]
 
         if not job_ids:
@@ -746,19 +742,18 @@ def slurm_cancel(project_dir: str, run_id: str | None):
             result = subprocess.run(
                 [
                     "squeue",
-                    "-u", os.environ.get("USER", ""),
-                    "--name", f"kintsugi_%_{project_name}",
+                    "-u",
+                    os.environ.get("USER", ""),
+                    "--name",
+                    f"kintsugi_%_{project_name}",
                     "-h",
-                    "-o", "%i",
+                    "-o",
+                    "%i",
                 ],
                 capture_output=True,
                 text=True,
             )
-            job_ids = [
-                line.strip()
-                for line in result.stdout.strip().splitlines()
-                if line.strip()
-            ]
+            job_ids = [line.strip() for line in result.stdout.strip().splitlines() if line.strip()]
 
             if not job_ids:
                 console.print(f"[dim]No running kintsugi jobs found for {project_name}[/dim]")
@@ -788,6 +783,262 @@ def slurm_cancel(project_dir: str, run_id: str | None):
 
 
 # ============================================================================
+# Workflow Commands (Snakemake)
+# ============================================================================
+
+
+@main.group()
+def workflow():
+    """Manage Snakemake-based processing workflows."""
+    pass
+
+
+@workflow.command("config")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--print-only", is_flag=True, help="Print config to stdout without writing")
+def workflow_config(project_dir: str, print_only: bool):
+    """
+    Generate workflow/config.yaml for a project.
+
+    Reads meta/experiment.json and slurm/config.sh to create a unified
+    Snakemake configuration file.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    """
+    import json
+    import re
+    import shutil
+    from pathlib import Path
+
+    project_dir = Path(project_dir).resolve()
+
+    # Load experiment config
+    experiment = {}
+    exp_path = project_dir / "meta" / "experiment.json"
+    if exp_path.exists():
+        with open(exp_path) as f:
+            experiment = json.load(f)
+
+    # Detect KINTSUGI installation path
+    kintsugi_dir = Path(__file__).parent.parent.parent.resolve()
+
+    # Build cycles list
+    n_cycles = experiment.get("n_cycles", 7)
+    cycles_list = list(range(1, n_cycles + 1))
+
+    # Build channels list
+    channels_per_cycle = experiment.get("channels_per_cycle", 4)
+    channels_list = list(range(1, channels_per_cycle + 1))
+
+    # Detect SLURM settings from existing config.sh
+    slurm_config_path = project_dir / "slurm" / "config.sh"
+    account = ""
+    partition = "hpg-b200"
+    if slurm_config_path.exists():
+        config_text = slurm_config_path.read_text()
+        m = re.search(r'export\s+ACCOUNT="([^"]*)"', config_text)
+        if m:
+            account = m.group(1)
+        m = re.search(r'export\s+PARTITION="([^"]*)"', config_text)
+        if m:
+            partition = m.group(1)
+
+    config_content = f"""# =============================================================================
+# KINTSUGI Snakemake Pipeline Configuration
+# =============================================================================
+# Auto-generated from meta/experiment.json
+# Edit paths and resource settings as needed.
+# =============================================================================
+
+# Paths
+project_dir: "{project_dir}"
+kintsugi_dir: "{kintsugi_dir}"
+
+# Processing scope
+cycles: {cycles_list}
+channels: {channels_list}
+output_format: tiff
+
+# Tile grid
+tile_rows: {experiment.get("tile_rows", 5)}
+tile_cols: {experiment.get("tile_cols", 5)}
+tile_overlap: {experiment.get("tile_overlap", 0.1)}
+
+# Stitching parameters
+ncc_threshold: 0.078
+pou: 0.5
+blend_sigma: 15.0
+basic_flatfield_min: 0.1
+basic_max_iterations: 500
+basic_optimization_tolerance: 1.0e-6
+
+# EDF parameters
+edf:
+  radius_x: 2
+  radius_y: 2
+  sigma: 10.0
+  tiles: [3, 3]
+  blend_depth: 0
+  z_smooth_sigma: 1.0
+
+quality_gate:
+  max_zero_pct: 0.10
+  max_sat_pct: 0.05
+  min_valid_slices: 3
+
+# SLURM resources
+resources:
+  account: "{account}"
+  partition_gpu: "{partition}"
+  partition_cpu: hpg-default
+  qos: ""
+  conda_env: kintsugi
+  mem_stitch: 48000
+  mem_decon: 48000
+  mem_edf: 16000
+  time_stitch: 240
+  time_decon: 240
+  time_edf: 60
+"""
+
+    if print_only:
+        console.print(config_content)
+        return
+
+    # Write config
+    wf_dir = project_dir / "workflow"
+    wf_dir.mkdir(parents=True, exist_ok=True)
+    config_file = wf_dir / "config.yaml"
+    config_file.write_text(config_content)
+    console.print(f"[green]Created workflow config:[/green] {config_file}")
+
+    # Copy Snakefile and scripts from KINTSUGI installation
+    src_wf = kintsugi_dir / "workflow"
+    if src_wf.exists():
+        for item in ["Snakefile", "scripts", "profiles", "envs"]:
+            src = src_wf / item
+            dst = wf_dir / item
+            if src.exists() and not dst.exists():
+                if src.is_dir():
+                    shutil.copytree(str(src), str(dst))
+                else:
+                    shutil.copy2(str(src), str(dst))
+                console.print(f"  Copied {item}")
+
+    console.print()
+    console.print("[bold]Next steps:[/bold]")
+    console.print(f"  cd {wf_dir}")
+    console.print("  snakemake -n                              # Dry run")
+    console.print("  snakemake --profile profiles/slurm -j 8   # Submit via SLURM")
+    console.print("  snakemake --cores 4                       # Run locally")
+
+
+@workflow.command("run")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--jobs", "-j", default=8, type=int, help="Max concurrent SLURM jobs (default: 8)")
+@click.option("--dry-run", "-n", is_flag=True, help="Preview without executing")
+@click.option("--local", is_flag=True, help="Run locally instead of via SLURM")
+@click.option("--cores", default=4, type=int, help="CPU cores for local execution (default: 4)")
+@click.option(
+    "--forcerun", default=None, help="Force re-run a specific rule (stitch/deconvolve/edf)"
+)
+@click.option("--cycles", "-c", default=None, help="Override cycles: '1-3' or '1,2,5'")
+def workflow_run(
+    project_dir: str,
+    jobs: int,
+    dry_run: bool,
+    local: bool,
+    cores: int,
+    forcerun: str | None,
+    cycles: str | None,
+):
+    """
+    Run the Snakemake processing pipeline.
+
+    Requires workflow/config.yaml to exist. Create it with:
+      kintsugi workflow config .
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+
+    \b
+    Examples:
+        kintsugi workflow run .                    # Full pipeline via SLURM
+        kintsugi workflow run . --dry-run          # Preview
+        kintsugi workflow run . --local --cores 4  # Local execution
+        kintsugi workflow run . --forcerun stitch  # Force re-stitch
+    """
+    from pathlib import Path
+
+    project_dir = Path(project_dir).resolve()
+    wf_dir = project_dir / "workflow"
+
+    if not (wf_dir / "config.yaml").exists():
+        console.print("[red]No workflow/config.yaml found.[/red]")
+        console.print("Run 'kintsugi workflow config .' first.")
+        raise SystemExit(1)
+
+    if not (wf_dir / "Snakefile").exists():
+        console.print("[red]No workflow/Snakefile found.[/red]")
+        console.print("Run 'kintsugi workflow config .' to set up the workflow.")
+        raise SystemExit(1)
+
+    # Build snakemake command
+    cmd = ["snakemake", "--directory", str(wf_dir)]
+
+    if local:
+        cmd.extend(["--cores", str(cores)])
+    else:
+        profile_dir = wf_dir / "profiles" / "slurm"
+        if profile_dir.exists():
+            cmd.extend(["--profile", str(profile_dir), "-j", str(jobs)])
+        else:
+            console.print("[yellow]No SLURM profile found, running locally.[/yellow]")
+            cmd.extend(["--cores", str(cores)])
+
+    if dry_run:
+        cmd.append("-n")
+
+    if forcerun:
+        cmd.extend(["--forcerun", forcerun])
+
+    if cycles:
+        # Parse cycle range and build specific targets
+        import re
+
+        cycle_nums = []
+        if "-" in cycles:
+            m = re.match(r"(\d+)-(\d+)", cycles)
+            if m:
+                cycle_nums = list(range(int(m.group(1)), int(m.group(2)) + 1))
+        else:
+            cycle_nums = [int(c.strip()) for c in cycles.split(",")]
+
+        if cycle_nums:
+            # Read project_dir from config to build target paths
+            import yaml
+
+            with open(wf_dir / "config.yaml") as f:
+                wf_config = yaml.safe_load(f)
+            proj = wf_config["project_dir"]
+            targets = [
+                f"{proj}/data/processed/edf/cyc{c:02d}/.snakemake_complete" for c in cycle_nums
+            ]
+            cmd.extend(targets)
+
+    console.print(f"[bold]Running:[/bold] {' '.join(cmd)}")
+    console.print()
+
+    try:
+        result = subprocess.run(cmd, check=False)
+        if result.returncode != 0:
+            raise SystemExit(result.returncode)
+    except FileNotFoundError:
+        console.print("[red]snakemake not found. Install with:[/red]")
+        console.print("  pip install snakemake snakemake-executor-plugin-slurm")
+        raise SystemExit(1)
+
+
+# ============================================================================
 # Project Commands
 # ============================================================================
 
@@ -807,10 +1058,14 @@ def slurm_cancel(project_dir: str, run_id: str | None):
 # Microscope parameters (stored in /meta/experiment.json)
 @click.option("--tile-rows", type=int, default=None, help="Number of tile rows (auto-detected)")
 @click.option("--tile-cols", type=int, default=None, help="Number of tile columns (auto-detected)")
-@click.option("--xy-pixel-size", type=float, default=377.0, help="XY pixel size in nm (default: 377)")
+@click.option(
+    "--xy-pixel-size", type=float, default=377.0, help="XY pixel size in nm (default: 377)"
+)
 @click.option("--z-step-size", type=float, default=1500.0, help="Z step size in nm (default: 1500)")
 @click.option("--numerical-aperture", type=float, default=0.75, help="Objective NA (default: 0.75)")
-@click.option("--tissue-ri", type=float, default=1.44, help="Tissue refractive index (default: 1.44)")
+@click.option(
+    "--tissue-ri", type=float, default=1.44, help="Tissue refractive index (default: 1.44)"
+)
 def init(
     project_path: str,
     name: str | None,
@@ -1148,9 +1403,7 @@ def scan(directory: str, depth: int, samples: int):
             summary_lines.append(f"  Cycles: {cycles_str}")
 
     if report.has_processed_data:
-        summary_lines.append(
-            f"[yellow]Processed data:[/yellow] {report.processed_size_mb:.1f} MB"
-        )
+        summary_lines.append(f"[yellow]Processed data:[/yellow] {report.processed_size_mb:.1f} MB")
         for stage, count in report.processed_stages.items():
             summary_lines.append(f"  {stage}: {count} files")
 

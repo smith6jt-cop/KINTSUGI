@@ -1,0 +1,142 @@
+"""
+KINTSUGI Snakemake Pipeline
+============================
+
+Declarative workflow for multiplex immunofluorescence image processing.
+Replaces the custom submit.sh orchestration with Snakemake's native
+dependency management, skip-existing, and failure recovery.
+
+Processing stages:
+  1. stitch    - Illumination correction (BaSiC) + tile stitching
+  2. deconvolve - Richardson-Lucy deconvolution
+  3. edf       - Extended depth of focus (variance-based z-projection)
+
+Each rule processes one cycle (all channels, all z-planes).
+Snakemake's DAG ensures per-cycle dependencies: stitch -> deconvolve -> edf.
+
+Usage:
+  snakemake --profile profiles/slurm -j 8          # Full pipeline via SLURM
+  snakemake --cores 4                               # Local execution
+  snakemake -n                                      # Dry run
+  snakemake --forcerun stitch                       # Force re-run stitching
+"""
+
+import json
+from pathlib import Path
+
+configfile: "config.yaml"
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+PROJECT = config["project_dir"]
+KINTSUGI = config["kintsugi_dir"]
+CYCLES = config["cycles"]
+CHANNELS = config["channels"]
+
+# Load experiment metadata (z-planes, microscope params)
+_experiment_path = Path(PROJECT) / "meta" / "experiment.json"
+if _experiment_path.exists():
+    with open(_experiment_path) as _f:
+        EXPERIMENT = json.load(_f)
+else:
+    EXPERIMENT = {}
+
+N_ZPLANES = EXPERIMENT.get("n_zplanes", 15)
+
+# Format cycle numbers as zero-padded strings for file paths
+def cyc_fmt(cycle):
+    """Format cycle number with zero-padding."""
+    return f"{int(cycle):02d}"
+
+# ---------------------------------------------------------------------------
+# Target rule: request all final EDF outputs
+# ---------------------------------------------------------------------------
+rule all:
+    input:
+        expand(
+            "{project}/data/processed/edf/cyc{cycle}/{sentinel}",
+            project=PROJECT,
+            cycle=[cyc_fmt(c) for c in CYCLES],
+            sentinel=".snakemake_complete",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Rule 1: Stitching (includes BaSiC illumination correction)
+# ---------------------------------------------------------------------------
+# One job per cycle. Produces all channels x all z-planes as TIFF files.
+# The sentinel file signals completion (avoids declaring hundreds of outputs).
+rule stitch:
+    input:
+        # Snakemake verifies this directory exists before scheduling
+        raw_dir=directory("{project}/data/raw/cyc{cycle}"),
+    output:
+        sentinel="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+    resources:
+        mem_mb=config.get("resources", {}).get("mem_stitch", 48000),
+        runtime=config.get("resources", {}).get("time_stitch", 240),
+        slurm_partition=config.get("resources", {}).get("partition_gpu", ""),
+        slurm_account=config.get("resources", {}).get("account", ""),
+        gpus=1,
+        cpus_per_task=4,
+    log:
+        "{project}/slurm/logs/snakemake/stitch_cyc{cycle}.log",
+    script:
+        "scripts/stitch.py"
+
+
+# ---------------------------------------------------------------------------
+# Rule 2: Deconvolution
+# ---------------------------------------------------------------------------
+# One job per cycle. Depends on stitching completion sentinel.
+rule deconvolve:
+    input:
+        stitch_done="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
+    output:
+        sentinel="{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+    resources:
+        mem_mb=config.get("resources", {}).get("mem_decon", 48000),
+        runtime=config.get("resources", {}).get("time_decon", 240),
+        slurm_partition=config.get("resources", {}).get("partition_gpu", ""),
+        slurm_account=config.get("resources", {}).get("account", ""),
+        gpus=1,
+        cpus_per_task=4,
+    log:
+        "{project}/slurm/logs/snakemake/decon_cyc{cycle}.log",
+    script:
+        "scripts/deconvolve.py"
+
+
+# ---------------------------------------------------------------------------
+# Rule 3: Extended Depth of Focus
+# ---------------------------------------------------------------------------
+# One job per cycle. Produces one EDF image per channel.
+rule edf:
+    input:
+        decon_done="{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
+    output:
+        sentinel="{project}/data/processed/edf/cyc{cycle}/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+    resources:
+        mem_mb=config.get("resources", {}).get("mem_edf", 16000),
+        runtime=config.get("resources", {}).get("time_edf", 60),
+        slurm_partition=config.get("resources", {}).get("partition_gpu", ""),
+        slurm_account=config.get("resources", {}).get("account", ""),
+        gpus=1,
+        cpus_per_task=4,
+    log:
+        "{project}/slurm/logs/snakemake/edf_cyc{cycle}.log",
+    script:
+        "scripts/edf.py"
