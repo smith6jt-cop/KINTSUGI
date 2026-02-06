@@ -7,6 +7,7 @@ against original implementations for quality and performance.
 
 from __future__ import annotations
 
+import importlib.util
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,17 +18,6 @@ from scipy.spatial import cKDTree
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 
-# Check if cv2 is available for NLM tests
-try:
-    import cv2
-
-    HAS_CV2 = True
-except ImportError:
-    HAS_CV2 = False
-
-requires_cv2 = pytest.mark.skipif(not HAS_CV2, reason="OpenCV (cv2) not available")
-
-# Import original implementations
 from kintsugi.denoise.patch_based import (
     _dct_2d,
     _extract_patches,
@@ -38,6 +28,10 @@ from kintsugi.denoise.patch_based import (
     denoise_bm3d_lite,
     denoise_patch_similarity,
 )
+
+# Check if cv2 is available for NLM tests
+HAS_CV2 = importlib.util.find_spec("cv2") is not None
+requires_cv2 = pytest.mark.skipif(not HAS_CV2, reason="OpenCV (cv2) not available")
 
 # ============================================================================
 # Test Image Generation
