@@ -34,6 +34,10 @@ CHANNELS = list(snakemake.params.channels)
 sys.path.insert(0, str(PROJECT_DIR / "notebooks"))
 sys.path.insert(0, str(KINTSUGI_DIR))
 
+# Logging utilities (replicates slurm/utils.sh structured logging)
+sys.path.insert(0, str(Path(snakemake.workflow.basedir) / "scripts"))
+from log_utils import log_header, log_footer, summary_before, summary_after
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -102,6 +106,10 @@ DATA_DIR = PROJECT_DIR / "data"
 DECON_DIR = DATA_DIR / "processed" / "deconvolved"
 EDF_DIR = DATA_DIR / "processed" / "edf"
 EDF_DIR.mkdir(parents=True, exist_ok=True)
+
+# Structured logging header (mirrors utils.sh)
+log_header("edf", CYCLE, PROJECT_DIR)
+summary_before("edf", PROJECT_DIR)
 
 print(f"\n{'='*60}")
 print(f"EDF Processing - Cycle {CYCLE}")
@@ -315,7 +323,12 @@ if failed:
     print(f"\nFailed channels:")
     for ch, err in failed:
         print(f"  CH{ch}: {err}")
+    summary_after("edf", PROJECT_DIR, elapsed * 60, exit_code=1)
+    log_footer(1)
     sys.exit(1)
+
+# Structured logging after-summary (mirrors utils.sh summary_after)
+summary_after("edf", PROJECT_DIR, elapsed * 60, exit_code=0)
 
 # ---------------------------------------------------------------------------
 # Write sentinel
@@ -331,3 +344,4 @@ sentinel.write_text(
     f"duration_minutes={elapsed:.1f}\n"
 )
 print(f"Sentinel written: {sentinel}")
+log_footer(0)
