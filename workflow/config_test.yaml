@@ -1,0 +1,45 @@
+# Test configuration for dry-run validation
+# Points to test_data/mini_project (2x2 tiles, 2 cycles, 2 channels)
+
+project_dir: /home/user/KINTSUGI/test_data/mini_project
+kintsugi_dir: /home/user/KINTSUGI
+
+cycles: [1, 2]
+channels: [1, 2]
+output_format: tiff
+
+tile_rows: 2
+tile_cols: 2
+tile_overlap: 0.1
+
+ncc_threshold: 0.078
+pou: 0.5
+blend_sigma: 15.0
+
+basic_flatfield_min: 0.1
+basic_max_iterations: 500
+basic_optimization_tolerance: 1.0e-6
+
+edf:
+  radius_x: 2
+  radius_y: 2
+  sigma: 10.0
+  tiles: [1, 1]
+  blend_depth: 0
+  z_smooth_sigma: 1.0
+
+quality_gate:
+  max_zero_pct: 0.10
+  max_sat_pct: 0.05
+  min_valid_slices: 3
+
+resources:
+  account: test
+  partition_gpu: gpu
+  partition_cpu: default
+  mem_stitch: 16000
+  mem_decon: 16000
+  mem_edf: 8000
+  time_stitch: 60
+  time_decon: 60
+  time_edf: 30
