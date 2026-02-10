@@ -98,13 +98,15 @@ def get_raw_dir(wildcards):
 # ---------------------------------------------------------------------------
 # Target rule: request all final EDF outputs
 # ---------------------------------------------------------------------------
+# Targets the actual EDF TIFF files (not just sentinels) so Snakemake
+# can verify the real outputs exist.
 rule all:
     input:
         expand(
-            "{project}/data/processed/edf/cyc{cycle}/{sentinel}",
+            "{project}/data/processed/edf/cyc{cycle}/CH{ch}_edf.tif",
             project=PROJECT,
             cycle=[cyc_fmt(c) for c in CYCLES],
-            sentinel=".snakemake_complete",
+            ch=CHANNELS,
         )
 
 
@@ -166,10 +168,16 @@ rule deconvolve:
 # Rule 3: Extended Depth of Focus
 # ---------------------------------------------------------------------------
 # One job per cycle. Produces one EDF image per channel.
+# Unlike stitch/decon, EDF outputs are few enough to declare explicitly,
+# giving Snakemake real file tracking on the final pipeline outputs.
 rule edf:
     input:
         decon_done="{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
     output:
+        edf_files=expand(
+            "{{project}}/data/processed/edf/cyc{{cycle}}/CH{ch}_edf.tif",
+            ch=CHANNELS,
+        ),
         sentinel="{project}/data/processed/edf/cyc{cycle}/.snakemake_complete",
     params:
         project_dir=PROJECT,

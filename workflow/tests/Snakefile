@@ -1,0 +1,131 @@
+"""
+Test Snakefile for KINTSUGI workflow validation (Phase 3).
+
+Uses mock wrapper scripts that produce dummy outputs to validate:
+  - DAG construction and dependency chains
+  - Sentinel file creation and tracking
+  - QC image generation
+  - Failure recovery (via mock failure injection)
+  - Selective reprocessing (--forcerun)
+
+Usage:
+  cd workflow/tests
+  snakemake --configfile ../config_test.yaml --cores 1 -p
+"""
+
+import json
+from pathlib import Path
+
+configfile: "../config_test.yaml"
+
+PROJECT = config["project_dir"]
+KINTSUGI = config["kintsugi_dir"]
+CYCLES = config["cycles"]
+CHANNELS = config["channels"]
+
+_experiment_path = Path(PROJECT) / "meta" / "experiment.json"
+if _experiment_path.exists():
+    with open(_experiment_path) as _f:
+        EXPERIMENT = json.load(_f)
+else:
+    EXPERIMENT = {}
+
+
+def cyc_fmt(cycle):
+    return f"{int(cycle):02d}"
+
+
+# Cycle directory resolution (same as production Snakefile)
+def _resolve_raw_cycle_dir(cycle_num):
+    raw_dir = Path(PROJECT) / "data" / "raw"
+    for pattern in [f"cyc{cycle_num:03d}_*", f"cyc{cycle_num:02d}_*", f"Cyc{cycle_num:02d}_*"]:
+        matches = sorted(raw_dir.glob(pattern))
+        if matches:
+            return str(matches[0])
+    for name in [f"cyc{cycle_num:03d}", f"cyc{cycle_num:02d}", f"Cyc{cycle_num:02d}"]:
+        candidate = raw_dir / name
+        if candidate.exists():
+            return str(candidate)
+    return str(raw_dir / f"cyc{cycle_num:02d}")
+
+
+_RAW_CYCLE_DIRS = {cyc_fmt(c): _resolve_raw_cycle_dir(c) for c in CYCLES}
+
+
+def get_raw_dir(wildcards):
+    return _RAW_CYCLE_DIRS[wildcards.cycle]
+
+
+# ---------------------------------------------------------------------------
+# Target: all EDF outputs
+# ---------------------------------------------------------------------------
+rule all:
+    input:
+        expand(
+            "{project}/data/processed/edf/cyc{cycle}/CH{ch}_edf.tif",
+            project=PROJECT,
+            cycle=[cyc_fmt(c) for c in CYCLES],
+            ch=CHANNELS,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Mock rules (identical structure to production, different scripts)
+# Keep rule structure in sync with workflow/Snakefile when modifying.
+# ---------------------------------------------------------------------------
+rule stitch:
+    input:
+        raw_dir=get_raw_dir,
+    output:
+        sentinel="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+    resources:
+        mem_mb=1000,
+        runtime=5,
+    log:
+        "{project}/slurm/logs/snakemake/stitch_cyc{cycle}.log",
+    script:
+        "mock_stitch.py"
+
+
+rule deconvolve:
+    input:
+        stitch_done="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
+    output:
+        sentinel="{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+    resources:
+        mem_mb=1000,
+        runtime=5,
+    log:
+        "{project}/slurm/logs/snakemake/decon_cyc{cycle}.log",
+    script:
+        "mock_deconvolve.py"
+
+
+rule edf:
+    input:
+        decon_done="{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
+    output:
+        edf_files=expand(
+            "{{project}}/data/processed/edf/cyc{{cycle}}/CH{ch}_edf.tif",
+            ch=CHANNELS,
+        ),
+        sentinel="{project}/data/processed/edf/cyc{cycle}/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+    resources:
+        mem_mb=1000,
+        runtime=5,
+    log:
+        "{project}/slurm/logs/snakemake/edf_cyc{cycle}.log",
+    script:
+        "mock_edf.py"

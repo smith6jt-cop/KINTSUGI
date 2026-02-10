@@ -28,7 +28,7 @@ sys.path.insert(0, str(PROJECT_DIR / "notebooks"))
 sys.path.insert(0, str(KINTSUGI_DIR))
 
 # Logging utilities (replicates slurm/utils.sh structured logging)
-sys.path.insert(0, str(Path(snakemake.workflow.basedir) / "scripts"))
+sys.path.insert(0, snakemake.scriptdir)
 from log_utils import log_header, log_footer, summary_before, summary_after
 
 # ---------------------------------------------------------------------------
