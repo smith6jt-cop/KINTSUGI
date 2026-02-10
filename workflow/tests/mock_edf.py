@@ -12,6 +12,15 @@ from pathlib import Path
 
 import numpy as np
 
+try:
+    import tifffile
+
+    def _write_tiff(path, data):
+        tifffile.imwrite(str(path), data)
+except ImportError:
+    def _write_tiff(path, data):
+        path.write_bytes(data.tobytes())
+
 # ---------------------------------------------------------------------------
 # Snakemake interface (identical to real edf.py)
 # ---------------------------------------------------------------------------
@@ -59,7 +68,7 @@ edf_output_dir.mkdir(parents=True, exist_ok=True)
 for channel in CHANNELS:
     dummy = np.random.randint(0, 1000, (64, 64), dtype=np.uint16)
     output_file = edf_output_dir / f"CH{channel}_edf.tif"
-    output_file.write_bytes(dummy.tobytes())
+    _write_tiff(output_file, dummy)
     print(f"  Channel {channel}: EDF written -> {output_file.name}")
 
     # QC image

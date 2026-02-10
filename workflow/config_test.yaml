@@ -1,12 +1,13 @@
 # Test configuration for dry-run validation
 # Points to test_data/mini_project (2x2 tiles, 2 cycles, 2 channels)
 #
-# NOTE: These paths are relative to the repository root.
-# Run from the repo root or override on the command line:
+# NOTE: Paths are relative to the working directory (workflow/tests/).
+# Usage:  cd workflow/tests && snakemake --configfile ../config_test.yaml --cores 1 -p
+# Override on the command line as needed:
 #   snakemake --config project_dir=/abs/path kintsugi_dir=/abs/path ...
 
-project_dir: test_data/mini_project
-kintsugi_dir: .
+project_dir: ../../test_data/mini_project
+kintsugi_dir: ../..
 
 cycles: [1, 2]
 channels: [1, 2]
