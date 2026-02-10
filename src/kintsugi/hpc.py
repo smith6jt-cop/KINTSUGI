@@ -453,6 +453,12 @@ export CPU_MEM_STITCH={config.get("cpu_mem_stitch", 48)}
 export CPU_MEM_DECON={config.get("cpu_mem_decon", 48)}
 export CPU_MEM_EDF={config.get("cpu_mem_edf", 16)}
 
+# Allocation limits (auto-detected from SLURM if not set)
+# Uncomment and set to override auto-detection:
+# export ALLOC_CPUS=104
+# export ALLOC_MEM=812
+# export ALLOC_GPUS=3
+
 # Memory per job (GB)
 export MEM_CORRECTION={config["mem_correction"]}
 export MEM_STITCH={config["mem_stitch"]}

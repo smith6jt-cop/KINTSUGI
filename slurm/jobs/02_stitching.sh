@@ -25,6 +25,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
+import errno
+import shutil
 from skimage.io import imread, imsave
 
 # Setup paths
@@ -203,6 +205,61 @@ print(f"Overlap: {TILE_OVERLAP*100:.0f}%")
 print(f"QC output: {QC_DIR}")
 
 # =============================================================================
+# CYCLE CLAIMING (prevents GPU/CPU duplicate work)
+# =============================================================================
+def claim_cycle(lock_base, cycle):
+    """Atomically claim a cycle using mkdir (atomic on POSIX/NFS)."""
+    lock_dir = lock_base / f".kintsugi_lock_cyc{cycle:02d}"
+    my_job_id = os.environ.get('SLURM_JOB_ID', 'unknown')
+    try:
+        os.mkdir(str(lock_dir))
+        with open(str(lock_dir / "owner.txt"), 'w') as f:
+            f.write(f"job_id={my_job_id}\n")
+            f.write(f"device_mode={os.environ.get('KINTSUGI_DEVICE_MODE', 'unknown')}\n")
+            f.write(f"hostname={os.environ.get('HOSTNAME', 'unknown')}\n")
+        return True
+    except FileExistsError:
+        return False
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            return False
+        raise
+
+def check_lock_owner(lock_base, cycle):
+    """Check if existing lock belongs to this job (requeue case)."""
+    lock_dir = lock_base / f".kintsugi_lock_cyc{cycle:02d}"
+    owner_file = lock_dir / "owner.txt"
+    my_job_id = os.environ.get('SLURM_JOB_ID', 'unknown')
+    if owner_file.exists():
+        try:
+            content = owner_file.read_text()
+            for line in content.strip().split('\n'):
+                if line.startswith('job_id=') and line.split('=', 1)[1] == my_job_id:
+                    return True
+        except Exception:
+            pass
+    return False
+
+def release_lock(lock_base, cycle):
+    """Remove lock after successful processing."""
+    lock_dir = lock_base / f".kintsugi_lock_cyc{cycle:02d}"
+    shutil.rmtree(str(lock_dir), ignore_errors=True)
+
+def cleanup_stale_locks(lock_base, max_age_hours=12):
+    """Remove locks older than max_age_hours (handles dead jobs)."""
+    import time as _time
+    for lock_dir in lock_base.glob(".kintsugi_lock_cyc*"):
+        owner_file = lock_dir / "owner.txt"
+        if owner_file.exists():
+            try:
+                age_hours = (_time.time() - owner_file.stat().st_mtime) / 3600
+                if age_hours > max_age_hours:
+                    shutil.rmtree(str(lock_dir), ignore_errors=True)
+                    print(f"  Cleaned stale lock: {lock_dir.name} (age: {age_hours:.1f}h)")
+            except Exception:
+                pass
+
+# =============================================================================
 # SKIP-EXISTING CHECK
 # =============================================================================
 def check_cycle_complete(stitch_dir, cycle, start_ch, end_ch, n_zplanes):
@@ -234,6 +291,16 @@ if is_complete:
     sys.exit(0)
 else:
     print(f"\nCycle {CYCLE} needs processing: {status}")
+
+# Claim this cycle (prevents GPU/CPU pool from duplicating work)
+cleanup_stale_locks(STITCH_DIR, max_age_hours=12)
+if not claim_cycle(STITCH_DIR, CYCLE):
+    # Check if this is a requeued job reclaiming its own lock
+    if check_lock_owner(STITCH_DIR, CYCLE):
+        print(f"Requeued job reclaiming cycle {CYCLE} lock")
+    else:
+        print(f"SKIP: Cycle {CYCLE} already claimed by another job")
+        sys.exit(0)
 
 # Generate row/col indices for snake pattern
 rows = []
@@ -442,6 +509,9 @@ print(f"Z-planes per channel: {n_zplanes}")
 print(f"Total time: {total_time/60:.1f} minutes")
 print(f"Output: {STITCH_DIR}")
 print(f"{'='*60}")
+
+# Release cycle lock (processing succeeded)
+release_lock(STITCH_DIR, CYCLE)
 
 # =============================================================================
 # WRITE COMPLETION MARKER

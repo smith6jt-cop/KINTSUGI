@@ -405,6 +405,41 @@ multiply_time() {
 # RESOURCE CALCULATION
 # =============================================================================
 
+# Auto-detect allocation limits from SLURM QOS when not set in config.sh
+# Uses sacctmgr to query GrpTRES for the account's QOS.
+auto_detect_allocation() {
+    # If all ALLOC_* are already set, nothing to do
+    if [ -n "${ALLOC_GPUS}" ] && [ -n "${ALLOC_CPUS}" ] && [ -n "${ALLOC_MEM}" ]; then
+        return 0
+    fi
+
+    local account="${ACCOUNT:-maigan}"
+    if ! command -v sacctmgr &> /dev/null; then
+        term_warn "sacctmgr not available - using default allocation limits"
+        return 0
+    fi
+
+    # Query GrpTRES from the account's QOS
+    local grp_tres
+    grp_tres=$(sacctmgr show qos "${account}" format=GrpTRES%80 -n -P 2>/dev/null || echo "")
+
+    if [ -n "${grp_tres}" ]; then
+        # Parse cpu=N, gres/gpu=N, mem=NM (memory in MB)
+        local detected_cpus detected_gpus detected_mem_mb
+        detected_cpus=$(echo "${grp_tres}" | grep -oP 'cpu=\K[0-9]+' || echo "")
+        detected_gpus=$(echo "${grp_tres}" | grep -oP 'gres/gpu=\K[0-9]+' || echo "")
+        detected_mem_mb=$(echo "${grp_tres}" | grep -oP 'mem=\K[0-9]+' || echo "")
+
+        [ -z "${ALLOC_CPUS}" ] && [ -n "${detected_cpus}" ] && export ALLOC_CPUS="${detected_cpus}"
+        [ -z "${ALLOC_GPUS}" ] && [ -n "${detected_gpus}" ] && export ALLOC_GPUS="${detected_gpus}"
+        if [ -z "${ALLOC_MEM}" ] && [ -n "${detected_mem_mb}" ]; then
+            export ALLOC_MEM=$(( detected_mem_mb / 1024 ))  # Convert MB to GB
+        fi
+
+        term_info "Auto-detected allocation: ${ALLOC_CPUS:-?} CPUs, ${ALLOC_MEM:-?}GB mem, ${ALLOC_GPUS:-?} GPUs"
+    fi
+}
+
 # Calculate optimal max concurrent jobs based on allocation limits
 # Uses a dual-pool architecture: GPU slots + CPU slots = total concurrent
 # Sets COMPUTED_MAX_CONCURRENT, GPU_SLOTS, CPU_SLOTS as output (globals)
@@ -735,6 +770,9 @@ if [ "${USE_BURST}" = true ]; then
 fi
 term_info "------------------------------------------------------------"
 
+# Auto-detect allocation limits if not set in config.sh
+auto_detect_allocation
+
 # Calculate optimal concurrency based on allocation limits
 term_info "Calculating resource allocation..."
 if ! resolve_max_concurrent; then
@@ -953,29 +991,20 @@ submit_job() {
     local use_qos="${QOS}"
     local using_fallback=false
 
-    # For GPU mode, check availability and potentially fallback
-    # Strategy: Always submit to both primary and fallback when fallback is configured
-    # (skip-existing logic in job scripts prevents duplicate work)
-    local submit_to_fallback_too=false
-
+    # For GPU mode, check availability and switch to fallback only when primary
+    # is genuinely unavailable. No double-submission — cycle claiming in job
+    # scripts prevents duplicate work between GPU and CPU pools.
     if [ "${SELECTED_MODE}" = "gpu" ]; then
         check_gpu_availability "${use_partition}" "${SELECTED_ACCOUNT}"
         local gpu_check_status=$?
 
         if [ ${gpu_check_status} -eq 0 ]; then
-            # Primary GPUs appear idle - submit to primary
-            # Also submit to fallback if configured, since QOS group limits
-            # can still block jobs after submission even when nodes are idle
-            if [ -n "${PARTITION_FALLBACK}" ]; then
-                term_info "Primary partition ${use_partition} has idle GPUs"
-                term_info "Also submitting to fallback ${PARTITION_FALLBACK} (QOS safety net)"
-                submit_to_fallback_too=true
-            fi
+            # Primary GPUs appear idle - submit to primary only
+            term_info "Primary partition ${use_partition} has idle GPUs"
         elif [ ${gpu_check_status} -eq 1 ]; then
             # Partition doesn't exist or has no nodes - try fallback
             term_warn "Primary partition ${use_partition} not available"
 
-            # Check if fallback is configured
             if [ -n "${PARTITION_FALLBACK}" ]; then
                 term_info "Checking fallback partition: ${PARTITION_FALLBACK}..."
                 check_gpu_availability "${PARTITION_FALLBACK}" "${SELECTED_ACCOUNT}"
@@ -1007,13 +1036,11 @@ submit_job() {
                 local fallback_status=$?
 
                 if [ ${fallback_status} -eq 0 ] || [ ${fallback_status} -eq 2 ]; then
-                    # Fallback available - switch to it (don't submit to primary at all)
                     term_info "Switching to fallback partition ${PARTITION_FALLBACK}"
                     use_partition="${PARTITION_FALLBACK}"
                     use_qos="${QOS_FALLBACK}"
                     using_fallback=true
                 elif [ ${fallback_status} -eq 3 ]; then
-                    # QOS limits also reached on fallback - submit to fallback anyway (will queue)
                     term_warn "QOS limits also reached on fallback - jobs will queue on ${PARTITION_FALLBACK}"
                     use_partition="${PARTITION_FALLBACK}"
                     use_qos="${QOS_FALLBACK}"
@@ -1029,32 +1056,8 @@ submit_job() {
                 return 1
             fi
         elif [ ${gpu_check_status} -eq 2 ]; then
-            # Primary GPUs are busy - always queue on primary, optionally also submit to fallback
+            # Primary GPUs are busy - queue on primary only (will start when available)
             term_info "Primary partition ${use_partition} is busy - jobs will queue"
-
-            if [ -n "${PARTITION_FALLBACK}" ]; then
-                term_info "Checking fallback partition: ${PARTITION_FALLBACK}..."
-                check_gpu_availability "${PARTITION_FALLBACK}" "${SELECTED_ACCOUNT}"
-                local fallback_status=$?
-
-                if [ ${fallback_status} -eq 0 ]; then
-                    # Fallback has idle GPUs - submit to BOTH (primary queues, fallback may start faster)
-                    term_info "Fallback partition has idle GPUs - will ALSO submit to ${PARTITION_FALLBACK}"
-                    submit_to_fallback_too=true
-                elif [ ${fallback_status} -eq 2 ]; then
-                    # Both partitions busy - submit to BOTH, first to get resources wins
-                    term_info "Both partitions busy - will submit to BOTH (first to start wins)"
-                    submit_to_fallback_too=true
-                elif [ ${fallback_status} -eq 3 ]; then
-                    # QOS limits on fallback but primary is just busy - stick with primary
-                    term_info "Fallback has QOS limits - queuing on primary ${use_partition} only"
-                else
-                    # Fallback not available, stick with primary only
-                    term_info "Fallback partition not available - queuing on primary ${use_partition} only"
-                fi
-            else
-                term_info "No fallback configured - queuing on primary ${use_partition}"
-            fi
         fi
     fi
 
@@ -1071,16 +1074,6 @@ submit_job() {
             term_info "DRY RUN - would execute:"
         fi
         echo "  $(format_cmd_for_display)" >&2
-
-        # Show fallback submission if both partitions busy
-        if [ "${submit_to_fallback_too}" = true ]; then
-            term_info "DRY RUN - would ALSO submit to fallback partition:"
-            build_sbatch_cmd_array "${step_name}" "${script}" "${effective_mem}" "${effective_time}" \
-                "${dep_type}" "${dep_jobid}" "${PARTITION_FALLBACK}" "${QOS_FALLBACK}" \
-                "${SELECTED_ACCOUNT}" "${SELECTED_MODE}" "${EFFECTIVE_CPUS_PER_TASK}" "${EFFECTIVE_GPUS}"
-            echo "  $(format_cmd_for_display)" >&2
-            term_info "NOTE: Both jobs would race - first to get resources wins"
-        fi
 
         echo "DRY_${step_name}_JOB"
         return 0
@@ -1116,29 +1109,6 @@ submit_job() {
         fi
 
         term_info "Successfully submitted ${step_name} - Job ID: ${jobid}"
-
-        # Also submit to fallback partition if configured (first to start wins, skip-existing prevents duplicates)
-        if [ "${submit_to_fallback_too}" = true ]; then
-            term_info "Also submitting to fallback partition ${PARTITION_FALLBACK}..."
-            build_sbatch_cmd_array "${step_name}" "${script}" "${effective_mem}" "${effective_time}" \
-                "${dep_type}" "${dep_jobid}" "${PARTITION_FALLBACK}" "${QOS_FALLBACK}" \
-                "${SELECTED_ACCOUNT}" "${SELECTED_MODE}" "${EFFECTIVE_CPUS_PER_TASK}" "${EFFECTIVE_GPUS}"
-
-            local fallback_result
-            fallback_result=$("${SBATCH_CMD[@]}" 2>&1)
-            if [ $? -eq 0 ]; then
-                local fallback_jobid
-                fallback_jobid=$(echo "${fallback_result}" | grep -oP 'Submitted batch job \K[0-9]+' | head -1)
-                if [ -z "${fallback_jobid}" ]; then
-                    fallback_jobid=$(echo "${fallback_result}" | grep "Submitted batch job" | head -1 | sed 's/.*Submitted batch job //' | tr -d '[:space:]')
-                fi
-                term_info "Fallback job submitted: ${fallback_jobid} (on ${PARTITION_FALLBACK})"
-                term_info "NOTE: Jobs ${jobid} and ${fallback_jobid} will race - first to get resources wins"
-                term_info "      Cancel the other with: scancel <jobid> once one starts"
-            else
-                term_warn "Fallback submission failed (non-critical): ${fallback_result}"
-            fi
-        fi
 
         echo "${jobid}"
         return 0
@@ -1465,14 +1435,8 @@ run_step() {
                 term_error "Failed to submit correction job - aborting pipeline"
                 exit 1
             fi
-            # Submit concurrent CPU job (always, if CPU accounts configured)
-            JOB_CORRECTION_CPU=$(submit_cpu_job "correct" "${KINTSUGI_SLURM}/jobs/01_correction.sh" \
-                "${MEM_CORRECTION}" "${TIME_CORRECTION}" "" "")
-            # Submit burst job if enabled
-            if [ "${USE_BURST}" = true ]; then
-                JOB_CORRECTION_BURST=$(submit_burst_job "correct" "${KINTSUGI_SLURM}/jobs/01_correction.sh" \
-                    "${MEM_CORRECTION}" "${TIME_CORRECTION}" "" "")
-            fi
+            # NOTE: No CPU/burst jobs for correction - it's a passthrough (sleep 2; exit 0)
+            # The primary job is only submitted for dependency chain tracking.
             ;;
         stitch)
             echo "--- Step 2: Stitching ---"

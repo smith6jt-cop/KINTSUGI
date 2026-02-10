@@ -55,6 +55,8 @@ sys.path.insert(0, str(KINTSUGI_DIR))
 from kintsugi.edf import EDFProcessor
 from kintsugi.gpu import cleanup_gpu_memory
 import numpy as np
+import errno
+import shutil
 
 # =============================================================================
 # METADATA LOADING
@@ -188,6 +190,61 @@ if not wait_for_input(input_dir, max_wait=3600, poll_interval=30):
 print(f"Deconvolution input validated for cycle {CYCLE}")
 
 # =============================================================================
+# CYCLE CLAIMING (prevents GPU/CPU duplicate work)
+# =============================================================================
+def claim_cycle(lock_base, cycle):
+    """Atomically claim a cycle using mkdir (atomic on POSIX/NFS)."""
+    lock_dir = lock_base / f".kintsugi_lock_cyc{cycle:02d}"
+    my_job_id = os.environ.get('SLURM_JOB_ID', 'unknown')
+    try:
+        os.mkdir(str(lock_dir))
+        with open(str(lock_dir / "owner.txt"), 'w') as f:
+            f.write(f"job_id={my_job_id}\n")
+            f.write(f"device_mode={os.environ.get('KINTSUGI_DEVICE_MODE', 'unknown')}\n")
+            f.write(f"hostname={os.environ.get('HOSTNAME', 'unknown')}\n")
+        return True
+    except FileExistsError:
+        return False
+    except OSError as e:
+        if e.errno == errno.EEXIST:
+            return False
+        raise
+
+def check_lock_owner(lock_base, cycle):
+    """Check if existing lock belongs to this job (requeue case)."""
+    lock_dir = lock_base / f".kintsugi_lock_cyc{cycle:02d}"
+    owner_file = lock_dir / "owner.txt"
+    my_job_id = os.environ.get('SLURM_JOB_ID', 'unknown')
+    if owner_file.exists():
+        try:
+            content = owner_file.read_text()
+            for line in content.strip().split('\n'):
+                if line.startswith('job_id=') and line.split('=', 1)[1] == my_job_id:
+                    return True
+        except Exception:
+            pass
+    return False
+
+def release_lock(lock_base, cycle):
+    """Remove lock after successful processing."""
+    lock_dir = lock_base / f".kintsugi_lock_cyc{cycle:02d}"
+    shutil.rmtree(str(lock_dir), ignore_errors=True)
+
+def cleanup_stale_locks(lock_base, max_age_hours=12):
+    """Remove locks older than max_age_hours (handles dead jobs)."""
+    import time as _time
+    for lock_dir in lock_base.glob(".kintsugi_lock_cyc*"):
+        owner_file = lock_dir / "owner.txt"
+        if owner_file.exists():
+            try:
+                age_hours = (_time.time() - owner_file.stat().st_mtime) / 3600
+                if age_hours > max_age_hours:
+                    shutil.rmtree(str(lock_dir), ignore_errors=True)
+                    print(f"  Cleaned stale lock: {lock_dir.name} (age: {age_hours:.1f}h)")
+            except Exception:
+                pass
+
+# =============================================================================
 # EDF PARAMETERS - Updated to exclude edge z-planes and prevent distortion
 # =============================================================================
 EDF_PARAMS = {
@@ -250,6 +307,16 @@ if is_complete:
     sys.exit(0)
 else:
     print(f"\nCycle {CYCLE} needs EDF processing: {status}")
+
+# Claim this cycle (prevents GPU/CPU pool from duplicating work)
+cleanup_stale_locks(EDF_DIR, max_age_hours=12)
+if not claim_cycle(EDF_DIR, CYCLE):
+    # Check if this is a requeued job reclaiming its own lock
+    if check_lock_owner(EDF_DIR, CYCLE):
+        print(f"Requeued job reclaiming cycle {CYCLE} lock")
+    else:
+        print(f"SKIP: Cycle {CYCLE} already claimed by another job")
+        sys.exit(0)
 
 channels = list(range(START_CHANNEL, END_CHANNEL + 1))
 
@@ -460,6 +527,9 @@ if failed:
     for ch, err in failed:
         print(f"  CH{ch}: {err}")
     sys.exit(1)
+
+# Release cycle lock (processing succeeded)
+release_lock(EDF_DIR, CYCLE)
 
 # =============================================================================
 # WRITE COMPLETION MARKER
