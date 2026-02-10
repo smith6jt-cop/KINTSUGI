@@ -413,30 +413,59 @@ auto_detect_allocation() {
         return 0
     fi
 
-    local account="${ACCOUNT:-maigan}"
     if ! command -v sacctmgr &> /dev/null; then
         term_warn "sacctmgr not available - using default allocation limits"
         return 0
     fi
+
+    # Use the same account that select_account() will pick for submission:
+    # first GPU-capable account from ACCOUNT_CHAIN, else ACCOUNT
+    local account=""
+    local chain
+    chain=$(get_account_chain)
+    if [ -n "${chain}" ]; then
+        IFS=',' read -ra _accounts <<< "${chain}"
+        for _acct in "${_accounts[@]}"; do
+            _acct=$(echo "${_acct}" | xargs)
+            if ! is_cpu_only_account "${_acct}"; then
+                account="${_acct}"
+                break
+            fi
+        done
+    fi
+    account="${account:-${ACCOUNT:-maigan}}"
 
     # Query GrpTRES from the account's QOS
     local grp_tres
     grp_tres=$(sacctmgr show qos "${account}" format=GrpTRES%80 -n -P 2>/dev/null || echo "")
 
     if [ -n "${grp_tres}" ]; then
-        # Parse cpu=N, gres/gpu=N, mem=NM (memory in MB)
-        local detected_cpus detected_gpus detected_mem_mb
+        # Parse cpu=N, gres/gpu=N, mem=VALUE[G|M]
+        local detected_cpus detected_gpus detected_mem_raw
         detected_cpus=$(echo "${grp_tres}" | grep -oP 'cpu=\K[0-9]+' || echo "")
         detected_gpus=$(echo "${grp_tres}" | grep -oP 'gres/gpu=\K[0-9]+' || echo "")
-        detected_mem_mb=$(echo "${grp_tres}" | grep -oP 'mem=\K[0-9]+' || echo "")
+        detected_mem_raw=$(echo "${grp_tres}" | grep -oP 'mem=\K[0-9]+(\.[0-9]+)?[GM]?' || echo "")
 
         [ -z "${ALLOC_CPUS}" ] && [ -n "${detected_cpus}" ] && export ALLOC_CPUS="${detected_cpus}"
         [ -z "${ALLOC_GPUS}" ] && [ -n "${detected_gpus}" ] && export ALLOC_GPUS="${detected_gpus}"
-        if [ -z "${ALLOC_MEM}" ] && [ -n "${detected_mem_mb}" ]; then
-            export ALLOC_MEM=$(( detected_mem_mb / 1024 ))  # Convert MB to GB
+
+        if [ -z "${ALLOC_MEM}" ] && [ -n "${detected_mem_raw}" ]; then
+            # Handle suffixes: 812.50G (GB), 625G (GB), 640000M (MB), or plain number (MB)
+            if [[ "${detected_mem_raw}" == *G ]]; then
+                # GB value - strip suffix, truncate to integer
+                local mem_gb="${detected_mem_raw%G}"
+                export ALLOC_MEM=$(printf '%.0f' "${mem_gb}")
+            elif [[ "${detected_mem_raw}" == *M ]]; then
+                # MB value - strip suffix, convert to GB
+                local mem_mb="${detected_mem_raw%M}"
+                export ALLOC_MEM=$(printf '%.0f' "$(echo "${mem_mb} / 1024" | bc -l)")
+            else
+                # No suffix - assume MB
+                export ALLOC_MEM=$(( detected_mem_raw / 1024 ))
+            fi
         fi
 
-        term_info "Auto-detected allocation: ${ALLOC_CPUS:-?} CPUs, ${ALLOC_MEM:-?}GB mem, ${ALLOC_GPUS:-?} GPUs"
+        term_info "Auto-detected allocation (from ${account} QOS): ${ALLOC_CPUS:-?} CPUs, ${ALLOC_MEM:-?}GB mem, ${ALLOC_GPUS:-?} GPUs"
     fi
 }
 

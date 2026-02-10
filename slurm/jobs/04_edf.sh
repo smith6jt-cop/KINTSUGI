@@ -129,12 +129,21 @@ QC_DIR.mkdir(parents=True, exist_ok=True)
 # INPUT VALIDATION - Wait for deconvolution to complete
 # =============================================================================
 
+def has_data_files(input_dir: Path) -> bool:
+    """Check if directory has actual data (TIF files in channel subdirs)."""
+    for ch_dir in input_dir.glob("CH*"):
+        if ch_dir.is_dir() and any(ch_dir.glob("*.tif")):
+            return True
+    return False
+
 def wait_for_input(input_dir: Path, max_wait: int = 3600, poll_interval: int = 30) -> bool:
     """
     Wait for input to be ready with polling.
 
     Checks for a .complete marker file that indicates the upstream job
     finished successfully and all files are written to disk/NFS.
+    Also accepts pre-existing data without a marker (e.g., deconvolved before
+    markers were implemented).
 
     Args:
         input_dir: Directory to check for .complete marker
@@ -148,9 +157,14 @@ def wait_for_input(input_dir: Path, max_wait: int = 3600, poll_interval: int = 3
     elapsed = 0
     print(f"Checking input readiness: {input_dir}")
 
-    # Quick check first (no wait if already ready)
+    # Quick check: marker exists
     if marker.exists():
-        print(f"Input ready immediately")
+        print(f"Input ready immediately (marker found)")
+        return True
+
+    # Quick check: data already present (pre-existing, no marker)
+    if has_data_files(input_dir):
+        print(f"Input ready immediately (data files found, no marker)")
         return True
 
     print(f"Waiting for completion marker (timeout: {max_wait}s)...")
@@ -166,6 +180,11 @@ def wait_for_input(input_dir: Path, max_wait: int = 3600, poll_interval: int = 3
 
         if marker.exists():
             print(f"Input ready after {elapsed}s")
+            return True
+
+        # Also check for data appearing without marker
+        if has_data_files(input_dir):
+            print(f"Input ready after {elapsed}s (data files found)")
             return True
 
         if elapsed % 300 == 0:
