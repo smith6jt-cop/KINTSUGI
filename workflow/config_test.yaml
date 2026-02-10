@@ -1,8 +1,12 @@
 # Test configuration for dry-run validation
 # Points to test_data/mini_project (2x2 tiles, 2 cycles, 2 channels)
+#
+# NOTE: These paths are relative to the repository root.
+# Run from the repo root or override on the command line:
+#   snakemake --config project_dir=/abs/path kintsugi_dir=/abs/path ...
 
-project_dir: /home/user/KINTSUGI/test_data/mini_project
-kintsugi_dir: /home/user/KINTSUGI
+project_dir: test_data/mini_project
+kintsugi_dir: .
 
 cycles: [1, 2]
 channels: [1, 2]

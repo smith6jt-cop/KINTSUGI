@@ -77,16 +77,13 @@ if fail_flag.exists():
 # ---------------------------------------------------------------------------
 start_time = time.time()
 
-for channel in range(START_CHANNEL, END_CHANNEL + 1):
+for channel in CHANNELS:
     ch_dir = STITCH_DIR / f"cyc{CYCLE:02d}" / f"CH{channel}"
     ch_dir.mkdir(parents=True, exist_ok=True)
 
     for z in range(1, n_zplanes + 1):
         dummy = np.random.randint(0, 1000, (64, 64), dtype=np.uint16)
         output_file = ch_dir / f"{z:02d}.tif"
-        # Write raw bytes as minimal TIFF (just numpy save for simplicity)
-        np.save(str(output_file).replace(".tif", ".npy"), dummy)
-        # Also create the .tif as an empty marker
         output_file.write_bytes(dummy.tobytes())
 
     print(f"  Channel {channel}: {n_zplanes} z-planes written")

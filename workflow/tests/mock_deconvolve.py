@@ -54,7 +54,7 @@ if fail_flag.exists():
 # ---------------------------------------------------------------------------
 start_time = time.time()
 
-for channel in range(START_CHANNEL, END_CHANNEL + 1):
+for channel in CHANNELS:
     # Read stitched input to determine z-plane count
     stitch_ch_dir = STITCH_DIR / f"cyc{CYCLE:02d}" / f"CH{channel}"
     z_files = sorted(stitch_ch_dir.glob("*.tif")) if stitch_ch_dir.exists() else []

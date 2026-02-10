@@ -56,7 +56,7 @@ start_time = time.time()
 edf_output_dir = EDF_DIR / f"cyc{CYCLE:02d}"
 edf_output_dir.mkdir(parents=True, exist_ok=True)
 
-for channel in range(START_CHANNEL, END_CHANNEL + 1):
+for channel in CHANNELS:
     dummy = np.random.randint(0, 1000, (64, 64), dtype=np.uint16)
     output_file = edf_output_dir / f"CH{channel}_edf.tif"
     output_file.write_bytes(dummy.tobytes())

@@ -71,6 +71,7 @@ rule all:
 
 # ---------------------------------------------------------------------------
 # Mock rules (identical structure to production, different scripts)
+# Keep rule structure in sync with workflow/Snakefile when modifying.
 # ---------------------------------------------------------------------------
 rule stitch:
     input:
