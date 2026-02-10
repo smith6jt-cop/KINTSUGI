@@ -36,6 +36,10 @@ CHANNELS = list(snakemake.params.channels)
 sys.path.insert(0, str(PROJECT_DIR / "notebooks"))
 sys.path.insert(0, str(KINTSUGI_DIR))
 
+# Logging utilities (replicates slurm/utils.sh structured logging)
+sys.path.insert(0, str(Path(snakemake.workflow.basedir) / "scripts"))
+from log_utils import log_header, log_footer, summary_before, summary_after
+
 # ---------------------------------------------------------------------------
 # Configuration from experiment.json and workflow config
 # ---------------------------------------------------------------------------
@@ -158,6 +162,10 @@ for f in sample_files:
 n_zplanes = len(z_planes)
 n_tiles = TILE_ROWS * TILE_COLS
 
+# Structured logging header (mirrors utils.sh log_header)
+log_header("stitch", CYCLE, PROJECT_DIR)
+summary_before("stitch", PROJECT_DIR)
+
 print(f"\n{'='*60}")
 print(f"Correction + Stitching - Cycle {CYCLE}")
 print(f"{'='*60}")
@@ -198,6 +206,40 @@ def load_tiles_parallel(file_list, max_workers=4):
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         tiles = list(executor.map(load_one, file_list))
     return np.array(tiles)
+
+
+# ---------------------------------------------------------------------------
+# QC helper
+# ---------------------------------------------------------------------------
+def save_qc_image(data, output_path, title=""):
+    """Save stitched result as QC image (downsampled)."""
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        from skimage.transform import rescale
+
+        max_dim = 1024
+        scale = min(1.0, max_dim / max(data.shape))
+        if scale < 1.0:
+            data_small = rescale(
+                data, scale, preserve_range=True, anti_aliasing=True
+            )
+        else:
+            data_small = data
+
+        fig, ax = plt.subplots(figsize=(10, 10))
+        vmin, vmax = np.percentile(data_small, [1, 99])
+        ax.imshow(data_small, cmap="gray", vmin=vmin, vmax=vmax)
+        ax.set_title(title)
+        ax.axis("off")
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=100, bbox_inches="tight")
+        plt.close()
+        print(f"  QC saved: {Path(output_path).name}")
+    except Exception as e:
+        print(f"  QC save failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +386,15 @@ for channel in channels:
         for e in errors[:3]:
             print(f"    - {e}")
 
+    # Generate QC image from middle z-plane
+    qc_file = output_dir / f"{ref_zplane:02d}.tif"
+    if qc_file.exists():
+        log_dir = Path(snakemake.log[0]).parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+        qc_data = imread(str(qc_file))
+        qc_path = log_dir / f"cyc{CYCLE:02d}_CH{channel}_stitched.png"
+        save_qc_image(qc_data, str(qc_path), f"Cycle {CYCLE} CH{channel} Z{ref_zplane}")
+
     # GPU cleanup between channels
     cleanup_gpu_memory()
     gc.collect()
@@ -359,6 +410,9 @@ print(f"Z-planes per channel: {n_zplanes}")
 print(f"Total time: {total_time/60:.1f} minutes")
 print(f"Output: {STITCH_DIR}")
 
+# Structured logging after-summary (mirrors utils.sh summary_after)
+summary_after("stitch", PROJECT_DIR, total_time, exit_code=0)
+
 # ---------------------------------------------------------------------------
 # Write sentinel (replaces .complete marker)
 # ---------------------------------------------------------------------------
@@ -373,3 +427,4 @@ sentinel.write_text(
     f"duration_minutes={total_time/60:.1f}\n"
 )
 print(f"Sentinel written: {sentinel}")
+log_footer(0)

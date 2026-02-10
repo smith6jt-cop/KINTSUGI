@@ -22,6 +22,7 @@ Usage:
 """
 
 import json
+import re
 from pathlib import Path
 
 configfile: "config.yaml"
@@ -49,6 +50,51 @@ def cyc_fmt(cycle):
     """Format cycle number with zero-padding."""
     return f"{int(cycle):02d}"
 
+
+# ---------------------------------------------------------------------------
+# Cycle directory resolution
+# ---------------------------------------------------------------------------
+# Raw cycle directories may use different naming conventions:
+#   cyc01, cyc001, cyc001_reg001_200210_170925, Cyc01, etc.
+# This function resolves the actual directory name at DAG creation time,
+# mirroring the find_cycle_dir() logic in the wrapper scripts.
+def _resolve_raw_cycle_dir(cycle_num):
+    """Resolve actual cycle directory path from cycle number."""
+    raw_dir = Path(PROJECT) / "data" / "raw"
+
+    # Try glob patterns for long-form names (e.g., cyc001_reg001_200210_170925)
+    for pattern in [
+        f"cyc{cycle_num:03d}_*",
+        f"cyc{cycle_num:02d}_*",
+        f"Cyc{cycle_num:02d}_*",
+    ]:
+        matches = sorted(raw_dir.glob(pattern))
+        if matches:
+            return str(matches[0])
+
+    # Try exact short-form names
+    for name in [
+        f"cyc{cycle_num:03d}",
+        f"cyc{cycle_num:02d}",
+        f"Cyc{cycle_num:02d}",
+    ]:
+        candidate = raw_dir / name
+        if candidate.exists():
+            return str(candidate)
+
+    # Fallback: return the 2-digit form (Snakemake will error if missing)
+    return str(raw_dir / f"cyc{cycle_num:02d}")
+
+
+# Build a lookup table so the stitch rule can reference resolved paths
+_RAW_CYCLE_DIRS = {cyc_fmt(c): _resolve_raw_cycle_dir(c) for c in CYCLES}
+
+
+def get_raw_dir(wildcards):
+    """Input function: return the resolved raw directory for a cycle."""
+    return _RAW_CYCLE_DIRS[wildcards.cycle]
+
+
 # ---------------------------------------------------------------------------
 # Target rule: request all final EDF outputs
 # ---------------------------------------------------------------------------
@@ -69,8 +115,8 @@ rule all:
 # The sentinel file signals completion (avoids declaring hundreds of outputs).
 rule stitch:
     input:
-        # Snakemake verifies this directory exists before scheduling
-        raw_dir=directory("{project}/data/raw/cyc{cycle}"),
+        # Input function resolves the actual cycle directory name
+        raw_dir=get_raw_dir,
     output:
         sentinel="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
     params:
