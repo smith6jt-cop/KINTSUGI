@@ -707,17 +707,19 @@ class TestFindCycleDir:
     def _find_cycle_dir(self, raw_dir, cycle_num):
         """Reference implementation matching stitch.py's find_cycle_dir."""
 
-        # Check exact matches first to avoid case-insensitive filesystem
-        # ambiguity where glob("cyc01_*") could match "Cyc01" on macOS/Windows.
+        # List actual directory entries so we match by real (case-preserving)
+        # name.  Using Path.exists() directly is unreliable on case-insensitive
+        # filesystems (macOS, Windows) where "cyc01" matches "Cyc01".
+        entries = {p.name: p for p in raw_dir.iterdir() if p.is_dir()}
+
         exact_patterns = [
             f"cyc{cycle_num:03d}",
             f"cyc{cycle_num:02d}",
             f"Cyc{cycle_num:02d}",
         ]
         for pattern in exact_patterns:
-            test_dir = raw_dir / pattern
-            if test_dir.exists() and test_dir.is_dir():
-                return test_dir
+            if pattern in entries:
+                return entries[pattern]
 
         glob_patterns = [
             f"cyc{cycle_num:03d}_*",
