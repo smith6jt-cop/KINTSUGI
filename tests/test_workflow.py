@@ -707,6 +707,18 @@ class TestFindCycleDir:
     def _find_cycle_dir(self, raw_dir, cycle_num):
         """Reference implementation matching stitch.py's find_cycle_dir."""
 
+        # Check exact matches first to avoid case-insensitive filesystem
+        # ambiguity where glob("cyc01_*") could match "Cyc01" on macOS/Windows.
+        exact_patterns = [
+            f"cyc{cycle_num:03d}",
+            f"cyc{cycle_num:02d}",
+            f"Cyc{cycle_num:02d}",
+        ]
+        for pattern in exact_patterns:
+            test_dir = raw_dir / pattern
+            if test_dir.exists() and test_dir.is_dir():
+                return test_dir
+
         glob_patterns = [
             f"cyc{cycle_num:03d}_*",
             f"cyc{cycle_num:02d}_*",
@@ -716,15 +728,7 @@ class TestFindCycleDir:
             matches = list(raw_dir.glob(pattern))
             if matches:
                 return matches[0]
-        exact_patterns = [
-            f"cyc{cycle_num:03d}",
-            f"cyc{cycle_num:02d}",
-            f"Cyc{cycle_num:02d}",
-        ]
-        for pattern in exact_patterns:
-            test_dir = raw_dir / pattern
-            if test_dir.exists():
-                return test_dir
+
         return None
 
     def test_short_format(self, tmp_path):
@@ -753,13 +757,20 @@ class TestFindCycleDir:
         """Returns None when cycle directory doesn't exist."""
         assert self._find_cycle_dir(tmp_path, 99) is None
 
-    def test_prefers_glob_over_exact(self, tmp_path):
-        """Long-form name with suffix is preferred over plain cyc01."""
+    def test_prefers_exact_over_glob(self, tmp_path):
+        """Exact directory name is preferred over glob with suffix."""
         (tmp_path / "cyc001_markers").mkdir()
         (tmp_path / "cyc001").mkdir()
         result = self._find_cycle_dir(tmp_path, 1)
-        # Glob pattern cyc001_* matches first
-        assert "_markers" in result.name
+        # Exact pattern cyc001 matches first (avoids case-insensitive glob issues)
+        assert result.name == "cyc001"
+
+    def test_falls_back_to_glob(self, tmp_path):
+        """Falls back to glob when no exact match exists."""
+        (tmp_path / "cyc001_DAPI_CD3").mkdir()
+        result = self._find_cycle_dir(tmp_path, 1)
+        assert result is not None
+        assert result.name == "cyc001_DAPI_CD3"
 
 
 # ============================================================================
