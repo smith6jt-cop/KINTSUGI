@@ -117,6 +117,28 @@ END_CHANNEL = int(os.environ.get('END_CHANNEL',
 OUTPUT_FORMAT = os.environ.get('OUTPUT_FORMAT', 'zarr')
 
 print(f"  Channels: {START_CHANNEL}-{END_CHANNEL}")
+
+# Load channel names from CHANNELNAMES.txt (matches notebook process_edf_tiff naming)
+from Kio import load_channel_names
+channels_per_cycle = experiment_config.get('channels_per_cycle', END_CHANNEL)
+channel_name_dict = load_channel_names(
+    PROJECT_DIR / 'meta',
+    channels_per_cycle=channels_per_cycle
+)
+if channel_name_dict:
+    cycle_names = channel_name_dict.get(CYCLE, [])
+    print(f"  Channel names (cycle {CYCLE}): {cycle_names}")
+else:
+    cycle_names = []
+    print(f"  WARNING: CHANNELNAMES.txt not found, using CH# fallback naming")
+
+def get_channel_name(ch):
+    """Get marker name for channel, with CH# fallback."""
+    idx = ch - 1
+    if cycle_names and idx < len(cycle_names):
+        return cycle_names[idx]
+    return f"CH{ch}"
+
 print("=" * 60)
 
 DATA_DIR = PROJECT_DIR / 'data'
@@ -309,9 +331,10 @@ def check_cycle_complete(edf_dir, cycle, start_ch, end_ch):
         return False, "output directory missing"
 
     for ch in range(start_ch, end_ch + 1):
-        edf_file = cycle_out / f"CH{ch}_edf.tif"
+        ch_name = get_channel_name(ch)
+        edf_file = cycle_out / f"{ch_name}.tif"
         if not edf_file.exists():
-            return False, f"CH{ch}_edf.tif missing"
+            return False, f"{ch_name}.tif missing"
 
     return True, "complete"
 
@@ -403,10 +426,11 @@ def save_qc_image(data, output_path, title=""):
 def process_edf(args):
     """Process EDF for one channel with quality gate."""
     ch, gpu_id = args
+    ch_name = get_channel_name(ch)
     if DEVICE_MODE == 'gpu':
-        print(f"\n  [GPU{gpu_id}] Channel {ch} starting...")
+        print(f"\n  [GPU{gpu_id}] Channel {ch} ({ch_name}) starting...")
     else:
-        print(f"\n  [CPU] Channel {ch} starting...")
+        print(f"\n  [CPU] Channel {ch} ({ch_name}) starting...")
 
     try:
         if DEVICE_MODE == 'gpu' and n_gpus > 0:
@@ -472,9 +496,9 @@ def process_edf(args):
             z_smooth_sigma=EDF_PARAMS.get('z_smooth_sigma', 0.0)
         )
 
-        # Save result
+        # Save result (use marker name to match notebook process_edf_tiff convention)
         from skimage.io import imsave
-        output_file = output_path / f"CH{ch}_edf.tif"
+        output_file = output_path / f"{ch_name}.tif"
         imsave(str(output_file), edf_result.astype(np.uint16), check_contrast=False)
 
         # Verify output quality
@@ -485,13 +509,13 @@ def process_edf(args):
             print(f"    WARNING: High zero percentage in output")
 
         # Generate QC image
-        qc_path = QC_DIR / f"cyc{CYCLE:02d}_CH{ch}_edf.png"
-        save_qc_image(edf_result, qc_path, f"Cycle {CYCLE} CH{ch} EDF ({pct_zero:.1f}% zeros)")
+        qc_path = QC_DIR / f"cyc{CYCLE:02d}_{ch_name}_edf.png"
+        save_qc_image(edf_result, qc_path, f"Cycle {CYCLE} {ch_name} EDF ({pct_zero:.1f}% zeros)")
 
         if DEVICE_MODE == 'gpu':
-            print(f"  [GPU{gpu_id}] Channel {ch} complete -> {output_file.name}")
+            print(f"  [GPU{gpu_id}] Channel {ch} ({ch_name}) complete -> {output_file.name}")
         else:
-            print(f"  [CPU] Channel {ch} complete -> {output_file.name}")
+            print(f"  [CPU] Channel {ch} ({ch_name}) complete -> {output_file.name}")
 
         # Cleanup
         del stack, stack_filtered, edf_result
@@ -501,9 +525,9 @@ def process_edf(args):
 
     except Exception as e:
         if DEVICE_MODE == 'gpu':
-            print(f"  [GPU{gpu_id}] Channel {ch} FAILED: {e}")
+            print(f"  [GPU{gpu_id}] Channel {ch} ({ch_name}) FAILED: {e}")
         else:
-            print(f"  [CPU] Channel {ch} FAILED: {e}")
+            print(f"  [CPU] Channel {ch} ({ch_name}) FAILED: {e}")
         import traceback
         traceback.print_exc()
         return ch, False, str(e)
@@ -544,7 +568,7 @@ failed = [(ch, err) for ch, ok, err in results if not ok]
 if failed:
     print(f"\nFailed channels:")
     for ch, err in failed:
-        print(f"  CH{ch}: {err}")
+        print(f"  {get_channel_name(ch)} (CH{ch}): {err}")
     sys.exit(1)
 
 # Release cycle lock (processing succeeded)

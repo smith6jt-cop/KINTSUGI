@@ -140,10 +140,16 @@ my_project/
 
 **Metadata loading**: SLURM job scripts automatically load parameters from:
 1. `/meta/experiment.json` - Microscope parameters (tile grid, pixel sizes, wavelengths)
-2. `/meta/CHANNELNAMES.txt` - Channel/marker names
+2. `/meta/CHANNELNAMES.txt` - Channel/marker names (used for EDF output file naming)
 3. `slurm/config.sh` environment variables - Fallback if metadata files don't exist
 
 This eliminates the need to manually configure `config.sh` for most parameters.
+
+**SLURM output naming**: SLURM job scripts produce output that matches the notebook conventions:
+- **Deconvolution**: `data/processed/deconvolved/cyc##/CH#/*.tif` (z-plane TIFFs per channel)
+- **EDF**: `data/processed/edf/cyc##/{channel_name}.tif` (marker-named, e.g., `CD3.tif`, `DAPI-01.tif`)
+
+EDF output files use marker names from `CHANNELNAMES.txt` (loaded via `Kio.load_channel_names()`), falling back to `CH#` if the file is missing. This is critical for downstream compatibility with `_find_edf_file()` in `Kview_qc.py`.
 
 **Add SLURM to existing project** (two equivalent methods):
 ```bash
@@ -187,60 +193,33 @@ KINTSUGI has two distinct processing modes with different resource utilization s
 
 ### Resource Pool Calculation (Dual-Pool Architecture)
 
-KINTSUGI calculates total concurrent jobs from both GPU and CPU resources, not just GPUs:
+KINTSUGI calculates total concurrent jobs from two **independent** SLURM accounts, each with its own resource limits:
 
-**GPU Pool**: Limited by `ALLOC_GPUS / GPUS_PER_NODE`
-- Also constrained by CPU and memory available for GPU jobs
+**GPU Pool**: From GPU account (`ACCOUNT_CHAIN`, e.g., `clive`)
+- Auto-detected from the GPU account's QOS limits via `sacctmgr`
+- Provides GPUs, CPUs, and memory for GPU-accelerated jobs
 
-**CPU Pool**: Limited by remaining resources after GPU allocation
-- CPUs: `(ALLOC_CPUS - GPU_CPUs_used) / CPU_CPUS_PER_TASK`
-- Memory: `(ALLOC_MEM - GPU_mem_used) / CPU_MEM_*`
+**CPU Pool**: From CPU account (`CPU_ONLY_ACCOUNTS`, e.g., `maigan`) - **completely independent**
+- Auto-detected from the CPU account's QOS limits via `auto_detect_cpu_allocation()`
+- Provides CPUs and memory for CPU-only jobs with **guaranteed** resources (not preemptible)
 
-**Total Concurrent** = GPU slots + CPU slots
+**Total Concurrent** = GPU slots + CPU slots (from separate accounts)
 
-**Example calculation** (104 CPUs, 812GB memory, 3 GPUs):
-| Resource | GPU Jobs | CPU Jobs | Calculation |
-|----------|----------|----------|-------------|
-| GPUs | 3 | 0 | 3 GPUs / 1 per job |
-| CPUs | 24 | 80 | 104 - (3×8) = 80 remaining |
-| Memory | 540 GB | 272 GB | 812 - (3×180) = 272 remaining |
-| CPU slots | - | 5 | min(80/8, 272/48) = min(10,5) |
-| **Total** | **8** | | 3 GPU + 5 CPU concurrent jobs |
+**Example calculation** (two independent accounts):
+| Account | CPUs | Memory | GPUs | Slots | Calculation |
+|---------|------|--------|------|-------|-------------|
+| `clive` (GPU) | 104 | 812 GB | 3 | 3 | 3 GPUs / 1 per job |
+| `maigan` (CPU) | 80 | 625 GB | 0 | 10 | min(80/8, 625/48) = min(10,13) |
+| **Total** | | | | **13** | 3 GPU + 10 CPU concurrent jobs |
 
 ### How Concurrent GPU/CPU Works
 
-1. `submit.sh` calculates dual-pool resource allocation (GPU slots + CPU slots)
-2. Submits GPU jobs with `KINTSUGI_DEVICE_MODE=gpu`
-3. Submits CPU jobs with `KINTSUGI_DEVICE_MODE=cpu` (use remaining resources)
-4. Job scripts read `KINTSUGI_DEVICE_MODE` and use appropriate backend (CuPy for GPU, NumPy/SciPy for CPU)
-5. CPU jobs run 5x longer (automatic time multiplier) but utilize otherwise idle CPU cores
-
-### Dynamic Job Promotion
-
-The burst monitor (`burst_monitor.sh`) promotes jobs when better resources become available:
-
-**Burst → Allocated**: Preemptible GPU jobs promoted to guaranteed QOS
-**CPU → GPU**: CPU jobs promoted to GPU when GPUs free up
-
-Promotion priority: Burst jobs first (already GPU-ready), then CPU jobs.
-
-This allows flexible resource utilization: jobs start on whatever resources are available (burst or CPU), then get promoted to optimal resources (allocated GPU) as they become free.
-
-### Using Burst Resources (`--use-burst` flag)
-
-Burst QOS provides access to idle cluster resources but jobs are preemptible. Use burst for faster processing when the cluster has spare capacity:
-
-```bash
-kintsugi slurm submit . --use-burst              # All steps with burst
-kintsugi slurm submit . --steps decon --use-burst # Specific step with burst
-```
-
-When `--use-burst` is enabled:
-1. Primary jobs are submitted to allocated QOS (guaranteed, higher priority)
-2. Duplicate jobs are submitted to burst QOS (preemptible, uses idle resources)
-3. Burst jobs include `--requeue` flag for automatic requeue if preempted
-4. SLURM scheduler prioritizes allocated jobs; burst runs on spare capacity
-5. If both allocated and burst jobs complete the same cycle, one is redundant (harmless)
+1. `submit.sh` auto-detects GPU and CPU account limits independently via `sacctmgr`
+2. Calculates GPU slots from the GPU account, CPU slots from the CPU account
+3. Submits GPU jobs on the GPU account/partition (e.g., `clive`/`hpg-b200`) with `KINTSUGI_DEVICE_MODE=gpu`
+4. Submits CPU jobs on the CPU account/partition (e.g., `maigan`/`hpg-default`) with `KINTSUGI_DEVICE_MODE=cpu` and guaranteed (non-preemptible) resources
+5. Job scripts read `KINTSUGI_DEVICE_MODE` and use appropriate backend (CuPy for GPU, NumPy/SciPy for CPU)
+6. CPU jobs get a 5x time multiplier (automatic) but have guaranteed memory allocation from the CPU account
 
 ## Development Workspace
 
