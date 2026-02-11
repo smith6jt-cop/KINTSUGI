@@ -158,6 +158,13 @@ sys.path.insert(0, str(KINTSUGI_DIR / 'notebooks'))  # Required for Kio, Kproces
 sys.path.insert(0, str(KINTSUGI_DIR))
 ```
 
+**Memory allocation**: EDF loads full deconvolved z-stacks (~3-4 GB per channel for large datasets) and must have sufficient memory. Match EDF memory to deconvolution memory in `config.sh`:
+```bash
+export MEM_EDF=48       # GPU jobs (match MEM_DECON)
+export CPU_MEM_EDF=48   # CPU jobs (match CPU_MEM_DECON)
+```
+The default of 16 GB is insufficient for datasets with large tile grids (e.g., 5x5).
+
 **Add SLURM to existing project** (two equivalent methods):
 ```bash
 kintsugi init /path/to/project --slurm    # Auto-detects existing project, adds SLURM
