@@ -1352,7 +1352,7 @@ class KintsugiProject:
 
         if not config_file.exists():
             raise FileNotFoundError(
-                f"No KINTSUGI project found at {root}. " f"Use create() to create a new project."
+                f"No KINTSUGI project found at {root}. Use create() to create a new project."
             )
 
         with open(config_file) as f:
