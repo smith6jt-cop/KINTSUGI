@@ -19,7 +19,6 @@ CYCLES_OVERRIDE=""
 PROJECT_DIR=""
 CONFIG_FILE=""
 RUN_ID=""
-USE_BURST=false
 
 # =============================================================================
 # TERMINAL LOGGING
@@ -213,7 +212,7 @@ apply_time_multiplier() {
 # ACCOUNT CHAIN SELECTION
 # =============================================================================
 
-# Check if account is CPU-only (burst account)
+# Check if account is CPU-only (no GPU access)
 # Returns: 0 if CPU-only, 1 if GPU-enabled
 is_cpu_only_account() {
     local account=$1
@@ -229,7 +228,7 @@ is_cpu_only_account() {
         return 1
     fi
 
-    # Default heuristic: accounts ending in -b are CPU-only burst accounts
+    # Default heuristic: accounts ending in -b are CPU-only accounts
     [[ "${account}" == *-b ]] && return 0 || return 1
 }
 
@@ -265,7 +264,7 @@ select_account() {
         if is_cpu_only_account "${account}"; then
             SELECTED_ACCOUNT="${account}"
             SELECTED_MODE="cpu"
-            term_info "Selected account: ${account} (CPU-only burst)"
+            term_info "Selected account: ${account} (CPU-only)"
             return 0
         else
             SELECTED_ACCOUNT="${account}"
@@ -279,54 +278,6 @@ select_account() {
     return 1
 }
 
-# Get burst QOS name for an account
-# Adds "-b" suffix if not already present
-get_burst_qos() {
-    local account=$1
-    if [[ "${account}" == *-b ]]; then
-        echo "${account}"
-    else
-        echo "${account}-b"
-    fi
-}
-
-# Check if burst QOS exists for current account
-# Returns 0 if burst QOS is available, 1 otherwise
-burst_qos_available() {
-    local account_to_check="${1:-${SELECTED_ACCOUNT:-${ACCOUNT:-}}}"
-
-    if [ -z "${account_to_check}" ]; then
-        return 1
-    fi
-
-    local burst_qos
-    burst_qos=$(get_burst_qos "${account_to_check}")
-
-    if [ "${DRY_RUN}" = true ]; then
-        # In dry run, assume burst is available
-        return 0
-    fi
-
-    # Check if QOS exists using sacctmgr
-    if command -v sacctmgr &> /dev/null; then
-        local qos_list
-        qos_list=$(sacctmgr show qos format=name -n 2>/dev/null || true)
-        if [ -n "${qos_list}" ] && echo "${qos_list}" | grep -q "^${burst_qos}$"; then
-            return 0
-        fi
-    fi
-
-    # Fallback: check if user has access to burst QOS via association
-    if command -v sacctmgr &> /dev/null; then
-        local assoc_qos
-        assoc_qos=$(sacctmgr show assoc where user="${USER}" format=qos -n 2>/dev/null || true)
-        if [ -n "${assoc_qos}" ] && echo "${assoc_qos}" | grep -q "${burst_qos}"; then
-            return 0
-        fi
-    fi
-
-    return 1
-}
 
 # Calculate effective resources based on GPU or CPU mode
 # Sets globals: EFFECTIVE_GPUS, EFFECTIVE_CPUS_PER_TASK, EFFECTIVE_MEM_*, EFFECTIVE_TIME_*
@@ -469,8 +420,87 @@ auto_detect_allocation() {
     fi
 }
 
+# Auto-detect CPU account allocation limits from SLURM QOS
+# Uses CPU_ONLY_ACCOUNTS or ACCOUNT as the CPU account
+# Sets CPU_ALLOC_CPUS, CPU_ALLOC_MEM as output (globals)
+auto_detect_cpu_allocation() {
+    # If already set, nothing to do
+    if [ -n "${CPU_ALLOC_CPUS}" ] && [ -n "${CPU_ALLOC_MEM}" ]; then
+        return 0
+    fi
+
+    if ! command -v sacctmgr &> /dev/null; then
+        term_warn "sacctmgr not available - cannot detect CPU account limits"
+        return 0
+    fi
+
+    # Get CPU account
+    local cpu_account="${CPU_ONLY_ACCOUNTS:-${ACCOUNT:-maigan}}"
+    # Take first if comma-separated
+    cpu_account=$(echo "${cpu_account}" | cut -d',' -f1 | xargs)
+
+    # Skip if CPU account is the same as GPU account (resources shared, not separate pool)
+    local gpu_account="${SELECTED_ACCOUNT:-}"
+    if [ -z "${gpu_account}" ]; then
+        local chain
+        chain=$(get_account_chain)
+        if [ -n "${chain}" ]; then
+            IFS=',' read -ra _accounts <<< "${chain}"
+            for _acct in "${_accounts[@]}"; do
+                _acct=$(echo "${_acct}" | xargs)
+                if ! is_cpu_only_account "${_acct}"; then
+                    gpu_account="${_acct}"
+                    break
+                fi
+            done
+        fi
+        gpu_account="${gpu_account:-${ACCOUNT:-maigan}}"
+    fi
+
+    if [ "${cpu_account}" = "${gpu_account}" ]; then
+        term_info "CPU account same as GPU account (${cpu_account}) - CPU pool disabled"
+        CPU_ALLOC_CPUS=0
+        CPU_ALLOC_MEM=0
+        return 0
+    fi
+
+    # Query GrpTRES from the CPU account's QOS
+    local grp_tres
+    grp_tres=$(sacctmgr show qos "${cpu_account}" format=GrpTRES%80 -n -P 2>/dev/null || echo "")
+
+    if [ -n "${grp_tres}" ]; then
+        local detected_cpus detected_mem_raw
+        detected_cpus=$(echo "${grp_tres}" | grep -oP 'cpu=\K[0-9]+' || echo "")
+        detected_mem_raw=$(echo "${grp_tres}" | grep -oP 'mem=\K[0-9]+(\.[0-9]+)?[GM]?' || echo "")
+
+        [ -z "${CPU_ALLOC_CPUS}" ] && [ -n "${detected_cpus}" ] && CPU_ALLOC_CPUS="${detected_cpus}"
+
+        if [ -z "${CPU_ALLOC_MEM}" ] && [ -n "${detected_mem_raw}" ]; then
+            if [[ "${detected_mem_raw}" == *G ]]; then
+                local mem_gb="${detected_mem_raw%G}"
+                CPU_ALLOC_MEM=$(printf '%.0f' "${mem_gb}")
+            elif [[ "${detected_mem_raw}" == *M ]]; then
+                local mem_mb="${detected_mem_raw%M}"
+                CPU_ALLOC_MEM=$(printf '%.0f' "$(echo "${mem_mb} / 1024" | bc -l)")
+            else
+                CPU_ALLOC_MEM=$(( detected_mem_raw / 1024 ))
+            fi
+        fi
+
+        term_info "Auto-detected CPU allocation (from ${cpu_account} QOS): ${CPU_ALLOC_CPUS:-0} CPUs, ${CPU_ALLOC_MEM:-0}GB mem"
+    else
+        term_warn "Could not detect CPU account limits for ${cpu_account}"
+        CPU_ALLOC_CPUS=0
+        CPU_ALLOC_MEM=0
+    fi
+
+    export CPU_ALLOC_CPUS
+    export CPU_ALLOC_MEM
+}
+
 # Calculate optimal max concurrent jobs based on allocation limits
 # Uses a dual-pool architecture: GPU slots + CPU slots = total concurrent
+# GPU and CPU pools are independent (separate accounts with separate limits)
 # Sets COMPUTED_MAX_CONCURRENT, GPU_SLOTS, CPU_SLOTS as output (globals)
 calculate_max_concurrent() {
     local cpus_per_task=${CPUS_PER_TASK:-4}
@@ -479,9 +509,11 @@ calculate_max_concurrent() {
     local alloc_mem=${ALLOC_MEM:-600}
     local alloc_gpus=${ALLOC_GPUS:-2}
 
-    # CPU job resource requirements
+    # CPU job resource requirements (from CPU account)
     local cpu_cpus=${CPU_CPUS_PER_TASK:-8}
     local cpu_mem=${CPU_MEM_DECON:-48}
+    local cpu_alloc_cpus=${CPU_ALLOC_CPUS:-0}
+    local cpu_alloc_mem=${CPU_ALLOC_MEM:-0}
 
     # Find max memory requirement for GPU jobs across all steps
     local gpu_max_mem=${MEM_DECON:-96}
@@ -490,11 +522,11 @@ calculate_max_concurrent() {
     [ "${MEM_EDF:-32}" -gt "${gpu_max_mem}" ] && gpu_max_mem=${MEM_EDF:-32}
 
     # ==========================================================================
-    # GPU Pool: Limited by allocated GPUs
+    # GPU Pool: From GPU account (ACCOUNT_CHAIN), limited by GPUs
     # ==========================================================================
     local gpu_slots=$((alloc_gpus / gpus_per_node))
 
-    # Also check GPU pool against CPU and memory limits
+    # Also check GPU pool against CPU and memory limits of GPU account
     local gpu_slots_by_cpu=$((alloc_cpus / cpus_per_task))
     local gpu_slots_by_mem=$((alloc_mem / gpu_max_mem))
 
@@ -504,22 +536,17 @@ calculate_max_concurrent() {
     [ "${gpu_slots}" -lt 0 ] && gpu_slots=0
 
     # ==========================================================================
-    # CPU Pool: Limited by remaining resources after GPU allocation
+    # CPU Pool: From CPU account (CPU_ONLY_ACCOUNTS), independent of GPU account
     # ==========================================================================
-    # CPUs remaining after GPU jobs
-    local cpus_used_by_gpu=$((gpu_slots * cpus_per_task))
-    local cpus_for_cpu_jobs=$((alloc_cpus - cpus_used_by_gpu))
-    local cpu_slots_by_cpu=$((cpus_for_cpu_jobs / cpu_cpus))
+    local cpu_slots=0
+    if [ "${cpu_alloc_cpus}" -gt 0 ] && [ "${cpu_alloc_mem}" -gt 0 ]; then
+        local cpu_slots_by_cpu=$((cpu_alloc_cpus / cpu_cpus))
+        local cpu_slots_by_mem=$((cpu_alloc_mem / cpu_mem))
 
-    # Memory remaining after GPU jobs
-    local mem_used_by_gpu=$((gpu_slots * gpu_max_mem))
-    local mem_for_cpu_jobs=$((alloc_mem - mem_used_by_gpu))
-    local cpu_slots_by_mem=$((mem_for_cpu_jobs / cpu_mem))
-
-    # CPU pool is minimum of CPU and memory limits
-    local cpu_slots=${cpu_slots_by_cpu}
-    [ "${cpu_slots_by_mem}" -lt "${cpu_slots}" ] && cpu_slots=${cpu_slots_by_mem}
-    [ "${cpu_slots}" -lt 0 ] && cpu_slots=0
+        cpu_slots=${cpu_slots_by_cpu}
+        [ "${cpu_slots_by_mem}" -lt "${cpu_slots}" ] && cpu_slots=${cpu_slots_by_mem}
+        [ "${cpu_slots}" -lt 0 ] && cpu_slots=0
+    fi
 
     # ==========================================================================
     # Total concurrent = GPU slots + CPU slots
@@ -528,22 +555,18 @@ calculate_max_concurrent() {
     GPU_SLOTS=${gpu_slots}
     CPU_SLOTS=${cpu_slots}
 
-    # Export for use by burst_monitor.sh
-    export GPU_SLOTS
-    export CPU_SLOTS
-
     # Store calculation details for display
-    RESOURCE_CALC_DETAILS="GPU pool: ${gpu_slots} (${alloc_gpus} GPUs), CPU pool: ${cpu_slots} (${cpus_for_cpu_jobs} CPUs, ${mem_for_cpu_jobs}GB remaining)"
+    RESOURCE_CALC_DETAILS="GPU pool: ${gpu_slots} (${alloc_gpus} GPUs on GPU account), CPU pool: ${cpu_slots} (${cpu_alloc_cpus} CPUs, ${cpu_alloc_mem}GB on CPU account)"
 
     # Determine limiting factor for display
     if [ "${gpu_slots}" -eq 0 ]; then
         LIMITING_RESOURCE="GPUs (no GPU slots available)"
     elif [ "${cpu_slots}" -eq 0 ]; then
-        LIMITING_RESOURCE="remaining resources (no CPU slots after GPU allocation)"
+        LIMITING_RESOURCE="CPU account (no CPU slots available)"
     elif [ "${cpu_slots_by_mem}" -lt "${cpu_slots_by_cpu}" ]; then
-        LIMITING_RESOURCE="memory for CPU pool"
+        LIMITING_RESOURCE="memory on CPU account"
     else
-        LIMITING_RESOURCE="CPUs for CPU pool"
+        LIMITING_RESOURCE="CPUs on CPU account"
     fi
 
     # Validate we can run at least 1 job
@@ -553,17 +576,21 @@ calculate_max_concurrent() {
         term_error "============================================================"
         term_error "Cannot fit even 1 job within allocation limits!"
         term_error ""
-        term_error "Allocation limits:"
+        term_error "GPU account limits:"
         term_error "  CPUs:   ${alloc_cpus}"
         term_error "  Memory: ${alloc_mem} GB"
         term_error "  GPUs:   ${alloc_gpus}"
         term_error ""
-        term_error "Per-job requirements (GPU):"
+        term_error "Per GPU job requirements:"
         term_error "  CPUs:   ${cpus_per_task}"
         term_error "  Memory: ${gpu_max_mem} GB (max across steps)"
         term_error "  GPUs:   ${gpus_per_node}"
         term_error ""
-        term_error "Per-job requirements (CPU):"
+        term_error "CPU account limits:"
+        term_error "  CPUs:   ${cpu_alloc_cpus}"
+        term_error "  Memory: ${cpu_alloc_mem} GB"
+        term_error ""
+        term_error "Per CPU job requirements:"
         term_error "  CPUs:   ${cpu_cpus}"
         term_error "  Memory: ${cpu_mem} GB"
         term_error ""
@@ -591,8 +618,8 @@ resolve_max_concurrent() {
     if [ "${configured}" = "auto" ] || [ -z "${configured}" ]; then
         EFFECTIVE_MAX_CONCURRENT=${COMPUTED_MAX_CONCURRENT}
         term_info "Resource pool calculation:"
-        term_info "  GPU job slots: ${GPU_SLOTS} (from ${ALLOC_GPUS:-2} GPUs)"
-        term_info "  CPU job slots: ${CPU_SLOTS} (from remaining resources)"
+        term_info "  GPU job slots: ${GPU_SLOTS} (from GPU account: ${ALLOC_GPUS:-2} GPUs)"
+        term_info "  CPU job slots: ${CPU_SLOTS} (from CPU account: ${CPU_ALLOC_CPUS:-0} CPUs, ${CPU_ALLOC_MEM:-0}GB mem)"
         term_info "  Total concurrent jobs: ${EFFECTIVE_MAX_CONCURRENT}"
         term_info "  ${RESOURCE_CALC_DETAILS}"
     else
@@ -616,16 +643,9 @@ resolve_max_concurrent() {
         fi
     fi
 
-    # Calculate actual resource usage with this concurrency (dual-pool aware)
-    local cpus_per_task=${CPUS_PER_TASK:-4}
-    local gpus_per_node=${GPUS_PER_NODE:-1}
-    local max_mem=${MEM_DECON:-96}
-    local cpu_cpus=${CPU_CPUS_PER_TASK:-8}
-    local cpu_mem=${CPU_MEM_DECON:-48}
-
-    TOTAL_CPUS_USED=$(( GPU_SLOTS * cpus_per_task + CPU_SLOTS * cpu_cpus ))
-    TOTAL_MEM_USED=$(( GPU_SLOTS * max_mem + CPU_SLOTS * cpu_mem ))
-    TOTAL_GPUS_USED=$(( GPU_SLOTS * gpus_per_node ))
+    # Export slots for use by job scripts
+    export GPU_SLOTS
+    export CPU_SLOTS
 
     return 0
 }
@@ -644,8 +664,6 @@ Options:
   --config FILE       Custom config file (default: PROJECT_DIR/slurm/config.sh)
   --steps STEPS       Comma-separated: correction,stitch,decon,edf,all (default: all)
   --cycles RANGE      Override cycles: '1-7' or '1,2,5' (default: from config)
-  --use-burst         Also submit overflow cycles to burst QOS for faster processing
-                      (burst jobs are preemptible but utilize idle cluster resources)
   --dry-run           Show commands without submitting
   --help              Show this help
 
@@ -658,9 +676,6 @@ Examples:
 
   # Preview without submitting
   $0 --project ~/my_project --dry-run
-
-  # Use burst resources for faster processing (preemptible overflow)
-  $0 --project ~/my_project --use-burst
 
   # Multiple projects (run separately)
   $0 --project /path/to/project1 &
@@ -689,10 +704,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run|-n)
             DRY_RUN=true
-            shift
-            ;;
-        --use-burst|-b)
-            USE_BURST=true
             shift
             ;;
         --help|-h)
@@ -785,7 +796,6 @@ term_info "Cycles:   ${ARRAY_SPEC}"
 term_info "Steps:    ${STEPS}"
 term_info "Format:   ${OUTPUT_FORMAT}"
 term_info "Dry run:  ${DRY_RUN}"
-term_info "Burst:    ${USE_BURST}"
 term_info "------------------------------------------------------------"
 term_info "GPU Configuration:"
 term_info "  Primary partition:  ${PARTITION}"
@@ -794,13 +804,14 @@ if [ -n "${PARTITION_FALLBACK}" ]; then
 else
     term_info "  Fallback partition: (not configured)"
 fi
-if [ "${USE_BURST}" = true ]; then
-    term_info "  Burst partition:    ${PARTITION_BURST:-hpg-default} (preemptible)"
-fi
+term_info "CPU Configuration:"
+term_info "  CPU partition:      ${PARTITION_CPU:-hpg-default}"
+term_info "  CPU account:        ${CPU_ONLY_ACCOUNTS:-${ACCOUNT:-maigan}}"
 term_info "------------------------------------------------------------"
 
 # Auto-detect allocation limits if not set in config.sh
 auto_detect_allocation
+auto_detect_cpu_allocation
 
 # Calculate optimal concurrency based on allocation limits
 term_info "Calculating resource allocation..."
@@ -810,12 +821,13 @@ fi
 
 term_info "------------------------------------------------------------"
 term_info "Resource Allocation (Dual-Pool Architecture):"
-term_info "  Allocation limits: ${ALLOC_CPUS:-64} CPUs, ${ALLOC_MEM:-600}GB mem, ${ALLOC_GPUS:-2} GPUs"
-term_info "  GPU jobs: ${CPUS_PER_TASK:-4} CPUs, ${MEM_DECON:-96}GB mem, ${GPUS_PER_NODE:-1} GPU each"
-term_info "  CPU jobs: ${CPU_CPUS_PER_TASK:-8} CPUs, ${CPU_MEM_DECON:-48}GB mem each"
-term_info "  GPU slots: ${GPU_SLOTS}, CPU slots: ${CPU_SLOTS}"
-term_info "  Total concurrent: ${EFFECTIVE_MAX_CONCURRENT} jobs"
-term_info "  Total usage: ${TOTAL_CPUS_USED} CPUs, ${TOTAL_MEM_USED}GB mem, ${TOTAL_GPUS_USED} GPUs"
+term_info "  GPU pool (${SELECTED_ACCOUNT:-clive}): ${ALLOC_CPUS:-64} CPUs, ${ALLOC_MEM:-600}GB mem, ${ALLOC_GPUS:-2} GPUs"
+term_info "    Per job: ${CPUS_PER_TASK:-4} CPUs, ${MEM_DECON:-96}GB mem, ${GPUS_PER_NODE:-1} GPU → ${GPU_SLOTS} slots"
+cpu_acct_display="${CPU_ONLY_ACCOUNTS:-${ACCOUNT:-maigan}}"
+cpu_acct_display=$(echo "${cpu_acct_display}" | cut -d',' -f1 | xargs)
+term_info "  CPU pool (${cpu_acct_display}): ${CPU_ALLOC_CPUS:-0} CPUs, ${CPU_ALLOC_MEM:-0}GB mem"
+term_info "    Per job: ${CPU_CPUS_PER_TASK:-8} CPUs, ${CPU_MEM_DECON:-48}GB mem → ${CPU_SLOTS} slots"
+term_info "  Total concurrent: ${EFFECTIVE_MAX_CONCURRENT} jobs (${GPU_SLOTS} GPU + ${CPU_SLOTS} CPU)"
 term_info "============================================================"
 echo ""
 
@@ -1205,127 +1217,9 @@ submit_job() {
     return 1
 }
 
-# Submit burst job (preemptible, opportunistic resources)
-# Called after the main allocated job when --use-burst is enabled
-submit_burst_job() {
-    local step_name=$1
-    local script=$2
-    local mem=$3
-    local time=$4
-    local dep_type=$5
-    local dep_jobid=$6
-
-    # Ensure account is selected (may have been cleared after submit_job)
-    if [ -z "${SELECTED_ACCOUNT}" ]; then
-        if ! select_account; then
-            term_warn "Failed to select account for burst job"
-            return 0
-        fi
-    fi
-
-    # Get burst QOS from the primary account (not a -b account)
-    local base_account="${SELECTED_ACCOUNT}"
-    # If current account ends in -b, strip it to get base
-    if [[ "${base_account}" == *-b ]]; then
-        base_account="${base_account%-b}"
-    fi
-
-    local burst_qos
-    burst_qos=$(get_burst_qos "${base_account}")
-
-    # Check if burst QOS is available
-    if ! burst_qos_available; then
-        term_warn "Burst QOS ${burst_qos} not available - skipping burst submission"
-        return 0
-    fi
-
-    local job_name="kintsugi_${step_name}_burst_${PROJECT_NAME}"
-
-    # Burst jobs use GPU mode (can request GPUs on burst, they're just preemptible)
-    local burst_mode="gpu"
-    local burst_gpus="${GPUS_PER_NODE:-1}"
-    local burst_cpus="${CPUS_PER_TASK:-4}"
-
-    # For GPU burst jobs, use the primary GPU partition with burst QOS
-    # This allows preemptible access to GPU resources on the same partition
-    local burst_partition="${PARTITION}"
-
-    term_info "Submitting BURST job for ${step_name}..."
-    term_info "  Account: ${base_account}, QOS: ${burst_qos}"
-    term_info "  Partition: ${burst_partition} (preemptible GPU)"
-    term_info "  Note: Burst jobs may be preempted and automatically requeued"
-
-    # Build burst sbatch command (similar to regular but with burst QOS and --requeue)
-    SBATCH_CMD=(
-        sbatch
-        "--job-name=${job_name}"
-        "--output=${LOG_DIR}/${step_name}_burst_%A_%a.out"
-        "--error=${LOG_DIR}/${step_name}_burst_%A_%a.err"
-        "--partition=${burst_partition}"
-        "--qos=${burst_qos}"
-        "--account=${base_account}"
-        "--nodes=1"
-        "--ntasks=1"
-        "--cpus-per-task=${burst_cpus}"
-        "--mem=${mem}gb"
-        "--requeue"  # Automatically requeue if preempted
-    )
-
-    # Request GPUs for burst jobs (preemptible but available when cluster is idle)
-    if [ "${burst_gpus}" -gt 0 ]; then
-        SBATCH_CMD+=("--gpus=${burst_gpus}")
-    fi
-
-    # Burst jobs are GPU jobs, use GPU_SLOTS limit
-    local burst_array_limit=${GPU_SLOTS:-${EFFECTIVE_MAX_CONCURRENT}}
-
-    SBATCH_CMD+=(
-        "--time=${time}"
-        "--array=${ARRAY_SPEC}%${burst_array_limit}"
-        "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name},KINTSUGI_DEVICE_MODE=${burst_mode}"
-    )
-
-    if [ -n "${dep_jobid}" ]; then
-        # Accept DRY_ placeholders for dry-run mode, numeric IDs for real runs
-        if [[ "${dep_jobid}" =~ ^DRY_ ]] || [[ "${dep_jobid}" =~ ^[0-9]+$ ]]; then
-            SBATCH_CMD+=("--dependency=${dep_type}:${dep_jobid}")
-        fi
-    fi
-
-    SBATCH_CMD+=("${script}")
-
-    if [ "${DRY_RUN}" = true ]; then
-        term_info "DRY RUN - would execute (burst):"
-        echo "  $(printf '%q ' "${SBATCH_CMD[@]}")" >&2
-        echo "DRY_${step_name}_BURST_JOB"
-        return 0
-    fi
-
-    # Submit burst job
-    local result
-    result=$("${SBATCH_CMD[@]}" 2>&1)
-    local exit_code=$?
-
-    if [ ${exit_code} -eq 0 ]; then
-        local jobid
-        jobid=$(echo "${result}" | grep -oP 'Submitted batch job \K[0-9]+' | head -1)
-        if [ -z "${jobid}" ]; then
-            jobid=$(echo "${result}" | grep "Submitted batch job" | head -1 | sed 's/.*Submitted batch job //' | tr -d '[:space:]')
-        fi
-
-        if [ -n "${jobid}" ] && [[ "${jobid}" =~ ^[0-9]+$ ]]; then
-            term_info "Burst job submitted: ${jobid} (preemptible)"
-            echo "${jobid}"
-            return 0
-        fi
-    fi
-
-    term_warn "Burst job submission failed (non-critical): ${result}"
-    return 0  # Don't fail the pipeline if burst submission fails
-}
 
 # Submit concurrent CPU job (to supplement GPU processing)
-# Uses burst QOS on CPU partition for parallel processing with GPU jobs
+# Uses the CPU account's regular QOS on CPU partition for guaranteed resources
 submit_cpu_job() {
     local step_name=$1
     local script=$2
@@ -1334,24 +1228,16 @@ submit_cpu_job() {
     local dep_type=$5
     local dep_jobid=$6
 
-    # Get base account (strip -b suffix if present)
-    local base_account="${ACCOUNT:-maigan}"
-    if [[ "${base_account}" == *-b ]]; then
-        base_account="${base_account%-b}"
-    fi
+    # Get CPU account from CPU_ONLY_ACCOUNTS or fall back to ACCOUNT
+    local cpu_account="${CPU_ONLY_ACCOUNTS:-${ACCOUNT:-maigan}}"
+    # Take first account if comma-separated
+    cpu_account=$(echo "${cpu_account}" | cut -d',' -f1 | xargs)
 
-    # Get burst QOS for CPU jobs
-    local cpu_qos
-    cpu_qos=$(get_burst_qos "${base_account}")
-
-    # Check if burst QOS is available
-    if ! burst_qos_available "${base_account}"; then
-        # No burst QOS available - skip CPU job
+    # Skip CPU jobs if no CPU slots available
+    if [ "${CPU_SLOTS:-0}" -eq 0 ]; then
+        term_info "No CPU slots available - skipping CPU job for ${step_name}"
         return 0
     fi
-
-    # Use base account with burst QOS (not a separate account)
-    local cpu_account="${base_account}"
 
     local job_name="kintsugi_${step_name}_cpu_${PROJECT_NAME}"
 
@@ -1371,13 +1257,14 @@ submit_cpu_job() {
 
     local cpu_cpus="${CPU_CPUS_PER_TASK:-8}"
     local cpu_partition="${PARTITION_CPU:-hpg-default}"
+    # Use the CPU account name as QOS (guaranteed resources)
+    local cpu_qos="${cpu_account}"
 
     term_info "Submitting CPU job for ${step_name} (concurrent processing)..."
     term_info "  Account: ${cpu_account}, QOS: ${cpu_qos}, Partition: ${cpu_partition}"
     term_info "  CPUs: ${cpu_cpus}, Memory: ${cpu_mem}GB, Time: ${cpu_time}"
-    term_info "  Note: CPU jobs run concurrently with GPU jobs (preemptible)"
 
-    # Build CPU sbatch command with burst QOS
+    # Build CPU sbatch command with regular account QOS (guaranteed resources)
     SBATCH_CMD=(
         sbatch
         "--job-name=${job_name}"
@@ -1391,7 +1278,6 @@ submit_cpu_job() {
         "--cpus-per-task=${cpu_cpus}"
         "--mem=${cpu_mem}gb"
         "--time=${cpu_time}"
-        "--requeue"
         "--array=${ARRAY_SPEC}%${CPU_SLOTS:-${EFFECTIVE_MAX_CONCURRENT}}"
         "--export=ALL,PROJECT_DIR=${PROJECT_DIR},KINTSUGI_DIR=${KINTSUGI_DIR},RUN_ID=${RUN_ID},QC_DIR=${QC_DIR}/${step_name},KINTSUGI_DEVICE_MODE=cpu"
     )
@@ -1442,10 +1328,6 @@ JOB_CORRECTION=""
 JOB_STITCH=""
 JOB_DECON=""
 JOB_EDF=""
-JOB_CORRECTION_BURST=""
-JOB_STITCH_BURST=""
-JOB_DECON_BURST=""
-JOB_EDF_BURST=""
 JOB_CORRECTION_CPU=""
 JOB_STITCH_CPU=""
 JOB_DECON_CPU=""
@@ -1464,7 +1346,7 @@ run_step() {
                 term_error "Failed to submit correction job - aborting pipeline"
                 exit 1
             fi
-            # NOTE: No CPU/burst jobs for correction - it's a passthrough (sleep 2; exit 0)
+            # NOTE: No CPU jobs for correction - it's a passthrough (sleep 2; exit 0)
             # The primary job is only submitted for dependency chain tracking.
             ;;
         stitch)
@@ -1479,12 +1361,6 @@ run_step() {
             local cpu_dep="${JOB_CORRECTION_CPU:-${JOB_CORRECTION}}"
             JOB_STITCH_CPU=$(submit_cpu_job "stitch" "${KINTSUGI_SLURM}/jobs/02_stitching.sh" \
                 "${MEM_STITCH}" "${TIME_STITCH}" "aftercorr" "${cpu_dep}")
-            # Submit burst job if enabled (depends on burst correction if it exists)
-            if [ "${USE_BURST}" = true ]; then
-                local burst_dep="${JOB_CORRECTION_BURST:-${JOB_CORRECTION}}"
-                JOB_STITCH_BURST=$(submit_burst_job "stitch" "${KINTSUGI_SLURM}/jobs/02_stitching.sh" \
-                    "${MEM_STITCH}" "${TIME_STITCH}" "aftercorr" "${burst_dep}")
-            fi
             ;;
         decon)
             echo "--- Step 3: Deconvolution ---"
@@ -1498,12 +1374,6 @@ run_step() {
             local cpu_dep="${JOB_STITCH_CPU:-${JOB_STITCH}}"
             JOB_DECON_CPU=$(submit_cpu_job "decon" "${KINTSUGI_SLURM}/jobs/03_deconvolution.sh" \
                 "${MEM_DECON}" "${TIME_DECON}" "aftercorr" "${cpu_dep}")
-            # Submit burst job if enabled
-            if [ "${USE_BURST}" = true ]; then
-                local burst_dep="${JOB_STITCH_BURST:-${JOB_STITCH}}"
-                JOB_DECON_BURST=$(submit_burst_job "decon" "${KINTSUGI_SLURM}/jobs/03_deconvolution.sh" \
-                    "${MEM_DECON}" "${TIME_DECON}" "aftercorr" "${burst_dep}")
-            fi
             ;;
         edf)
             echo "--- Step 4: Extended Depth of Focus ---"
@@ -1517,12 +1387,6 @@ run_step() {
             local cpu_dep="${JOB_DECON_CPU:-${JOB_DECON}}"
             JOB_EDF_CPU=$(submit_cpu_job "edf" "${KINTSUGI_SLURM}/jobs/04_edf.sh" \
                 "${MEM_EDF}" "${TIME_EDF}" "aftercorr" "${cpu_dep}")
-            # Submit burst job if enabled
-            if [ "${USE_BURST}" = true ]; then
-                local burst_dep="${JOB_DECON_BURST:-${JOB_DECON}}"
-                JOB_EDF_BURST=$(submit_burst_job "edf" "${KINTSUGI_SLURM}/jobs/04_edf.sh" \
-                    "${MEM_EDF}" "${TIME_EDF}" "aftercorr" "${burst_dep}")
-            fi
             ;;
     esac
 }
@@ -1583,23 +1447,19 @@ else
         echo "Job IDs:"
         [ -n "${JOB_CORRECTION}" ]       && echo "  correction_gpu:   ${JOB_CORRECTION}"
         [ -n "${JOB_CORRECTION_CPU}" ]   && echo "  correction_cpu:   ${JOB_CORRECTION_CPU}"
-        [ -n "${JOB_CORRECTION_BURST}" ] && echo "  correction_burst: ${JOB_CORRECTION_BURST}"
         [ -n "${JOB_STITCH}" ]           && echo "  stitch_gpu:       ${JOB_STITCH}"
         [ -n "${JOB_STITCH_CPU}" ]       && echo "  stitch_cpu:       ${JOB_STITCH_CPU}"
-        [ -n "${JOB_STITCH_BURST}" ]     && echo "  stitch_burst:     ${JOB_STITCH_BURST}"
         [ -n "${JOB_DECON}" ]            && echo "  decon_gpu:        ${JOB_DECON}"
         [ -n "${JOB_DECON_CPU}" ]        && echo "  decon_cpu:        ${JOB_DECON_CPU}"
-        [ -n "${JOB_DECON_BURST}" ]      && echo "  decon_burst:      ${JOB_DECON_BURST}"
         [ -n "${JOB_EDF}" ]              && echo "  edf_gpu:          ${JOB_EDF}"
         [ -n "${JOB_EDF_CPU}" ]          && echo "  edf_cpu:          ${JOB_EDF_CPU}"
-        [ -n "${JOB_EDF_BURST}" ]        && echo "  edf_burst:        ${JOB_EDF_BURST}"
     } >> "${RUN_DIR}/run_info.txt"
 
     # Write machine-readable job_ids.txt for cancel command
-    for jid in ${JOB_CORRECTION} ${JOB_CORRECTION_CPU} ${JOB_CORRECTION_BURST} \
-               ${JOB_STITCH} ${JOB_STITCH_CPU} ${JOB_STITCH_BURST} \
-               ${JOB_DECON} ${JOB_DECON_CPU} ${JOB_DECON_BURST} \
-               ${JOB_EDF} ${JOB_EDF_CPU} ${JOB_EDF_BURST}; do
+    for jid in ${JOB_CORRECTION} ${JOB_CORRECTION_CPU} \
+               ${JOB_STITCH} ${JOB_STITCH_CPU} \
+               ${JOB_DECON} ${JOB_DECON_CPU} \
+               ${JOB_EDF} ${JOB_EDF_CPU}; do
         [ -n "${jid}" ] && echo "${jid}"
     done > "${RUN_DIR}/job_ids.txt"
 
