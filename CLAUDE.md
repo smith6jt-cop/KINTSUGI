@@ -151,6 +151,13 @@ This eliminates the need to manually configure `config.sh` for most parameters.
 
 EDF output files use marker names from `CHANNELNAMES.txt` (loaded via `Kio.load_channel_names()`), falling back to `CH#` if the file is missing. This is critical for downstream compatibility with `_find_edf_file()` in `Kview_qc.py`.
 
+**PYTHONPATH in SLURM jobs**: Job scripts must include `KINTSUGI_DIR/notebooks` on `sys.path` to import notebook modules like `Kio`. Project notebooks directories may only have a subset of synced files. The required path setup is:
+```python
+sys.path.insert(0, str(PROJECT_DIR / 'notebooks'))
+sys.path.insert(0, str(KINTSUGI_DIR / 'notebooks'))  # Required for Kio, Kprocess, etc.
+sys.path.insert(0, str(KINTSUGI_DIR))
+```
+
 **Add SLURM to existing project** (two equivalent methods):
 ```bash
 kintsugi init /path/to/project --slurm    # Auto-detects existing project, adds SLURM

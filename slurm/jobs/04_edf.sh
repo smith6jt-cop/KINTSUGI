@@ -34,7 +34,7 @@ log_info "Starting EDF processing..."
 module load conda
 conda activate ${CONDA_ENV:-kintsugi}
 
-export PYTHONPATH="${KINTSUGI_DIR}:${PROJECT_DIR}/notebooks:${PYTHONPATH}"
+export PYTHONPATH="${KINTSUGI_DIR}:${KINTSUGI_DIR}/notebooks:${PROJECT_DIR}/notebooks:${PYTHONPATH}"
 
 python << 'PYTHON_SCRIPT'
 import sys
@@ -50,6 +50,7 @@ PROJECT_DIR = Path(os.environ['PROJECT_DIR'])
 KINTSUGI_DIR = Path(os.environ['KINTSUGI_DIR'])
 QC_DIR = Path(os.environ.get('QC_DIR', PROJECT_DIR / 'slurm' / 'qc' / 'edf'))
 sys.path.insert(0, str(PROJECT_DIR / 'notebooks'))
+sys.path.insert(0, str(KINTSUGI_DIR / 'notebooks'))
 sys.path.insert(0, str(KINTSUGI_DIR))
 
 from kintsugi.edf import EDFProcessor
