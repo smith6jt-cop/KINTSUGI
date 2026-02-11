@@ -118,7 +118,7 @@ class TestWorkflowConfig:
         assert config_file.exists()
 
         cfg = yaml.safe_load(config_file.read_text())
-        assert cfg["project_dir"] == str(project_dir)
+        assert cfg["project_dir"] == project_dir.as_posix()
         assert cfg["cycles"] == [1, 2]
         assert cfg["channels"] == [1, 2, 3, 4]
         assert cfg["tile_rows"] == 3
