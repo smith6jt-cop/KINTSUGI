@@ -71,29 +71,25 @@ export QOS_FALLBACK=""
 # Maximize throughput by running GPU and CPU jobs simultaneously
 # =============================================================================
 # With limited GPUs (typically 2), CPU cores would otherwise sit idle.
-# Configure an account chain with GPU accounts first, then CPU-only burst
-# accounts. Jobs automatically adapt via KINTSUGI_DEVICE_MODE environment
+# Configure an account chain with GPU accounts first, then a separate CPU
+# account. Jobs automatically adapt via KINTSUGI_DEVICE_MODE environment
 # variable, using CuPy for GPU or NumPy/SciPy for CPU processing.
 #
-# Example workflow with account chain "maigan,clive,maigan-b":
+# Example workflow with account chain "maigan,clive":
 #   - Cycles 1-2: GPU jobs on maigan/clive accounts (fast)
-#   - Cycles 3+: CPU jobs on maigan-b burst account (slower but concurrent)
-#   - Result: More cycles processed simultaneously
+#   - Cycles 3+: CPU jobs on cpu_account with its own QOS (slower but concurrent)
+#   - Result: More cycles processed simultaneously, all resources guaranteed
 #
-# Comma-separated list of accounts to try in order
-# Example: "maigan,clive,maigan-b,clive-b"
+# Comma-separated list of GPU accounts to try in order (used on GPU partition)
+# Example: "maigan,clive"
 export ACCOUNT_CHAIN=""
 
-# CPU-only accounts (cannot request GPUs, will use CPU processing)
-# Auto-detected: accounts ending in -b are assumed CPU-only if this is empty
+# CPU account for concurrent processing (separate account with its own QOS)
+# CPU jobs run on PARTITION_CPU with guaranteed (non-preemptible) resources
 export CPU_ONLY_ACCOUNTS=""
 
-# CPU-only partition (used with CPU-only burst accounts)
+# CPU partition (used with CPU account for concurrent CPU processing)
 export PARTITION_CPU="hpg-default"
-
-# Burst partition (used with --use-burst flag for preemptible jobs)
-# Burst jobs can request GPUs but may be preempted when resources are needed
-export PARTITION_BURST="hpg-default"
 
 # CPU resource adjustments (CPU processing is ~5x slower than GPU)
 # Jobs on CPU-only accounts automatically get extended time limits

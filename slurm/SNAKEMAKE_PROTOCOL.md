@@ -35,7 +35,7 @@ The existing pipeline has four processing stages executed as SLURM array jobs:
 - The Python processing code inside each job script
 - `config.sh` resource definitions
 - `utils.sh` logging and QC utilities
-- The burst monitor (handled differently; see Section 8)
+- The burst monitor (deprecated; burst resources are no longer used)
 
 ---
 
@@ -550,36 +550,24 @@ create separate groups per cycle, defeating the batching intent.
 
 ---
 
-## 9. Handling Burst Resources
+## 9. Failure Handling
 
-The burst monitor (`burst_monitor.sh`) promotes preemptible jobs to guaranteed
-QOS. With Snakemake, this is handled differently:
+Burst resources are no longer used. All jobs run with guaranteed (non-preemptible)
+QOS on their respective partitions. Snakemake's built-in retry mechanism handles
+transient failures:
 
-1. **Retries replace burst**: Set `retries: 2` in the profile. If a burst job
-   is preempted, Snakemake automatically resubmits it.
+1. **Retries handle failures**: Set `retries: 2` in the profile. If a job
+   fails due to a transient error (OOM, node failure, etc.), Snakemake
+   automatically resubmits it.
 
-2. **Burst profile**: Create a separate Snakemake profile for burst jobs:
+2. **No preemption risk**: Since all resources are guaranteed, there is no
+   need for `--requeue` flags or separate burst profiles.
 
-```yaml
-# workflow/profiles/slurm-burst/config.yaml
-executor: slurm
-default-resources:
-  slurm_account: maigan-b
-  slurm_partition: hpg-default
-  slurm_extra: "--requeue"
-retries: 3
-```
-
-3. **Run both profiles in parallel** (from separate terminals):
+3. **Single profile execution**:
 ```bash
-# Terminal 1: Primary GPU jobs
-snakemake --profile profiles/slurm -j 3
-
-# Terminal 2: Burst overflow (shares lock file)
-snakemake --profile profiles/slurm-burst -j 10
+# All jobs use guaranteed resources
+snakemake --profile profiles/slurm -j 8
 ```
-
-Snakemake's file locking prevents duplicate work across the two instances.
 
 ---
 
@@ -614,7 +602,6 @@ Snakemake's file locking prevents duplicate work across the two instances.
 ### Phase 4: Advanced features
 
 - [ ] Implement GPU/CPU dual-pool (Option B above)
-- [ ] Add burst profile
 - [ ] Add registration step (post-EDF, multi-cycle)
 - [ ] Add signal isolation step
 - [ ] Integrate with `kintsugi slurm submit` CLI
