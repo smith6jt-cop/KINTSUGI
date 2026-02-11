@@ -232,8 +232,9 @@ class TestComputeHPFFTPeakStrength:
 
     def test_striped_image_higher_row_peak(self, striped_image):
         """Test that horizontal stripes increase row peak."""
+        rng = np.random.default_rng(42)
         clean_result = compute_hp_fft_peak_strength(
-            np.random.randint(1000, 5000, (512, 512), dtype=np.uint16)
+            rng.integers(1000, 5000, (512, 512), dtype=np.uint16)
         )
         striped_result = compute_hp_fft_peak_strength(striped_image)
 
