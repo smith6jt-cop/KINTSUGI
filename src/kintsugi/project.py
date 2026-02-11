@@ -31,7 +31,7 @@ import warnings
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 # Project configuration filename
 PROJECT_CONFIG_FILE = "kintsugi_project.json"
@@ -167,6 +167,40 @@ PROCESSING_STAGES = [
 # Experiment metadata filename
 EXPERIMENT_CONFIG_FILE = "experiment.json"
 
+# Known CODEX filter sets: excitation → (excitation, emission) in nm
+# Used to convert CODEX flat wavelength lists to proper (ex, em) pairs
+_CODEX_FILTER_SETS: dict[int, tuple[float, float]] = {
+    358: (358.0, 461.0),   # DAPI
+    488: (488.0, 525.0),   # FITC / Alexa 488
+    550: (560.0, 575.0),   # TRITC / Cy3
+    650: (648.0, 668.0),   # Cy5
+    750: (753.0, 775.0),   # Cy7
+}
+
+
+def _excitation_to_filter_pair(ex_nm: float) -> tuple[float, float]:
+    """Map a CODEX excitation wavelength to (excitation, emission) pair.
+
+    Uses known filter sets with a ±10 nm tolerance for matching.
+    Falls back to the exact value for both if no known filter matches.
+    """
+    ex_int = round(ex_nm)
+    # Exact match first
+    if ex_int in _CODEX_FILTER_SETS:
+        return _CODEX_FILTER_SETS[ex_int]
+    # Fuzzy match within ±10 nm
+    for ref_ex, pair in _CODEX_FILTER_SETS.items():
+        if abs(ex_int - ref_ex) <= 10:
+            return pair
+    # Unknown filter - return excitation only with warning
+    import warnings
+    warnings.warn(
+        f"Unknown CODEX excitation wavelength {ex_nm} nm; "
+        f"emission wavelength unknown. Add to _CODEX_FILTER_SETS in project.py.",
+        stacklevel=3,
+    )
+    return (ex_nm, ex_nm)
+
 
 @dataclass
 class ExperimentConfig:
@@ -226,17 +260,44 @@ class ExperimentConfig:
         data["wavelengths"] = {str(k): v for k, v in self.wavelengths.items()}
         return data
 
+    # CODEX field name -> KINTSUGI field name
+    _CODEX_FIELD_MAP: ClassVar[dict[str, str]] = {
+        "numCycles": "n_cycles",
+        "numZPlanes": "n_zplanes",
+        "regionHeight": "tile_rows",
+        "regionWidth": "tile_cols",
+        "numChannels": "channels_per_cycle",
+        "xyResolution": "xy_pixel_size",
+        "zPitch": "z_step_size",
+        "aperture": "numerical_aperture",
+    }
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ExperimentConfig:
-        """Create from dictionary."""
+        """Create from dictionary (handles both KINTSUGI and CODEX field names)."""
+        # Translate CODEX field names to KINTSUGI equivalents
+        for codex_key, kintsugi_key in cls._CODEX_FIELD_MAP.items():
+            if codex_key in data and kintsugi_key not in data:
+                data[kintsugi_key] = data[codex_key]
+
         # Convert wavelengths keys back to integers
         if "wavelengths" in data:
             wl = data["wavelengths"]
             if isinstance(wl, dict):
                 data["wavelengths"] = {int(k): tuple(v) for k, v in wl.items()}
             elif isinstance(wl, list):
-                # Handle list-of-pairs format: [[1, [358.0, 461.0]], ...]
-                data["wavelengths"] = {int(pair[0]): tuple(pair[1]) for pair in wl}
+                if wl and isinstance(wl[0], (list, tuple)):
+                    # List-of-pairs format: [[1, [358.0, 461.0]], ...]
+                    data["wavelengths"] = {int(pair[0]): tuple(pair[1]) for pair in wl}
+                elif wl and isinstance(wl[0], (int, float)):
+                    # CODEX flat list of excitation wavelengths: [358, 750, 550, 650]
+                    # Map to (excitation, emission) pairs using known filter sets
+                    data["wavelengths"] = {
+                        i + 1: _excitation_to_filter_pair(float(w))
+                        for i, w in enumerate(wl)
+                    }
+                else:
+                    del data["wavelengths"]
             else:
                 del data["wavelengths"]  # Invalid format, use default
         # Filter to valid fields only
