@@ -203,9 +203,7 @@ class TestKCorrectGPU:
         flatfield_low[flatfield_low < 0.5] = 0.01  # Very low values
 
         # With flatfield_min=0.1, amplification limited to 10x
-        corrected = corrector.transform(
-            tile_images, flatfield_low, darkfield, flatfield_min=0.1
-        )
+        corrected = corrector.transform(tile_images, flatfield_low, darkfield, flatfield_min=0.1)
 
         # Should not have extreme amplification
         assert corrected.max() < tile_images.max() * 15
@@ -232,9 +230,7 @@ class TestKCorrectGPUFunc:
 
     def test_basic_usage(self, tile_images):
         """Test basic functional interface usage."""
-        flatfield, darkfield = KCorrectGPUFunc(
-            tile_images, use_gpu=False, max_iterations=20
-        )
+        flatfield, darkfield = KCorrectGPUFunc(tile_images, use_gpu=False, max_iterations=20)
 
         assert flatfield.shape == tile_images.shape[1:]
         assert darkfield.shape == tile_images.shape[1:]
@@ -243,9 +239,7 @@ class TestKCorrectGPUFunc:
         """Test with list of images as input."""
         images_list = [tile_images[i] for i in range(tile_images.shape[0])]
 
-        flatfield, darkfield = KCorrectGPUFunc(
-            images_list, use_gpu=False, max_iterations=20
-        )
+        flatfield, darkfield = KCorrectGPUFunc(images_list, use_gpu=False, max_iterations=20)
 
         assert flatfield.shape == tile_images.shape[1:]
 
@@ -255,9 +249,7 @@ class TestKCorrectGPUFunc:
         # Shape (height, width, n_images) - wrong order
         images = np.random.randint(1000, 5000, (64, 64, 15)).astype(np.float64)
 
-        flatfield, darkfield = KCorrectGPUFunc(
-            images, use_gpu=False, max_iterations=20
-        )
+        flatfield, darkfield = KCorrectGPUFunc(images, use_gpu=False, max_iterations=20)
 
         # Should handle the transpose and return correct shape
         # After transpose, images become (15, 64, 64)

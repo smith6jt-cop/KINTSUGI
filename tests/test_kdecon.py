@@ -252,17 +252,13 @@ class TestLucyRichardsonCPU:
 
     def test_output_shape(self, simple_stack, small_psf):
         """Test that output shape matches input."""
-        result = lucy_richardson_cpu(
-            simple_stack, small_psf, iterations=2, verbose=False
-        )
+        result = lucy_richardson_cpu(simple_stack, small_psf, iterations=2, verbose=False)
 
         assert result.shape == simple_stack.shape
 
     def test_output_non_negative(self, simple_stack, small_psf):
         """Test that output is non-negative."""
-        result = lucy_richardson_cpu(
-            simple_stack, small_psf, iterations=3, verbose=False
-        )
+        result = lucy_richardson_cpu(simple_stack, small_psf, iterations=3, verbose=False)
 
         assert np.all(result >= 0)
 
@@ -328,17 +324,13 @@ class TestDeconvolve:
 
     def test_basic_deconvolution(self, simple_stack, small_psf):
         """Test basic deconvolution runs without error."""
-        result = deconvolve(
-            simple_stack, small_psf, iterations=2, device="cpu", verbose=False
-        )
+        result = deconvolve(simple_stack, small_psf, iterations=2, device="cpu", verbose=False)
 
         assert result.shape == simple_stack.shape
 
     def test_output_dtype(self, simple_stack, small_psf):
         """Test that output preserves reasonable dtype."""
-        result = deconvolve(
-            simple_stack, small_psf, iterations=2, device="cpu", verbose=False
-        )
+        result = deconvolve(simple_stack, small_psf, iterations=2, device="cpu", verbose=False)
 
         # Should be float array
         assert np.issubdtype(result.dtype, np.floating)
@@ -420,9 +412,7 @@ class TestGeneratePSF:
         lambda_em = 520.0  # nm
 
         # Use small fixed size for speed
-        psf, info = generate_psf(
-            dxy, dz, NA, n, lambda_ex, lambda_em, nxy=9, nz=7, verbose=False
-        )
+        psf, info = generate_psf(dxy, dz, NA, n, lambda_ex, lambda_em, nxy=9, nz=7, verbose=False)
 
         # Check shape
         assert psf.shape == (9, 9, 7)
@@ -572,20 +562,14 @@ class TestGPUDeconvolution:
 
     def test_gpu_deconvolution(self, simple_stack, small_psf):
         """Test GPU deconvolution runs."""
-        result = deconvolve(
-            simple_stack, small_psf, iterations=2, device="gpu", verbose=False
-        )
+        result = deconvolve(simple_stack, small_psf, iterations=2, device="gpu", verbose=False)
 
         assert result.shape == simple_stack.shape
 
     def test_gpu_cpu_consistency(self, blurred_stack, small_psf):
         """Test that GPU and CPU produce similar results."""
-        result_cpu = deconvolve(
-            blurred_stack, small_psf, iterations=5, device="cpu", verbose=False
-        )
-        result_gpu = deconvolve(
-            blurred_stack, small_psf, iterations=5, device="gpu", verbose=False
-        )
+        result_cpu = deconvolve(blurred_stack, small_psf, iterations=5, device="cpu", verbose=False)
+        result_gpu = deconvolve(blurred_stack, small_psf, iterations=5, device="gpu", verbose=False)
 
         # Results should be similar (allow for numerical differences)
         np.testing.assert_allclose(result_cpu, result_gpu, rtol=0.1, atol=100)
@@ -620,9 +604,7 @@ class TestEdgeCases:
         stack = np.random.rand(1, 32, 32).astype(np.float32) * 1000
 
         # This should work (though deconvolution is less meaningful)
-        result = deconvolve(
-            stack, small_psf, iterations=2, device="cpu", verbose=False
-        )
+        result = deconvolve(stack, small_psf, iterations=2, device="cpu", verbose=False)
 
         assert result.shape == stack.shape
 
@@ -631,17 +613,13 @@ class TestEdgeCases:
         large_psf = np.random.rand(15, 15, 15).astype(np.float32)
         large_psf = large_psf / large_psf.sum()
 
-        result = deconvolve(
-            simple_stack, large_psf, iterations=2, device="cpu", verbose=False
-        )
+        result = deconvolve(simple_stack, large_psf, iterations=2, device="cpu", verbose=False)
 
         assert result.shape == simple_stack.shape
 
     def test_zero_iterations(self, simple_stack, small_psf):
         """Test with zero iterations (should return input)."""
-        result = deconvolve(
-            simple_stack, small_psf, iterations=0, device="cpu", verbose=False
-        )
+        result = deconvolve(simple_stack, small_psf, iterations=0, device="cpu", verbose=False)
 
         # With 0 iterations, should be close to input
         # (exact match depends on padding behavior)

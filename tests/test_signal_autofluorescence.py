@@ -98,9 +98,7 @@ class TestSubtractAutofluorescence:
     def test_blank_clip_factor(self, signal_image, blank_image):
         """Test that blank_clip_factor removes noise from blank."""
         # Higher clip factor should result in less subtraction
-        result_no_clip = subtract_autofluorescence(
-            signal_image, blank_image, blank_clip_factor=0
-        )
+        result_no_clip = subtract_autofluorescence(signal_image, blank_image, blank_clip_factor=0)
         result_high_clip = subtract_autofluorescence(
             signal_image, blank_image, blank_clip_factor=3000
         )
@@ -122,9 +120,7 @@ class TestSubtractAutofluorescence:
 
     def test_smooth_low_option(self, signal_image, blank_image):
         """Test smooth_low parameter produces valid output."""
-        result_no_smooth = subtract_autofluorescence(
-            signal_image, blank_image, smooth_low=False
-        )
+        result_no_smooth = subtract_autofluorescence(signal_image, blank_image, smooth_low=False)
         result_smooth = subtract_autofluorescence(
             signal_image, blank_image, smooth_low=True, low_size=3, low_percentile=60
         )
@@ -137,9 +133,7 @@ class TestSubtractAutofluorescence:
 
     def test_smooth_high_option(self, signal_image, blank_image):
         """Test smooth_high parameter smooths high-intensity regions."""
-        result_no_smooth = subtract_autofluorescence(
-            signal_image, blank_image, smooth_high=False
-        )
+        result_no_smooth = subtract_autofluorescence(signal_image, blank_image, smooth_high=False)
         result_smooth = subtract_autofluorescence(
             signal_image, blank_image, smooth_high=True, high_size=3, high_percentile=90
         )
@@ -149,9 +143,7 @@ class TestSubtractAutofluorescence:
 
     def test_erosion_option(self, signal_image, blank_image):
         """Test erosion parameter shrinks signal regions."""
-        result_no_erosion = subtract_autofluorescence(
-            signal_image, blank_image, erosion=0
-        )
+        result_no_erosion = subtract_autofluorescence(signal_image, blank_image, erosion=0)
         result_erosion = subtract_autofluorescence(signal_image, blank_image, erosion=2)
 
         # Erosion should reduce number of non-zero pixels
@@ -265,9 +257,9 @@ class TestSuggestBlankChannel:
 
         # Create blanks with different correlations to signal
         blank_low_corr = np.random.randint(0, 1000, signal_image.shape, dtype=np.uint16)
-        blank_high_corr = (signal_image * 0.5 + np.random.randint(0, 500, signal_image.shape)).astype(
-            np.uint16
-        )
+        blank_high_corr = (
+            signal_image * 0.5 + np.random.randint(0, 500, signal_image.shape)
+        ).astype(np.uint16)
 
         blanks = {"low_corr": blank_low_corr, "high_corr": blank_high_corr}
 

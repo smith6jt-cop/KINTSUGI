@@ -139,12 +139,8 @@ class TestExtendedDepthOfFocusVariance:
 
     def test_radius_parameters(self, simple_zstack):
         """Test that radius parameters affect result."""
-        result_small = extended_depth_of_focus_variance(
-            simple_zstack, radius_x=1, radius_y=1
-        )
-        result_large = extended_depth_of_focus_variance(
-            simple_zstack, radius_x=5, radius_y=5
-        )
+        result_small = extended_depth_of_focus_variance(simple_zstack, radius_x=1, radius_y=1)
+        result_large = extended_depth_of_focus_variance(simple_zstack, radius_x=5, radius_y=5)
 
         # Both should produce valid results
         assert result_small.shape == simple_zstack.shape[1:]
@@ -175,12 +171,8 @@ class TestExtendedDepthOfFocusVariance:
 
     def test_z_smooth_sigma_parameter(self, focused_zstack):
         """Test z_smooth_sigma for z-index smoothing."""
-        result_no_smooth = extended_depth_of_focus_variance(
-            focused_zstack, z_smooth_sigma=0.0
-        )
-        result_smooth = extended_depth_of_focus_variance(
-            focused_zstack, z_smooth_sigma=3.0
-        )
+        result_no_smooth = extended_depth_of_focus_variance(focused_zstack, z_smooth_sigma=0.0)
+        result_smooth = extended_depth_of_focus_variance(focused_zstack, z_smooth_sigma=3.0)
 
         # Both should be valid
         assert result_no_smooth.shape == focused_zstack.shape[1:]
@@ -290,9 +282,7 @@ class TestEDFTiled:
 
     def test_blend_depth_in_tiled(self, large_zstack):
         """Test blend_depth parameter in tiled processing."""
-        result = edf_tiled(
-            large_zstack, tile_size=(256, 256), method="variance", blend_depth=2
-        )
+        result = edf_tiled(large_zstack, tile_size=(256, 256), method="variance", blend_depth=2)
 
         assert result.shape == large_zstack.shape[1:]
 
@@ -386,9 +376,7 @@ class TestProcessEDF:
 
     def test_with_parameters(self, simple_zstack):
         """Test with custom parameters."""
-        result = process_edf(
-            simple_zstack, radius_x=3, radius_y=3, sigma=15.0, backend="numpy"
-        )
+        result = process_edf(simple_zstack, radius_x=3, radius_y=3, sigma=15.0, backend="numpy")
 
         assert result.shape == simple_zstack.shape[1:]
 
@@ -432,7 +420,9 @@ class TestSigmaFixRegression:
         max_contrast = max(diff_x.max(), diff_y.max())
 
         # Should have significant contrast (checkerboard pattern)
-        assert max_contrast > 1000, "Detail was lost - sigma may be smoothing input instead of variance"
+        assert (
+            max_contrast > 1000
+        ), "Detail was lost - sigma may be smoothing input instead of variance"
 
     def test_sigma_zero_vs_nonzero_preserves_intensity(self, focused_zstack):
         """Test that sigma doesn't change the intensity values significantly.
@@ -452,9 +442,7 @@ class TestSigmaFixRegression:
 
         These are the CLIJ2 defaults mentioned in the CLAUDE.md fix notes.
         """
-        result = extended_depth_of_focus_variance(
-            simple_zstack, radius_x=2, radius_y=2, sigma=10.0
-        )
+        result = extended_depth_of_focus_variance(simple_zstack, radius_x=2, radius_y=2, sigma=10.0)
 
         # Should produce valid output
         assert result.shape == simple_zstack.shape[1:]
@@ -554,6 +542,4 @@ class TestGPUAvailability:
         result_gpu = extended_depth_of_focus_variance(simple_zstack, device="gpu")
 
         # Results should be very similar (floating point differences allowed)
-        np.testing.assert_allclose(
-            result_cpu.astype(float), result_gpu.astype(float), rtol=0.01
-        )
+        np.testing.assert_allclose(result_cpu.astype(float), result_gpu.astype(float), rtol=0.01)

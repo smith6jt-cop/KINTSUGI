@@ -80,9 +80,9 @@ def clean_zstack():
     for z in range(10):
         # Vary intensity across z (simulating focus)
         base_intensity = 2000 + z * 500
-        stack[z] = np.random.randint(
-            base_intensity - 500, base_intensity + 500, (256, 256)
-        ).astype(np.uint16)
+        stack[z] = np.random.randint(base_intensity - 500, base_intensity + 500, (256, 256)).astype(
+            np.uint16
+        )
     return stack
 
 
@@ -94,9 +94,9 @@ def zstack_with_artifact():
 
     for z in range(10):
         base_intensity = 2000 + z * 500
-        stack[z] = np.random.randint(
-            base_intensity - 500, base_intensity + 500, (256, 256)
-        ).astype(np.uint16)
+        stack[z] = np.random.randint(base_intensity - 500, base_intensity + 500, (256, 256)).astype(
+            np.uint16
+        )
 
     # Add stripe artifact to plane 5
     for i in range(0, 256, 25):
@@ -431,9 +431,7 @@ class TestArtifactItem:
 
     def test_to_dict(self):
         """Test conversion to dictionary."""
-        item = ArtifactItem(
-            cycle="cyc001", channel=1, z_plane=5, severity="mild", score=0.3
-        )
+        item = ArtifactItem(cycle="cyc001", channel=1, z_plane=5, severity="mild", score=0.3)
         d = item.to_dict()
 
         assert d["cycle"] == "cyc001"
@@ -587,9 +585,7 @@ class TestArtifactReport:
             total_artifacts_found=3,
         )
         report.affected_items = [
-            ArtifactItem(
-                cycle="cyc001", channel=1, z_plane=5, severity="moderate", score=0.5
-            ),
+            ArtifactItem(cycle="cyc001", channel=1, z_plane=5, severity="moderate", score=0.5),
         ]
 
         # Save
