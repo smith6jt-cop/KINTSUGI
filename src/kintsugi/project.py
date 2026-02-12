@@ -213,7 +213,7 @@ class ExperimentConfig:
     # Tile grid configuration
     tile_rows: int = 5
     tile_cols: int = 5
-    tile_overlap: float = 0.1  # Fraction (0.1 = 10%)
+    tile_overlap: float = 0.3  # Fraction (0.3 = 30%)
 
     # Pixel dimensions (nanometers)
     xy_pixel_size: float = 377.0  # nm per pixel XY
@@ -270,6 +270,7 @@ class ExperimentConfig:
         "xyResolution": "xy_pixel_size",
         "zPitch": "z_step_size",
         "aperture": "numerical_aperture",
+        "tileOverlapX": "tile_overlap",
     }
 
     @classmethod
@@ -279,6 +280,16 @@ class ExperimentConfig:
         for codex_key, kintsugi_key in cls._CODEX_FIELD_MAP.items():
             if codex_key in data and kintsugi_key not in data:
                 data[kintsugi_key] = data[codex_key]
+
+        # Warn if CODEX tileOverlapX != tileOverlapY (asymmetric overlap)
+        if "tileOverlapX" in data and "tileOverlapY" in data:
+            ox, oy = data["tileOverlapX"], data["tileOverlapY"]
+            if ox != oy:
+                warnings.warn(
+                    f"Asymmetric tile overlap: tileOverlapX={ox}, tileOverlapY={oy}. "
+                    f"Using tileOverlapX={ox} for tile_overlap.",
+                    stacklevel=2,
+                )
 
         # Convert wavelengths keys back to integers
         if "wavelengths" in data:

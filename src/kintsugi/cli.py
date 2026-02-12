@@ -800,8 +800,11 @@ def workflow_config(project_dir: str, print_only: bool):
     """
     Generate workflow/config.yaml for a project.
 
-    Reads meta/experiment.json and slurm/config.sh to create a unified
-    Snakemake configuration file.
+    Reads meta/experiment.json (auto-translating CODEX field names) and
+    slurm/config.sh to create a unified Snakemake configuration file.
+
+    All microscope and acquisition parameters are written to config.yaml so
+    that workflow scripts never need to read experiment.json directly.
 
     PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
     """
@@ -810,25 +813,47 @@ def workflow_config(project_dir: str, print_only: bool):
     import shutil
     from pathlib import Path
 
+    import yaml
+
+    from kintsugi.project import ExperimentConfig
+
     project_dir = Path(project_dir).resolve()
 
-    # Load experiment config
-    experiment = {}
+    # Load experiment config via ExperimentConfig.from_dict() for CODEX translation
     exp_path = project_dir / "meta" / "experiment.json"
-    if exp_path.exists():
-        with open(exp_path) as f:
-            experiment = json.load(f)
+    if not exp_path.exists():
+        console.print(f"[red]Missing: {exp_path}[/red]")
+        console.print("Cannot generate workflow config without experiment metadata.")
+        raise SystemExit(1)
+
+    with open(exp_path) as f:
+        raw_experiment = json.load(f)
+
+    exp = ExperimentConfig.from_dict(raw_experiment.copy())
+
+    # Validate critical fields — fail loudly, no silent defaults
+    if exp.n_cycles is None:
+        console.print("[red]ERROR: n_cycles not found in experiment.json[/red]")
+        console.print("Expected field: 'n_cycles' (KINTSUGI) or 'numCycles' (CODEX)")
+        raise SystemExit(1)
+
+    if exp.n_zplanes is None:
+        console.print("[red]ERROR: n_zplanes not found in experiment.json[/red]")
+        console.print("Expected field: 'n_zplanes' (KINTSUGI) or 'numZPlanes' (CODEX)")
+        raise SystemExit(1)
 
     # Detect KINTSUGI installation path
     kintsugi_dir = Path(__file__).parent.parent.parent.resolve()
 
-    # Build cycles list
-    n_cycles = experiment.get("n_cycles", 7)
-    cycles_list = list(range(1, n_cycles + 1))
+    # Build cycles and channels lists
+    cycles_list = list(range(1, exp.n_cycles + 1))
+    channels_list = list(range(1, exp.channels_per_cycle + 1))
 
-    # Build channels list
-    channels_per_cycle = experiment.get("channels_per_cycle", 4)
-    channels_list = list(range(1, channels_per_cycle + 1))
+    # Build wavelengths dict for YAML (string keys for readability)
+    wavelengths_dict = {}
+    for ch in sorted(exp.wavelengths.keys()):
+        ex, em = exp.wavelengths[ch]
+        wavelengths_dict[str(ch)] = [float(ex), float(em)]
 
     # Detect SLURM settings from existing config.sh
     slurm_config_path = project_dir / "slurm" / "config.sh"
@@ -843,63 +868,75 @@ def workflow_config(project_dir: str, print_only: bool):
         if m:
             partition = m.group(1)
 
-    config_content = f"""# =============================================================================
-# KINTSUGI Snakemake Pipeline Configuration
-# =============================================================================
-# Auto-generated from meta/experiment.json
-# Edit paths and resource settings as needed.
-# =============================================================================
+    # Build config dict and dump via PyYAML for correct types
+    config_dict = {
+        # Paths
+        "project_dir": str(project_dir),
+        "kintsugi_dir": str(kintsugi_dir),
+        # Processing scope
+        "cycles": cycles_list,
+        "channels": channels_list,
+        "output_format": "tiff",
+        # Tile grid
+        "tile_rows": exp.tile_rows,
+        "tile_cols": exp.tile_cols,
+        "tile_overlap": exp.tile_overlap,
+        # Microscope parameters
+        "xy_pixel_size": exp.xy_pixel_size,
+        "z_step_size": exp.z_step_size,
+        "numerical_aperture": exp.numerical_aperture,
+        "tissue_refractive_index": exp.tissue_refractive_index,
+        "wavelengths": wavelengths_dict,
+        "n_zplanes": exp.n_zplanes,
+        # Stitching parameters
+        "ncc_threshold": 0.078,
+        "pou": 0.5,
+        "blend_sigma": 15.0,
+        "basic_flatfield_min": 0.1,
+        "basic_max_iterations": 500,
+        "basic_optimization_tolerance": 1.0e-6,
+        # EDF parameters
+        "edf": {
+            "radius_x": 2,
+            "radius_y": 2,
+            "sigma": 10.0,
+            "tiles": [3, 3],
+            "blend_depth": 0,
+            "z_smooth_sigma": 1.0,
+        },
+        "quality_gate": {
+            "max_zero_pct": 0.10,
+            "max_sat_pct": 0.05,
+            "min_valid_slices": 3,
+        },
+        # SLURM resources
+        "resources": {
+            "account": account,
+            "partition_gpu": partition,
+            "partition_cpu": "hpg-default",
+            "qos": "",
+            "conda_env": "kintsugi",
+            "mem_stitch": 48000,
+            "mem_decon": 48000,
+            "mem_edf": 48000,
+            "time_stitch": 240,
+            "time_decon": 240,
+            "time_edf": 60,
+        },
+    }
 
-# Paths
-project_dir: "{project_dir}"
-kintsugi_dir: "{kintsugi_dir}"
-
-# Processing scope
-cycles: {cycles_list}
-channels: {channels_list}
-output_format: tiff
-
-# Tile grid
-tile_rows: {experiment.get("tile_rows", 5)}
-tile_cols: {experiment.get("tile_cols", 5)}
-tile_overlap: {experiment.get("tile_overlap", 0.1)}
-
-# Stitching parameters
-ncc_threshold: 0.078
-pou: 0.5
-blend_sigma: 15.0
-basic_flatfield_min: 0.1
-basic_max_iterations: 500
-basic_optimization_tolerance: 1.0e-6
-
-# EDF parameters
-edf:
-  radius_x: 2
-  radius_y: 2
-  sigma: 10.0
-  tiles: [3, 3]
-  blend_depth: 0
-  z_smooth_sigma: 1.0
-
-quality_gate:
-  max_zero_pct: 0.10
-  max_sat_pct: 0.05
-  min_valid_slices: 3
-
-# SLURM resources
-resources:
-  account: "{account}"
-  partition_gpu: "{partition}"
-  partition_cpu: hpg-default
-  qos: ""
-  conda_env: kintsugi
-  mem_stitch: 48000
-  mem_decon: 48000
-  mem_edf: 16000
-  time_stitch: 240
-  time_decon: 240
-  time_edf: 60
-"""
+    # Generate YAML with header comment
+    header = (
+        "# =============================================================================\n"
+        "# KINTSUGI Snakemake Pipeline Configuration\n"
+        "# =============================================================================\n"
+        "# Auto-generated from meta/experiment.json via ExperimentConfig.from_dict()\n"
+        "# Edit paths and resource settings as needed.\n"
+        "# =============================================================================\n\n"
+    )
+    config_content = header + yaml.dump(
+        config_dict, default_flow_style=False, sort_keys=False, allow_unicode=True
+    )
 
     if print_only:
         console.print(config_content)
@@ -911,6 +948,14 @@ resources:
     config_file = wf_dir / "config.yaml"
     config_file.write_text(config_content)
     console.print(f"[green]Created workflow config:[/green] {config_file}")
+
+    # Show key parameters for verification
+    console.print(f"  n_cycles: {exp.n_cycles}")
+    console.print(f"  n_zplanes: {exp.n_zplanes}")
+    console.print(f"  tile_grid: {exp.tile_rows}x{exp.tile_cols}")
+    console.print(f"  tile_overlap: {exp.tile_overlap}")
+    console.print(f"  xy_pixel_size: {exp.xy_pixel_size}")
+    console.print(f"  wavelengths: {len(exp.wavelengths)} channels")
 
     # Copy Snakefile and scripts from KINTSUGI installation
     src_wf = kintsugi_dir / "workflow"

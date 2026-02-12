@@ -97,7 +97,7 @@ TILE_ROWS = int(os.environ.get('TILE_ROWS',
 TILE_COLS = int(os.environ.get('TILE_COLS',
     experiment_config.get('tile_cols', 5)))
 TILE_OVERLAP = float(os.environ.get('TILE_OVERLAP',
-    experiment_config.get('tile_overlap', 0.1)))
+    experiment_config.get('tile_overlap', 0.3)))
 
 # BaSiC correction parameters
 BASIC_FLATFIELD_MIN = 0.1

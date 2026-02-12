@@ -12,7 +12,6 @@ Snakemake guarantees:
 """
 
 import gc
-import json
 import re
 import sys
 import time
@@ -34,6 +33,7 @@ CHANNELS = list(snakemake.params.channels)
 
 # Setup Python path (same as old job scripts)
 sys.path.insert(0, str(PROJECT_DIR / "notebooks"))
+sys.path.insert(0, str(KINTSUGI_DIR / "notebooks"))
 sys.path.insert(0, str(KINTSUGI_DIR))
 
 # Logging utilities (replicates slurm/utils.sh structured logging)
@@ -41,21 +41,14 @@ sys.path.insert(0, snakemake.scriptdir)
 from log_utils import log_header, log_footer, summary_before, summary_after
 
 # ---------------------------------------------------------------------------
-# Configuration from experiment.json and workflow config
+# Configuration from config.yaml (single source of truth)
 # ---------------------------------------------------------------------------
-experiment_config = {}
-config_path = PROJECT_DIR / "meta" / "experiment.json"
-if config_path.exists():
-    with open(config_path) as f:
-        experiment_config = json.load(f)
-
 wf_config = snakemake.config
 
-TILE_ROWS = int(wf_config.get("tile_rows", experiment_config.get("tile_rows", 5)))
-TILE_COLS = int(wf_config.get("tile_cols", experiment_config.get("tile_cols", 5)))
-TILE_OVERLAP = float(
-    wf_config.get("tile_overlap", experiment_config.get("tile_overlap", 0.1))
-)
+# Tile grid — no fallback defaults; config.yaml must provide these
+TILE_ROWS = int(wf_config["tile_rows"])
+TILE_COLS = int(wf_config["tile_cols"])
+TILE_OVERLAP = float(wf_config["tile_overlap"])
 START_CHANNEL = min(CHANNELS)
 END_CHANNEL = max(CHANNELS)
 
@@ -68,10 +61,8 @@ BASIC_OPTIMIZATION_TOLERANCE = float(
 
 # Stitching parameters
 OVERLAP_PERCENTAGE = TILE_OVERLAP * 100
-INITIAL_NCC_THRESHOLD = float(
-    wf_config.get("ncc_threshold", experiment_config.get("ncc_threshold", 0.078))
-)
-POU = float(wf_config.get("pou", experiment_config.get("pou", 0.5)))
+INITIAL_NCC_THRESHOLD = float(wf_config["ncc_threshold"])
+POU = float(wf_config["pou"])
 BLEND_SIGMA = float(wf_config.get("blend_sigma", 15.0))
 
 # ---------------------------------------------------------------------------

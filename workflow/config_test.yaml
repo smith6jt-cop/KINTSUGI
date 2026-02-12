@@ -15,7 +15,7 @@ output_format: tiff
 
 tile_rows: 2
 tile_cols: 2
-tile_overlap: 0.1
+tile_overlap: 0.3
 
 ncc_threshold: 0.078
 pou: 0.5
