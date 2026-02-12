@@ -543,10 +543,10 @@ def _estimate_af_contribution(signal: np.ndarray, blank: np.ndarray) -> float:
 
 def _estimate_noise_level(image: np.ndarray) -> float:
     """Estimate noise level using MAD (median absolute deviation)."""
-    from scipy.ndimage import laplacian
+    from scipy.ndimage import laplace
 
     # Use Laplacian to isolate noise
-    lap = laplacian(image.astype(np.float64))
+    lap = laplace(image.astype(np.float64))
     mad = np.median(np.abs(lap - np.median(lap)))
     return mad * 1.4826  # Scale to std estimate
 

@@ -179,14 +179,6 @@ class TestSubtractAutofluorescence:
 class TestAnalyzeForSubtraction:
     """Tests for the parameter suggestion analysis."""
 
-    # Note: analyze_for_subtraction uses _estimate_noise_level which has a
-    # scipy.ndimage.laplacian import that's deprecated in newer scipy versions.
-    # These tests are marked xfail until the source code is fixed.
-
-    @pytest.mark.xfail(
-        raises=(ImportError, AttributeError),
-        reason="Source code uses deprecated scipy.ndimage.laplacian",
-    )
     def test_returns_expected_keys(self, signal_image, blank_image):
         """Test that analysis returns all expected parameter keys."""
         result = analyze_for_subtraction(signal_image, blank_image)
@@ -208,30 +200,18 @@ class TestAnalyzeForSubtraction:
         for key in expected_keys:
             assert key in result, f"Missing key: {key}"
 
-    @pytest.mark.xfail(
-        raises=(ImportError, AttributeError),
-        reason="Source code uses deprecated scipy.ndimage.laplacian",
-    )
     def test_scale_factor_in_valid_range(self, signal_image, blank_image):
         """Test that suggested scale factor is in valid range."""
         result = analyze_for_subtraction(signal_image, blank_image)
 
         assert 0.1 <= result["blank_scale_factor"] <= 3.0
 
-    @pytest.mark.xfail(
-        raises=(ImportError, AttributeError),
-        reason="Source code uses deprecated scipy.ndimage.laplacian",
-    )
     def test_confidence_in_valid_range(self, signal_image, blank_image):
         """Test that confidence is between 0 and 1."""
         result = analyze_for_subtraction(signal_image, blank_image)
 
         assert 0.0 <= result["confidence"] <= 1.0
 
-    @pytest.mark.xfail(
-        raises=(ImportError, AttributeError),
-        reason="Source code uses deprecated scipy.ndimage.laplacian",
-    )
     def test_analysis_contains_stats(self, signal_image, blank_image):
         """Test that analysis dict contains statistics."""
         result = analyze_for_subtraction(signal_image, blank_image)
@@ -241,7 +221,6 @@ class TestAnalyzeForSubtraction:
         assert "correlation" in result["analysis"]
         assert "af_contribution" in result["analysis"]
 
-    @pytest.mark.xfail(reason="Source code uses deprecated scipy.ndimage.laplacian")
     def test_tissue_marker_adjustments(self, signal_image, blank_image):
         """Test that tissue/marker parameters affect suggestions."""
         result_default = analyze_for_subtraction(signal_image, blank_image)
@@ -377,7 +356,6 @@ class TestHelperFunctions:
 
         assert 0 <= af <= 1
 
-    @pytest.mark.xfail(reason="Source code uses deprecated scipy.ndimage.laplacian")
     def test_estimate_noise_level(self, signal_image):
         """Test noise level estimation is non-negative."""
         noise = _estimate_noise_level(signal_image)
