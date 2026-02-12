@@ -156,6 +156,10 @@ venv.bak/
 # Skills Registry submodule
 Skills_Registry/
 
+# Snakemake working directories (created at runtime)
+workflow/.snakemake/
+**/.snakemake/
+
 # Spyder project settings
 .spyderproject
 .spyproject

@@ -51,7 +51,10 @@ CPU_CPUS = int(RES.get("cpu_cpus_per_task", 8))
 
 # Format cycle numbers as zero-padded strings for file paths
 def cyc_fmt(cycle):
-    """Format cycle number with zero-padding."""
+    """Format cycle number with zero-padding.
+
+    Accepts int or str (Snakemake CLI --config passes strings).
+    """
     return f"{int(cycle):02d}"
 
 
@@ -78,6 +81,7 @@ def get_edf_filename(cycle, channel):
 # mirroring the find_cycle_dir() logic in the wrapper scripts.
 def _resolve_raw_cycle_dir(cycle_num):
     """Resolve actual cycle directory path from cycle number."""
+    cycle_num = int(cycle_num)  # CLI --config passes strings
     raw_dir = Path(PROJECT) / "data" / "raw"
 
     # Try glob patterns for long-form names (e.g., cyc001_reg001_200210_170925)
@@ -246,12 +250,13 @@ rule stitch:
         kintsugi_dir=KINTSUGI,
         channels=CHANNELS,
         device_mode=lambda wc: _assign(wc)["mode"],
+
     resources:
         mem_mb=lambda wc: RES.get("mem_stitch", 48000),
         runtime=lambda wc: RES.get("time_stitch", 240) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
         slurm_partition=lambda wc: _assign(wc)["partition"],
         slurm_account=lambda wc: _assign(wc)["account"],
-        gpus=lambda wc: 1 if _is_gpu(wc) else 0,
+        gres=lambda wc: "gpu:1" if _is_gpu(wc) else "",
         cpus_per_task=lambda wc: 4 if _is_gpu(wc) else CPU_CPUS,
     log:
         "{project}/slurm/logs/snakemake/stitch_cyc{cycle}.log",
@@ -274,12 +279,13 @@ rule deconvolve:
         kintsugi_dir=KINTSUGI,
         channels=CHANNELS,
         device_mode=lambda wc: _assign(wc)["mode"],
+
     resources:
         mem_mb=lambda wc: RES.get("mem_decon", 48000),
         runtime=lambda wc: RES.get("time_decon", 240) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
         slurm_partition=lambda wc: _assign(wc)["partition"],
         slurm_account=lambda wc: _assign(wc)["account"],
-        gpus=lambda wc: 1 if _is_gpu(wc) else 0,
+        gres=lambda wc: "gpu:1" if _is_gpu(wc) else "",
         cpus_per_task=lambda wc: 4 if _is_gpu(wc) else CPU_CPUS,
     log:
         "{project}/slurm/logs/snakemake/decon_cyc{cycle}.log",
@@ -304,12 +310,13 @@ rule edf:
         channels=CHANNELS,
         device_mode=lambda wc: _assign(wc)["mode"],
         channel_names=CHANNEL_NAMES,
+
     resources:
         mem_mb=lambda wc: RES.get("mem_edf", 48000),
         runtime=lambda wc: RES.get("time_edf", 60) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
         slurm_partition=lambda wc: _assign(wc)["partition"],
         slurm_account=lambda wc: _assign(wc)["account"],
-        gpus=lambda wc: 1 if _is_gpu(wc) else 0,
+        gres=lambda wc: "gpu:1" if _is_gpu(wc) else "",
         cpus_per_task=lambda wc: 4 if _is_gpu(wc) else CPU_CPUS,
     log:
         "{project}/slurm/logs/snakemake/edf_cyc{cycle}.log",

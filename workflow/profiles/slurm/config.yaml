@@ -15,6 +15,11 @@
 
 executor: slurm
 
+# Activate the existing KINTSUGI conda environment on compute nodes.
+# Without this, srun inherits a bare shell and conda-installed packages
+# (cupy, torch, etc.) are not available.
+precommand: "module load conda && conda activate KINTSUGI"
+
 # Default SLURM settings (per-rule resources override these)
 default-resources:
   mem_mb: 48000
@@ -22,7 +27,7 @@ default-resources:
   cpus_per_task: 4
 
 # Maximum concurrent SLURM jobs
-# Override with -j flag (e.g., -j 13 for 3 GPU + 10 CPU slots)
+# Override with -j flag (e.g., -j 24 for 5 GPU + 19 CPU slots)
 jobs: 8
 
 # NFS latency tolerance (seconds)

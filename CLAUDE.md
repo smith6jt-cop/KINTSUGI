@@ -231,35 +231,107 @@ KINTSUGI has two distinct processing modes with different resource utilization s
 - Jobs automatically adapt via `KINTSUGI_DEVICE_MODE` environment variable
 - Quality parameters remain unchanged - only the compute device differs
 
-### Resource Pool Calculation (Dual-Pool Architecture)
+### Resource Pool Calculation (Multi-Account Architecture)
 
-KINTSUGI calculates total concurrent jobs from two **independent** SLURM accounts, each with its own resource limits:
+KINTSUGI calculates total concurrent jobs from **all** non-blocked SLURM accounts. Each account contributes **both** GPU slots and CPU slots independently:
 
-**GPU Pool**: From GPU account (`ACCOUNT_CHAIN`, e.g., `clive`)
-- Auto-detected from the GPU account's QOS limits via `sacctmgr`
-- Provides GPUs, CPUs, and memory for GPU-accelerated jobs
+- **GPU slots** per account = QOS `gres/gpu` limit (via `sacctmgr`)
+- **CPU slots** per account = `floor(0.85 * account_cpus / cpus_per_job)` (85% cap avoids starving other users)
+- GPU and CPU partitions are separate resource pools — GPU jobs on `hpg-b200` do NOT consume CPU allocation on `hpg-default`
+- **`brusko` account is permanently blocked** — hard-coded in `BLOCKED_ACCOUNTS` frozenset in `hpc.py`
 
-**CPU Pool**: From CPU account (`CPU_ONLY_ACCOUNTS`, e.g., `maigan`) - **completely independent**
-- Auto-detected from the CPU account's QOS limits via `auto_detect_cpu_allocation()`
-- Provides CPUs and memory for CPU-only jobs with **guaranteed** resources (not preemptible)
+**Total Concurrent** = sum(GPU slots) + sum(CPU slots) across all accounts
 
-**Total Concurrent** = GPU slots + CPU slots (from separate accounts)
-
-**Example calculation** (two independent accounts):
-| Account | CPUs | Memory | GPUs | Slots | Calculation |
-|---------|------|--------|------|-------|-------------|
-| `clive` (GPU) | 104 | 812 GB | 3 | 3 | 3 GPUs / 1 per job |
-| `maigan` (CPU) | 80 | 625 GB | 0 | 10 | min(80/8, 625/48) = min(10,13) |
-| **Total** | | | | **13** | 3 GPU + 10 CPU concurrent jobs |
+**Example calculation** (two accounts, each with GPUs AND CPUs):
+| Account | CPUs | Memory | GPUs | GPU Slots | CPU Slots | Calculation |
+|---------|------|--------|------|-----------|-----------|-------------|
+| `clive` | 104 | 812 GB | 3 | 3 | 11 | GPUs: 3/1; CPUs: floor(0.85*104/8) |
+| `maigan` | 80 | 625 GB | 2 | 2 | 8 | GPUs: 2/1; CPUs: floor(0.85*80/8) |
+| **Total** | | | **5** | **5** | **19** | **24 concurrent jobs** |
 
 ### How Concurrent GPU/CPU Works
 
-1. `submit.sh` auto-detects GPU and CPU account limits independently via `sacctmgr`
-2. Calculates GPU slots from the GPU account, CPU slots from the CPU account
-3. Submits GPU jobs on the GPU account/partition (e.g., `clive`/`hpg-b200`) with `KINTSUGI_DEVICE_MODE=gpu`
-4. Submits CPU jobs on the CPU account/partition (e.g., `maigan`/`hpg-default`) with `KINTSUGI_DEVICE_MODE=cpu` and guaranteed (non-preemptible) resources
+1. `detect_multi_account_resources()` / `detect_live_multi_account()` query `sacctmgr show associations` for all user accounts (filtering burst `-b` accounts and blocked accounts)
+2. Each account's GPU and CPU slots are calculated independently from its QOS limits
+3. GPU jobs are submitted on each account's GPU partition (e.g., `hpg-b200`) with `KINTSUGI_DEVICE_MODE=gpu`
+4. CPU jobs are submitted on each account's CPU partition (e.g., `hpg-default`) with `KINTSUGI_DEVICE_MODE=cpu` and guaranteed (non-preemptible) resources
 5. Job scripts read `KINTSUGI_DEVICE_MODE` and use appropriate backend (CuPy for GPU, NumPy/SciPy for CPU)
-6. CPU jobs get a 5x time multiplier (automatic) but have guaranteed memory allocation from the CPU account
+6. CPU jobs get a 5x time multiplier (automatic) but have guaranteed memory allocation
+
+**Important**: `sacctmgr show associations user=USERNAME format=account -n -P` is the correct query format. The older `sacctmgr show user USERNAME format=account` returns empty results.
+
+### Snakemake Workflow (Alternative to submit.sh)
+
+KINTSUGI includes a Snakemake-based workflow as an alternative to `submit.sh` for SLURM batch processing. Both produce files in the same `data/processed/` tree but should not run simultaneously on the same project.
+
+**Setup and usage:**
+```bash
+kintsugi workflow config .    # Generate workflow/config.yaml + Snakefile
+kintsugi workflow check .     # Show live per-account availability
+kintsugi workflow run .       # Submit via Snakemake (auto-sets -j)
+```
+
+**Key design decisions:**
+
+| Design Choice | Rationale |
+|---------------|-----------|
+| 3 rules with lambda resources | `ruleorder` does NOT fall back — it always picks the preferred rule, so 6 rules + ruleorder was fundamentally broken |
+| Cycle pre-assignment at DAG creation | `_build_cycle_assignment()` distributes cycles proportionally across accounts/modes before any job runs |
+| Sentinel files (`.snakemake_complete`) | Stitching/deconvolution produce hundreds of files; declaring every output would create an enormous DAG |
+| Per-cycle dependencies | `stitch cyc01 → decon cyc01 → edf cyc01` allows pipelining across cycles |
+| No `--resources gpus=N` needed | GPU budget is baked into cycle pre-assignment |
+
+**Config format** (`workflow/config.yaml`):
+```yaml
+resources:
+  accounts:
+    - name: clive
+      partition_gpu: "hpg-b200,hpg-turin"
+      partition_cpu: hpg-default
+      gpu_slots: 3
+      cpu_slots: 11
+    - name: maigan
+      partition_gpu: "hpg-b200,hpg-turin"
+      partition_cpu: hpg-default
+      gpu_slots: 2
+      cpu_slots: 8
+  total_slots: 24
+  cpu_time_multiplier: 5
+  cpu_cpus_per_task: 8
+```
+
+**Cycle assignment example** (13 cycles, clive 3G+11C, maigan 2G+8C):
+- Cycles 1-3 → clive GPU, Cycles 4-5 → maigan GPU
+- Cycles 6-16 → clive CPU, Cycles 17+ → maigan CPU (round-robin overflow)
+
+**Lambda resource routing** (per-rule in Snakefile):
+```python
+resources:
+    slurm_partition=lambda wc: _assign(wc)["partition"],
+    slurm_account=lambda wc: _assign(wc)["account"],
+    gres=lambda wc: "gpu:1" if _is_gpu(wc) else "",
+    runtime=lambda wc: base_time * (1 if _is_gpu(wc) else CPU_TIME_MULT),
+```
+
+**GPU resource naming**: Use `gres="gpu:1"` (maps to `--gres=gpu:1`). Do NOT use `gpus=1` (maps to `--gpus=1`) or `gpu=1` — both trigger `SLURM_TRES_PER_TASK` conflicts on SLURM >= 24.11.
+
+**SLURM profile** (`workflow/profiles/slurm/config.yaml`):
+- `precommand: "module load conda && conda activate KINTSUGI"` — activates the existing conda environment on compute nodes so that conda-installed packages (cupy, torch, etc.) are importable inside srun jobs
+
+**SLURM_TRES_PER_TASK fix** (critical for SLURM >= 24.11):
+- SLURM 24.11+ sets `SLURM_TRES_PER_TASK` in GPU job environments, which conflicts with the jobstep plugin's `srun` call
+- Error: `srun: fatal: SLURM_TRES_PER_TASK is mutually exclusive with --ntasks-per-gpu`
+- Fix: patched `snakemake_executor_plugin_slurm_jobstep/__init__.py` to unset this variable in `__post_init__()`: `os.environ.pop("SLURM_TRES_PER_TASK", None)`
+- **This patch must be re-applied after any pip upgrade of `snakemake-executor-plugin-slurm-jobstep`**
+
+**Cycle directory resolution**: `_resolve_raw_cycle_dir()` handles `cyc001_reg001_*`, `cyc001`, `cyc01`, and `Cyc01` naming conventions at DAG creation time. Accepts int or str (Snakemake CLI `--config` passes strings).
+
+**`workflow config` behavior**: Always overwrites the Snakefile (so pipeline logic updates propagate); only copies scripts/profiles if they don't already exist.
+
+**What Snakemake replaces vs keeps:**
+- Replaces: `submit.sh` orchestration, dependency wiring, `.complete` polling, skip-existing logic, `--array` limit calculation
+- Keeps: Python processing code in wrapper scripts (`workflow/scripts/*.py`), `KINTSUGI_DEVICE_MODE` environment variable pattern
+- Coexists with: Existing `slurm/` job scripts (run one system or the other, not both)
 
 ## Development Workspace
 

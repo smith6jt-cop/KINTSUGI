@@ -27,6 +27,8 @@ Smith, J. A. et al. Protocol for processing and analyzing multiplexed images imp
   - [Python API](#python-api)
 - [Notebooks](#notebooks)
 - [HPC/SLURM Job Submission](#hpcslurm-job-submission)
+  - [Snakemake Workflow (Recommended)](#snakemake-workflow-recommended)
+  - [Legacy SLURM Submission](#legacy-slurm-submission-submitsh)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
 
@@ -200,10 +202,8 @@ kintsugi template -o my_config.json
 KINTSUGI provides a CLI for common operations:
 
 ```bash
-# Check dependencies
+# Check dependencies and show system info
 kintsugi check
-
-# Show system info
 kintsugi info
 
 # Install optional features
@@ -219,6 +219,18 @@ kintsugi register config.json
 
 # Initialize a new project
 kintsugi init /path/to/project --name "My Project"
+kintsugi scan /path/to/directory   # Preview what init will find
+
+# Snakemake workflow management (recommended for HPC)
+kintsugi workflow config .         # Auto-detect accounts, generate config + Snakefile
+kintsugi workflow check .          # Show live per-account slot availability
+kintsugi workflow run .            # Submit via Snakemake with auto-calculated -j
+
+# Legacy SLURM submission
+kintsugi slurm init /path/to/project
+kintsugi slurm submit /path/to/project
+kintsugi slurm status /path/to/project
+kintsugi slurm cancel /path/to/project
 ```
 
 ### Python API
@@ -366,136 +378,111 @@ code .
 
 ## HPC/SLURM Job Submission
 
-KINTSUGI includes a SLURM submission system for running batch processing on HPC clusters. The scripts are located in the `slurm/` directory.
+KINTSUGI provides two SLURM submission systems. The **Snakemake workflow** (recommended) handles dependency management, skip-existing, and multi-account scheduling declaratively. The legacy `submit.sh` script is still available for simpler setups.
 
-### Quick Start
+### Snakemake Workflow (Recommended)
 
-```bash
-# Submit full pipeline for a project
-./slurm/submit.sh --project /path/to/your/project
+The Snakemake pipeline runs three processing stages per cycle, with automatic per-cycle dependencies:
 
-# Preview commands without submitting (dry run)
-./slurm/submit.sh --project /path/to/your/project --dry-run
+| Stage | Description | Includes |
+|-------|-------------|----------|
+| `stitch` | BaSiC illumination correction + tile stitching | GPU or CPU |
+| `deconvolve` | Richardson-Lucy deconvolution | GPU or CPU |
+| `edf` | Extended depth of focus (variance projection) | GPU or CPU |
 
-# Run specific steps only
-./slurm/submit.sh --project /path/to/your/project --steps decon,edf
+Dependencies flow per-cycle, enabling pipelining: `stitch cyc01 -> decon cyc01 -> edf cyc01` runs in parallel with `stitch cyc02 -> decon cyc02 -> edf cyc02`.
 
-# Process specific cycles
-./slurm/submit.sh --project /path/to/your/project --cycles 1-3
-
-# Use burst resources for faster processing (preemptible)
-./slurm/submit.sh --project /path/to/your/project --use-burst
-```
-
-### Pipeline Steps
-
-The SLURM pipeline runs four processing steps with automatic dependencies:
-
-| Step | Description | Default Memory | Default Time |
-|------|-------------|----------------|--------------|
-| `correction` | GPU-accelerated BaSiC illumination correction | 64 GB | 4 hours |
-| `stitch` | Image stitching with phase correlation | 128 GB | 6 hours |
-| `decon` | Lucy-Richardson deconvolution | 192 GB | 8 hours |
-| `edf` | Extended depth of focus projection | 64 GB | 2 hours |
-
-Jobs are submitted as SLURM arrays (one task per cycle) with automatic dependencies between steps.
-
-### Resource Pool Architecture (Dual-Pool)
-
-KINTSUGI maximizes cluster utilization by running **GPU and CPU jobs concurrently**. The system calculates total concurrent jobs from both resource pools:
-
-**GPU Pool**: Limited by allocated GPUs (`ALLOC_GPUS / GPUS_PER_NODE`)
-
-**CPU Pool**: Limited by remaining resources after GPU allocation
-- CPUs remaining: `(ALLOC_CPUS - GPU_CPUs_used) / CPU_CPUS_PER_TASK`
-- Memory remaining: `(ALLOC_MEM - GPU_mem_used) / CPU_MEM_*`
-
-**Total Concurrent** = GPU slots + CPU slots
-
-**Example calculation** (104 CPUs, 812GB memory, 3 GPUs):
-| Resource | GPU Jobs | CPU Jobs | Calculation |
-|----------|----------|----------|-------------|
-| GPUs | 3 | 0 | 3 GPUs / 1 per job |
-| CPUs | 24 | 80 | 104 - (3×8) = 80 remaining |
-| Memory | 540 GB | 272 GB | 812 - (3×180) = 272 remaining |
-| CPU slots | - | 5 | min(80/8, 272/48) = min(10,5) |
-| **Total** | **8** | | 3 GPU + 5 CPU concurrent jobs |
-
-Instead of being limited to 3 concurrent jobs (GPU-only), the system runs 8 jobs concurrently.
-
-### Dynamic Job Promotion
-
-The burst monitor (`burst_monitor.sh`) automatically promotes jobs to better resources when available:
-
-- **Burst → Allocated**: Preemptible GPU jobs promoted to guaranteed QOS
-- **CPU → GPU**: CPU jobs promoted to GPU partition when GPUs free up
-
-Start the monitor after submitting jobs:
-```bash
-./slurm/burst_monitor.sh --project /path/to/your/project
-```
-
-The monitor runs continuously, checking for promotion opportunities every 60 seconds.
-
-### Configuration
-
-On first run, a configuration file is created at `PROJECT_DIR/slurm/config.sh`. Edit this file to customize:
+#### Quick Start (Snakemake)
 
 ```bash
-# Key settings in config.sh
+# 1. Create project
+kintsugi init /path/to/project --name "My Experiment"
 
-# Processing parameters
-export START_CYCLE=1
-export END_CYCLE=7
-export OUTPUT_FORMAT="zarr"  # or "tiff"
+# 2. Copy raw data to data/raw/cyc01/, cyc02/, etc.
 
-# Microscope parameters (for deconvolution)
-export XY_VOX=377          # nm per pixel
-export Z_VOX=1500          # nm per z-slice
-export MIC_NA=0.75         # Numerical aperture
+# 3. Generate workflow config (auto-detects accounts, resources, cycles)
+kintsugi workflow config /path/to/project
 
-# HPC resources (HiPerGator RHEL9+)
-# GPU Partition: hpg-b200 (B200), hpg-turin (L4)
-export PARTITION="hpg-b200"
-export QOS="maigan-b"
-export ACCOUNT="maigan"
-export GPUS_PER_NODE=1
+# 4. Check live resource availability across all accounts
+kintsugi workflow check /path/to/project
 
-# Resource allocation limits (for dual-pool calculation)
-export ALLOC_CPUS=104      # Total CPUs in allocation
-export ALLOC_MEM=812       # Total memory (GB) in allocation
-export ALLOC_GPUS=3        # Total GPUs in allocation
+# 5. Submit (auto-calculates -j from live availability)
+kintsugi workflow run /path/to/project
 
-# GPU job resources
-export CPUS_PER_TASK=8     # CPUs per GPU job
-export MEM_DECON=180       # Memory per deconvolution job (GB)
-
-# CPU job resources (for concurrent CPU processing)
-export CPU_CPUS_PER_TASK=8 # CPUs per CPU job
-export CPU_MEM_DECON=48    # Memory per CPU deconvolution job (GB)
-export CPU_TIME_MULTIPLIER=5  # CPU jobs run 5x longer than GPU
-
-# Email notifications (optional)
-export EMAIL="your.email@example.com"
-export MAIL_TYPE="END,FAIL"
+# Or run directly with Snakemake:
+cd /path/to/project/workflow
+snakemake --profile profiles/slurm -j 24
+snakemake -n                               # Dry run
 ```
+
+`workflow config` auto-detects SLURM accounts via `sacctmgr`, calculates GPU and CPU slots per account, reads microscope parameters from `meta/experiment.json`, and generates `workflow/config.yaml` + copies the Snakefile.
+
+#### Multi-Account Architecture
+
+KINTSUGI maximizes throughput by distributing jobs across **multiple independent SLURM accounts**, each with its own GPU and CPU pools:
+
+| Account | GPUs | GPU Slots | CPUs | CPU Slots | Calculation |
+|---------|------|-----------|------|-----------|-------------|
+| `clive` | 3 | 3 | 104 | 11 | floor(0.85 * 104 / 8) |
+| `maigan` | 2 | 2 | 80 | 8 | floor(0.85 * 80 / 8) |
+| **Total** | | **5** | | **19** | **24 concurrent jobs** |
+
+Cycles are **pre-assigned** to accounts and modes (GPU/CPU) at DAG creation time for deterministic scheduling. GPU cycles run first, CPU cycles fill remaining capacity. Each rule uses lambda resource functions to route jobs to the correct account and partition.
+
+#### Workflow Configuration (`workflow/config.yaml`)
+
+Auto-generated by `kintsugi workflow config`. Includes cycles, channels, microscope parameters, and per-account resource allocations:
+
+```yaml
+resources:
+  accounts:
+    - name: clive
+      partition_gpu: "hpg-b200,hpg-turin"
+      partition_cpu: hpg-default
+      gpu_slots: 3
+      cpu_slots: 11
+    - name: maigan
+      partition_gpu: "hpg-b200,hpg-turin"
+      partition_cpu: hpg-default
+      gpu_slots: 2
+      cpu_slots: 8
+  total_gpu_slots: 5
+  total_cpu_slots: 19
+  total_slots: 24
+```
+
+#### Project Workflow Structure
+
+```
+my_project/workflow/
+├── config.yaml              # Auto-generated by kintsugi workflow config
+├── Snakefile                # Pipeline definition (always overwritten on config)
+├── scripts/
+│   ├── stitch.py
+│   ├── deconvolve.py
+│   └── edf.py
+└── profiles/slurm/
+    └── config.yaml          # SLURM executor profile (precommand, retries, etc.)
+```
+
+### Legacy SLURM Submission (`submit.sh`)
+
+The original `submit.sh` script is still available for single-account setups or when Snakemake is not installed:
+
+```bash
+./slurm/submit.sh --project /path/to/project
+./slurm/submit.sh --project /path/to/project --dry-run
+./slurm/submit.sh --project /path/to/project --steps decon,edf
+./slurm/submit.sh --project /path/to/project --cycles 1-3
+```
+
+Configuration is in `slurm/config.sh` (auto-generated on first run). The legacy system uses a single-account dual-pool architecture where GPU and CPU slots are calculated from one account's allocation.
 
 ### Batch Processing Multiple Projects
 
-Process multiple datasets at once:
-
 ```bash
-# From a project list file
 ./slurm/submit_batch.sh projects.txt
-
-# Specify projects directly
-./slurm/submit_batch.sh --list /path/to/project1 /path/to/project2
-
-# Auto-discover projects under a directory
 ./slurm/submit_batch.sh --find /path/to/KINTSUGI_Projects
-
-# Run sequentially (wait for each project to complete)
-./slurm/submit_batch.sh --sequential projects.txt
 ```
 
 ### Monitoring Jobs
@@ -507,52 +494,32 @@ squeue -u $USER
 # View jobs for a specific project
 squeue -u $USER -n "kintsugi_*_ProjectName"
 
-# Cancel all KINTSUGI jobs
-scancel -u $USER -n "kintsugi_*"
+# Cancel all KINTSUGI jobs for a project
+kintsugi slurm cancel /path/to/project
 
-# View job output in real-time
-tail -f PROJECT_DIR/slurm/runs/RUNID/logs/step_JOBID_CYCLE.out
-```
-
-### Output Structure
-
-Each run creates a timestamped directory with logs, QC images, and summaries:
-
-```
-PROJECT_DIR/slurm/runs/20250122_143052/
-├── run_info.txt          # Run configuration
-├── logs/                 # SLURM output logs
-│   ├── correct_12345_1.out
-│   ├── stitch_12346_1.out
-│   └── ...
-├── qc/                   # QC images per step
-│   ├── correction/
-│   ├── stitch/
-│   ├── decon/
-│   └── edf/
-└── summaries/            # Before/after data summaries
+# View Snakemake job logs
+tail -f PROJECT_DIR/slurm/logs/snakemake/stitch_cyc01.log
 ```
 
 ### Example Workflow
 
 ```bash
-# 1. Create/verify project structure
-kintsugi init /blue/maigan/smith6jt/KINTSUGI_Projects/MyExperiment
+# 1. Create project
+kintsugi init /path/to/project --name "My Experiment"
 
-# 2. Copy raw data to data/raw/cyc001/, cyc002/, etc.
+# 2. Copy raw data to data/raw/cyc01/, cyc02/, etc.
 
-# 3. Submit pipeline (creates config on first run)
-./slurm/submit.sh --project /blue/maigan/smith6jt/KINTSUGI_Projects/MyExperiment
+# 3. Generate workflow config (detects accounts, resources, cycles)
+kintsugi workflow config /path/to/project
 
-# 4. Edit the generated config if needed
-nano /blue/maigan/smith6jt/KINTSUGI_Projects/MyExperiment/slurm/config.sh
+# 4. Check resource availability
+kintsugi workflow check /path/to/project
 
-# 5. Re-submit with updated config
-./slurm/submit.sh --project /blue/maigan/smith6jt/KINTSUGI_Projects/MyExperiment
+# 5. Submit
+kintsugi workflow run /path/to/project
 
-# 6. Monitor progress
+# 6. Monitor
 squeue -u $USER
-tail -f /blue/maigan/smith6jt/KINTSUGI_Projects/MyExperiment/slurm/runs/*/logs/*.out
 ```
 
 ## Troubleshooting

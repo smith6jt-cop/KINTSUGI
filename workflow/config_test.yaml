@@ -1,30 +1,54 @@
 # Test configuration for dry-run validation
-# Points to test_data/mini_project (2x2 tiles, 2 cycles, 2 channels)
+# Points to test_data/mini_project (2x2 tiles, 3 cycles, 4 channels)
 #
-# NOTE: Paths are relative to the working directory (workflow/tests/).
-# Usage:  cd workflow/tests && snakemake --configfile ../config_test.yaml --cores 1 -p
-# Override on the command line as needed:
-#   snakemake --config project_dir=/abs/path kintsugi_dir=/abs/path ...
+# Usage:
+#   cd workflow && snakemake --configfile config_test.yaml -n   # dry run
+#   cd workflow && snakemake --configfile config_test.yaml --cores 1 -p  # local
+#
+# Uses absolute paths so it works from any working directory.
 
-project_dir: ../../test_data/mini_project
-kintsugi_dir: ../..
+project_dir: /blue/maigan/smith6jt/KINTSUGI/test_data/mini_project
+kintsugi_dir: /blue/maigan/smith6jt/KINTSUGI
 
-cycles: [1, 2]
-channels: [1, 2]
+cycles: [1, 2, 3]
+channels: [1, 2, 3, 4]
 output_format: tiff
+n_zplanes: 15
 
+# Channel names from CHANNELNAMES.txt (4 channels per cycle)
+channel_names:
+  1: [DAPI-01, Blank, Blank, Blank]
+  2: [DAPI-02, CD31, CD8, CD45]
+  3: [DAPI-03, CD20, Ki67, CD3e]
+
+# Tile grid
 tile_rows: 2
 tile_cols: 2
-tile_overlap: 0.3
+tile_overlap: 0.1
 
+# Microscope parameters
+xy_pixel_size: 377.0
+z_step_size: 1500.0
+numerical_aperture: 0.75
+tissue_refractive_index: 1.44
+
+wavelengths:
+  '1': [358.0, 461.0]
+  '2': [753.0, 775.0]
+  '3': [560.0, 575.0]
+  '4': [648.0, 668.0]
+
+# Stitching parameters
 ncc_threshold: 0.078
 pou: 0.5
 blend_sigma: 15.0
 
+# BaSiC illumination correction
 basic_flatfield_min: 0.1
 basic_max_iterations: 500
 basic_optimization_tolerance: 1.0e-6
 
+# EDF parameters
 edf:
   radius_x: 2
   radius_y: 2
@@ -33,13 +57,15 @@ edf:
   blend_depth: 0
   z_smooth_sigma: 1.0
 
+# Quality gate thresholds
 quality_gate:
   max_zero_pct: 0.10
   max_sat_pct: 0.05
   min_valid_slices: 3
 
+# Resources — no accounts list = legacy fallback (all cycles on one account)
 resources:
-  account: test
+  account_gpu: test
   partition_gpu: gpu
   partition_cpu: default
   mem_stitch: 16000
@@ -48,3 +74,5 @@ resources:
   time_stitch: 60
   time_decon: 60
   time_edf: 30
+  cpu_cpus_per_task: 4
+  cpu_time_multiplier: 5
