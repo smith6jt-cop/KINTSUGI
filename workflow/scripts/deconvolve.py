@@ -53,19 +53,24 @@ for ch_str, pair in wl_raw.items():
     WAVELENGTHS[int(ch_str)] = (float(pair[0]), float(pair[1]))
 
 # ---------------------------------------------------------------------------
-# GPU initialization
+# GPU initialization (respects device_mode from Snakemake rule)
 # ---------------------------------------------------------------------------
-DEVICE_MODE = "gpu"
-try:
-    import cupy as cp
+REQUESTED_DEVICE_MODE = getattr(snakemake.params, "device_mode", "gpu")
 
-    cp.cuda.Device(0).use()
-    _ = cp.zeros(1)
-    print(f"CUDA initialized successfully on device 0")
-except Exception as e:
-    print(f"WARNING: CUDA initialization failed: {e}")
-    print("Falling back to CPU processing")
-    DEVICE_MODE = "cpu"
+DEVICE_MODE = "cpu"
+if REQUESTED_DEVICE_MODE == "gpu":
+    try:
+        import cupy as cp
+
+        cp.cuda.Device(0).use()
+        _ = cp.zeros(1)
+        print(f"CUDA initialized successfully on device 0")
+        DEVICE_MODE = "gpu"
+    except Exception as e:
+        print(f"WARNING: CUDA initialization failed: {e}")
+        print("Falling back to CPU processing")
+else:
+    print(f"CPU mode (requested by Snakemake rule)")
 
 # ---------------------------------------------------------------------------
 # Imports

@@ -831,6 +831,27 @@ def workflow_config(project_dir: str, print_only: bool):
 
     exp = ExperimentConfig.from_dict(raw_experiment.copy())
 
+    # Load channel names from CHANNELNAMES.txt
+    channel_names_dict: dict[int, list[str]] = {}
+    try:
+        sys.path.insert(0, str(Path(__file__).parent.parent.parent.resolve() / "notebooks"))
+        from Kio import load_channel_names
+
+        channel_names_dict = load_channel_names(
+            project_dir / "meta",
+            channels_per_cycle=raw_experiment.get(
+                "channels_per_cycle", raw_experiment.get("numChannels", 4)
+            ),
+            make_unique=True,
+        )
+        console.print(
+            f"  Loaded channel names: {sum(len(v) for v in channel_names_dict.values())} markers"
+        )
+    except FileNotFoundError:
+        console.print("[yellow]  Warning: meta/CHANNELNAMES.txt not found — EDF will use CH# names[/yellow]")
+    except Exception as e:
+        console.print(f"[yellow]  Warning: Could not load channel names: {e}[/yellow]")
+
     # Validate critical fields — fail loudly, no silent defaults
     if exp.n_cycles is None:
         console.print("[red]ERROR: n_cycles not found in experiment.json[/red]")
@@ -868,7 +889,22 @@ def workflow_config(project_dir: str, print_only: bool):
         if m:
             partition = m.group(1)
 
+    # Detect CPU account from config.sh
+    cpu_account = ""
+    if slurm_config_path.exists():
+        m = re.search(r'export\s+CPU_ONLY_ACCOUNTS="([^"]*)"', config_text)
+        if m:
+            cpu_account = m.group(1).split(",")[0].strip()
+
+    # Detect dual-pool resources via sacctmgr
+    from kintsugi.hpc import detect_dual_pool_resources
+
+    pool = detect_dual_pool_resources(account, cpu_account)
+
     # Build config dict and dump via PyYAML for correct types
+    # Convert channel_names_dict keys to int for YAML (Snakemake reads as int)
+    channel_names_yaml = {int(k): v for k, v in channel_names_dict.items()} if channel_names_dict else {}
+
     config_dict = {
         # Paths
         "project_dir": str(project_dir),
@@ -877,6 +913,8 @@ def workflow_config(project_dir: str, print_only: bool):
         "cycles": cycles_list,
         "channels": channels_list,
         "output_format": "tiff",
+        # Channel names (from CHANNELNAMES.txt)
+        "channel_names": channel_names_yaml,
         # Tile grid
         "tile_rows": exp.tile_rows,
         "tile_cols": exp.tile_cols,
@@ -911,17 +949,29 @@ def workflow_config(project_dir: str, print_only: bool):
         },
         # SLURM resources
         "resources": {
-            "account": account,
+            "account_gpu": account,
+            "account_cpu": cpu_account,
             "partition_gpu": partition,
             "partition_cpu": "hpg-default",
             "qos": "",
             "conda_env": "kintsugi",
+            # Dual-pool slots (auto-detected via sacctmgr)
+            "gpu_slots": pool["gpu_slots"],
+            "cpu_slots": pool["cpu_slots"],
+            "total_slots": pool["total_slots"],
+            # GPU job resources
             "mem_stitch": 48000,
             "mem_decon": 48000,
             "mem_edf": 48000,
             "time_stitch": 240,
             "time_decon": 240,
             "time_edf": 60,
+            # CPU job resources
+            "cpu_cpus_per_task": 8,
+            "cpu_time_multiplier": 5,
+            "cpu_mem_stitch": 48000,
+            "cpu_mem_decon": 48000,
+            "cpu_mem_edf": 48000,
         },
     }
 
@@ -956,11 +1006,18 @@ def workflow_config(project_dir: str, print_only: bool):
     console.print(f"  tile_overlap: {exp.tile_overlap}")
     console.print(f"  xy_pixel_size: {exp.xy_pixel_size}")
     console.print(f"  wavelengths: {len(exp.wavelengths)} channels")
+    if channel_names_dict:
+        console.print(f"  channel_names: {sum(len(v) for v in channel_names_dict.values())} markers")
+    if pool["total_slots"] > 0:
+        console.print(
+            f"  dual-pool: {pool['gpu_slots']} GPU ({account}) + "
+            f"{pool['cpu_slots']} CPU ({cpu_account}) = {pool['total_slots']} slots"
+        )
 
     # Copy Snakefile and scripts from KINTSUGI installation
     src_wf = kintsugi_dir / "workflow"
     if src_wf.exists():
-        for item in ["Snakefile", "scripts", "profiles", "envs"]:
+        for item in ["Snakefile", "scripts", "profiles"]:
             src = src_wf / item
             dst = wf_dir / item
             if src.exists() and not dst.exists():
@@ -973,9 +1030,97 @@ def workflow_config(project_dir: str, print_only: bool):
     console.print()
     console.print("[bold]Next steps:[/bold]")
     console.print(f"  cd {wf_dir}")
-    console.print("  snakemake -n                              # Dry run")
-    console.print("  snakemake --profile profiles/slurm -j 8   # Submit via SLURM")
-    console.print("  snakemake --cores 4                       # Run locally")
+    console.print("  kintsugi workflow check .                  # Verify resources")
+    console.print("  snakemake -n                               # Dry run")
+    console.print("  kintsugi workflow run .                    # Submit via SLURM")
+
+
+@workflow.command("check")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+def workflow_check(project_dir: str):
+    """
+    Check SLURM resource availability for dual-pool execution.
+
+    Reads workflow/config.yaml, queries both GPU and CPU accounts via
+    sacctmgr, and prints recommended snakemake command with correct
+    -j and --resources flags.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    """
+    from pathlib import Path
+
+    import yaml
+
+    from kintsugi.hpc import detect_account_resources, detect_dual_pool_resources
+
+    project_dir = Path(project_dir).resolve()
+    config_path = project_dir / "workflow" / "config.yaml"
+
+    if not config_path.exists():
+        console.print("[red]No workflow/config.yaml found.[/red]")
+        console.print("Run 'kintsugi workflow config .' first.")
+        raise SystemExit(1)
+
+    with open(config_path) as f:
+        wf_config = yaml.safe_load(f)
+
+    res = wf_config.get("resources", {})
+    gpu_account = res.get("account_gpu", res.get("account", ""))
+    cpu_account = res.get("account_cpu", "")
+
+    console.print(f"\n[bold]Resource Check[/bold]  ({project_dir.name})\n")
+
+    # Query each account
+    gpu_alloc = detect_account_resources(gpu_account)
+    cpu_alloc = detect_account_resources(cpu_account) if cpu_account and cpu_account != gpu_account else {"cpus": 0, "gpus": 0, "mem_gb": 0}
+
+    pool = detect_dual_pool_resources(gpu_account, cpu_account)
+
+    if gpu_account:
+        console.print(
+            f"  GPU pool ({gpu_account}):  "
+            f"CPUs: {gpu_alloc['cpus']}, Memory: {gpu_alloc['mem_gb']}GB, "
+            f"GPUs: {gpu_alloc['gpus']} -> [bold]{pool['gpu_slots']}[/bold] GPU slots"
+        )
+    else:
+        console.print("  GPU pool: [yellow]no account configured[/yellow]")
+
+    if cpu_account and cpu_account != gpu_account:
+        console.print(
+            f"  CPU pool ({cpu_account}):  "
+            f"CPUs: {cpu_alloc['cpus']}, Memory: {cpu_alloc['mem_gb']}GB "
+            f"-> [bold]{pool['cpu_slots']}[/bold] CPU slots"
+        )
+    else:
+        console.print("  CPU pool: [dim]not configured (same account or empty)[/dim]")
+
+    total = pool["total_slots"]
+    gpu_slots = pool["gpu_slots"]
+
+    console.print(f"\n  [bold green]Total: {total} concurrent slots[/bold green]")
+
+    if total > 0:
+        console.print(f"\n  [bold]Recommended:[/bold]")
+        if gpu_slots > 0 and pool["cpu_slots"] > 0:
+            console.print(
+                f"    snakemake --profile profiles/slurm -j {total} --resources gpus={gpu_slots}"
+            )
+        elif gpu_slots > 0:
+            console.print(
+                f"    snakemake --profile profiles/slurm -j {gpu_slots} --resources gpus={gpu_slots}"
+            )
+        else:
+            console.print(f"    snakemake --profile profiles/slurm -j {total}")
+
+        # Show if config needs updating
+        stored_total = res.get("total_slots", 0)
+        if stored_total != total:
+            console.print(
+                f"\n  [yellow]Config has total_slots={stored_total}, "
+                f"detected {total}. Re-run 'kintsugi workflow config .' to update.[/yellow]"
+            )
+    else:
+        console.print("\n  [yellow]No resources detected. Check sacctmgr access.[/yellow]")
 
 
 @workflow.command("run")
@@ -1035,7 +1180,18 @@ def workflow_run(
     else:
         profile_dir = wf_dir / "profiles" / "slurm"
         if profile_dir.exists():
-            cmd.extend(["--profile", str(profile_dir), "-j", str(jobs)])
+            # Auto-detect -j and --resources from config's dual-pool slots
+            import yaml
+
+            with open(wf_dir / "config.yaml") as f:
+                wf_config = yaml.safe_load(f)
+            res = wf_config.get("resources", {})
+            total = res.get("total_slots", 0) or jobs
+            gpu_slots = res.get("gpu_slots", 0)
+
+            cmd.extend(["--profile", str(profile_dir), "-j", str(total)])
+            if gpu_slots > 0:
+                cmd.extend(["--resources", f"gpus={gpu_slots}"])
         else:
             console.print("[yellow]No SLURM profile found, running locally.[/yellow]")
             cmd.extend(["--cores", str(cores)])

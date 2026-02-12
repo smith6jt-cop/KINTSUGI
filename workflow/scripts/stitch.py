@@ -66,19 +66,24 @@ POU = float(wf_config["pou"])
 BLEND_SIGMA = float(wf_config.get("blend_sigma", 15.0))
 
 # ---------------------------------------------------------------------------
-# GPU initialization
+# GPU initialization (respects device_mode from Snakemake rule)
 # ---------------------------------------------------------------------------
-use_gpu = True
-try:
-    import cupy as cp
+REQUESTED_DEVICE_MODE = getattr(snakemake.params, "device_mode", "gpu")
 
-    cp.cuda.Device(0).use()
-    _ = cp.zeros(1)
-    print(f"CUDA initialized successfully on device 0")
-except Exception as e:
-    print(f"WARNING: CUDA initialization failed: {e}")
-    print("Falling back to CPU processing")
-    use_gpu = False
+use_gpu = False
+if REQUESTED_DEVICE_MODE == "gpu":
+    try:
+        import cupy as cp
+
+        cp.cuda.Device(0).use()
+        _ = cp.zeros(1)
+        print(f"CUDA initialized successfully on device 0")
+        use_gpu = True
+    except Exception as e:
+        print(f"WARNING: CUDA initialization failed: {e}")
+        print("Falling back to CPU processing")
+else:
+    print(f"CPU mode (requested by Snakemake rule)")
 
 # ---------------------------------------------------------------------------
 # Imports (after PYTHONPATH setup)

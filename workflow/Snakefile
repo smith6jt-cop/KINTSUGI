@@ -14,11 +14,16 @@ Processing stages:
 Each rule processes one cycle (all channels, all z-planes).
 Snakemake's DAG ensures per-cycle dependencies: stitch -> deconvolve -> edf.
 
+Dual-pool architecture:
+  GPU rules run on the GPU account/partition (e.g., maigan/hpg-b200).
+  CPU rules run on the CPU account/partition (e.g., clive/hpg-default).
+  ruleorder prefers GPU; --resources gpus=N caps GPU usage so Snakemake
+  falls back to CPU variants when the GPU budget is exhausted.
+
 Usage:
-  snakemake --profile profiles/slurm -j 8          # Full pipeline via SLURM
-  snakemake --cores 4                               # Local execution
-  snakemake -n                                      # Dry run
-  snakemake --forcerun stitch                       # Force re-run stitching
+  snakemake --profile profiles/slurm -j 13 --resources gpus=3  # Dual-pool
+  snakemake --cores 4                                           # Local
+  snakemake -n                                                  # Dry run
 """
 
 import re
@@ -35,10 +40,36 @@ CYCLES = config["cycles"]
 CHANNELS = config["channels"]
 N_ZPLANES = config["n_zplanes"]
 
+# Channel names for marker-named EDF output
+CHANNEL_NAMES = config.get("channel_names", {})
+
+# Dual-pool resource configuration
+RES = config.get("resources", {})
+ACCOUNT_GPU = RES.get("account_gpu", RES.get("account", ""))
+ACCOUNT_CPU = RES.get("account_cpu", "")
+PARTITION_GPU = RES.get("partition_gpu", "hpg-b200")
+PARTITION_CPU = RES.get("partition_cpu", "hpg-default")
+CPU_TIME_MULT = int(RES.get("cpu_time_multiplier", 5))
+CPU_CPUS = int(RES.get("cpu_cpus_per_task", 8))
+
 # Format cycle numbers as zero-padded strings for file paths
 def cyc_fmt(cycle):
     """Format cycle number with zero-padding."""
     return f"{int(cycle):02d}"
+
+
+# ---------------------------------------------------------------------------
+# EDF filename helper (marker names from CHANNELNAMES.txt)
+# ---------------------------------------------------------------------------
+def get_edf_filename(cycle, channel):
+    """Marker name if available, else CH#_edf.tif fallback."""
+    cyc_key = int(cycle)
+    ch_idx = int(channel) - 1
+    # Try int key first (YAML default), then string key
+    names = CHANNEL_NAMES.get(cyc_key, CHANNEL_NAMES.get(str(cyc_key), []))
+    if names and ch_idx < len(names):
+        return names[ch_idx].replace("/", "_").replace(" ", "_") + ".tif"
+    return f"CH{channel}_edf.tif"
 
 
 # ---------------------------------------------------------------------------
@@ -86,28 +117,38 @@ def get_raw_dir(wildcards):
 
 
 # ---------------------------------------------------------------------------
-# Target rule: request all final EDF outputs
+# Target rule: request all final EDF outputs (marker-named)
 # ---------------------------------------------------------------------------
-# Targets the actual EDF TIFF files (not just sentinels) so Snakemake
-# can verify the real outputs exist.
+def all_edf_targets():
+    """Build list of marker-named EDF target files."""
+    targets = []
+    for c in CYCLES:
+        for ch in CHANNELS:
+            fname = get_edf_filename(c, ch)
+            targets.append(f"{PROJECT}/data/processed/edf/cyc{cyc_fmt(c)}/{fname}")
+    return targets
+
+
 rule all:
-    input:
-        expand(
-            "{project}/data/processed/edf/cyc{cycle}/CH{ch}_edf.tif",
-            project=PROJECT,
-            cycle=[cyc_fmt(c) for c in CYCLES],
-            ch=CHANNELS,
-        )
+    input: all_edf_targets()
 
 
 # ---------------------------------------------------------------------------
+# Rule order: prefer GPU variants; CPU is fallback when GPU budget exhausted
+# ---------------------------------------------------------------------------
+ruleorder: stitch_gpu > stitch_cpu
+ruleorder: deconvolve_gpu > deconvolve_cpu
+ruleorder: edf_gpu > edf_cpu
+
+
+# ===========================================================================
 # Rule 1: Stitching (includes BaSiC illumination correction)
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # One job per cycle. Produces all channels x all z-planes as TIFF files.
 # The sentinel file signals completion (avoids declaring hundreds of outputs).
-rule stitch:
+
+rule stitch_gpu:
     input:
-        # Input function resolves the actual cycle directory name
         raw_dir=get_raw_dir,
     output:
         sentinel="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
@@ -115,11 +156,12 @@ rule stitch:
         project_dir=PROJECT,
         kintsugi_dir=KINTSUGI,
         channels=CHANNELS,
+        device_mode="gpu",
     resources:
-        mem_mb=config.get("resources", {}).get("mem_stitch", 48000),
-        runtime=config.get("resources", {}).get("time_stitch", 240),
-        slurm_partition=config.get("resources", {}).get("partition_gpu", ""),
-        slurm_account=config.get("resources", {}).get("account", ""),
+        mem_mb=RES.get("mem_stitch", 48000),
+        runtime=RES.get("time_stitch", 240),
+        slurm_partition=PARTITION_GPU,
+        slurm_account=ACCOUNT_GPU,
         gpus=1,
         cpus_per_task=4,
     log:
@@ -128,11 +170,35 @@ rule stitch:
         "scripts/stitch.py"
 
 
-# ---------------------------------------------------------------------------
+rule stitch_cpu:
+    input:
+        raw_dir=get_raw_dir,
+    output:
+        sentinel="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+        device_mode="cpu",
+    resources:
+        mem_mb=RES.get("cpu_mem_stitch", 48000),
+        runtime=RES.get("time_stitch", 240) * CPU_TIME_MULT,
+        slurm_partition=PARTITION_CPU,
+        slurm_account=ACCOUNT_CPU,
+        gpus=0,
+        cpus_per_task=CPU_CPUS,
+    log:
+        "{project}/slurm/logs/snakemake/stitch_cyc{cycle}.log",
+    script:
+        "scripts/stitch.py"
+
+
+# ===========================================================================
 # Rule 2: Deconvolution
-# ---------------------------------------------------------------------------
+# ===========================================================================
 # One job per cycle. Depends on stitching completion sentinel.
-rule deconvolve:
+
+rule deconvolve_gpu:
     input:
         stitch_done="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
     output:
@@ -141,11 +207,12 @@ rule deconvolve:
         project_dir=PROJECT,
         kintsugi_dir=KINTSUGI,
         channels=CHANNELS,
+        device_mode="gpu",
     resources:
-        mem_mb=config.get("resources", {}).get("mem_decon", 48000),
-        runtime=config.get("resources", {}).get("time_decon", 240),
-        slurm_partition=config.get("resources", {}).get("partition_gpu", ""),
-        slurm_account=config.get("resources", {}).get("account", ""),
+        mem_mb=RES.get("mem_decon", 48000),
+        runtime=RES.get("time_decon", 240),
+        slurm_partition=PARTITION_GPU,
+        slurm_account=ACCOUNT_GPU,
         gpus=1,
         cpus_per_task=4,
     log:
@@ -154,32 +221,77 @@ rule deconvolve:
         "scripts/deconvolve.py"
 
 
-# ---------------------------------------------------------------------------
+rule deconvolve_cpu:
+    input:
+        stitch_done="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
+    output:
+        sentinel="{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+        device_mode="cpu",
+    resources:
+        mem_mb=RES.get("cpu_mem_decon", 48000),
+        runtime=RES.get("time_decon", 240) * CPU_TIME_MULT,
+        slurm_partition=PARTITION_CPU,
+        slurm_account=ACCOUNT_CPU,
+        gpus=0,
+        cpus_per_task=CPU_CPUS,
+    log:
+        "{project}/slurm/logs/snakemake/decon_cyc{cycle}.log",
+    script:
+        "scripts/deconvolve.py"
+
+
+# ===========================================================================
 # Rule 3: Extended Depth of Focus
-# ---------------------------------------------------------------------------
-# One job per cycle. Produces one EDF image per channel.
-# Unlike stitch/decon, EDF outputs are few enough to declare explicitly,
-# giving Snakemake real file tracking on the final pipeline outputs.
-rule edf:
+# ===========================================================================
+# One job per cycle. Uses sentinel-only output since marker filenames vary
+# per cycle. The rule all targets verify the actual EDF files exist.
+
+rule edf_gpu:
     input:
         decon_done="{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
     output:
-        edf_files=expand(
-            "{{project}}/data/processed/edf/cyc{{cycle}}/CH{ch}_edf.tif",
-            ch=CHANNELS,
-        ),
         sentinel="{project}/data/processed/edf/cyc{cycle}/.snakemake_complete",
     params:
         project_dir=PROJECT,
         kintsugi_dir=KINTSUGI,
         channels=CHANNELS,
+        device_mode="gpu",
+        channel_names=CHANNEL_NAMES,
     resources:
-        mem_mb=config.get("resources", {}).get("mem_edf", 16000),
-        runtime=config.get("resources", {}).get("time_edf", 60),
-        slurm_partition=config.get("resources", {}).get("partition_gpu", ""),
-        slurm_account=config.get("resources", {}).get("account", ""),
+        mem_mb=RES.get("mem_edf", 48000),
+        runtime=RES.get("time_edf", 60),
+        slurm_partition=PARTITION_GPU,
+        slurm_account=ACCOUNT_GPU,
         gpus=1,
         cpus_per_task=4,
+    log:
+        "{project}/slurm/logs/snakemake/edf_cyc{cycle}.log",
+    script:
+        "scripts/edf.py"
+
+
+rule edf_cpu:
+    input:
+        decon_done="{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
+    output:
+        sentinel="{project}/data/processed/edf/cyc{cycle}/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+        device_mode="cpu",
+        channel_names=CHANNEL_NAMES,
+    resources:
+        mem_mb=RES.get("cpu_mem_edf", 48000),
+        runtime=RES.get("time_edf", 60) * CPU_TIME_MULT,
+        slurm_partition=PARTITION_CPU,
+        slurm_account=ACCOUNT_CPU,
+        gpus=0,
+        cpus_per_task=CPU_CPUS,
     log:
         "{project}/slurm/logs/snakemake/edf_cyc{cycle}.log",
     script:

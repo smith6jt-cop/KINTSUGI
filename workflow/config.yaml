@@ -5,8 +5,9 @@
 # a project-specific config.yaml from meta/experiment.json.
 #
 # Usage:
-#   snakemake --profile profiles/slurm -j 8   # SLURM execution
-#   snakemake --cores 4                        # Local execution
+#   kintsugi workflow check .                              # Verify resources
+#   snakemake --profile profiles/slurm -j 13 --resources gpus=3  # Dual-pool
+#   snakemake --cores 4                                    # Local execution
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -26,6 +27,13 @@ channels: [1, 2, 3, 4]
 
 # Output format: tiff or zarr
 output_format: tiff
+
+# ---------------------------------------------------------------------------
+# Channel names (auto-populated from meta/CHANNELNAMES.txt)
+# ---------------------------------------------------------------------------
+# Maps cycle number -> list of marker names for marker-named EDF output.
+# Empty dict falls back to CH#_edf.tif naming.
+channel_names: {}
 
 # ---------------------------------------------------------------------------
 # Tile grid (for stitching)
@@ -80,21 +88,36 @@ quality_gate:
   min_valid_slices: 3
 
 # ---------------------------------------------------------------------------
-# SLURM resource defaults
+# SLURM resource defaults (dual-pool architecture)
 # ---------------------------------------------------------------------------
 resources:
-  account: maigan
+  # GPU pool account/partition
+  account_gpu: maigan
   partition_gpu: hpg-b200
+
+  # CPU pool account/partition (independent from GPU pool)
+  account_cpu: clive
   partition_cpu: hpg-default
+
   qos: ""
   conda_env: kintsugi
 
-  # Memory per step (MB)
+  # Dual-pool slots (auto-detected via sacctmgr by 'kintsugi workflow config')
+  gpu_slots: 0       # Set by auto-detection
+  cpu_slots: 0       # Set by auto-detection
+  total_slots: 0     # gpu_slots + cpu_slots
+
+  # GPU job resources (per step, in MB and minutes)
   mem_stitch: 48000
   mem_decon: 48000
   mem_edf: 48000
-
-  # Time per step (minutes)
   time_stitch: 240
   time_decon: 240
   time_edf: 60
+
+  # CPU job resources
+  cpu_cpus_per_task: 8
+  cpu_time_multiplier: 5
+  cpu_mem_stitch: 48000
+  cpu_mem_decon: 48000
+  cpu_mem_edf: 48000

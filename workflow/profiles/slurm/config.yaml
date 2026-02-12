@@ -4,24 +4,24 @@
 # Configures Snakemake to submit jobs via SLURM.
 # Requires: snakemake >= 8.0, snakemake-executor-plugin-slurm
 #
+# Account and partition are set per-rule (GPU vs CPU variants) in the
+# Snakefile, NOT here. Use 'kintsugi workflow check .' to see recommended
+# -j and --resources flags.
+#
 # Usage:
-#   snakemake --profile profiles/slurm -j 8
-#   snakemake --profile profiles/slurm -j 8 --resources gpus=3
+#   snakemake --profile profiles/slurm -j 13 --resources gpus=3
 # =============================================================================
 
 executor: slurm
 
-# Default SLURM settings (overridden per-rule via resources:)
+# Default SLURM settings (per-rule resources override these)
 default-resources:
-  slurm_account: maigan
-  slurm_partition: hpg-b200
   mem_mb: 48000
   runtime: 240           # minutes
   cpus_per_task: 4
-  gpus: 1
 
 # Maximum concurrent SLURM jobs
-# Set this to your total available job slots (GPU + CPU)
+# Override with -j flag (e.g., -j 13 for 3 GPU + 10 CPU slots)
 jobs: 8
 
 # NFS latency tolerance (seconds)
@@ -34,6 +34,3 @@ retries: 2
 
 # Continue running independent jobs when one fails
 keep-going: true
-
-# Use conda environments
-use-conda: true

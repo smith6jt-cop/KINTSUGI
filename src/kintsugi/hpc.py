@@ -285,6 +285,138 @@ def get_cpu_only_accounts_from_user() -> str:
     return ""
 
 
+def detect_account_resources(account: str) -> dict[str, int]:
+    """
+    Detect SLURM account resource limits via sacctmgr.
+
+    Queries the account's QOS GrpTRES limits to determine available
+    CPUs, GPUs, and memory.
+
+    Parameters
+    ----------
+    account : str
+        SLURM account name (e.g., 'maigan', 'clive')
+
+    Returns
+    -------
+    dict
+        {"cpus": int, "gpus": int, "mem_gb": int}
+        Falls back to {0, 0, 0} if sacctmgr is unavailable.
+    """
+    result = {"cpus": 0, "gpus": 0, "mem_gb": 0}
+    if not account:
+        return result
+
+    try:
+        proc = subprocess.run(
+            ["sacctmgr", "show", "qos", account, "format=GrpTRES%80", "-n", "-P"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return result
+
+        # Parse GrpTRES string like "cpu=104,gres/gpu=3,mem=812G"
+        tres_str = proc.stdout.strip().split("|")[0].strip()
+        if not tres_str:
+            return result
+
+        import re
+
+        for part in tres_str.split(","):
+            part = part.strip()
+            if part.startswith("cpu="):
+                result["cpus"] = int(part.split("=", 1)[1])
+            elif part.startswith("gres/gpu="):
+                result["gpus"] = int(part.split("=", 1)[1])
+            elif part.startswith("mem="):
+                mem_str = part.split("=", 1)[1]
+                m = re.match(r"(\d+)\s*([GMgm]?)", mem_str)
+                if m:
+                    val = int(m.group(1))
+                    unit = m.group(2).upper()
+                    if unit == "M":
+                        result["mem_gb"] = val // 1024
+                    else:
+                        result["mem_gb"] = val
+
+    except (subprocess.SubprocessError, FileNotFoundError, OSError, ValueError):
+        pass
+
+    return result
+
+
+def detect_dual_pool_resources(
+    gpu_account: str,
+    cpu_account: str,
+    resources_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Detect combined GPU+CPU pool resources from two SLURM accounts.
+
+    Mirrors the dual-pool calculation in submit.sh (lines 361-606).
+
+    Parameters
+    ----------
+    gpu_account : str
+        Account with GPU access (e.g., 'maigan')
+    cpu_account : str
+        Account for CPU-only jobs (e.g., 'clive')
+    resources_config : dict, optional
+        Resource config with per-job requirements:
+        - cpus_per_gpu_job (default 4)
+        - mem_per_gpu_job (default 48 GB)
+        - cpus_per_cpu_job (default 8)
+        - mem_per_cpu_job (default 48 GB)
+
+    Returns
+    -------
+    dict
+        {
+            "gpu_slots": int,
+            "cpu_slots": int,
+            "total_slots": int,
+            "gpu_alloc": {"cpus": int, "gpus": int, "mem_gb": int},
+            "cpu_alloc": {"cpus": int, "gpus": int, "mem_gb": int},
+        }
+    """
+    rc = resources_config or {}
+    cpus_per_gpu = rc.get("cpus_per_gpu_job", 4)
+    mem_per_gpu = rc.get("mem_per_gpu_job", 48)
+    cpus_per_cpu = rc.get("cpus_per_cpu_job", 8)
+    mem_per_cpu = rc.get("mem_per_cpu_job", 48)
+
+    gpu_alloc = detect_account_resources(gpu_account)
+    cpu_alloc = detect_account_resources(cpu_account) if cpu_account and cpu_account != gpu_account else {"cpus": 0, "gpus": 0, "mem_gb": 0}
+
+    # GPU slots: limited by GPUs, CPUs, and memory
+    if gpu_alloc["gpus"] > 0:
+        gpu_slots = min(
+            gpu_alloc["gpus"],
+            gpu_alloc["cpus"] // cpus_per_gpu if cpus_per_gpu > 0 else gpu_alloc["gpus"],
+            gpu_alloc["mem_gb"] // mem_per_gpu if mem_per_gpu > 0 else gpu_alloc["gpus"],
+        )
+    else:
+        gpu_slots = 0
+
+    # CPU slots: limited by CPUs and memory (no GPU requirement)
+    if cpu_alloc["cpus"] > 0 and cpus_per_cpu > 0:
+        cpu_by_cores = cpu_alloc["cpus"] // cpus_per_cpu
+        cpu_by_mem = cpu_alloc["mem_gb"] // mem_per_cpu if mem_per_cpu > 0 else cpu_by_cores
+        cpu_slots = min(cpu_by_cores, cpu_by_mem)
+    else:
+        cpu_slots = 0
+
+    return {
+        "gpu_slots": gpu_slots,
+        "cpu_slots": cpu_slots,
+        "total_slots": gpu_slots + cpu_slots,
+        "gpu_alloc": gpu_alloc,
+        "cpu_alloc": cpu_alloc,
+    }
+
+
 def generate_slurm_config(
     project_name: str,
     project_dir: str | Path,

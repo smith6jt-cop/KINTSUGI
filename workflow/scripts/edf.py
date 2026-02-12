@@ -66,26 +66,47 @@ QUALITY_GATE = {
 }
 
 # ---------------------------------------------------------------------------
-# GPU initialization
+# GPU initialization (respects device_mode from Snakemake rule)
 # ---------------------------------------------------------------------------
-DEVICE_MODE = "gpu"
+REQUESTED_DEVICE_MODE = getattr(snakemake.params, "device_mode", "gpu")
+
+DEVICE_MODE = "cpu"
 n_gpus = 0
 GPU_IDS = []
-try:
-    import cupy as cp
+if REQUESTED_DEVICE_MODE == "gpu":
+    try:
+        import cupy as cp
 
-    cp.cuda.Device(0).use()
-    _ = cp.zeros(1)
-    n_gpus = cp.cuda.runtime.getDeviceCount()
-    GPU_IDS = list(range(n_gpus))
-    print(f"CUDA initialized: {n_gpus} GPU(s) available")
-except Exception as e:
-    print(f"WARNING: CUDA initialization failed: {e}")
-    print("Falling back to CPU mode")
-    DEVICE_MODE = "cpu"
+        cp.cuda.Device(0).use()
+        _ = cp.zeros(1)
+        n_gpus = cp.cuda.runtime.getDeviceCount()
+        GPU_IDS = list(range(n_gpus))
+        print(f"CUDA initialized: {n_gpus} GPU(s) available")
+        DEVICE_MODE = "gpu"
+    except Exception as e:
+        print(f"WARNING: CUDA initialization failed: {e}")
+        print("Falling back to CPU mode")
+else:
+    print(f"CPU mode (requested by Snakemake rule)")
 
 EDF_PARAMS["backend"] = "numpy" if DEVICE_MODE == "cpu" else "auto"
 EDF_PARAMS["device"] = DEVICE_MODE
+
+# ---------------------------------------------------------------------------
+# Channel names for marker-named output
+# ---------------------------------------------------------------------------
+CHANNEL_NAMES_CONFIG = getattr(snakemake.params, "channel_names", {})
+
+
+def get_channel_output_name(cycle, channel):
+    """Get marker-named output filename, falling back to CH#_edf.tif."""
+    cyc_key = int(cycle)
+    ch_idx = int(channel) - 1
+    names = CHANNEL_NAMES_CONFIG.get(cyc_key, CHANNEL_NAMES_CONFIG.get(str(cyc_key), []))
+    if names and ch_idx < len(names):
+        return names[ch_idx].replace("/", "_").replace(" ", "_") + ".tif"
+    return f"CH{channel}_edf.tif"
+
 
 # ---------------------------------------------------------------------------
 # Imports
@@ -252,8 +273,8 @@ def process_edf(args):
             z_smooth_sigma=EDF_PARAMS.get("z_smooth_sigma", 0.0),
         )
 
-        # Save
-        output_file = output_path / f"CH{ch}_edf.tif"
+        # Save (marker-named if channel names available)
+        output_file = output_path / get_channel_output_name(CYCLE, ch)
         imsave(str(output_file), edf_result.astype(np.uint16), check_contrast=False)
 
         pct_zero = 100 * np.sum(edf_result == 0) / edf_result.size
