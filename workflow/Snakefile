@@ -21,29 +21,19 @@ Usage:
   snakemake --forcerun stitch                       # Force re-run stitching
 """
 
-import json
 import re
 from pathlib import Path
 
 configfile: "config.yaml"
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration (all from config.yaml — single source of truth)
 # ---------------------------------------------------------------------------
 PROJECT = config["project_dir"]
 KINTSUGI = config["kintsugi_dir"]
 CYCLES = config["cycles"]
 CHANNELS = config["channels"]
-
-# Load experiment metadata (z-planes, microscope params)
-_experiment_path = Path(PROJECT) / "meta" / "experiment.json"
-if _experiment_path.exists():
-    with open(_experiment_path) as _f:
-        EXPERIMENT = json.load(_f)
-else:
-    EXPERIMENT = {}
-
-N_ZPLANES = EXPERIMENT.get("n_zplanes", 15)
+N_ZPLANES = config["n_zplanes"]
 
 # Format cycle numbers as zero-padded strings for file paths
 def cyc_fmt(cycle):

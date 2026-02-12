@@ -44,7 +44,7 @@ The `/meta/experiment.json` file stores microscope and acquisition parameters. I
 {
   "tile_rows": 5,
   "tile_cols": 5,
-  "tile_overlap": 0.1,
+  "tile_overlap": 0.3,
   "xy_pixel_size": 377.0,
   "z_step_size": 1500.0,
   "numerical_aperture": 0.75,
@@ -68,6 +68,32 @@ kintsugi init /path/to/project --name "My Experiment" \
     --xy-pixel-size 377 --z-step-size 1500 \
     --numerical-aperture 0.75 --tissue-ri 1.44
 ```
+
+**CODEX/Akoya Format Compatibility:**
+`ExperimentConfig.from_dict()` automatically translates CODEX field names to KINTSUGI equivalents:
+
+| CODEX Field | KINTSUGI Field |
+|-------------|---------------|
+| `numCycles` | `n_cycles` |
+| `numZPlanes` | `n_zplanes` |
+| `regionHeight` | `tile_rows` |
+| `regionWidth` | `tile_cols` |
+| `numChannels` | `channels_per_cycle` |
+| `xyResolution` | `xy_pixel_size` |
+| `zPitch` | `z_step_size` |
+| `aperture` | `numerical_aperture` |
+
+CODEX flat wavelength lists (e.g., `[358, 488, 550, 650]`) are mapped to proper (excitation, emission) pairs using `_CODEX_FILTER_SETS` in `project.py`. The mapping uses known filter sets:
+
+| Excitation | Filter | Emission |
+|------------|--------|----------|
+| 358 nm | DAPI | 461 nm |
+| 488 nm | FITC/Alexa 488 | 525 nm |
+| 550 nm | TRITC/Cy3 | 575 nm |
+| 650 nm | Cy5 | 668 nm |
+| 750 nm | Cy7 | 775 nm |
+
+CODEX experiment.json does NOT include refractive index. For uncleared tissue (all HuBMAP CODEX datasets), RI is always **1.44**.
 
 ### Channel Names
 
@@ -633,6 +659,31 @@ stack, result = check_before_processing(
     fail_action="mitigate"  # Options: 'raise', 'warn', 'skip', 'mitigate'
 )
 ```
+
+## Batch Processing (Multi-Dataset)
+
+KINTSUGI supports automated batch processing of multiple CODEX datasets. See `KINTSUGI_Batch_Processing_Guide.docx` for the complete 8-phase workflow.
+
+**Key scripts** (in `/blue/maigan/smith6jt/`):
+- `data_discovery.py` - Scans orange storage, builds `dataset_manifest.csv` from experiment.json files
+- `setup_all_projects.sh` - Creates KINTSUGI projects for all datasets in manifest
+- `stage_datasets.sh` - Submits SLURM rsync jobs to copy raw data from orange to blue
+- `configure_workflows.sh` - Generates Snakemake configs for each project
+
+**Storage architecture** (HiPerGator):
+- `/orange/maigan/` - Long-term storage for raw CODEX data (~9.7 TB, 34 datasets)
+- `/blue/maigan/` - Processing workspace (~17 TB available). Raw data must be copied here.
+- Peak blue usage per dataset: ~3x raw size (raw + stitched + deconvolved intermediates)
+
+**Rsync staging pattern** (preserves cycle directory structure):
+```bash
+rsync -av '${orange_path}/' '${RAW_DIR}/' \
+  --include='*/' --include='*.tif' --exclude='*'
+```
+**CRITICAL**: Never use bash glob `*/` on rsync source — it flattens cycle directories and overwrites files across cycles. Use the source path with trailing `/` and let rsync handle the tree.
+
+**Batch processing phases**:
+1. Discovery → 2. Setup + Staging → 3. Single-cycle validation → 4. SLURM batch (stitch→decon→EDF) → 5. Registration → 6. Cleanup intermediates → 7. Signal isolation (local GPU PCs) → 8. Segmentation (local GPU PCs)
 
 ## Dependencies
 

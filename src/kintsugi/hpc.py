@@ -183,7 +183,7 @@ def get_slurm_defaults() -> dict[str, Any]:
         # Tile grid
         "tile_rows": 5,
         "tile_cols": 5,
-        "tile_overlap": 0.1,
+        "tile_overlap": 0.3,
         # Microscope parameters
         "xy_vox": 377,
         "z_vox": 1500,

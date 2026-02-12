@@ -11,7 +11,6 @@ Snakemake guarantees:
 """
 
 import gc
-import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -32,6 +31,7 @@ CHANNELS = list(snakemake.params.channels)
 
 # Setup Python path
 sys.path.insert(0, str(PROJECT_DIR / "notebooks"))
+sys.path.insert(0, str(KINTSUGI_DIR / "notebooks"))
 sys.path.insert(0, str(KINTSUGI_DIR))
 
 # Logging utilities (replicates slurm/utils.sh structured logging)
@@ -39,14 +39,8 @@ sys.path.insert(0, snakemake.scriptdir)
 from log_utils import log_header, log_footer, summary_before, summary_after
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration from config.yaml (single source of truth)
 # ---------------------------------------------------------------------------
-experiment_config = {}
-config_path = PROJECT_DIR / "meta" / "experiment.json"
-if config_path.exists():
-    with open(config_path) as f:
-        experiment_config = json.load(f)
-
 wf_config = snakemake.config
 
 START_CHANNEL = min(CHANNELS)

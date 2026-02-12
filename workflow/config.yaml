@@ -1,8 +1,8 @@
 # =============================================================================
 # KINTSUGI Snakemake Pipeline Configuration
 # =============================================================================
-# This file replaces slurm/config.sh for the Snakemake workflow.
-# Edit the paths and parameters below for your project.
+# This is a TEMPLATE. Use 'kintsugi workflow config .' to auto-generate
+# a project-specific config.yaml from meta/experiment.json.
 #
 # Usage:
 #   snakemake --profile profiles/slurm -j 8   # SLURM execution
@@ -32,7 +32,23 @@ output_format: tiff
 # ---------------------------------------------------------------------------
 tile_rows: 5
 tile_cols: 5
-tile_overlap: 0.1
+tile_overlap: 0.3
+
+# ---------------------------------------------------------------------------
+# Microscope parameters (from experiment.json)
+# ---------------------------------------------------------------------------
+xy_pixel_size: 377.0      # nm per pixel XY
+z_step_size: 1500.0       # nm per z-slice
+numerical_aperture: 0.75
+tissue_refractive_index: 1.44
+n_zplanes: 15
+
+# Wavelengths per channel: {channel: [excitation_nm, emission_nm]}
+wavelengths:
+  '1': [358.0, 461.0]     # DAPI
+  '2': [488.0, 525.0]     # FITC / Alexa 488
+  '3': [560.0, 575.0]     # TRITC / Cy3
+  '4': [648.0, 668.0]     # Cy5
 
 # ---------------------------------------------------------------------------
 # Stitching parameters
@@ -66,8 +82,6 @@ quality_gate:
 # ---------------------------------------------------------------------------
 # SLURM resource defaults
 # ---------------------------------------------------------------------------
-# These are used by the SLURM profile. Microscope parameters are read
-# directly from meta/experiment.json by the processing scripts.
 resources:
   account: maigan
   partition_gpu: hpg-b200
@@ -78,7 +92,7 @@ resources:
   # Memory per step (MB)
   mem_stitch: 48000
   mem_decon: 48000
-  mem_edf: 16000
+  mem_edf: 48000
 
   # Time per step (minutes)
   time_stitch: 240

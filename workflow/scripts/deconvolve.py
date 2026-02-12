@@ -9,7 +9,6 @@ Snakemake guarantees:
   - No need for skip-existing checks
 """
 
-import json
 import sys
 import time
 from datetime import datetime
@@ -25,6 +24,7 @@ CHANNELS = list(snakemake.params.channels)
 
 # Setup Python path
 sys.path.insert(0, str(PROJECT_DIR / "notebooks"))
+sys.path.insert(0, str(KINTSUGI_DIR / "notebooks"))
 sys.path.insert(0, str(KINTSUGI_DIR))
 
 # Logging utilities (replicates slurm/utils.sh structured logging)
@@ -32,37 +32,25 @@ sys.path.insert(0, snakemake.scriptdir)
 from log_utils import log_header, log_footer, summary_before, summary_after
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration from config.yaml (single source of truth)
 # ---------------------------------------------------------------------------
-experiment_config = {}
-config_path = PROJECT_DIR / "meta" / "experiment.json"
-if config_path.exists():
-    with open(config_path) as f:
-        experiment_config = json.load(f)
+wf_config = snakemake.config
 
 START_CHANNEL = min(CHANNELS)
 END_CHANNEL = max(CHANNELS)
-OUTPUT_FORMAT = snakemake.config.get("output_format", "zarr")
+OUTPUT_FORMAT = wf_config.get("output_format", "zarr")
 
-# Microscope parameters (experiment.json -> defaults)
-XY_VOX = float(experiment_config.get("xy_pixel_size", 377))
-Z_VOX = float(experiment_config.get("z_step_size", 1500))
-MIC_NA = float(experiment_config.get("numerical_aperture", 0.75))
-TISSUE_RI = float(experiment_config.get("tissue_refractive_index", 1.44))
+# Microscope parameters — no fallback defaults; config.yaml must provide these
+XY_VOX = float(wf_config["xy_pixel_size"])
+Z_VOX = float(wf_config["z_step_size"])
+MIC_NA = float(wf_config["numerical_aperture"])
+TISSUE_RI = float(wf_config["tissue_refractive_index"])
 
-# Parse wavelengths
+# Parse wavelengths from config.yaml (already in dict format: {"1": [ex, em], ...})
 WAVELENGTHS = {}
-if "wavelengths" in experiment_config:
-    for ch_str, (ex, em) in experiment_config["wavelengths"].items():
-        WAVELENGTHS[int(ch_str)] = (float(ex), float(em))
-else:
-    # Default wavelengths
-    WAVELENGTHS = {
-        1: (358.0, 461.0),
-        2: (753.0, 775.0),
-        3: (560.0, 575.0),
-        4: (648.0, 668.0),
-    }
+wl_raw = wf_config["wavelengths"]
+for ch_str, pair in wl_raw.items():
+    WAVELENGTHS[int(ch_str)] = (float(pair[0]), float(pair[1]))
 
 # ---------------------------------------------------------------------------
 # GPU initialization
@@ -145,7 +133,13 @@ def process_channel(ch):
     print(f"\n  Channel {ch} starting...")
 
     try:
-        lambda_ex, lambda_em = WAVELENGTHS.get(ch, (560, 575))
+        if ch not in WAVELENGTHS:
+            raise KeyError(
+                f"Channel {ch} not found in wavelengths config. "
+                f"Available: {sorted(WAVELENGTHS.keys())}. "
+                f"Check config.yaml wavelengths section."
+            )
+        lambda_ex, lambda_em = WAVELENGTHS[ch]
 
         decon(
             base_dir=str(PROJECT_DIR),

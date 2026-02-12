@@ -114,7 +114,7 @@ microscope:
 # Tile grid
 tile_rows: 5
 tile_cols: 5
-tile_overlap: 0.1
+tile_overlap: 0.3
 
 # SLURM resource defaults (used in profile)
 resources:
