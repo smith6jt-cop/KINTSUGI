@@ -14,18 +14,19 @@ Processing stages:
 Each rule processes one cycle (all channels, all z-planes).
 Snakemake's DAG ensures per-cycle dependencies: stitch -> deconvolve -> edf.
 
-Dual-pool architecture:
-  GPU rules run on the GPU account/partition (e.g., maigan/hpg-b200).
-  CPU rules run on the CPU account/partition (e.g., clive/hpg-default).
-  ruleorder prefers GPU; --resources gpus=N caps GPU usage so Snakemake
-  falls back to CPU variants when the GPU budget is exhausted.
+Multi-account scheduling:
+  Cycles are pre-assigned to accounts and modes (GPU/CPU) at DAG creation.
+  GPU slots come from each account's QOS gres/gpu allocation.
+  CPU slots use 85% of each account's CPU allocation (separate pool).
+  Lambda resource functions route each cycle to the correct account/partition.
 
 Usage:
-  snakemake --profile profiles/slurm -j 13 --resources gpus=3  # Dual-pool
-  snakemake --cores 4                                           # Local
-  snakemake -n                                                  # Dry run
+  snakemake --profile profiles/slurm -j 24  # Multi-account
+  snakemake --cores 4                        # Local
+  snakemake -n                               # Dry run
 """
 
+import os
 import re
 from pathlib import Path
 
@@ -43,12 +44,8 @@ N_ZPLANES = config["n_zplanes"]
 # Channel names for marker-named EDF output
 CHANNEL_NAMES = config.get("channel_names", {})
 
-# Dual-pool resource configuration
+# Resource configuration
 RES = config.get("resources", {})
-ACCOUNT_GPU = RES.get("account_gpu", RES.get("account", ""))
-ACCOUNT_CPU = RES.get("account_cpu", "")
-PARTITION_GPU = RES.get("partition_gpu", "hpg-b200")
-PARTITION_CPU = RES.get("partition_cpu", "hpg-default")
 CPU_TIME_MULT = int(RES.get("cpu_time_multiplier", 5))
 CPU_CPUS = int(RES.get("cpu_cpus_per_task", 8))
 
@@ -117,10 +114,96 @@ def get_raw_dir(wildcards):
 
 
 # ---------------------------------------------------------------------------
-# Target rule: request all final EDF outputs (marker-named)
+# Multi-account cycle assignment
 # ---------------------------------------------------------------------------
-def all_edf_targets():
-    """Build list of marker-named EDF target files."""
+ACCOUNTS = RES.get("accounts", [])
+
+
+def _build_cycle_assignment():
+    """Pre-assign each cycle to an account and mode (gpu/cpu).
+
+    First N cycles go to GPU (distributed proportionally across accounts),
+    remaining cycles go to CPU (distributed proportionally across accounts).
+    """
+    assignment = {}
+
+    # Build GPU queue: each account contributes gpu_slots entries
+    gpu_queue = []
+    for acct in ACCOUNTS:
+        gpu_queue.extend([{
+            "account": acct["name"],
+            "mode": "gpu",
+            "partition": acct.get("partition_gpu", "hpg-b200,hpg-turin"),
+        }] * acct.get("gpu_slots", 0))
+
+    # Build CPU queue: each account contributes cpu_slots entries
+    cpu_queue = []
+    for acct in ACCOUNTS:
+        cpu_queue.extend([{
+            "account": acct["name"],
+            "mode": "cpu",
+            "partition": acct.get("partition_cpu", "hpg-default"),
+        }] * acct.get("cpu_slots", 0))
+
+    for i, cyc in enumerate(CYCLES):
+        cyc_key = cyc_fmt(cyc)
+        if i < len(gpu_queue):
+            assignment[cyc_key] = gpu_queue[i]
+        elif i - len(gpu_queue) < len(cpu_queue):
+            assignment[cyc_key] = cpu_queue[i - len(gpu_queue)]
+        else:
+            # Overflow: round-robin across accounts on CPU
+            acct = ACCOUNTS[i % len(ACCOUNTS)] if ACCOUNTS else {"name": "", "partition_cpu": "hpg-default"}
+            assignment[cyc_key] = {
+                "account": acct["name"],
+                "mode": "cpu",
+                "partition": acct.get("partition_cpu", "hpg-default"),
+            }
+
+    return assignment
+
+
+_CYCLE_ASSIGN = _build_cycle_assignment() if ACCOUNTS else {}
+
+# Fallback for single-account / legacy config (no accounts list)
+if not _CYCLE_ASSIGN:
+    _default_acct = RES.get("account_gpu", RES.get("account", ""))
+    _default_part = RES.get("partition_gpu", "hpg-b200")
+    for cyc in CYCLES:
+        _CYCLE_ASSIGN[cyc_fmt(cyc)] = {
+            "account": _default_acct,
+            "mode": "gpu",
+            "partition": _default_part,
+        }
+
+
+def _assign(wc):
+    """Get assignment dict for a cycle wildcard."""
+    return _CYCLE_ASSIGN[wc.cycle]
+
+
+def _is_gpu(wc):
+    return _assign(wc)["mode"] == "gpu"
+
+
+# ---------------------------------------------------------------------------
+# Target rule: request all EDF sentinels (one per cycle)
+# ---------------------------------------------------------------------------
+# EDF rules produce sentinel-only outputs because marker filenames vary per
+# cycle. The edf.py script writes the actual marker-named TIFs (e.g., CD45.tif).
+# After completion, use 'validate' rule to verify all expected files exist.
+
+def all_edf_sentinels():
+    """Build list of EDF sentinel targets (one per cycle)."""
+    return expand(
+        "{project}/data/processed/edf/cyc{cycle}/.snakemake_complete",
+        project=PROJECT,
+        cycle=[cyc_fmt(c) for c in CYCLES],
+    )
+
+
+def all_edf_marker_files():
+    """Build list of expected marker-named EDF files (for validation)."""
     targets = []
     for c in CYCLES:
         for ch in CHANNELS:
@@ -130,15 +213,21 @@ def all_edf_targets():
 
 
 rule all:
-    input: all_edf_targets()
+    input: all_edf_sentinels()
 
 
-# ---------------------------------------------------------------------------
-# Rule order: prefer GPU variants; CPU is fallback when GPU budget exhausted
-# ---------------------------------------------------------------------------
-ruleorder: stitch_gpu > stitch_cpu
-ruleorder: deconvolve_gpu > deconvolve_cpu
-ruleorder: edf_gpu > edf_cpu
+rule validate:
+    """Check that all expected marker-named EDF files exist after processing."""
+    input: all_edf_sentinels()
+    run:
+        import sys
+        missing = [f for f in all_edf_marker_files() if not os.path.exists(f)]
+        if missing:
+            print(f"ERROR: {len(missing)} expected EDF files missing:")
+            for f in missing[:20]:
+                print(f"  {f}")
+            sys.exit(1)
+        print(f"OK: All {len(all_edf_marker_files())} marker-named EDF files verified")
 
 
 # ===========================================================================
@@ -147,7 +236,7 @@ ruleorder: edf_gpu > edf_cpu
 # One job per cycle. Produces all channels x all z-planes as TIFF files.
 # The sentinel file signals completion (avoids declaring hundreds of outputs).
 
-rule stitch_gpu:
+rule stitch:
     input:
         raw_dir=get_raw_dir,
     output:
@@ -156,37 +245,14 @@ rule stitch_gpu:
         project_dir=PROJECT,
         kintsugi_dir=KINTSUGI,
         channels=CHANNELS,
-        device_mode="gpu",
+        device_mode=lambda wc: _assign(wc)["mode"],
     resources:
-        mem_mb=RES.get("mem_stitch", 48000),
-        runtime=RES.get("time_stitch", 240),
-        slurm_partition=PARTITION_GPU,
-        slurm_account=ACCOUNT_GPU,
-        gpus=1,
-        cpus_per_task=4,
-    log:
-        "{project}/slurm/logs/snakemake/stitch_cyc{cycle}.log",
-    script:
-        "scripts/stitch.py"
-
-
-rule stitch_cpu:
-    input:
-        raw_dir=get_raw_dir,
-    output:
-        sentinel="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
-    params:
-        project_dir=PROJECT,
-        kintsugi_dir=KINTSUGI,
-        channels=CHANNELS,
-        device_mode="cpu",
-    resources:
-        mem_mb=RES.get("cpu_mem_stitch", 48000),
-        runtime=RES.get("time_stitch", 240) * CPU_TIME_MULT,
-        slurm_partition=PARTITION_CPU,
-        slurm_account=ACCOUNT_CPU,
-        gpus=0,
-        cpus_per_task=CPU_CPUS,
+        mem_mb=lambda wc: RES.get("mem_stitch", 48000),
+        runtime=lambda wc: RES.get("time_stitch", 240) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
+        slurm_partition=lambda wc: _assign(wc)["partition"],
+        slurm_account=lambda wc: _assign(wc)["account"],
+        gpus=lambda wc: 1 if _is_gpu(wc) else 0,
+        cpus_per_task=lambda wc: 4 if _is_gpu(wc) else CPU_CPUS,
     log:
         "{project}/slurm/logs/snakemake/stitch_cyc{cycle}.log",
     script:
@@ -198,7 +264,7 @@ rule stitch_cpu:
 # ===========================================================================
 # One job per cycle. Depends on stitching completion sentinel.
 
-rule deconvolve_gpu:
+rule deconvolve:
     input:
         stitch_done="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
     output:
@@ -207,37 +273,14 @@ rule deconvolve_gpu:
         project_dir=PROJECT,
         kintsugi_dir=KINTSUGI,
         channels=CHANNELS,
-        device_mode="gpu",
+        device_mode=lambda wc: _assign(wc)["mode"],
     resources:
-        mem_mb=RES.get("mem_decon", 48000),
-        runtime=RES.get("time_decon", 240),
-        slurm_partition=PARTITION_GPU,
-        slurm_account=ACCOUNT_GPU,
-        gpus=1,
-        cpus_per_task=4,
-    log:
-        "{project}/slurm/logs/snakemake/decon_cyc{cycle}.log",
-    script:
-        "scripts/deconvolve.py"
-
-
-rule deconvolve_cpu:
-    input:
-        stitch_done="{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
-    output:
-        sentinel="{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
-    params:
-        project_dir=PROJECT,
-        kintsugi_dir=KINTSUGI,
-        channels=CHANNELS,
-        device_mode="cpu",
-    resources:
-        mem_mb=RES.get("cpu_mem_decon", 48000),
-        runtime=RES.get("time_decon", 240) * CPU_TIME_MULT,
-        slurm_partition=PARTITION_CPU,
-        slurm_account=ACCOUNT_CPU,
-        gpus=0,
-        cpus_per_task=CPU_CPUS,
+        mem_mb=lambda wc: RES.get("mem_decon", 48000),
+        runtime=lambda wc: RES.get("time_decon", 240) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
+        slurm_partition=lambda wc: _assign(wc)["partition"],
+        slurm_account=lambda wc: _assign(wc)["account"],
+        gpus=lambda wc: 1 if _is_gpu(wc) else 0,
+        cpus_per_task=lambda wc: 4 if _is_gpu(wc) else CPU_CPUS,
     log:
         "{project}/slurm/logs/snakemake/decon_cyc{cycle}.log",
     script:
@@ -250,7 +293,7 @@ rule deconvolve_cpu:
 # One job per cycle. Uses sentinel-only output since marker filenames vary
 # per cycle. The rule all targets verify the actual EDF files exist.
 
-rule edf_gpu:
+rule edf:
     input:
         decon_done="{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
     output:
@@ -259,39 +302,15 @@ rule edf_gpu:
         project_dir=PROJECT,
         kintsugi_dir=KINTSUGI,
         channels=CHANNELS,
-        device_mode="gpu",
+        device_mode=lambda wc: _assign(wc)["mode"],
         channel_names=CHANNEL_NAMES,
     resources:
-        mem_mb=RES.get("mem_edf", 48000),
-        runtime=RES.get("time_edf", 60),
-        slurm_partition=PARTITION_GPU,
-        slurm_account=ACCOUNT_GPU,
-        gpus=1,
-        cpus_per_task=4,
-    log:
-        "{project}/slurm/logs/snakemake/edf_cyc{cycle}.log",
-    script:
-        "scripts/edf.py"
-
-
-rule edf_cpu:
-    input:
-        decon_done="{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
-    output:
-        sentinel="{project}/data/processed/edf/cyc{cycle}/.snakemake_complete",
-    params:
-        project_dir=PROJECT,
-        kintsugi_dir=KINTSUGI,
-        channels=CHANNELS,
-        device_mode="cpu",
-        channel_names=CHANNEL_NAMES,
-    resources:
-        mem_mb=RES.get("cpu_mem_edf", 48000),
-        runtime=RES.get("time_edf", 60) * CPU_TIME_MULT,
-        slurm_partition=PARTITION_CPU,
-        slurm_account=ACCOUNT_CPU,
-        gpus=0,
-        cpus_per_task=CPU_CPUS,
+        mem_mb=lambda wc: RES.get("mem_edf", 48000),
+        runtime=lambda wc: RES.get("time_edf", 60) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
+        slurm_partition=lambda wc: _assign(wc)["partition"],
+        slurm_account=lambda wc: _assign(wc)["account"],
+        gpus=lambda wc: 1 if _is_gpu(wc) else 0,
+        cpus_per_task=lambda wc: 4 if _is_gpu(wc) else CPU_CPUS,
     log:
         "{project}/slurm/logs/snakemake/edf_cyc{cycle}.log",
     script:

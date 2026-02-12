@@ -4,12 +4,13 @@
 # Configures Snakemake to submit jobs via SLURM.
 # Requires: snakemake >= 8.0, snakemake-executor-plugin-slurm
 #
-# Account and partition are set per-rule (GPU vs CPU variants) in the
-# Snakefile, NOT here. Use 'kintsugi workflow check .' to see recommended
-# -j and --resources flags.
+# Account and partition are set per-rule in the Snakefile via lambda
+# resources, NOT here. Use 'kintsugi workflow check .' to see available
+# slots across all accounts.
 #
 # Usage:
-#   snakemake --profile profiles/slurm -j 13 --resources gpus=3
+#   snakemake --profile profiles/slurm
+#   kintsugi workflow run .                    # auto-sets -j from live availability
 # =============================================================================
 
 executor: slurm

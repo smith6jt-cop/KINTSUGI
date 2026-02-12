@@ -12,6 +12,18 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+# ============================================================================
+# Account blocklist — these accounts are NEVER used for any KINTSUGI jobs.
+# Enforced in get_user_slurm_accounts(), detect_multi_account_resources(),
+# and detect_live_multi_account().  To add/remove accounts, edit this set.
+# ============================================================================
+BLOCKED_ACCOUNTS: frozenset[str] = frozenset({"brusko"})
+
+
+def _filter_blocked(accounts: list[str]) -> list[str]:
+    """Remove blocked accounts from a list. Single enforcement point."""
+    return [a for a in accounts if a not in BLOCKED_ACCOUNTS]
+
 
 def detect_hpc_settings() -> dict[str, Any]:
     """
@@ -229,18 +241,22 @@ def get_user_slurm_accounts() -> list[str]:
     """
     try:
         result = subprocess.run(
-            ["sacctmgr", "show", "user", os.environ.get("USER", ""), "-n", "-p", "format=account"],
+            [
+                "sacctmgr", "show", "associations",
+                f"user={os.environ.get('USER', '')}",
+                "format=account", "-n", "-P",
+            ],
             capture_output=True,
             text=True,
             timeout=10,
         )
         if result.returncode == 0:
-            accounts = [
-                line.strip().rstrip("|")
+            accounts = list(dict.fromkeys(
+                line.strip()
                 for line in result.stdout.strip().split("\n")
                 if line.strip()
-            ]
-            return accounts
+            ))
+            return _filter_blocked(accounts)
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
         pass
     return []
@@ -347,6 +363,154 @@ def detect_account_resources(account: str) -> dict[str, int]:
     return result
 
 
+def detect_current_usage(account: str) -> dict[str, int]:
+    """
+    Detect current resource usage on a SLURM account.
+
+    Uses slurmInfo (HiPerGator) to get investment QOS usage,
+    falling back to squeue if unavailable.
+
+    Parameters
+    ----------
+    account : str
+        SLURM account name
+
+    Returns
+    -------
+    dict
+        {"cpus": int, "gpus": int, "mem_gb": int}
+        Includes running + pending jobs from all users on the account.
+    """
+    usage = {"cpus": 0, "gpus": 0, "mem_gb": 0}
+    if not account:
+        return usage
+
+    import re
+
+    # Try slurmInfo first (HiPerGator tool, provides clean investment usage)
+    try:
+        proc = subprocess.run(
+            ["slurmInfo", "-g", account],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if proc.returncode == 0:
+            # Parse "Investment (<account>):  CPU  MEM(GB)  CPU  MEM(GB)  CPU  MEM(GB)"
+            # The "Total" columns (last pair) include running + pending
+            for line in proc.stdout.split("\n"):
+                # Match investment line: "Investment (maigan):     4       32     0        0     4       32"
+                m = re.match(
+                    rf"\s*Investment\s+\({re.escape(account)}\):"
+                    r"\s+(\d+)\s+(\d+)"   # running: cpu, mem
+                    r"\s+(\d+)\s+(\d+)"   # pending: cpu, mem
+                    r"\s+(\d+)\s+(\d+)",  # total:   cpu, mem
+                    line,
+                )
+                if m:
+                    usage["cpus"] = int(m.group(5))   # total CPUs
+                    usage["mem_gb"] = int(m.group(6))  # total MEM(GB)
+                    break
+            # slurmInfo doesn't show GPU usage per account, estimate from squeue
+            usage["gpus"] = _count_gpu_usage_squeue(account)
+            return usage
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        pass
+
+    # Fallback: parse squeue directly
+    try:
+        proc = subprocess.run(
+            ["squeue", "-A", account, "--state=RUNNING,PENDING", "-h", "-o", "%C|%m|%b"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if proc.returncode != 0:
+            return usage
+
+        for line in proc.stdout.strip().split("\n"):
+            if not line.strip():
+                continue
+            parts = line.strip().split("|")
+            if len(parts) < 3:
+                continue
+
+            try:
+                usage["cpus"] += int(parts[0])
+            except ValueError:
+                pass
+
+            mem_str = parts[1].strip()
+            m = re.match(r"(\d+)\s*([GMgm]?)", mem_str)
+            if m:
+                val = int(m.group(1))
+                unit = m.group(2).upper()
+                if unit == "M":
+                    usage["mem_gb"] += val // 1024
+                else:
+                    usage["mem_gb"] += val
+
+            gres_str = parts[2].strip()
+            if gres_str and gres_str != "N/A":
+                gm = re.search(r"gpu(?::[^:]+)?:(\d+)", gres_str)
+                if gm:
+                    usage["gpus"] += int(gm.group(1))
+
+    except (subprocess.SubprocessError, FileNotFoundError, OSError, ValueError):
+        pass
+
+    return usage
+
+
+def _count_gpu_usage_squeue(account: str) -> int:
+    """Count GPUs in use on an account via squeue GRES field."""
+    try:
+        proc = subprocess.run(
+            ["squeue", "-A", account, "--state=RUNNING,PENDING", "-h", "-o", "%b"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if proc.returncode != 0:
+            return 0
+
+        import re
+
+        total = 0
+        for line in proc.stdout.strip().split("\n"):
+            line = line.strip()
+            if line and line != "N/A":
+                m = re.search(r"gpu(?::[^:]+)?:(\d+)", line)
+                if m:
+                    total += int(m.group(1))
+        return total
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return 0
+
+
+def _compute_slots(alloc: dict, usage: dict, cpus_per_job: int, mem_per_job: int, has_gpus: bool) -> int:
+    """Compute available job slots from allocation minus current usage."""
+    avail_cpus = max(0, alloc["cpus"] - usage["cpus"])
+    avail_mem = max(0, alloc["mem_gb"] - usage["mem_gb"])
+
+    if has_gpus:
+        avail_gpus = max(0, alloc["gpus"] - usage["gpus"])
+        if avail_gpus == 0:
+            return 0
+        slots = [avail_gpus]
+        if cpus_per_job > 0:
+            slots.append(avail_cpus // cpus_per_job)
+        if mem_per_job > 0:
+            slots.append(avail_mem // mem_per_job)
+        return min(slots)
+    else:
+        if cpus_per_job <= 0:
+            return 0
+        by_cpus = avail_cpus // cpus_per_job
+        by_mem = avail_mem // mem_per_job if mem_per_job > 0 else by_cpus
+        return min(by_cpus, by_mem)
+
+
 def detect_dual_pool_resources(
     gpu_account: str,
     cpu_account: str,
@@ -355,7 +519,8 @@ def detect_dual_pool_resources(
     """
     Detect combined GPU+CPU pool resources from two SLURM accounts.
 
-    Mirrors the dual-pool calculation in submit.sh (lines 361-606).
+    Reports both **max** slots (from QOS allocation) and **available** slots
+    (allocation minus current usage by all users on the account).
 
     Parameters
     ----------
@@ -374,11 +539,16 @@ def detect_dual_pool_resources(
     -------
     dict
         {
-            "gpu_slots": int,
-            "cpu_slots": int,
-            "total_slots": int,
-            "gpu_alloc": {"cpus": int, "gpus": int, "mem_gb": int},
-            "cpu_alloc": {"cpus": int, "gpus": int, "mem_gb": int},
+            "gpu_slots": int,       # max GPU slots from allocation
+            "cpu_slots": int,       # max CPU slots from allocation
+            "total_slots": int,     # gpu_slots + cpu_slots (max)
+            "gpu_avail": int,       # currently available GPU slots
+            "cpu_avail": int,       # currently available CPU slots
+            "total_avail": int,     # currently available total
+            "gpu_alloc": {...},     # raw QOS allocation
+            "cpu_alloc": {...},     # raw QOS allocation
+            "gpu_usage": {...},     # current usage on GPU account
+            "cpu_usage": {...},     # current usage on CPU account
         }
     """
     rc = resources_config or {}
@@ -388,32 +558,202 @@ def detect_dual_pool_resources(
     mem_per_cpu = rc.get("mem_per_cpu_job", 48)
 
     gpu_alloc = detect_account_resources(gpu_account)
-    cpu_alloc = detect_account_resources(cpu_account) if cpu_account and cpu_account != gpu_account else {"cpus": 0, "gpus": 0, "mem_gb": 0}
+    has_cpu_pool = cpu_account and cpu_account != gpu_account
+    cpu_alloc = detect_account_resources(cpu_account) if has_cpu_pool else {"cpus": 0, "gpus": 0, "mem_gb": 0}
 
-    # GPU slots: limited by GPUs, CPUs, and memory
-    if gpu_alloc["gpus"] > 0:
-        gpu_slots = min(
-            gpu_alloc["gpus"],
-            gpu_alloc["cpus"] // cpus_per_gpu if cpus_per_gpu > 0 else gpu_alloc["gpus"],
-            gpu_alloc["mem_gb"] // mem_per_gpu if mem_per_gpu > 0 else gpu_alloc["gpus"],
-        )
-    else:
-        gpu_slots = 0
+    gpu_usage = detect_current_usage(gpu_account)
+    cpu_usage = detect_current_usage(cpu_account) if has_cpu_pool else {"cpus": 0, "gpus": 0, "mem_gb": 0}
 
-    # CPU slots: limited by CPUs and memory (no GPU requirement)
-    if cpu_alloc["cpus"] > 0 and cpus_per_cpu > 0:
-        cpu_by_cores = cpu_alloc["cpus"] // cpus_per_cpu
-        cpu_by_mem = cpu_alloc["mem_gb"] // mem_per_cpu if mem_per_cpu > 0 else cpu_by_cores
-        cpu_slots = min(cpu_by_cores, cpu_by_mem)
-    else:
-        cpu_slots = 0
+    zero_usage = {"cpus": 0, "gpus": 0, "mem_gb": 0}
+
+    # Max slots (from full allocation, ignoring current usage)
+    gpu_slots_max = _compute_slots(gpu_alloc, zero_usage, cpus_per_gpu, mem_per_gpu, has_gpus=True)
+    cpu_slots_max = _compute_slots(cpu_alloc, zero_usage, cpus_per_cpu, mem_per_cpu, has_gpus=False)
+
+    # Available slots (allocation minus current usage)
+    gpu_slots_avail = _compute_slots(gpu_alloc, gpu_usage, cpus_per_gpu, mem_per_gpu, has_gpus=True)
+    cpu_slots_avail = _compute_slots(cpu_alloc, cpu_usage, cpus_per_cpu, mem_per_cpu, has_gpus=False)
 
     return {
-        "gpu_slots": gpu_slots,
-        "cpu_slots": cpu_slots,
-        "total_slots": gpu_slots + cpu_slots,
+        "gpu_slots": gpu_slots_max,
+        "cpu_slots": cpu_slots_max,
+        "total_slots": gpu_slots_max + cpu_slots_max,
+        "gpu_avail": gpu_slots_avail,
+        "cpu_avail": cpu_slots_avail,
+        "total_avail": gpu_slots_avail + cpu_slots_avail,
         "gpu_alloc": gpu_alloc,
         "cpu_alloc": cpu_alloc,
+        "gpu_usage": gpu_usage,
+        "cpu_usage": cpu_usage,
+    }
+
+
+def detect_multi_account_resources(
+    accounts: list[str],
+    resources_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Detect resources across multiple SLURM accounts.
+
+    For each account, computes:
+    - GPU slots: direct from QOS gres/gpu allocation
+    - CPU slots: floor(utilization_cap * account_cpus / cpus_per_cpu_job)
+
+    GPU and CPU partitions are separate resource pools on HiPerGator,
+    so GPU jobs don't consume from the CPU allocation.
+
+    Parameters
+    ----------
+    accounts : list[str]
+        SLURM account names (e.g., ['maigan', 'clive'])
+    resources_config : dict, optional
+        Resource config with:
+        - cpus_per_cpu_job (default 8)
+        - cpu_utilization_cap (default 0.85)
+        - partition_gpu (default "hpg-b200,hpg-turin")
+        - partition_cpu (default "hpg-default")
+
+    Returns
+    -------
+    dict
+        {
+            "accounts": [
+                {"name": "maigan", "gpu_slots": 2, "cpu_slots": 8, "alloc": {...}},
+                {"name": "clive",  "gpu_slots": 3, "cpu_slots": 11, "alloc": {...}},
+            ],
+            "total_gpu_slots": 5,
+            "total_cpu_slots": 19,
+            "total_slots": 24,
+        }
+    """
+    import math
+
+    rc = resources_config or {}
+    cpus_per_cpu = rc.get("cpus_per_cpu_job", 8)
+    util_cap = rc.get("cpu_utilization_cap", 0.85)
+    partition_gpu = rc.get("partition_gpu", "hpg-b200,hpg-turin")
+    partition_cpu = rc.get("partition_cpu", "hpg-default")
+
+    # Safety net: always filter blocked accounts even if caller forgot
+    accounts = _filter_blocked(accounts)
+
+    account_details = []
+    total_gpu = 0
+    total_cpu = 0
+
+    for acct_name in accounts:
+        if not acct_name or acct_name.endswith("-b"):
+            continue
+
+        alloc = detect_account_resources(acct_name)
+        gpu_slots = alloc["gpus"]
+        cpu_slots = math.floor(util_cap * alloc["cpus"] / cpus_per_cpu) if cpus_per_cpu > 0 else 0
+
+        account_details.append({
+            "name": acct_name,
+            "gpu_slots": gpu_slots,
+            "cpu_slots": cpu_slots,
+            "partition_gpu": partition_gpu,
+            "partition_cpu": partition_cpu,
+            "alloc": alloc,
+        })
+        total_gpu += gpu_slots
+        total_cpu += cpu_slots
+
+    return {
+        "accounts": account_details,
+        "total_gpu_slots": total_gpu,
+        "total_cpu_slots": total_cpu,
+        "total_slots": total_gpu + total_cpu,
+    }
+
+
+def detect_live_multi_account(
+    accounts: list[str],
+    resources_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Detect resources with live usage across multiple SLURM accounts.
+
+    Like detect_multi_account_resources() but also queries current usage
+    to compute available slots.
+
+    Parameters
+    ----------
+    accounts : list[str]
+        SLURM account names
+    resources_config : dict, optional
+        Same as detect_multi_account_resources()
+
+    Returns
+    -------
+    dict
+        Same as detect_multi_account_resources() plus:
+        - Each account entry has "usage", "gpu_avail", "cpu_avail"
+        - Top-level "total_gpu_avail", "total_cpu_avail", "total_avail"
+    """
+    import math
+
+    rc = resources_config or {}
+    cpus_per_cpu = rc.get("cpus_per_cpu_job", 8)
+    mem_per_cpu = rc.get("mem_per_cpu_job", 48)
+    util_cap = rc.get("cpu_utilization_cap", 0.85)
+    partition_gpu = rc.get("partition_gpu", "hpg-b200,hpg-turin")
+    partition_cpu = rc.get("partition_cpu", "hpg-default")
+
+    # Safety net: always filter blocked accounts even if caller forgot
+    accounts = _filter_blocked(accounts)
+
+    account_details = []
+    total_gpu = 0
+    total_cpu = 0
+    total_gpu_avail = 0
+    total_cpu_avail = 0
+
+    for acct_name in accounts:
+        if not acct_name or acct_name.endswith("-b"):
+            continue
+
+        alloc = detect_account_resources(acct_name)
+        usage = detect_current_usage(acct_name)
+
+        gpu_slots = alloc["gpus"]
+        cpu_slots = math.floor(util_cap * alloc["cpus"] / cpus_per_cpu) if cpus_per_cpu > 0 else 0
+
+        # Available GPU slots
+        gpu_avail = max(0, alloc["gpus"] - usage["gpus"])
+
+        # Available CPU slots (from remaining capacity after usage, with util cap)
+        avail_cpus = max(0, math.floor(util_cap * alloc["cpus"]) - usage["cpus"])
+        avail_mem = max(0, alloc["mem_gb"] - usage["mem_gb"])
+        cpu_avail_by_cpus = avail_cpus // cpus_per_cpu if cpus_per_cpu > 0 else 0
+        cpu_avail_by_mem = avail_mem // mem_per_cpu if mem_per_cpu > 0 else cpu_avail_by_cpus
+        cpu_avail = min(cpu_avail_by_cpus, cpu_avail_by_mem)
+
+        account_details.append({
+            "name": acct_name,
+            "gpu_slots": gpu_slots,
+            "cpu_slots": cpu_slots,
+            "gpu_avail": gpu_avail,
+            "cpu_avail": cpu_avail,
+            "partition_gpu": partition_gpu,
+            "partition_cpu": partition_cpu,
+            "alloc": alloc,
+            "usage": usage,
+        })
+        total_gpu += gpu_slots
+        total_cpu += cpu_slots
+        total_gpu_avail += gpu_avail
+        total_cpu_avail += cpu_avail
+
+    return {
+        "accounts": account_details,
+        "total_gpu_slots": total_gpu,
+        "total_cpu_slots": total_cpu,
+        "total_slots": total_gpu + total_cpu,
+        "total_gpu_avail": total_gpu_avail,
+        "total_cpu_avail": total_cpu_avail,
+        "total_avail": total_gpu_avail + total_cpu_avail,
     }
 
 
