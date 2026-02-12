@@ -170,11 +170,11 @@ EXPERIMENT_CONFIG_FILE = "experiment.json"
 # Known CODEX filter sets: excitation → (excitation, emission) in nm
 # Used to convert CODEX flat wavelength lists to proper (ex, em) pairs
 _CODEX_FILTER_SETS: dict[int, tuple[float, float]] = {
-    358: (358.0, 461.0),   # DAPI
-    488: (488.0, 525.0),   # FITC / Alexa 488
-    550: (560.0, 575.0),   # TRITC / Cy3
-    650: (648.0, 668.0),   # Cy5
-    750: (753.0, 775.0),   # Cy7
+    358: (358.0, 461.0),  # DAPI
+    488: (488.0, 525.0),  # FITC / Alexa 488
+    550: (560.0, 575.0),  # TRITC / Cy3
+    650: (648.0, 668.0),  # Cy5
+    750: (753.0, 775.0),  # Cy7
 }
 
 
@@ -194,6 +194,7 @@ def _excitation_to_filter_pair(ex_nm: float) -> tuple[float, float]:
             return pair
     # Unknown filter - return excitation only with warning
     import warnings
+
     warnings.warn(
         f"Unknown CODEX excitation wavelength {ex_nm} nm; "
         f"emission wavelength unknown. Add to _CODEX_FILTER_SETS in project.py.",
@@ -293,8 +294,7 @@ class ExperimentConfig:
                     # CODEX flat list of excitation wavelengths: [358, 750, 550, 650]
                     # Map to (excitation, emission) pairs using known filter sets
                     data["wavelengths"] = {
-                        i + 1: _excitation_to_filter_pair(float(w))
-                        for i, w in enumerate(wl)
+                        i + 1: _excitation_to_filter_pair(float(w)) for i, w in enumerate(wl)
                     }
                 else:
                     del data["wavelengths"]
