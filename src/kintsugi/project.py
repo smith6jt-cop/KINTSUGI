@@ -1807,7 +1807,27 @@ class KintsugiProject:
 
     def _create_default_configs(self) -> None:
         """Create default configuration files."""
-        # Default processing parameters
+        # Read overlap and reference cycle from experiment.json if available
+        overlap_pct = 30  # CODEX standard default
+        ref_cycle = 1
+        exp_path = self.paths.meta / "experiment.json"
+        if exp_path.exists():
+            try:
+                with open(exp_path) as f:
+                    exp_data = json.load(f)
+                overlap_raw = exp_data.get(
+                    "tileOverlapX", exp_data.get("tile_overlap", None)
+                )
+                if overlap_raw is not None:
+                    val = float(overlap_raw)
+                    # Handle both fraction (0.3) and percent (30) formats
+                    overlap_pct = int(val * 100) if val < 1 else int(val)
+                ref_raw = exp_data.get("referenceCycle", exp_data.get("reference_cycle"))
+                if ref_raw is not None:
+                    ref_cycle = int(ref_raw)
+            except Exception:
+                pass  # Use defaults on read error
+
         default_params = {
             "illumination_correction": {
                 "method": "BaSiC",
@@ -1815,12 +1835,12 @@ class KintsugiProject:
                 "max_iterations": 500,
             },
             "stitching": {
-                "overlap_percent": 10,
+                "overlap_percent": overlap_pct,
                 "blend_mode": "linear",
             },
             "registration": {
                 "method": "rigid",
-                "reference_cycle": 1,
+                "reference_cycle": ref_cycle,
             },
             "segmentation": {
                 "method": "instanseg",

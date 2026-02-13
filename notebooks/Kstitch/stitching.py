@@ -511,7 +511,7 @@ def stitch_images(
     position_indices: Optional[NumArray] = None,
     position_initial_guess: Optional[NumArray] = None,
     overlap_diff_threshold: Float = 10,
-    pou: Float = 3,
+    pou: Float = 0.5,
     full_output: bool = False,
     row_col_transpose: bool = False,
     initial_ncc_threshold: Float = 0.9,
@@ -546,7 +546,7 @@ def stitch_images(
         the allowed difference from the initial guess, in percentage of the image size.
         ignored if position_initial_guess is None
 
-    pou : Float, default 3
+    pou : Float, default 0.5
         the "percent overlap uncertainty" parameter
 
     full_output : bool, default False
@@ -790,26 +790,56 @@ def stitch_images(
         print(f"Computed overlap automatically - top: {overlap_top:.1f}%, left: {overlap_left:.1f}%")
 
     ### compute_repeatability ###
-    grid["top_valid1"] = filter_by_overlap_and_correlation(
-        grid["top_y_first"],
-        grid["top_ncc_first"],
-        overlap_top,
-        sizeY,
-        pou,
-        ncc_threshold,
-        overlap_percentage
-    )
-    grid["top_valid2"] = filter_outliers(grid["top_y_first"], grid["top_valid1"])
-    grid["left_valid1"] = filter_by_overlap_and_correlation(
-        grid["left_x_first"],
-        grid["left_ncc_first"],
-        overlap_left,
-        sizeX,
-        pou,
-        ncc_threshold,
-        overlap_percentage
-    )
-    grid["left_valid2"] = filter_outliers(grid["left_x_first"], grid["left_valid1"])
+    # Progressively relax POU if the initial filter rejects ALL translations
+    # for a direction. This prevents tight POU values from collapsing an axis.
+    pou_schedule = [pou]
+    for candidate in [0.5, 1, 1.5, 2, 3, 5, 10, 20]:
+        if candidate > pou and candidate not in pou_schedule:
+            pou_schedule.append(candidate)
+
+    for current_pou in pou_schedule:
+        grid["top_valid1"] = filter_by_overlap_and_correlation(
+            grid["top_y_first"],
+            grid["top_ncc_first"],
+            overlap_top,
+            sizeY,
+            current_pou,
+            ncc_threshold,
+            overlap_percentage
+        )
+        grid["top_valid2"] = filter_outliers(grid["top_y_first"], grid["top_valid1"])
+        grid["left_valid1"] = filter_by_overlap_and_correlation(
+            grid["left_x_first"],
+            grid["left_ncc_first"],
+            overlap_left,
+            sizeX,
+            current_pou,
+            ncc_threshold,
+            overlap_percentage
+        )
+        grid["left_valid2"] = filter_outliers(grid["left_x_first"], grid["left_valid1"])
+
+        n_top = grid["top_valid2"].sum()
+        n_left = grid["left_valid2"].sum()
+
+        if n_top > 0 and n_left > 0:
+            if current_pou != pou:
+                print(f"POU relaxed from {pou} to {current_pou} "
+                      f"(top_valid={n_top}, left_valid={n_left})")
+            break
+        else:
+            failed = []
+            if n_top == 0:
+                failed.append("top")
+            if n_left == 0:
+                failed.append("left")
+            if current_pou == pou_schedule[-1]:
+                print(f"WARNING: {'/'.join(failed)} translations all invalid "
+                      f"even at POU={current_pou}. "
+                      f"replace_invalid_translations will use raw medians.")
+            else:
+                print(f"POU={current_pou}: {'/'.join(failed)} has 0 valid "
+                      f"translations, relaxing...")
 
     rs = []
     for direction, dims, rowcol in zip(["top", "left"], ["yx", "xy"], ["col", "row"]):

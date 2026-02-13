@@ -140,14 +140,24 @@ def _build_cycle_assignment():
             "partition": acct.get("partition_gpu", "hpg-b200,hpg-turin"),
         }] * acct.get("gpu_slots", 0))
 
-    # Build CPU queue: each account contributes cpu_slots entries
-    cpu_queue = []
+    # Build CPU queue: interleave accounts for even distribution.
+    # Without interleaving, all CPU cycles land on the first account
+    # when there are fewer CPU cycles than the first account's slots.
+    cpu_entries = []
     for acct in ACCOUNTS:
-        cpu_queue.extend([{
+        cpu_entries.append(([{
             "account": acct["name"],
             "mode": "cpu",
             "partition": acct.get("partition_cpu", "hpg-default"),
-        }] * acct.get("cpu_slots", 0))
+        }], acct.get("cpu_slots", 0)))
+    # Round-robin: take one from each account in turn until all slots filled
+    cpu_queue = []
+    remaining = {i: n for i, (_, n) in enumerate(cpu_entries)}
+    while any(r > 0 for r in remaining.values()):
+        for i in remaining:
+            if remaining[i] > 0:
+                cpu_queue.append(cpu_entries[i][0][0])
+                remaining[i] -= 1
 
     for i, cyc in enumerate(CYCLES):
         cyc_key = cyc_fmt(cyc)

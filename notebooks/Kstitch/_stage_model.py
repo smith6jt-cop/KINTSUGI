@@ -55,7 +55,7 @@ def filter_by_overlap_and_correlation(
     ncc: pd.Series,
     overlap: Float,
     size: Int,
-    pou: Float = 3,
+    pou: Float = 0.5,
     ncc_threshold: Float = 0.5,
     overlap_percentage: Optional[Float] = None,
 ) -> pd.Series:
@@ -197,13 +197,37 @@ def replace_invalid_translations(grid: pd.DataFrame) -> pd.DataFrame:
         if isna.any():
             fill_value = grid.loc[~isna, key].median()
             if not np.isfinite(fill_value):
-                # All translations invalid for this direction — use 0 (no shift)
-                fill_value = 0.0
+                # All validated translations invalid — fall back to median of
+                # raw first-pass translations (before overlap/NCC filtering).
+                # This preserves the PCM-derived displacement instead of
+                # collapsing the entire axis to 0.
+                first_key = f"{direction}_{xy}_first"
+                raw_vals = grid[first_key].dropna()
+                if len(raw_vals) > 0:
+                    fill_value = raw_vals.median()
+                if not np.isfinite(fill_value):
+                    fill_value = 0.0
+                    print(
+                        f"WARNING: All {direction}_{xy} translations invalid "
+                        f"and no raw fallback available. Using 0."
+                    )
+                else:
+                    print(
+                        f"WARNING: All {direction}_{xy} validated translations "
+                        f"rejected by overlap filter. Falling back to raw "
+                        f"median: {fill_value:.1f}"
+                    )
             grid.loc[isna, key] = fill_value
             grid.loc[isna, f"{direction}_ncc_second"] = -1
     for direction, xy in itertools.product(["left", "top"], ["x", "y"]):
         remaining = ~np.isfinite(grid[f"{direction}_{xy}_second"])
         if remaining.any():
-            grid.loc[remaining, f"{direction}_{xy}_second"] = 0.0
+            # Same raw-median fallback for any remaining NaN/inf values
+            first_key = f"{direction}_{xy}_first"
+            raw_vals = grid[first_key].dropna()
+            fallback = raw_vals.median() if len(raw_vals) > 0 else 0.0
+            grid.loc[remaining, f"{direction}_{xy}_second"] = (
+                fallback if np.isfinite(fallback) else 0.0
+            )
 
     return grid
