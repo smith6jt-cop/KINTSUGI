@@ -252,7 +252,7 @@ rule stitch:
         device_mode=lambda wc: _assign(wc)["mode"],
 
     resources:
-        mem_mb=lambda wc: RES.get("mem_stitch", 48000),
+        mem_mb=lambda wc: RES.get("mem_stitch", 48000) if _is_gpu(wc) else RES.get("cpu_mem_stitch", 48000),
         runtime=lambda wc: RES.get("time_stitch", 240) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
         slurm_partition=lambda wc: _assign(wc)["partition"],
         slurm_account=lambda wc: _assign(wc)["account"],
@@ -281,7 +281,7 @@ rule deconvolve:
         device_mode=lambda wc: _assign(wc)["mode"],
 
     resources:
-        mem_mb=lambda wc: RES.get("mem_decon", 48000),
+        mem_mb=lambda wc: RES.get("mem_decon", 48000) if _is_gpu(wc) else RES.get("cpu_mem_decon", 128000),
         runtime=lambda wc: RES.get("time_decon", 240) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
         slurm_partition=lambda wc: _assign(wc)["partition"],
         slurm_account=lambda wc: _assign(wc)["account"],
@@ -312,7 +312,7 @@ rule edf:
         channel_names=CHANNEL_NAMES,
 
     resources:
-        mem_mb=lambda wc: RES.get("mem_edf", 48000),
+        mem_mb=lambda wc: RES.get("mem_edf", 48000) if _is_gpu(wc) else RES.get("cpu_mem_edf", 96000),
         runtime=lambda wc: RES.get("time_edf", 60) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
         slurm_partition=lambda wc: _assign(wc)["partition"],
         slurm_account=lambda wc: _assign(wc)["account"],

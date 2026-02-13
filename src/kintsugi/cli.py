@@ -964,19 +964,19 @@ def workflow_config(project_dir: str, print_only: bool):
             "cpu_utilization_cap": 0.85,
             "qos": "",
             "conda_env": "kintsugi",
-            # GPU job resources
+            # GPU job resources (CuPy processes in GPU memory)
             "mem_stitch": 48000,
             "mem_decon": 48000,
             "mem_edf": 48000,
             "time_stitch": 240,
             "time_decon": 240,
             "time_edf": 60,
-            # CPU job resources
+            # CPU job resources (float64 in system memory, needs more)
             "cpu_cpus_per_task": 8,
             "cpu_time_multiplier": 5,
             "cpu_mem_stitch": 48000,
-            "cpu_mem_decon": 48000,
-            "cpu_mem_edf": 48000,
+            "cpu_mem_decon": 128000,
+            "cpu_mem_edf": 96000,
         },
     }
 

@@ -36,14 +36,22 @@ ArrayLike = Union[np.ndarray, "cp.ndarray"]
 
 
 def _check_cupy_available() -> bool:
-    """Check if CuPy is available for GPU acceleration."""
+    """Check if CuPy can execute GPU operations (requires CUDA drivers).
+
+    Returns False on login nodes or machines without GPU hardware.
+    This does NOT indicate that CuPy is uninstalled — only that GPU
+    acceleration is unavailable in the current environment.
+    """
     try:
         import cupy as cp
 
-        # Test that CUDA is actually working
+        # Test that CUDA is actually working (fails on login nodes)
         _ = cp.array([1, 2, 3])
         return True
-    except (ImportError, Exception):
+    except ImportError:
+        return False
+    except Exception:
+        # CuPy is installed but GPU/CUDA not available (e.g., login node)
         return False
 
 
@@ -688,7 +696,7 @@ class EDFProcessor:
 
         elif requested == "cupy":
             if not _check_cupy_available():
-                logger.warning("CuPy not available, falling back to NumPy")
+                logger.warning("GPU not available (no CUDA drivers), falling back to NumPy")
                 return "numpy"
             return "cupy"
 

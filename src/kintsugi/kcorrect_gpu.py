@@ -106,7 +106,7 @@ class KCorrectGPU:
         if use_gpu == "auto":
             use_gpu = CUPY_AVAILABLE
         elif use_gpu and not CUPY_AVAILABLE:
-            warnings.warn("CuPy not available, falling back to CPU", stacklevel=2)
+            warnings.warn("GPU not available (no CUDA drivers), falling back to CPU", stacklevel=2)
             use_gpu = False
 
         self.use_gpu = use_gpu
@@ -724,7 +724,7 @@ def KCorrectGPUFunc(
 def check_gpu() -> tuple[bool, str]:
     """Check if GPU is available for KCorrect."""
     if not CUPY_AVAILABLE:
-        return False, "CuPy not installed"
+        return False, "GPU not available (CuPy package not importable — check CUDA drivers)"
 
     try:
         import cupy as cp

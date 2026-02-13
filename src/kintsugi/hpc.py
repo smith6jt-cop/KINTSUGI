@@ -174,13 +174,13 @@ def get_slurm_defaults() -> dict[str, Any]:
         "cpu_cpus_per_task": 8,
         "cpu_mem_correction": 16,
         "cpu_mem_stitch": 48,
-        "cpu_mem_decon": 48,
-        "cpu_mem_edf": 16,
-        # Memory per job (GB) - GPU mode
+        "cpu_mem_decon": 128,
+        "cpu_mem_edf": 96,
+        # Memory per job (GB) - GPU mode (CuPy processes in GPU memory)
         "mem_correction": 16,
         "mem_stitch": 48,
         "mem_decon": 48,
-        "mem_edf": 16,
+        "mem_edf": 48,
         # Time limits
         "time_correction": "02:00:00",
         "time_stitch": "04:00:00",

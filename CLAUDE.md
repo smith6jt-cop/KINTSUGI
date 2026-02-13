@@ -184,12 +184,15 @@ sys.path.insert(0, str(KINTSUGI_DIR / 'notebooks'))  # Required for Kio, Kproces
 sys.path.insert(0, str(KINTSUGI_DIR))
 ```
 
-**Memory allocation**: EDF loads full deconvolved z-stacks (~3-4 GB per channel for large datasets) and must have sufficient memory. Match EDF memory to deconvolution memory in `config.sh`:
+**Memory allocation**: GPU jobs use CuPy (float32 in GPU memory), so 48 GB CPU RAM is sufficient. CPU jobs use SciPy (float64 in system memory) and need more. Snakefile lambdas route `mem_decon`/`cpu_mem_decon` automatically based on GPU vs CPU mode.
 ```bash
-export MEM_EDF=48       # GPU jobs (match MEM_DECON)
-export CPU_MEM_EDF=48   # CPU jobs (match CPU_MEM_DECON)
+# GPU jobs (CuPy does heavy lifting in GPU memory)
+export MEM_DECON=48
+export MEM_EDF=48
+# CPU jobs (float64 in system memory, needs ~2.5x more)
+export CPU_MEM_DECON=128
+export CPU_MEM_EDF=96
 ```
-The default of 16 GB is insufficient for datasets with large tile grids (e.g., 5x5).
 
 **Add SLURM to existing project** (two equivalent methods):
 ```bash
@@ -773,6 +776,30 @@ Optional groups in pyproject.toml:
 - `[java]` - (DEPRECATED) JPype + PyImageJ for BioFormats
 
 **External requirements**: libvips (native library). Java/Maven no longer required.
+
+### CuPy Installation Status (IMPORTANT — READ BEFORE MODIFYING)
+
+**CuPy IS ALREADY INSTALLED** in the KINTSUGI conda environment. **DO NOT attempt to install, reinstall, or upgrade CuPy.** It is installed as `cupy-cuda12x` and is the correct version for the HiPerGator CUDA 12 stack.
+
+**Why CuPy may appear "unavailable":**
+- On **login nodes** (no GPU hardware), `import cupy` succeeds but GPU operations fail with `cudaErrorInsufficientDriver`
+- Functions like `_check_cupy_available()`, `gpu.cupy_available`, and `check_gpu()` test **GPU hardware availability**, not package installation
+- These returning `False` means "no GPU on this node," NOT "CuPy needs to be installed"
+- Use `gpu.cupy_installed` (import-only check) to verify the package is actually installed
+
+**If CuPy genuinely needs reinstalling** (extremely rare — only after environment rebuild):
+```bash
+kintsugi install gpu    # Installs cupy-cuda12x into the active conda env
+```
+
+### HPC Cache Redirection (IMPORTANT)
+
+All SLURM/Snakemake jobs MUST use account-specific cache directories, NOT the home directory. The system uses:
+- `~/.use_conda_maigan.sh` / `~/.use_conda_clive.sh` — Account switchers that set `BLUE_BASE` and source cache redirection
+- `~/.cache_redirect.sh` — Redirects pip, torch, numba, jupyter, XDG caches to `/blue/{account}/smith6jt/scratch/cache/`
+- The Snakemake profile precommand automatically sources the correct switcher based on `SLURM_JOB_ACCOUNT`
+
+**Never install packages or modify caches directly.** Always use the conda environment and account-specific paths.
 
 ## Git Submodules
 

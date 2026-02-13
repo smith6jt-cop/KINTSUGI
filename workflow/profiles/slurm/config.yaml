@@ -18,7 +18,13 @@ executor: slurm
 # Activate the existing KINTSUGI conda environment on compute nodes.
 # Without this, srun inherits a bare shell and conda-installed packages
 # (cupy, torch, etc.) are not available.
-precommand: "module load conda && conda activate KINTSUGI"
+#
+# Cache redirection: Sources the account-specific conda switcher which sets
+# BLUE_BASE and redirects ALL caches (pip, torch, numba, jupyter, XDG) from
+# the limited home directory to /blue/{account}/smith6jt/scratch/cache/.
+# SLURM_JOB_ACCOUNT is set by SLURM from the --account flag in each rule.
+# Falls back to maigan if unset (e.g., local runs).
+precommand: "source ~/.use_conda_${SLURM_JOB_ACCOUNT:-maigan}.sh 2>/dev/null; conda activate KINTSUGI && export LD_LIBRARY_PATH=$CONDA_PREFIX/lib/python3.11/site-packages/nvidia/cuda_nvrtc/lib:$CONDA_PREFIX/lib/python3.11/site-packages/nvidia/cublas/lib:$CONDA_PREFIX/lib/python3.11/site-packages/nvidia/cuda_runtime/lib:${LD_LIBRARY_PATH:-}"
 
 # Default SLURM settings (per-rule resources override these)
 default-resources:

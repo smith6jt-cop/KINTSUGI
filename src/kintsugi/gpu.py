@@ -131,7 +131,8 @@ class GPUManager:
     pytorch_available : bool
         Whether PyTorch CUDA is available
     cupy_available : bool
-        Whether CuPy is available
+        Whether CuPy is importable AND CUDA runtime is accessible (False on
+        login nodes without GPU drivers — does NOT mean CuPy is uninstalled)
     detection_times : dict[str, float]
         Timing breakdown for each detection step (for diagnostics)
     """
@@ -332,7 +333,7 @@ class GPUManager:
 
         except ImportError:
             if verbose:
-                print("  → CuPy not installed")
+                print("  → CuPy not importable (install with: kintsugi install gpu)")
             self.detection_times["cupy_import"] = 0.0
 
         except Exception as e:
@@ -351,6 +352,20 @@ class GPUManager:
                 print("    - Pre-importing torch/cupy in earlier cells")
                 print("    - Checking network filesystem latency")
                 print("    - Using 'verbose=True' to identify slow steps")
+
+    @property
+    def cupy_installed(self) -> bool:
+        """Check if CuPy package is installed (import-only, no GPU test).
+
+        Unlike ``cupy_available`` which requires working CUDA drivers,
+        this returns True as long as ``import cupy`` succeeds. Use this
+        to distinguish 'package missing' from 'GPU hardware unavailable'.
+        """
+        try:
+            __import__("cupy")
+            return True
+        except ImportError:
+            return False
 
     def wrap_model(
         self,
@@ -767,7 +782,7 @@ def prewarm_gpu_imports(verbose: bool = False) -> dict[str, float]:
         times["cupy"] = cupy_time
     except ImportError:
         if verbose:
-            print("  → CuPy not installed")
+            print("  → CuPy not importable (install with: kintsugi install gpu)")
         times["cupy"] = 0.0
 
     total = time.perf_counter() - total_start
