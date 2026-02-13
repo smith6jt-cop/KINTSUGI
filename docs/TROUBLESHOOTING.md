@@ -9,13 +9,14 @@ This guide covers common issues and their solutions when installing or running K
   - [Package Installation Errors](#package-installation-errors)
 - [Dependency Issues](#dependency-issues)
   - [libvips Not Found](#libvips-not-found)
-  - [Java/JVM Issues](#javajvm-issues)
+  - [Java/JVM Issues (Legacy)](#javajvm-issues-legacy)
   - [CUDA/GPU Issues](#cudagpu-issues)
 - [Runtime Issues](#runtime-issues)
   - [Import Errors](#import-errors)
   - [Memory Issues](#memory-issues)
   - [Stitched Image Quality Issues](#stitched-image-quality-issues)
   - [Registration Failures](#registration-failures)
+- [HPC/SLURM Issues](#hpcslurm-issues)
 - [Platform-Specific Issues](#platform-specific-issues)
   - [Windows](#windows)
   - [Linux](#linux)
@@ -129,7 +130,10 @@ print(f"libvips version: {pyvips.version(0)}.{pyvips.version(1)}.{pyvips.version
 
 ---
 
-### Java/JVM Issues
+### Java/JVM Issues (Legacy)
+
+> **Note:** Java, Maven, and FIJI/CLIJ2 are no longer required. KINTSUGI now uses pure Python
+> implementations for all processing. This section is kept for users of older versions.
 
 **Symptom**: `java.lang.Exception` or `JVMNotFoundException`.
 
@@ -430,6 +434,83 @@ python notebooks/reprocess_problematic_images.py
 
 ---
 
+## HPC/SLURM Issues
+
+### "snakemake: command not found"
+
+```bash
+conda activate KINTSUGI
+pip install "snakemake>=8.0" snakemake-executor-plugin-slurm
+```
+
+### "No workflow/config.yaml found"
+
+Run `kintsugi workflow config .` from your project directory first.
+
+### CuPy Appears Unavailable
+
+**On login nodes** (no GPU hardware), `import cupy` may succeed but GPU operations fail with `cudaErrorInsufficientDriver`. Functions like `gpu.cupy_available` test **GPU hardware availability**, not package installation. CuPy IS installed — do not attempt to reinstall it.
+
+To check if CuPy is actually installed (import-only, no GPU needed):
+```python
+from kintsugi.gpu import get_gpu_manager
+gpu = get_gpu_manager()
+print(f"CuPy installed: {gpu.cupy_installed}")   # True if package is importable
+print(f"CuPy available: {gpu.cupy_available}")    # True only if GPU hardware present
+```
+
+### Jobs Pending Indefinitely (QOS Limits)
+
+Check your account allocations:
+```bash
+sacctmgr show associations user=$(whoami) format=account,partition,qos,grptres -n -P
+```
+
+Reduce `-j` when running `kintsugi workflow run` or set `jobs:` lower in `profiles/slurm/config.yaml`.
+
+### SLURM Jobs Fail with OOM (Out of Memory)
+
+GPU jobs use CuPy (float32 in GPU memory), needing ~48 GB CPU RAM. CPU jobs use SciPy (float64 in system memory), needing ~128 GB. Adjust memory in `workflow/config.yaml`:
+
+```yaml
+resources:
+  mem_stitch: 48000     # MB, GPU jobs
+  mem_decon: 48000
+  cpu_mem_decon: 128000  # MB, CPU jobs
+```
+
+### "Missing output files after job completion" (NFS Latency)
+
+Increase latency wait in `workflow/profiles/slurm/config.yaml`:
+```yaml
+latency-wait: 300  # Increased from 120 to 300 seconds
+```
+
+### "CUDA initialization failed" in Job Logs
+
+This is expected on CPU-only nodes. Scripts automatically fall back to CPU mode via `KINTSUGI_DEVICE_MODE`. To ensure jobs land on GPU nodes, verify the partition setting in `workflow/config.yaml` points to a GPU partition (e.g., `hpg-b200`, `hpg-turin`).
+
+### "srun: fatal: SLURM_TRES_PER_TASK is mutually exclusive"
+
+SLURM >= 24.11 sets `SLURM_TRES_PER_TASK` in GPU job environments, which conflicts with the Snakemake jobstep plugin's `srun` call. Fix by patching the jobstep plugin:
+
+```python
+# In snakemake_executor_plugin_slurm_jobstep/__init__.py, add to __post_init__():
+import os
+os.environ.pop("SLURM_TRES_PER_TASK", None)
+```
+
+**This patch must be re-applied after any pip upgrade of `snakemake-executor-plugin-slurm-jobstep`.**
+
+### Stitch Model Not Found for CH2+
+
+Channel 1 computes the stitching model used by all other channels. If CH1 fails, subsequent channels fail with "No stitch model." Check the CH1 stitching log first:
+```bash
+tail /path/to/project/slurm/logs/snakemake/stitch_cyc01.log
+```
+
+---
+
 ## Platform-Specific Issues
 
 ### Windows
@@ -545,10 +626,12 @@ If you're still experiencing issues:
 | Issue | Quick Fix |
 |-------|-----------|
 | libvips not found | Windows: Download from Zenodo; Linux: `apt install libvips-dev` |
-| Java not found | `conda install openjdk=11` |
-| GPU not detected | Check `nvidia-smi`; reinstall PyTorch with CUDA |
+| GPU not detected | Check `nvidia-smi`; `kintsugi install gpu` |
+| CuPy unavailable on login node | Normal — no GPU on login nodes; test on compute node |
 | Import errors | `conda activate KINTSUGI && pip install -e .` |
 | Memory errors | Reduce `max_image_dim_px` in config |
-| Environment conflicts | Use `env_streamlined.yml` |
 | Blank white stitched images | Check BaSiC flatfield min (0.1); run `reprocess_problematic_images.py` |
 | Tile grid in stitched images | Increase blend sigma (10.0); verify stitch model compatibility |
+| Snakemake not found | `pip install "snakemake>=8.0" snakemake-executor-plugin-slurm` |
+| SLURM OOM kill | GPU: 48 GB RAM; CPU: 128 GB RAM — increase in config.yaml |
+| SLURM_TRES_PER_TASK error | Patch jobstep plugin (see HPC section above) |

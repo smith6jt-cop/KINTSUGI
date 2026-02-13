@@ -149,6 +149,115 @@ from kintsugi.denoise import (
 
 Advanced denoising algorithms including adaptive, NLM, bilateral, and N2V methods.
 
+## edf Module (Extended Depth of Focus)
+
+```python
+from kintsugi.edf import extended_depth_of_focus_variance
+```
+
+### extended_depth_of_focus_variance
+
+Compute extended depth of focus from a z-stack using variance-based focus selection.
+
+```python
+from kintsugi.edf import extended_depth_of_focus_variance
+
+edf = extended_depth_of_focus_variance(
+    stack,               # (Z, Y, X) array
+    radius_x=2,          # Variance window radius X
+    radius_y=2,          # Variance window radius Y
+    sigma=10.0,          # Smoothing sigma for variance map
+    blend_depth=2,       # Adjacent z-slices to blend
+    z_smooth_sigma=1.0,  # Gaussian smoothing for z-index map
+)
+```
+
+Uses CuPy (GPU) when available, falls back to NumPy/SciPy (CPU). Device mode is controlled by `KINTSUGI_DEVICE_MODE` environment variable in SLURM jobs.
+
+## kcorrect_gpu Module (Illumination Correction)
+
+```python
+from kintsugi.kcorrect_gpu import KCorrectGPU
+```
+
+GPU-accelerated BaSiC illumination correction using CuPy FFT.
+
+```python
+corrector = KCorrectGPU(device_id=0)
+flatfield, darkfield = corrector.estimate(images)
+corrected = corrector.transform(images, flatfield, darkfield)
+```
+
+## project Module
+
+```python
+from kintsugi.project import KintsugiProject, ExperimentConfig
+```
+
+### KintsugiProject Class
+
+```python
+project = KintsugiProject.load("/path/to/project")
+print(project.name)
+print(project.paths.raw)       # data/raw/
+print(project.paths.processed) # data/processed/
+print(project.config)          # ExperimentConfig
+```
+
+### ExperimentConfig Class
+
+```python
+config = ExperimentConfig.from_dict(json_data)
+# Automatically translates CODEX field names to KINTSUGI equivalents
+```
+
+## gpu Module
+
+```python
+from kintsugi.gpu import get_gpu_manager
+```
+
+Multi-GPU detection and management.
+
+```python
+gpu = get_gpu_manager()
+print(gpu.summary())         # List available GPUs
+print(gpu.cupy_installed)    # True if CuPy package is importable
+print(gpu.cupy_available)    # True if GPU hardware is accessible
+```
+
+## hpc Module
+
+```python
+from kintsugi.hpc import detect_multi_account_resources, detect_live_multi_account
+```
+
+HPC auto-detection for multi-account SLURM environments.
+
+```python
+# Static detection (from sacctmgr associations)
+resources = detect_multi_account_resources()
+
+# Live detection (accounts for running jobs)
+live = detect_live_multi_account()
+```
+
+## parallel_io Module
+
+```python
+from kintsugi.parallel_io import load_tiles_parallel, save_stack_parallel
+```
+
+Parallel image loading and saving utilities for multi-threaded I/O.
+
+## zarr_io Module
+
+```python
+from kintsugi.zarr_io import write_ome_zarr, read_ome_zarr
+```
+
+OME-Zarr format I/O with Dask lazy loading support.
+
 ## deps Module
 
 ```python
@@ -165,3 +274,11 @@ results = checker.check_all(verbose=True)
 ```
 
 Check and report on all external dependencies.
+
+## cli Module
+
+```python
+from kintsugi.cli import main
+```
+
+Click-based CLI with command groups: `main`, `mcp`, `slurm`, `workflow`. See [CLI Reference](cli.md) for full command documentation.

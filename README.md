@@ -27,7 +27,11 @@ Smith, J. A. et al. Protocol for processing and analyzing multiplexed images imp
   - [Python API](#python-api)
 - [Notebooks](#notebooks)
 - [HPC/SLURM Job Submission](#hpcslurm-job-submission)
+  - [Prerequisites](#prerequisites-hpc)
   - [Snakemake Workflow (Recommended)](#snakemake-workflow-recommended)
+  - [Monitoring and Logs](#monitoring-and-logs)
+  - [Reprocessing and Recovery](#reprocessing-and-recovery)
+  - [Batch Processing Multiple Projects](#batch-processing-multiple-projects)
   - [Legacy SLURM Submission](#legacy-slurm-submission-submitsh)
 - [Troubleshooting](#troubleshooting)
 - [Development](#development)
@@ -380,42 +384,71 @@ code .
 
 KINTSUGI provides two SLURM submission systems. The **Snakemake workflow** (recommended) handles dependency management, skip-existing, and multi-account scheduling declaratively. The legacy `submit.sh` script is still available for simpler setups.
 
+### Prerequisites (HPC)
+
+Snakemake and its SLURM executor plugin must be installed in your KINTSUGI conda environment (one-time setup):
+
+```bash
+conda activate KINTSUGI
+pip install "snakemake>=8.0" snakemake-executor-plugin-slurm
+
+# Verify
+snakemake --version        # Should print 8.x.x or higher
+```
+
+KINTSUGI itself must be installed in editable mode with GPU support:
+
+```bash
+cd /path/to/KINTSUGI
+pip install -e ".[gpu]"
+kintsugi check
+```
+
 ### Snakemake Workflow (Recommended)
 
 The Snakemake pipeline runs three processing stages per cycle, with automatic per-cycle dependencies:
 
-| Stage | Description | Includes |
-|-------|-------------|----------|
-| `stitch` | BaSiC illumination correction + tile stitching | GPU or CPU |
-| `deconvolve` | Richardson-Lucy deconvolution | GPU or CPU |
-| `edf` | Extended depth of focus (variance projection) | GPU or CPU |
+| Stage | Description | GPU or CPU |
+|-------|-------------|------------|
+| `stitch` | BaSiC illumination correction + tile stitching | Both |
+| `deconvolve` | Richardson-Lucy deconvolution | Both |
+| `edf` | Extended depth of focus (variance projection) | Both |
 
 Dependencies flow per-cycle, enabling pipelining: `stitch cyc01 -> decon cyc01 -> edf cyc01` runs in parallel with `stitch cyc02 -> decon cyc02 -> edf cyc02`.
 
-#### Quick Start (Snakemake)
+#### Quick Start
 
 ```bash
-# 1. Create project
-kintsugi init /path/to/project --name "My Experiment"
+# 1. Create project with metadata
+kintsugi init /path/to/project --name "My Experiment" \
+    --tile-rows 9 --tile-cols 7 \
+    --xy-pixel-size 377 --z-step-size 1500 \
+    --numerical-aperture 0.75 --tissue-ri 1.44
 
-# 2. Copy raw data to data/raw/cyc01/, cyc02/, etc.
+# 2. Copy raw data to data/raw/ (preserving cycle directories)
+#    Supported naming: cyc001/, cyc01/, cyc001_reg001_*/, Cyc01/
 
-# 3. Generate workflow config (auto-detects accounts, resources, cycles)
+# 3. Create channel names file (meta/CHANNELNAMES.txt)
+#    Simple list format (one marker per line, cycles sequential):
+#      DAPI-01, Blank, Blank, Blank, DAPI-02, CD31, CD8, CD45, ...
+#    Or cycle-prefixed format:
+#      1: DAPI, Blank, Blank, Blank
+#      2: DAPI, CD31, CD8, CD45
+
+# 4. Generate workflow config (auto-detects accounts, resources, cycles)
 kintsugi workflow config /path/to/project
 
-# 4. Check live resource availability across all accounts
+# 5. Check live resource availability across all accounts
 kintsugi workflow check /path/to/project
 
-# 5. Submit (auto-calculates -j from live availability)
-kintsugi workflow run /path/to/project
+# 6. Preview (always dry-run first)
+kintsugi workflow run /path/to/project --dry-run
 
-# Or run directly with Snakemake:
-cd /path/to/project/workflow
-snakemake --profile profiles/slurm -j 24
-snakemake -n                               # Dry run
+# 7. Submit (auto-calculates -j from live availability)
+kintsugi workflow run /path/to/project
 ```
 
-`workflow config` auto-detects SLURM accounts via `sacctmgr`, calculates GPU and CPU slots per account, reads microscope parameters from `meta/experiment.json`, and generates `workflow/config.yaml` + copies the Snakefile.
+`workflow config` auto-detects SLURM accounts via `sacctmgr show associations`, calculates GPU and CPU slots per account, reads microscope parameters from `meta/experiment.json`, and generates `workflow/config.yaml` + copies the Snakefile and wrapper scripts.
 
 #### Multi-Account Architecture
 
@@ -427,13 +460,23 @@ KINTSUGI maximizes throughput by distributing jobs across **multiple independent
 | `maigan` | 2 | 2 | 80 | 8 | floor(0.85 * 80 / 8) |
 | **Total** | | **5** | | **19** | **24 concurrent jobs** |
 
-Cycles are **pre-assigned** to accounts and modes (GPU/CPU) at DAG creation time for deterministic scheduling. GPU cycles run first, CPU cycles fill remaining capacity. Each rule uses lambda resource functions to route jobs to the correct account and partition.
+Cycles are **pre-assigned** to accounts and modes (GPU/CPU) at DAG creation time via `_build_cycle_assignment()` for deterministic scheduling. GPU cycles run first, CPU cycles fill remaining capacity. Each rule uses lambda resource functions to route jobs to the correct account, partition, and resource allocation. GPU jobs use `gres="gpu:1"` (not `gpus=1`, which triggers SLURM_TRES_PER_TASK conflicts on SLURM >= 24.11).
 
 #### Workflow Configuration (`workflow/config.yaml`)
 
 Auto-generated by `kintsugi workflow config`. Includes cycles, channels, microscope parameters, and per-account resource allocations:
 
 ```yaml
+project_dir: /path/to/my_project
+kintsugi_dir: /path/to/KINTSUGI
+
+cycles: [1, 2, 3, 4, 5, 6, 7]
+channels: [1, 2, 3, 4]
+
+tile_rows: 9
+tile_cols: 7
+tile_overlap: 0.3
+
 resources:
   accounts:
     - name: clive
@@ -446,9 +489,9 @@ resources:
       partition_cpu: hpg-default
       gpu_slots: 2
       cpu_slots: 8
-  total_gpu_slots: 5
-  total_cpu_slots: 19
   total_slots: 24
+  cpu_time_multiplier: 5
+  cpu_cpus_per_task: 8
 ```
 
 #### Project Workflow Structure
@@ -458,11 +501,119 @@ my_project/workflow/
 ├── config.yaml              # Auto-generated by kintsugi workflow config
 ├── Snakefile                # Pipeline definition (always overwritten on config)
 ├── scripts/
-│   ├── stitch.py
-│   ├── deconvolve.py
-│   └── edf.py
+│   ├── stitch.py            # BaSiC correction + stitching
+│   ├── deconvolve.py        # Richardson-Lucy deconvolution
+│   └── edf.py               # Extended depth of focus
 └── profiles/slurm/
     └── config.yaml          # SLURM executor profile (precommand, retries, etc.)
+```
+
+`workflow config` always overwrites the Snakefile and SLURM profiles (so pipeline logic updates propagate). Scripts are only copied if they don't already exist.
+
+#### Submitting Specific Cycles or Steps
+
+```bash
+# Specific cycles
+kintsugi workflow run /path/to/project --cycles 1-3
+kintsugi workflow run /path/to/project --cycles 1,3,5
+
+# Force re-run a specific step
+kintsugi workflow run /path/to/project --forcerun stitch
+
+# Override concurrent job count
+kintsugi workflow run /path/to/project -j 16
+
+# Run locally (no SLURM, for testing)
+kintsugi workflow run /path/to/project --local --cores 4
+
+# Direct Snakemake (more control)
+cd /path/to/project/workflow
+snakemake --profile profiles/slurm -n              # Dry run
+snakemake --profile profiles/slurm --allowed-rules deconvolve edf  # Skip stitching
+snakemake --dag | dot -Tpng > dag.png              # Visualize DAG
+snakemake --report report.html                     # HTML report
+```
+
+### Monitoring and Logs
+
+```bash
+# View queued/running SLURM jobs
+squeue -u $USER
+
+# Filter to KINTSUGI jobs for a project
+squeue -u $USER | grep kintsugi
+
+# Cancel all KINTSUGI jobs for a project
+kintsugi slurm cancel /path/to/project
+
+# Per-job logs (one per cycle per step)
+tail -f /path/to/project/slurm/logs/snakemake/stitch_cyc01.log
+tail -f /path/to/project/slurm/logs/snakemake/decon_cyc03.log
+tail -f /path/to/project/slurm/logs/snakemake/edf_cyc05.log
+
+# Snakemake coordinator log
+ls /path/to/project/workflow/.snakemake/log/
+tail -f /path/to/project/workflow/.snakemake/log/*.snakemake.log
+
+# List completed sentinel files
+find /path/to/project/data/processed/ -name ".snakemake_complete"
+
+# Count output files per stage
+echo "Stitched:"; find data/processed/stitched -name "*.tif" 2>/dev/null | wc -l
+echo "Deconvolved:"; find data/processed/deconvolved -name "*.tif" 2>/dev/null | wc -l
+echo "EDF:"; find data/processed/edf -name "*.tif" 2>/dev/null | wc -l
+
+# Show remaining work (dry run only shows incomplete jobs)
+cd /path/to/project/workflow && snakemake --profile profiles/slurm -n
+```
+
+### Reprocessing and Recovery
+
+**Automatic recovery:** Snakemake retries failed jobs automatically (default: 2 retries). No manual intervention needed for transient failures (OOM, node issues).
+
+**Resume after interruption:** If the terminal disconnects or the coordinator dies, re-run the same command. Snakemake checks sentinel files and only submits jobs for incomplete cycles:
+
+```bash
+kintsugi workflow run /path/to/project
+```
+
+Per-channel skip-existing logic inside the wrapper scripts means even partially-completed cycles resume efficiently — only unfinished channels are reprocessed.
+
+**Force reprocessing:**
+
+```bash
+# Force re-stitch a specific cycle (and everything downstream)
+cd /path/to/project/workflow
+snakemake --profile profiles/slurm \
+    --forcerun data/processed/stitched/cyc03/.snakemake_complete
+
+# Force re-run all deconvolution
+kintsugi workflow run /path/to/project --forcerun deconvolve
+
+# Delete outputs and reprocess from scratch
+rm -rf data/processed/stitched/cyc03/ data/processed/deconvolved/cyc03/ data/processed/edf/cyc03/
+kintsugi workflow run /path/to/project  # Snakemake detects missing outputs
+```
+
+### Batch Processing Multiple Projects
+
+For processing multiple staged datasets sequentially (all share the same SLURM resource pool):
+
+```bash
+# Process all staged datasets (run inside tmux/screen!)
+tmux new -s batch
+bash /path/to/run_all_workflows.sh             # All staged datasets
+bash /path/to/run_all_workflows.sh --dry-run   # Preview
+bash /path/to/run_all_workflows.sh --dataset CX_19-002_lymph-node_R1  # Single dataset
+```
+
+Sequential processing is intentional: all datasets share the same 24 SLURM slots, so running multiple Snakemake instances in parallel would cause resource contention.
+
+Legacy batch submission is also available:
+
+```bash
+./slurm/submit_batch.sh projects.txt
+./slurm/submit_batch.sh --find /path/to/KINTSUGI_Projects
 ```
 
 ### Legacy SLURM Submission (`submit.sh`)
@@ -476,50 +627,26 @@ The original `submit.sh` script is still available for single-account setups or 
 ./slurm/submit.sh --project /path/to/project --cycles 1-3
 ```
 
-Configuration is in `slurm/config.sh` (auto-generated on first run). The legacy system uses a single-account dual-pool architecture where GPU and CPU slots are calculated from one account's allocation.
+Configuration is in `slurm/config.sh` (auto-generated on first run). The legacy system uses a single-account dual-pool architecture.
 
-### Batch Processing Multiple Projects
-
-```bash
-./slurm/submit_batch.sh projects.txt
-./slurm/submit_batch.sh --find /path/to/KINTSUGI_Projects
-```
-
-### Monitoring Jobs
+### Quick Reference
 
 ```bash
-# View your queued/running jobs
-squeue -u $USER
-
-# View jobs for a specific project
-squeue -u $USER -n "kintsugi_*_ProjectName"
-
-# Cancel all KINTSUGI jobs for a project
-kintsugi slurm cancel /path/to/project
-
-# View Snakemake job logs
-tail -f PROJECT_DIR/slurm/logs/snakemake/stitch_cyc01.log
-```
-
-### Example Workflow
-
-```bash
-# 1. Create project
+# === PER-PROJECT SETUP ===
 kintsugi init /path/to/project --name "My Experiment"
-
-# 2. Copy raw data to data/raw/cyc01/, cyc02/, etc.
-
-# 3. Generate workflow config (detects accounts, resources, cycles)
+# Copy raw data to data/raw/, create meta/CHANNELNAMES.txt
 kintsugi workflow config /path/to/project
 
-# 4. Check resource availability
-kintsugi workflow check /path/to/project
+# === RUNNING ===
+kintsugi workflow run /path/to/project --dry-run    # Preview
+kintsugi workflow run /path/to/project              # Full pipeline via SLURM
+kintsugi workflow run /path/to/project --cycles 1-3 # Specific cycles
+kintsugi workflow run /path/to/project --local      # Local (no SLURM)
 
-# 5. Submit
-kintsugi workflow run /path/to/project
-
-# 6. Monitor
-squeue -u $USER
+# === MONITORING ===
+squeue -u $USER                                     # Job queue
+kintsugi workflow check /path/to/project            # Live resource availability
+tail -f /path/to/project/slurm/logs/snakemake/*.log # Live logs
 ```
 
 ## Troubleshooting
@@ -571,6 +698,51 @@ conda config --set solver libmamba
 # Then retry
 conda env create -f envs/env-linux.yml
 ```
+
+### HPC/SLURM Issues
+
+**"snakemake: command not found"**
+```bash
+conda activate KINTSUGI
+pip install "snakemake>=8.0" snakemake-executor-plugin-slurm
+```
+
+**"No workflow/config.yaml found"**
+
+Run `kintsugi workflow config .` from your project directory first.
+
+**Jobs pending indefinitely (QOS limits)**
+
+Check your account allocations:
+```bash
+sacctmgr show associations user=$(whoami) format=account,partition,qos,grptres -n -P
+```
+Reduce `-j` when running `kintsugi workflow run` to fit within your allocation.
+
+**Jobs fail with OOM (Out of Memory)**
+
+GPU jobs need ~48 GB RAM (CuPy does FFT in GPU memory). CPU jobs need ~128 GB (SciPy float64 in system memory). Adjust memory in `workflow/config.yaml` if needed:
+```yaml
+resources:
+  mem_stitch: 48000    # MB, GPU jobs
+  mem_decon: 48000
+  cpu_mem_decon: 128000  # MB, CPU jobs
+```
+
+**"Missing output files after job completion" (NFS latency)**
+
+Increase latency wait in `workflow/profiles/slurm/config.yaml`:
+```yaml
+latency-wait: 300  # Increased from 120 to 300 seconds
+```
+
+**"CUDA initialization failed" in job logs**
+
+This is expected on CPU nodes — scripts automatically fall back to CPU mode. GPU nodes are selected by the SLURM partition setting in the workflow config. On login nodes, `gpu.cupy_available` returns False because there is no GPU hardware; this does **not** mean CuPy is missing.
+
+**Stitch model not found for CH2+**
+
+Channel 1 computes the stitching model used by all other channels. If CH1 fails, subsequent channels fail with "No stitch model." Check the CH1 stitching log first.
 
 ## Development
 

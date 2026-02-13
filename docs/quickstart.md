@@ -10,9 +10,48 @@ kintsugi check
 
 # Show version info
 kintsugi info
+```
 
-# Generate config template
-kintsugi template -o my_config.json
+## Create a Project
+
+The recommended way to start is with `kintsugi init`:
+
+```bash
+# Create a new project with standard structure
+kintsugi init /path/to/my_project --name "My Experiment" \
+    --tile-rows 9 --tile-cols 7 \
+    --xy-pixel-size 377 --z-step-size 1500
+
+# Preview what init will find in an existing directory
+kintsugi scan /path/to/my_data
+```
+
+This creates a complete project directory:
+```
+my_project/
+├── data/
+│   ├── raw/           ← Put your raw images here (cyc001/, cyc002/, etc.)
+│   └── processed/     ← Outputs go here automatically
+├── meta/
+│   ├── experiment.json    ← Microscope parameters (auto-generated)
+│   └── CHANNELNAMES.txt   ← Channel/marker names (user-provided)
+├── notebooks/         ← Working copies of processing notebooks
+├── configs/           ← Processing configuration files
+└── .claude/           ← Claude Code MCP config (auto-generated)
+```
+
+### Channel Names
+
+Create `meta/CHANNELNAMES.txt` with marker names:
+```
+DAPI-01
+Blank
+Blank
+Blank
+DAPI-02
+CD31
+CD8
+CD45
 ```
 
 ## Command Line Interface
@@ -148,16 +187,49 @@ code .
 
 ## Data Organization
 
-Create a `data` folder in the KINTSUGI directory and move your image data there:
+Place raw image data in the `data/raw/` directory of your project, organized by cycle:
 
 ```
-KINTSUGI/
+my_project/
 └── data/
-    └── [your image files]
+    └── raw/
+        ├── cyc001/           ← Cycle 1 tiles
+        │   ├── 1_00001_Z001_CH1.tif
+        │   ├── 1_00001_Z001_CH2.tif
+        │   └── ...
+        ├── cyc002/           ← Cycle 2 tiles
+        └── ...
 ```
+
+> **Tip**: If you run `kintsugi init` on a directory that already has raw data, it will detect and organize the data automatically.
+
+## HPC Quick Start (SLURM)
+
+For large datasets on HPC clusters, use the Snakemake workflow:
+
+```bash
+# Add SLURM/workflow support to an existing project
+kintsugi init /path/to/project --slurm
+
+# Generate Snakemake config (auto-detects accounts and resources)
+kintsugi workflow config /path/to/project
+
+# Check resource availability
+kintsugi workflow check /path/to/project
+
+# Preview the pipeline
+kintsugi workflow run /path/to/project --dry-run
+
+# Submit (run inside tmux!)
+tmux new -s kintsugi
+kintsugi workflow run /path/to/project
+```
+
+The pipeline runs stitch, deconvolution, and EDF per cycle, distributing jobs across all available GPU and CPU slots.
 
 ## Next Steps
 
 - See the [Workflows](workflows.md) guide for detailed processing pipelines
+- See the [CLI Reference](cli.md) for all available commands
 - Check [Troubleshooting](TROUBLESHOOTING.md) if you encounter issues
 - Review the [API Reference](api.md) for programmatic usage

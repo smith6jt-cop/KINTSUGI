@@ -136,13 +136,42 @@ resources:
 
 ## Batch Processing (Multi-Dataset)
 
-KINTSUGI supports automated batch processing of multiple CODEX datasets. See `KINTSUGI_Batch_Processing_Guide.docx` for the complete 8-phase workflow.
+KINTSUGI supports automated batch processing of multiple CODEX datasets. See `/blue/maigan/smith6jt/README.md` for the complete pipeline reference and `KINTSUGI_Batch_Processing_Guide.docx` for the 8-phase workflow.
 
 **Key scripts** (in `/blue/maigan/smith6jt/`):
-- `data_discovery.py` - Scans orange storage, builds `dataset_manifest.csv` from experiment.json files
+- `dataset_manifest.csv` - Central registry of all 34 datasets (source paths, parameters, sizes)
 - `setup_all_projects.sh` - Creates KINTSUGI projects for all datasets in manifest
-- `stage_datasets.sh` - Submits SLURM rsync jobs to copy raw data from orange to blue
-- `configure_workflows.sh` - Generates Snakemake configs for each project
+- `configure_all_workflows.sh` - Generates Snakemake configs for each project
+- `stage_datasets.sh` - Submits SLURM rsync jobs to copy raw data from orange to blue (wave-based)
+- `stage_datasets_globus.py` - Alternative Globus-based staging for higher throughput
+- `run_all_workflows.sh` - Runs Snakemake for all staged datasets sequentially
+- `cleanup_datasets.sh` - Verifies EDF outputs, deletes intermediates and raw data
+- `pipeline_status.sh` - Shows current state of every dataset
+
+**Pipeline lifecycle:**
+```
+1. setup_all_projects.sh      Create project dirs + copy metadata from orange
+2. configure_all_workflows.sh Generate Snakemake configs for all projects
+3. stage_datasets.sh 5        Stage next wave of raw data (orange → blue)
+4. run_all_workflows.sh       Process all staged datasets (stitch → decon → EDF)
+5. cleanup_datasets.sh        Verify EDF, delete intermediates + raw
+6. Repeat 3-5 for next wave
+```
+
+**Running batch workflows:**
+```bash
+# Process all staged datasets (run inside tmux/screen!)
+tmux new -s batch
+bash run_all_workflows.sh               # all staged datasets, sequential
+bash run_all_workflows.sh --dry-run     # preview without executing
+bash run_all_workflows.sh --dataset CX_19-002_lymph-node_R1  # single dataset
+```
+
+**Why sequential processing:** All datasets share the same 24 SLURM slots (5 GPU + 19 CPU across clive and maigan accounts). Running multiple Snakemake instances in parallel would cause resource contention with no throughput gain. Each Snakemake instance is a long-running coordinator that submits SLURM jobs and polls their status — run inside tmux or screen so it survives terminal disconnects.
+
+**Re-run safety:** Completed datasets are automatically skipped on re-run via two mechanisms:
+1. Snakemake sentinel files (`.snakemake_complete/`) — cycle-level skip
+2. Per-channel skip-existing in wrapper scripts — channel-level resume for interrupted jobs
 
 **Storage architecture** (HiPerGator):
 - `/orange/maigan/` - Long-term storage for raw CODEX data (~9.7 TB, 34 datasets)
@@ -155,6 +184,15 @@ rsync -av '${orange_path}/' '${RAW_DIR}/' \
   --include='*/' --include='*.tif' --exclude='*'
 ```
 **CRITICAL**: Never use bash glob `*/` on rsync source — it flattens cycle directories and overwrites files across cycles. Use the source path with trailing `/` and let rsync handle the tree.
+
+**Sentinel files:**
+| File | Created by | Meaning |
+|------|-----------|---------|
+| `data/raw/.staged` | `stage_datasets.sh` | Raw data rsync complete |
+| `.snakemake_complete/stitch_cyc{NN}` | Snakemake stitch rule | Stitching done for cycle |
+| `.snakemake_complete/decon_cyc{NN}` | Snakemake decon rule | Deconvolution done for cycle |
+| `.snakemake_complete/edf_cyc{NN}` | Snakemake edf rule | EDF done for cycle |
+| `data/processed/edf/.complete` | `cleanup_datasets.sh` | Dataset fully processed and cleaned |
 
 **Batch processing phases**:
 1. Discovery → 2. Setup + Staging → 3. Single-cycle validation → 4. SLURM batch (stitch→decon→EDF) → 5. Registration → 6. Cleanup intermediates → 7. Signal isolation (local GPU PCs) → 8. Segmentation (local GPU PCs)

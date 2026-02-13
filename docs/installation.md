@@ -207,7 +207,47 @@ see the dedicated repository: [rapids_singlecell](https://github.com/smith6jt-co
 > **Note:** Java, Maven, and FIJI/CLIJ2 are no longer required. KINTSUGI now uses pure Python
 > implementations (CuPy/NumPy) for all processing including Extended Depth of Focus (EDF).
 
-## Verifying GPU Setup
+## HPC Installation (SLURM Clusters)
+
+For HPC environments like UF HiPerGator, KINTSUGI supports distributed batch processing via Snakemake + SLURM.
+
+### Environment Setup
+
+```bash
+# Load conda module (HiPerGator-specific)
+module load conda
+
+# Create environment from Linux yml
+conda env create -f envs/env-linux.yml
+conda activate KINTSUGI
+
+# Install package with HPC extras
+pip install -e ".[claude]"
+
+# Install GPU support
+kintsugi install gpu
+```
+
+### Optional Feature Groups
+
+Install additional capabilities as needed:
+
+```bash
+kintsugi install gpu        # GPU acceleration (CuPy + PyTorch)
+kintsugi install viz        # Napari visualization
+kintsugi install dl         # Deep learning segmentation (InstanSeg)
+kintsugi install analysis   # Spatial analysis (scanpy, scimap)
+kintsugi install bio        # Bio formats I/O
+kintsugi install full       # All optional features
+```
+
+### HPC-Specific Notes
+
+- **CuPy on login nodes**: `kintsugi check` will report CuPy as unavailable on login nodes (no GPU hardware). This is expected — CuPy works correctly on compute nodes.
+- **Cache redirection**: SLURM jobs automatically redirect pip/torch/numba caches to `/blue/` storage via account-specific scripts. Do not install packages inside jobs.
+- **SLURM plugin patch**: SLURM >= 24.11 requires a patch to the Snakemake jobstep plugin. See the main README for details.
+
+## Verifying Installation
 
 ```bash
 # Check all dependencies including GPU

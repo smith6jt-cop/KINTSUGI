@@ -384,11 +384,71 @@ refined = refine_masks(
 )
 ```
 
+## HPC/SLURM Batch Processing (Snakemake)
+
+For large datasets on HPC clusters, KINTSUGI provides a Snakemake-based pipeline that distributes processing across SLURM. This replaces interactive notebook execution with headless batch jobs.
+
+### Processing Stages
+
+The Snakemake pipeline runs three stages per cycle with automatic dependencies:
+
+| Stage | Script | Description |
+|-------|--------|-------------|
+| `stitch` | `workflow/scripts/stitch.py` | BaSiC illumination correction + tile stitching |
+| `deconvolve` | `workflow/scripts/deconvolve.py` | Richardson-Lucy deconvolution |
+| `edf` | `workflow/scripts/edf.py` | Extended depth of focus (variance projection) |
+
+Dependencies flow per-cycle: `stitch cyc01 -> decon cyc01 -> edf cyc01` runs in parallel with `stitch cyc02 -> decon cyc02 -> edf cyc02`.
+
+### Setup and Execution
+
+```bash
+# 1. Initialize project
+kintsugi init /path/to/project --name "My Experiment" \
+    --tile-rows 9 --tile-cols 7
+
+# 2. Copy raw data to data/raw/ and create meta/CHANNELNAMES.txt
+
+# 3. Generate Snakemake config (auto-detects accounts, resources, cycles)
+kintsugi workflow config /path/to/project
+
+# 4. Check resource availability
+kintsugi workflow check /path/to/project
+
+# 5. Preview
+kintsugi workflow run /path/to/project --dry-run
+
+# 6. Submit
+kintsugi workflow run /path/to/project
+```
+
+### Multi-Account Architecture
+
+KINTSUGI maximizes throughput by distributing jobs across multiple SLURM accounts, each with independent GPU and CPU pools. Cycles are pre-assigned to accounts and modes (GPU/CPU) at DAG creation time. See the [README](https://github.com/smith6jt-cop/KINTSUGI#multi-account-architecture) for details.
+
+### Skip-Existing and Recovery
+
+- **Cycle level**: Snakemake sentinel files (`.snakemake_complete`) track completed cycles
+- **Channel level**: Wrapper scripts skip completed channels within a cycle
+- **Resume**: Re-running `kintsugi workflow run` automatically skips completed work
+
+### Output Structure
+
+```
+data/processed/
+├── stitched/cyc01/CH1/01.tif ... 15.tif    # z-plane TIFFs per channel
+├── deconvolved/cyc01/CH1/01.tif ... 15.tif  # Deconvolved z-planes
+└── edf/cyc01/CD3.tif, DAPI-01.tif ...       # Marker-named 2D projections
+```
+
+EDF outputs use marker names from `meta/CHANNELNAMES.txt` (falls back to `CH#` if missing).
+
 ## Tips for Large Datasets
 
 1. **Start small**: Test parameters on a subset before full batch processing
-2. **Monitor memory**: Use `kintsugi info` to check available resources
-3. **Use tiled processing**: Enable tiled output for very large images
-4. **GPU acceleration**: Enable CuPy for faster deconvolution
+2. **Use HPC for batch**: Use the Snakemake workflow for datasets with many cycles
+3. **Monitor memory**: GPU jobs need ~48 GB RAM; CPU jobs need ~128 GB
+4. **GPU acceleration**: Enable CuPy for faster deconvolution and stitching
 5. **Parameter learning**: Use Claude Code to build a database of successful parameters
 6. **Batch QC**: Run BatchQC to detect and correct batch effects before analysis
+7. **Run in tmux**: Snakemake is a long-running coordinator — use tmux/screen

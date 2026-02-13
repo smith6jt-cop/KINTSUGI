@@ -46,13 +46,48 @@ kintsugi register config.json
 kintsugi register config.json --src /path/to/images --dst /path/to/output
 ```
 
-### kintsugi init
+### kintsugi scan
 
-Initialize a new KINTSUGI project.
+Preview what `kintsugi init` will find in a directory.
 
 ```bash
-kintsugi init /path/to/project
-kintsugi init /path/to/project --name "My Project" --description "Project description"
+kintsugi scan /path/to/directory
+```
+
+### kintsugi init
+
+Initialize a new KINTSUGI project with standard directory structure.
+
+```bash
+kintsugi init /path/to/project --name "My Project"
+kintsugi init /path/to/project --name "My Project" --slurm  # Add SLURM support
+
+# With microscope parameters
+kintsugi init /path/to/project --name "My Project" \
+    --tile-rows 9 --tile-cols 7 \
+    --xy-pixel-size 377 --z-step-size 1500 \
+    --numerical-aperture 0.75 --tissue-ri 1.44
+```
+
+**Options:**
+- `--name`: Project name (required)
+- `--slurm`: Add SLURM/Snakemake workflow support
+- `--force`: Refresh templates on existing project
+- `--tile-rows`, `--tile-cols`: Tile grid dimensions
+- `--xy-pixel-size`, `--z-step-size`: Pixel sizes in nm
+- `--numerical-aperture`, `--tissue-ri`: Optical parameters
+
+### kintsugi install
+
+Install optional dependency groups.
+
+```bash
+kintsugi install gpu        # GPU acceleration (CuPy + PyTorch)
+kintsugi install viz        # Napari visualization
+kintsugi install dl         # Deep learning segmentation (InstanSeg)
+kintsugi install analysis   # Spatial analysis (scanpy, scimap)
+kintsugi install bio        # Bio formats I/O
+kintsugi install full       # All optional features
 ```
 
 ## MCP Server Commands
@@ -126,36 +161,85 @@ The configuration file is a JSON file with the following structure:
 }
 ```
 
+## Workflow Commands (HPC/Snakemake)
+
+Manage the Snakemake-based processing pipeline for SLURM clusters.
+
+### kintsugi workflow config
+
+Generate Snakemake workflow configuration. Auto-detects SLURM accounts, calculates GPU and CPU slots, reads microscope parameters from `meta/experiment.json`.
+
+```bash
+kintsugi workflow config /path/to/project
+kintsugi workflow config /path/to/project --print-only  # Preview without writing
+```
+
+### kintsugi workflow check
+
+Show live per-account resource availability (GPU and CPU slots).
+
+```bash
+kintsugi workflow check /path/to/project
+```
+
+### kintsugi workflow run
+
+Run the Snakemake processing pipeline. Auto-calculates concurrent job count from live resource availability.
+
+```bash
+kintsugi workflow run /path/to/project              # Full pipeline
+kintsugi workflow run /path/to/project --dry-run     # Preview
+kintsugi workflow run /path/to/project --cycles 1-3  # Specific cycles
+kintsugi workflow run /path/to/project --forcerun stitch  # Force re-run
+kintsugi workflow run /path/to/project --local --cores 4  # Local execution
+kintsugi workflow run /path/to/project -j 16         # Override job count
+```
+
+## SLURM Commands
+
+Manage legacy SLURM job submission.
+
+### kintsugi slurm init
+
+Add SLURM support to an existing project.
+
+```bash
+kintsugi slurm init /path/to/project
+```
+
+### kintsugi slurm submit
+
+Submit processing jobs to SLURM.
+
+```bash
+kintsugi slurm submit /path/to/project
+kintsugi slurm submit /path/to/project --steps decon,edf
+kintsugi slurm submit /path/to/project --cycles 1-5
+kintsugi slurm submit /path/to/project --dry-run
+```
+
+### kintsugi slurm status
+
+Check SLURM job status for a project.
+
+```bash
+kintsugi slurm status /path/to/project
+```
+
+### kintsugi slurm cancel
+
+Cancel all KINTSUGI SLURM jobs for a project.
+
+```bash
+kintsugi slurm cancel /path/to/project
+```
+
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
 | `KINTSUGI_DATA_DIR` | Default data directory |
+| `KINTSUGI_DEVICE_MODE` | Processing backend: `gpu` or `cpu` (set by Snakemake) |
 | `VIPS_PATH` | libvips binary directory (Windows) |
-
-## Installing Optional Features
-
-Install optional dependency groups:
-
-```bash
-# GPU acceleration (PyTorch + CuPy)
-pip install kintsugi[gpu]
-
-# Napari visualization
-pip install kintsugi[viz]
-
-# Spatial analysis (scanpy, scimap)
-pip install kintsugi[analysis]
-
-# Deep learning segmentation
-pip install kintsugi[dl]
-
-# Claude Code MCP integration
-pip install kintsugi[claude]
-
-# Advanced denoising (N2V, CARE)
-pip install kintsugi[denoise]
-
-# All optional features
-pip install kintsugi[full]
-```
+| `SLURM_ACCOUNT` | Default SLURM account (auto-detected) |
+| `SLURM_JOB_ACCOUNT` | Current job's SLURM account (set by SLURM) |
