@@ -1022,15 +1022,16 @@ def workflow_config(project_dir: str, print_only: bool):
             f"{pool['total_gpu_slots']} GPU + {pool['total_cpu_slots']} CPU = {pool['total_slots']} slots"
         )
 
-    # Copy Snakefile and scripts from KINTSUGI installation
-    # Always overwrite Snakefile (pipeline logic may have changed);
-    # only copy scripts/profiles if they don't exist yet.
+    # Copy Snakefile, profiles, and scripts from KINTSUGI installation.
+    # Always overwrite Snakefile (pipeline logic) and profiles (precommand,
+    # cache redirection, SLURM settings). Only copy scripts if missing
+    # (users may customize wrapper scripts per-project).
     src_wf = kintsugi_dir / "workflow"
     if src_wf.exists():
         for item in ["Snakefile", "scripts", "profiles"]:
             src = src_wf / item
             dst = wf_dir / item
-            always_overwrite = item == "Snakefile"
+            always_overwrite = item in ("Snakefile", "profiles")
             if src.exists() and (always_overwrite or not dst.exists()):
                 if src.is_dir():
                     if dst.exists():
@@ -1038,7 +1039,7 @@ def workflow_config(project_dir: str, print_only: bool):
                     shutil.copytree(str(src), str(dst))
                 else:
                     shutil.copy2(str(src), str(dst))
-                console.print(f"  Copied {item}")
+                console.print(f"  {'Updated' if always_overwrite else 'Copied'} {item}")
 
     console.print()
     console.print("[bold]Next steps:[/bold]")

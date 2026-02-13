@@ -329,7 +329,7 @@ resources:
 
 **Cycle directory resolution**: `_resolve_raw_cycle_dir()` handles `cyc001_reg001_*`, `cyc001`, `cyc01`, and `Cyc01` naming conventions at DAG creation time. Accepts int or str (Snakemake CLI `--config` passes strings).
 
-**`workflow config` behavior**: Always overwrites the Snakefile (so pipeline logic updates propagate); only copies scripts/profiles if they don't already exist.
+**`workflow config` behavior**: Always overwrites the Snakefile and profiles (so pipeline logic and SLURM precommand updates propagate); only copies scripts if they don't already exist.
 
 **What Snakemake replaces vs keeps:**
 - Replaces: `submit.sh` orchestration, dependency wiring, `.complete` polling, skip-existing logic, `--array` limit calculation

@@ -540,7 +540,7 @@ def check_gpu_available() -> Tuple[bool, str]:
         (available, message)
     """
     if not CUPY_AVAILABLE:
-        return False, "CuPy is not installed. Install with: pip install cupy-cuda11x"
+        return False, "GPU not available (CuPy not importable — install with: kintsugi install gpu)"
 
     try:
         import cupy as cp

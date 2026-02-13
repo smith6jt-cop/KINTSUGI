@@ -7,7 +7,10 @@ quality gating for one cycle (all channels).
 Snakemake guarantees:
   - Deconvolution output exists before this script runs
   - No need for wait_for_input() polling
-  - No need for skip-existing checks
+
+Per-channel skip-existing: If a sentinel is missing but some channels are
+already complete (e.g. interrupted job), completed channels are skipped.
+A channel is considered complete when its marker-named EDF output file exists.
 """
 
 import gc
@@ -199,6 +202,16 @@ def save_qc_image(data, output_path, title=""):
 
 
 # ---------------------------------------------------------------------------
+# Skip-existing helper
+# ---------------------------------------------------------------------------
+def channel_edf_complete(ch):
+    """Check if EDF output file exists for this channel."""
+    output_path = EDF_DIR / f"cyc{CYCLE:02d}"
+    output_file = output_path / get_channel_output_name(CYCLE, ch)
+    return output_file.exists()
+
+
+# ---------------------------------------------------------------------------
 # Per-channel EDF processing
 # ---------------------------------------------------------------------------
 def process_edf(args):
@@ -311,25 +324,38 @@ def process_edf(args):
 # ---------------------------------------------------------------------------
 start_time = time.time()
 
-if DEVICE_MODE == "cpu":
-    print(f"\n[CPU] Processing {len(CHANNELS)} channels sequentially")
-    results = [process_edf((ch, 0)) for ch in CHANNELS]
-elif n_gpus >= 2 and len(CHANNELS) >= 2:
-    print(f"\n[MULTI-GPU] {len(CHANNELS)} channels across {n_gpus} GPUs")
-    pairs = list(zip(CHANNELS, iter_cycle(GPU_IDS)))
+# Filter out channels that are already complete
+channels_to_process = []
+skipped_channels = []
+for ch in CHANNELS:
+    if channel_edf_complete(ch):
+        print(f"  Channel {ch} SKIPPED ({get_channel_output_name(CYCLE, ch)} exists)")
+        skipped_channels.append(ch)
+    else:
+        channels_to_process.append(ch)
+
+if not channels_to_process:
+    print(f"\nAll {len(CHANNELS)} channels already complete — nothing to do")
+    results = []
+elif DEVICE_MODE == "cpu":
+    print(f"\n[CPU] Processing {len(channels_to_process)} channels sequentially")
+    results = [process_edf((ch, 0)) for ch in channels_to_process]
+elif n_gpus >= 2 and len(channels_to_process) >= 2:
+    print(f"\n[MULTI-GPU] {len(channels_to_process)} channels across {n_gpus} GPUs")
+    pairs = list(zip(channels_to_process, iter_cycle(GPU_IDS)))
     with ThreadPoolExecutor(max_workers=n_gpus) as executor:
         results = list(executor.map(process_edf, pairs))
 else:
-    print(f"\n[GPU] Processing {len(CHANNELS)} channels on GPU 0")
-    results = [process_edf((ch, 0)) for ch in CHANNELS]
+    print(f"\n[GPU] Processing {len(channels_to_process)} channels on GPU 0")
+    results = [process_edf((ch, 0)) for ch in channels_to_process]
 
-successful = sum(1 for _, ok, _ in results if ok)
+successful = sum(1 for _, ok, _ in results if ok) + len(skipped_channels)
 elapsed = (time.time() - start_time) / 60
 
 print(f"\n{'='*60}")
 print(f"EDF Complete")
 print(f"{'='*60}")
-print(f"Success: {successful}/{len(CHANNELS)} channels")
+print(f"Success: {successful}/{len(CHANNELS)} channels ({len(skipped_channels)} skipped)")
 print(f"Time: {elapsed:.1f} minutes")
 print(f"Output: {EDF_DIR}")
 
@@ -356,6 +382,7 @@ sentinel.write_text(
     f"completed={datetime.now().isoformat()}\n"
     f"channels={START_CHANNEL}-{END_CHANNEL}\n"
     f"successful={successful}\n"
+    f"skipped={len(skipped_channels)}\n"
     f"duration_minutes={elapsed:.1f}\n"
 )
 print(f"Sentinel written: {sentinel}")

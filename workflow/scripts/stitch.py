@@ -7,8 +7,11 @@ for one cycle (all channels, all z-planes).
 Snakemake guarantees:
   - Input raw directory exists before this script runs
   - Output sentinel is only written if this script exits successfully
-  - No need for skip-existing checks (Snakemake handles re-runs)
   - No need for wait_for_input() polling (Snakemake tracks dependencies)
+
+Per-channel skip-existing: If a sentinel is missing but some channels are
+already complete (e.g. interrupted job), completed channels are skipped.
+A channel is considered complete only when ALL expected z-plane TIFs exist.
 """
 
 import gc
@@ -332,13 +335,36 @@ def process_zplane(cycle, channel, zplane, device_id=0):
 
 
 # ---------------------------------------------------------------------------
+# Skip-existing helper
+# ---------------------------------------------------------------------------
+def channel_complete(channel):
+    """Check if all z-planes are already stitched for this channel."""
+    ch_dir = STITCH_DIR / f"cyc{CYCLE:02d}" / f"CH{channel}"
+    if not ch_dir.exists():
+        return False
+    for z in range(1, n_zplanes + 1):
+        if not (ch_dir / f"{z:02d}.tif").exists():
+            return False
+    # CH1 also needs the stitch model pickle
+    if channel == 1 and not (ch_dir / "result_df.pkl").exists():
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Main processing loop
 # ---------------------------------------------------------------------------
 start_time = time.time()
 channels = list(range(START_CHANNEL, END_CHANNEL + 1))
 ref_zplane = n_zplanes // 2
+skipped_channels = 0
 
 for channel in channels:
+    if channel_complete(channel):
+        print(f"\n--- Channel {channel}/{END_CHANNEL} --- SKIPPED (all {n_zplanes} z-planes exist)")
+        skipped_channels += 1
+        continue
+
     print(f"\n--- Channel {channel}/{END_CHANNEL} ---")
     ch_start = time.time()
 
@@ -397,11 +423,13 @@ for channel in channels:
 
 total_time = time.time() - start_time
 
+processed_channels = len(channels) - skipped_channels
+
 print(f"\n{'='*60}")
 print(f"Correction + Stitching Complete")
 print(f"{'='*60}")
 print(f"Cycle: {CYCLE}")
-print(f"Channels: {len(channels)}")
+print(f"Channels: {len(channels)} ({processed_channels} processed, {skipped_channels} skipped)")
 print(f"Z-planes per channel: {n_zplanes}")
 print(f"Total time: {total_time/60:.1f} minutes")
 print(f"Output: {STITCH_DIR}")
@@ -420,6 +448,7 @@ sentinel.write_text(
     f"completed={datetime.now().isoformat()}\n"
     f"channels={START_CHANNEL}-{END_CHANNEL}\n"
     f"zplanes={n_zplanes}\n"
+    f"skipped={skipped_channels}\n"
     f"duration_minutes={total_time/60:.1f}\n"
 )
 print(f"Sentinel written: {sentinel}")

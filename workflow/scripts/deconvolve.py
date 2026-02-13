@@ -6,7 +6,11 @@ Performs Richardson-Lucy deconvolution for one cycle (all channels).
 Snakemake guarantees:
   - Stitching output exists before this script runs (via sentinel dependency)
   - No need for wait_for_input() polling
-  - No need for skip-existing checks
+
+Per-channel skip-existing: If a sentinel is missing but some channels are
+already complete (e.g. interrupted job), completed channels are skipped.
+A channel is considered complete only when ALL expected z-plane TIFs exist
+(compared against the stitched input count).
 """
 
 import sys
@@ -131,6 +135,23 @@ def save_qc_slice(data, output_path, title=""):
 
 
 # ---------------------------------------------------------------------------
+# Skip-existing helper
+# ---------------------------------------------------------------------------
+def channel_decon_complete(ch):
+    """Check if deconvolution output is complete for this channel."""
+    decon_ch_dir = DECON_DIR / f"cyc{CYCLE:02d}" / f"CH{ch}"
+    if not decon_ch_dir.exists():
+        return False
+    # Count expected z-planes from stitched input
+    stitch_ch_dir = STITCH_DIR / f"cyc{CYCLE:02d}" / f"CH{ch}"
+    expected = len(list(stitch_ch_dir.glob("*.tif")))
+    if expected == 0:
+        return False  # No stitched input to compare against
+    actual = len(list(decon_ch_dir.glob("*.tif")))
+    return actual >= expected
+
+
+# ---------------------------------------------------------------------------
 # Per-channel processing
 # ---------------------------------------------------------------------------
 def process_channel(ch):
@@ -197,16 +218,29 @@ def process_channel(ch):
 # ---------------------------------------------------------------------------
 start_time = time.time()
 
-print(f"\nProcessing {len(CHANNELS)} channels sequentially")
-results = [process_channel(ch) for ch in CHANNELS]
+channels_to_process = []
+skipped_channels = []
+for ch in CHANNELS:
+    if channel_decon_complete(ch):
+        print(f"  Channel {ch} SKIPPED (all z-planes exist in {DECON_DIR / f'cyc{CYCLE:02d}' / f'CH{ch}'})")
+        skipped_channels.append(ch)
+    else:
+        channels_to_process.append(ch)
 
-successful = sum(1 for _, ok in results if ok)
+if channels_to_process:
+    print(f"\nProcessing {len(channels_to_process)} channels sequentially")
+    results = [process_channel(ch) for ch in channels_to_process]
+else:
+    print(f"\nAll {len(CHANNELS)} channels already complete — nothing to do")
+    results = []
+
+successful = sum(1 for _, ok in results if ok) + len(skipped_channels)
 elapsed = (time.time() - start_time) / 60
 
 print(f"\n{'='*60}")
 print(f"Deconvolution Complete")
 print(f"{'='*60}")
-print(f"Success: {successful}/{len(CHANNELS)} channels")
+print(f"Success: {successful}/{len(CHANNELS)} channels ({len(skipped_channels)} skipped)")
 print(f"Time: {elapsed:.1f} minutes")
 print(f"Output: {DECON_DIR}")
 
@@ -231,6 +265,7 @@ sentinel.write_text(
     f"completed={datetime.now().isoformat()}\n"
     f"channels={START_CHANNEL}-{END_CHANNEL}\n"
     f"successful={successful}\n"
+    f"skipped={len(skipped_channels)}\n"
     f"duration_minutes={elapsed:.1f}\n"
 )
 print(f"Sentinel written: {sentinel}")
