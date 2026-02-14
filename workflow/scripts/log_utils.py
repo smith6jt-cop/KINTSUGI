@@ -106,6 +106,7 @@ def summary_before(step_name: str, project_dir: str | Path) -> None:
         "stitch": project_dir / "data" / "raw",
         "decon": project_dir / "data" / "processed" / "stitched",
         "edf": project_dir / "data" / "processed" / "deconvolved",
+        "registration": project_dir / "data" / "processed" / "edf",
     }
 
     input_dir = input_dirs.get(step_name)
@@ -114,6 +115,7 @@ def summary_before(step_name: str, project_dir: str | Path) -> None:
             "stitch": "Raw Data",
             "decon": "Stitched Data",
             "edf": "Deconvolved Data",
+            "registration": "EDF Data",
         }
         print(summarize_directory(input_dir, label_map.get(step_name, "Input")))
 
@@ -152,6 +154,7 @@ def summary_after(
         "stitch": project_dir / "data" / "processed" / "stitched",
         "decon": project_dir / "data" / "processed" / "deconvolved",
         "edf": project_dir / "data" / "processed" / "edf",
+        "registration": project_dir / "data" / "processed" / "registered",
     }
 
     output_dir = output_dirs.get(step_name)
@@ -160,6 +163,7 @@ def summary_after(
             "stitch": "Stitched Data",
             "decon": "Deconvolved Data",
             "edf": "EDF Data",
+            "registration": "Registered Data",
         }
         print(summarize_directory(output_dir, label_map.get(step_name, "Output")))
 

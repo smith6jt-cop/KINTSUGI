@@ -68,6 +68,9 @@ QUALITY_GATE = {
     "min_valid_slices": int(qg_cfg.get("min_valid_slices", 3)),
 }
 
+# Number of CPU cores available (from SLURM allocation)
+CPUS = int(getattr(snakemake.resources, "cpus_per_task", 4))
+
 # ---------------------------------------------------------------------------
 # GPU initialization (respects device_mode from Snakemake rule)
 # ---------------------------------------------------------------------------
@@ -149,7 +152,7 @@ def load_stack_parallel(tiff_files):
     def load_single(f):
         return imread(str(f))
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=CPUS) as executor:
         slices = list(executor.map(load_single, tiff_files))
     return np.stack(slices, axis=0)
 

@@ -68,6 +68,9 @@ INITIAL_NCC_THRESHOLD = float(wf_config["ncc_threshold"])
 POU = float(wf_config["pou"])
 BLEND_SIGMA = float(wf_config.get("blend_sigma", 15.0))
 
+# Number of CPU cores available (from SLURM allocation)
+CPUS = int(getattr(snakemake.resources, "cpus_per_task", 4))
+
 # ---------------------------------------------------------------------------
 # GPU initialization (respects device_mode from Snakemake rule)
 # ---------------------------------------------------------------------------
@@ -196,8 +199,10 @@ def alphanumeric_key(s):
     return [int(c) if c.isdigit() else c for c in re.split("([0-9]+)", str(s))]
 
 
-def load_tiles_parallel(file_list, max_workers=4):
+def load_tiles_parallel(file_list, max_workers=None):
     """Load tiles in parallel."""
+    if max_workers is None:
+        max_workers = CPUS
 
     def load_one(f):
         return imread(str(f))
@@ -301,7 +306,7 @@ def process_zplane(cycle, channel, zplane, device_id=0):
             initial_ncc_threshold=INITIAL_NCC_THRESHOLD,
             overlap_percentage=OVERLAP_PERCENTAGE,
             pou=POU,
-            max_cores=4,
+            max_cores=CPUS,
             use_gpu=use_gpu,
         )
         pkl_path = output_dir / "result_df.pkl"

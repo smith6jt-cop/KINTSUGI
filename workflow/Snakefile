@@ -7,18 +7,21 @@ Replaces the custom submit.sh orchestration with Snakemake's native
 dependency management, skip-existing, and failure recovery.
 
 Processing stages:
-  1. stitch    - Illumination correction (BaSiC) + tile stitching
-  2. deconvolve - Richardson-Lucy deconvolution
-  3. edf       - Extended depth of focus (variance-based z-projection)
+  1. stitch        - Illumination correction (BaSiC) + tile stitching
+  2. deconvolve    - Richardson-Lucy deconvolution
+  3. edf           - Extended depth of focus (variance-based z-projection)
+  4. registration  - Multi-cycle alignment via VALIS (all cycles at once)
 
-Each rule processes one cycle (all channels, all z-planes).
-Snakemake's DAG ensures per-cycle dependencies: stitch -> deconvolve -> edf.
+Stages 1-3 process one cycle each (all channels, all z-planes).
+Stage 4 processes ALL cycles at once (requires all EDF outputs first).
+Snakemake's DAG ensures: stitch -> deconvolve -> edf (per-cycle) -> registration.
 
 Multi-account scheduling:
   Cycles are pre-assigned to accounts and modes (GPU/CPU) at DAG creation.
   GPU slots come from each account's QOS gres/gpu allocation.
   CPU slots use 85% of each account's CPU allocation (separate pool).
   Lambda resource functions route each cycle to the correct account/partition.
+  Registration gets a static account assignment (first GPU account preferred).
 
 Usage:
   snakemake --profile profiles/slurm -j 24  # Multi-account
@@ -124,14 +127,20 @@ ACCOUNTS = RES.get("accounts", [])
 
 
 def _build_cycle_assignment():
-    """Pre-assign each cycle to an account and mode (gpu/cpu).
+    """Pre-assign each cycle to an account and mode (gpu-only).
 
-    First N cycles go to GPU (distributed proportionally across accounts),
-    remaining cycles go to CPU (distributed proportionally across accounts).
+    All cycles are assigned to GPU, round-robin across accounts proportional
+    to each account's GPU slot count.  Overflow cycles queue in SLURM until
+    a GPU slot frees up — this is dramatically faster than CPU fallback
+    (GPU ~8 min vs CPU ~2 hours per cycle for stitching alone).
+
+    Snakemake's -j flag (set to total GPU slots) limits concurrent SLURM
+    submissions, so cycles naturally pipeline through freed GPU slots.
     """
     assignment = {}
 
-    # Build GPU queue: each account contributes gpu_slots entries
+    # Build GPU-only queue: each account contributes gpu_slots entries,
+    # then round-robin for any overflow beyond the total GPU slot count.
     gpu_queue = []
     for acct in ACCOUNTS:
         gpu_queue.extend([{
@@ -140,38 +149,20 @@ def _build_cycle_assignment():
             "partition": acct.get("partition_gpu", "hpg-b200,hpg-turin"),
         }] * acct.get("gpu_slots", 0))
 
-    # Build CPU queue: interleave accounts for even distribution.
-    # Without interleaving, all CPU cycles land on the first account
-    # when there are fewer CPU cycles than the first account's slots.
-    cpu_entries = []
-    for acct in ACCOUNTS:
-        cpu_entries.append(([{
-            "account": acct["name"],
-            "mode": "cpu",
-            "partition": acct.get("partition_cpu", "hpg-default"),
-        }], acct.get("cpu_slots", 0)))
-    # Round-robin: take one from each account in turn until all slots filled
-    cpu_queue = []
-    remaining = {i: n for i, (_, n) in enumerate(cpu_entries)}
-    while any(r > 0 for r in remaining.values()):
-        for i in remaining:
-            if remaining[i] > 0:
-                cpu_queue.append(cpu_entries[i][0][0])
-                remaining[i] -= 1
+    # Build list of GPU accounts for round-robin overflow
+    gpu_accounts = [acct for acct in ACCOUNTS if acct.get("gpu_slots", 0) > 0]
 
     for i, cyc in enumerate(CYCLES):
         cyc_key = cyc_fmt(cyc)
         if i < len(gpu_queue):
             assignment[cyc_key] = gpu_queue[i]
-        elif i - len(gpu_queue) < len(cpu_queue):
-            assignment[cyc_key] = cpu_queue[i - len(gpu_queue)]
         else:
-            # Overflow: round-robin across accounts on CPU
-            acct = ACCOUNTS[i % len(ACCOUNTS)] if ACCOUNTS else {"name": "", "partition_cpu": "hpg-default"}
+            # Overflow: round-robin across GPU accounts (still GPU mode)
+            acct = gpu_accounts[i % len(gpu_accounts)] if gpu_accounts else ACCOUNTS[0]
             assignment[cyc_key] = {
                 "account": acct["name"],
-                "mode": "cpu",
-                "partition": acct.get("partition_cpu", "hpg-default"),
+                "mode": "gpu",
+                "partition": acct.get("partition_gpu", "hpg-b200,hpg-turin"),
             }
 
     return assignment
@@ -226,8 +217,24 @@ def all_edf_marker_files():
     return targets
 
 
+def all_qc_sentinels():
+    """Build list of QC report sentinel targets (one per stage)."""
+    return [
+        f"{PROJECT}/qc_plots/.snakemake_complete_stitch",
+        f"{PROJECT}/qc_plots/.snakemake_complete_decon",
+        f"{PROJECT}/qc_plots/.snakemake_complete_edf",
+    ]
+
+
 rule all:
-    input: all_edf_sentinels()
+    input:
+        f"{PROJECT}/data/processed/registered/.snakemake_complete",
+        *all_qc_sentinels(),
+
+
+rule qc:
+    """Standalone target: generate only QC reports (no reprocessing)."""
+    input: all_qc_sentinels()
 
 
 rule validate:
@@ -332,3 +339,166 @@ rule edf:
         "{project}/slurm/logs/snakemake/edf_cyc{cycle}.log",
     script:
         "scripts/edf.py"
+
+
+# ===========================================================================
+# Rule 4: Registration (multi-cycle alignment via VALIS)
+# ===========================================================================
+# Single job processing ALL cycles at once. Requires all EDF outputs.
+# No {cycle} wildcard — static account assignment.
+
+# Registration configuration
+REG_CFG = config.get("registration", {})
+
+def _registration_assignment():
+    """Pick account for registration: prefer first GPU account, CPU fallback.
+
+    Registration uses VggFD feature detector (GPU-accelerated) by default.
+    Returns a dict with account, mode, and partition.
+    """
+    # Prefer GPU account for VggFD feature detector
+    for acct in ACCOUNTS:
+        if acct.get("gpu_slots", 0) > 0:
+            return {
+                "account": acct["name"],
+                "mode": "gpu",
+                "partition": acct.get("partition_gpu", "hpg-b200,hpg-turin"),
+            }
+    # CPU fallback (will use OrbFD instead of VggFD)
+    if ACCOUNTS:
+        return {
+            "account": ACCOUNTS[0]["name"],
+            "mode": "cpu",
+            "partition": ACCOUNTS[0].get("partition_cpu", "hpg-default"),
+        }
+    # No accounts configured — local execution
+    return {"account": "", "mode": "cpu", "partition": ""}
+
+
+_REG_ASSIGN = _registration_assignment()
+
+
+rule registration:
+    input:
+        edf_done=all_edf_sentinels(),
+    output:
+        sentinel="{project}/data/processed/registered/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+        cycles=CYCLES,
+        channel_names=CHANNEL_NAMES,
+        device_mode=_REG_ASSIGN["mode"],
+    resources:
+        mem_mb=RES.get("mem_registration", 64000) if _REG_ASSIGN["mode"] == "gpu" else RES.get("cpu_mem_registration", 64000),
+        runtime=RES.get("time_registration", 120) if _REG_ASSIGN["mode"] == "gpu" else RES.get("time_registration", 120) * CPU_TIME_MULT,
+        slurm_partition=_REG_ASSIGN["partition"],
+        slurm_account=_REG_ASSIGN["account"],
+        gres="gpu:1" if _REG_ASSIGN["mode"] == "gpu" else "",
+        cpus_per_task=4 if _REG_ASSIGN["mode"] == "gpu" else CPU_CPUS,
+    log:
+        "{project}/slurm/logs/snakemake/registration.log",
+    script:
+        "scripts/registration.py"
+
+
+# ===========================================================================
+# QC Report Rules (aggregate — one per stage, all cycles)
+# ===========================================================================
+# Each QC rule runs AFTER all cycles for its stage complete.
+# Produces summary heatmaps, z-plane profiles, and cross-stage comparison PDFs.
+# Uses Kprocess QC functions: run_stitched_qc(), run_decon_qc(), run_edf_qc().
+
+def _all_stitch_sentinels():
+    return expand(
+        "{project}/data/processed/stitched/cyc{cycle}/.snakemake_complete",
+        project=PROJECT,
+        cycle=[cyc_fmt(c) for c in CYCLES],
+    )
+
+
+def _all_decon_sentinels():
+    return expand(
+        "{project}/data/processed/deconvolved/cyc{cycle}/.snakemake_complete",
+        project=PROJECT,
+        cycle=[cyc_fmt(c) for c in CYCLES],
+    )
+
+
+rule qc_stitch:
+    input:
+        stitch_done=_all_stitch_sentinels(),
+    output:
+        sentinel=f"{PROJECT}/qc_plots/.snakemake_complete_stitch",
+    params:
+        stage="stitch",
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        cycles=CYCLES,
+        channels=CHANNELS,
+        n_zplanes=N_ZPLANES,
+        channel_names=CHANNEL_NAMES,
+    resources:
+        mem_mb=RES.get("mem_qc", 64000),
+        runtime=RES.get("time_qc", 120),
+        slurm_partition=_REG_ASSIGN["partition"],
+        slurm_account=_REG_ASSIGN["account"],
+        gres="gpu:1" if _REG_ASSIGN["mode"] == "gpu" else "",
+        cpus_per_task=4,
+    log:
+        f"{PROJECT}/slurm/logs/snakemake/qc_stitch.log",
+    script:
+        "scripts/qc_report.py"
+
+
+rule qc_decon:
+    input:
+        decon_done=_all_decon_sentinels(),
+    output:
+        sentinel=f"{PROJECT}/qc_plots/.snakemake_complete_decon",
+    params:
+        stage="decon",
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        cycles=CYCLES,
+        channels=CHANNELS,
+        n_zplanes=N_ZPLANES,
+        channel_names=CHANNEL_NAMES,
+    resources:
+        mem_mb=RES.get("mem_qc", 64000),
+        runtime=RES.get("time_qc", 120),
+        slurm_partition=_REG_ASSIGN["partition"],
+        slurm_account=_REG_ASSIGN["account"],
+        gres="gpu:1" if _REG_ASSIGN["mode"] == "gpu" else "",
+        cpus_per_task=4,
+    log:
+        f"{PROJECT}/slurm/logs/snakemake/qc_decon.log",
+    script:
+        "scripts/qc_report.py"
+
+
+rule qc_edf:
+    input:
+        edf_done=all_edf_sentinels(),
+    output:
+        sentinel=f"{PROJECT}/qc_plots/.snakemake_complete_edf",
+    params:
+        stage="edf",
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        cycles=CYCLES,
+        channels=CHANNELS,
+        n_zplanes=N_ZPLANES,
+        channel_names=CHANNEL_NAMES,
+    resources:
+        mem_mb=RES.get("mem_qc", 64000),
+        runtime=RES.get("time_qc", 120),
+        slurm_partition=_REG_ASSIGN["partition"],
+        slurm_account=_REG_ASSIGN["account"],
+        gres="gpu:1" if _REG_ASSIGN["mode"] == "gpu" else "",
+        cpus_per_task=4,
+    log:
+        f"{PROJECT}/slurm/logs/snakemake/qc_edf.log",
+    script:
+        "scripts/qc_report.py"
