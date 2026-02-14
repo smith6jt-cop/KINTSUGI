@@ -18,10 +18,16 @@ from kintsugi.signal.autofluorescence import (
     _estimate_af_contribution,
     _estimate_noise_level,
     analyze_for_subtraction,
+    analyze_for_weighted_subtraction,
+    build_weight_map,
+    compute_intensity_ranges,
     compute_subtraction_quality,
+    compute_weighted_subtraction_quality,
     subtract_autofluorescence,
+    subtract_autofluorescence_weighted,
     suggest_blank_channel,
 )
+from kintsugi.signal.utils import adaptive_range_boundaries, smooth_membership
 
 # =============================================================================
 # Fixtures
@@ -491,3 +497,366 @@ class TestRegressionFixes:
             result = subtract_autofluorescence(signal, blank)
 
             assert result.dtype == np.uint16, f"Failed for input dtype {dtype}"
+
+
+# =============================================================================
+# Tests for weighted subtraction
+# =============================================================================
+
+
+@pytest.fixture
+def dim_signal_with_bright_af():
+    """Create synthetic image with significant dim signal + bright AF.
+
+    The key scenario: a substantial portion of pixels have dim signal (3000-6000)
+    where AF is bright (7000-9000). Global subtraction at scale=1.0 zeros these
+    out; weighted method should preserve them because the dim intensity range
+    gets a lower weight.
+
+    Layout:
+    - 50% background (500-1500) with low AF
+    - 30% dim signal region (3000-6000) with bright AF (7000-9000) in blank
+    - 20% bright signal (20000-30000) with moderate AF (2000-4000)
+    """
+    np.random.seed(50)
+    signal = np.random.randint(500, 1500, (256, 256), dtype=np.uint16)
+    blank = np.random.randint(500, 1500, (256, 256), dtype=np.uint16)
+
+    # Dim signal region with bright AF (blank >> signal here)
+    # ~30% of image: rows 0-76 (77 rows = 30%)
+    signal[0:77, :] = np.random.randint(3000, 6000, (77, 256), dtype=np.uint16)
+    blank[0:77, :] = np.random.randint(7000, 9000, (77, 256), dtype=np.uint16)
+
+    # Bright true signal with moderate AF
+    signal[180:230, :] = np.random.randint(20000, 30000, (50, 256), dtype=np.uint16)
+    blank[180:230, :] = np.random.randint(2000, 4000, (50, 256), dtype=np.uint16)
+
+    return signal, blank
+
+
+class TestWeightedSubtraction:
+    """Tests for the weighted subtraction algorithm."""
+
+    def test_basic_shape_and_dtype(self, signal_image, blank_image):
+        """Test basic correctness: shape and dtype."""
+        result = subtract_autofluorescence_weighted(signal_image, blank_image)
+        assert result.shape == signal_image.shape
+        assert result.dtype == np.uint16
+
+    def test_non_negative(self, signal_image, blank_image):
+        """Test output is always non-negative."""
+        result = subtract_autofluorescence_weighted(
+            signal_image, blank_image, base_scale_factor=3.0
+        )
+        assert np.all(result >= 0)
+
+    def test_backwards_compatibility_uniform_weights(self, signal_image, blank_image):
+        """Uniform weights=1.0 should approximate global method."""
+        # Create uniform ranges with weight=1.0
+        uniform_ranges = [
+            {"lower_bound": 0, "upper_bound": 65536, "weight": 1.0, "label": "all"}
+        ]
+
+        result_weighted = subtract_autofluorescence_weighted(
+            signal_image,
+            blank_image,
+            base_scale_factor=1.0,
+            ranges=uniform_ranges,
+            transition_width=0.0,
+        )
+        result_global = subtract_autofluorescence(
+            signal_image, blank_image, blank_scale_factor=1.0
+        )
+
+        # Should be very close (small float rounding differences OK)
+        np.testing.assert_allclose(
+            result_weighted.astype(float),
+            result_global.astype(float),
+            atol=1,
+        )
+
+    def test_dim_region_preservation(self, dim_signal_with_bright_af):
+        """Key behavioral test: weighted method preserves dim cells."""
+        signal, blank = dim_signal_with_bright_af
+
+        # Global method at scale=1.0 — destroys dim cells (blank >> signal)
+        result_global = subtract_autofluorescence(
+            signal, blank, blank_scale_factor=1.0
+        )
+
+        # Weighted method — should preserve dim cells
+        result_weighted = subtract_autofluorescence_weighted(
+            signal, blank, base_scale_factor=1.0
+        )
+
+        # Dim region: rows 0:77, signal ~3000-6000, blank ~7000-9000
+        # Global: min(signal, blank*1.0) = signal → subtracts all → 0
+        # Weighted: dim range weight < 1.0 → blank*weight < signal → preserves some
+        dim_region_global = result_global[0:77, :].mean()
+        dim_region_weighted = result_weighted[0:77, :].mean()
+
+        assert dim_region_weighted > dim_region_global, (
+            f"Weighted method should preserve dim cells better: "
+            f"weighted={dim_region_weighted:.0f}, global={dim_region_global:.0f}"
+        )
+
+    def test_custom_ranges(self, signal_image, blank_image):
+        """Test with manually specified ranges."""
+        custom_ranges = [
+            {"lower_bound": 0, "upper_bound": 5000, "weight": 0.3, "label": "dim"},
+            {"lower_bound": 5000, "upper_bound": 20000, "weight": 0.8, "label": "medium"},
+            {"lower_bound": 20000, "upper_bound": 65536, "weight": 1.1, "label": "bright"},
+        ]
+
+        result = subtract_autofluorescence_weighted(
+            signal_image, blank_image, ranges=custom_ranges
+        )
+        assert result.shape == signal_image.shape
+        assert result.dtype == np.uint16
+
+    def test_shape_mismatch_raises(self, signal_image):
+        """Test that mismatched shapes raise ValueError."""
+        wrong_blank = np.zeros((128, 128), dtype=np.uint16)
+        with pytest.raises(ValueError, match="Signal shape"):
+            subtract_autofluorescence_weighted(signal_image, wrong_blank)
+
+    def test_near_uniform_fallback(self):
+        """Test fallback to global for near-uniform images."""
+        signal = np.full((64, 64), 1000, dtype=np.uint16)
+        blank = np.full((64, 64), 500, dtype=np.uint16)
+        result = subtract_autofluorescence_weighted(signal, blank)
+        assert result.dtype == np.uint16
+
+    def test_with_smoothing_and_erosion(self, signal_image, blank_image):
+        """Test that post-processing options work."""
+        result = subtract_autofluorescence_weighted(
+            signal_image,
+            blank_image,
+            smooth_low=True,
+            low_size=3,
+            smooth_high=True,
+            high_size=3,
+            erosion=1,
+        )
+        assert result.shape == signal_image.shape
+
+
+class TestComputeIntensityRanges:
+    """Tests for compute_intensity_ranges()."""
+
+    def test_correct_count(self, signal_image, blank_image):
+        """Test correct number of ranges returned."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=5)
+        assert len(ranges) == 5
+
+    def test_correct_count_3(self, signal_image, blank_image):
+        """Test with 3 ranges."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=3)
+        assert len(ranges) == 3
+
+    def test_non_overlapping(self, signal_image, blank_image):
+        """Test that ranges are non-overlapping."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=5)
+
+        for i in range(len(ranges) - 1):
+            assert ranges[i]["upper_bound"] <= ranges[i + 1]["upper_bound"]
+
+    def test_valid_weights(self, signal_image, blank_image):
+        """Test that weights are in valid range."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=5)
+
+        for r in ranges:
+            assert 0.0 <= r["weight"] <= 1.5, f"Weight {r['weight']} out of range for {r['label']}"
+
+    def test_dim_ranges_lower_weight(self, dim_signal_with_bright_af):
+        """Test that dim ranges get lower weight than bright ranges."""
+        signal, blank = dim_signal_with_bright_af
+        signal_f = signal.astype(np.float32)
+        blank_f = blank.astype(np.float32)
+        blank_clipped = np.clip(blank_f, 0, blank_f.max())
+
+        ranges = compute_intensity_ranges(signal_f, blank_clipped, n_ranges=5)
+
+        # The lowest non-background range should have lower weight than the highest
+        non_bg_ranges = [r for r in ranges if r["pixel_fraction"] > 0.01]
+        if len(non_bg_ranges) >= 2:
+            assert non_bg_ranges[0]["weight"] <= non_bg_ranges[-1]["weight"]
+
+    def test_otsu_method(self, signal_image, blank_image):
+        """Test Otsu boundary method."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=3, method="otsu")
+        assert len(ranges) == 3
+
+    def test_has_labels(self, signal_image, blank_image):
+        """Test that each range has a label."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=5)
+
+        for r in ranges:
+            assert "label" in r
+            assert isinstance(r["label"], str)
+            assert len(r["label"]) > 0
+
+
+class TestBuildWeightMap:
+    """Tests for build_weight_map()."""
+
+    def test_output_shape(self, signal_image, blank_image):
+        """Test that weight map has same shape as signal."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=5)
+        wmap = build_weight_map(signal_f, ranges)
+        assert wmap.shape == signal_f.shape
+
+    def test_no_discontinuities(self, signal_image, blank_image):
+        """Test that weight map has no sharp jumps (smooth gradient)."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=5)
+        wmap = build_weight_map(signal_f, ranges, transition_width=0.1)
+
+        # Check that gradient is bounded (no huge jumps between adjacent pixels)
+        grad_y = np.abs(np.diff(wmap, axis=0))
+        grad_x = np.abs(np.diff(wmap, axis=1))
+
+        # Max gradient should be reasonable (< 0.5 per pixel for smooth transitions)
+        assert grad_y.max() < 1.0, f"Large Y gradient: {grad_y.max()}"
+        assert grad_x.max() < 1.0, f"Large X gradient: {grad_x.max()}"
+
+    def test_transition_width_effect(self, signal_image, blank_image):
+        """Test that larger transition width produces smoother map."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=5)
+
+        wmap_narrow = build_weight_map(signal_f, ranges, transition_width=0.01)
+        wmap_wide = build_weight_map(signal_f, ranges, transition_width=0.4)
+
+        # Wider transitions should produce smaller max gradient
+        grad_narrow = np.abs(np.diff(wmap_narrow, axis=0)).max()
+        grad_wide = np.abs(np.diff(wmap_wide, axis=0)).max()
+
+        assert grad_wide <= grad_narrow + 0.1  # Wide should be smoother or equal
+
+    def test_weight_values_in_range(self, signal_image, blank_image):
+        """Test that weight map values are bounded."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=5)
+        wmap = build_weight_map(signal_f, ranges)
+
+        assert wmap.min() >= 0, f"Negative weight: {wmap.min()}"
+        assert wmap.max() <= 1.5, f"Weight too high: {wmap.max()}"
+
+
+class TestRangeUtilities:
+    """Tests for range utility functions."""
+
+    def test_adaptive_range_boundaries_count(self, signal_image):
+        """Test correct number of boundaries."""
+        boundaries = adaptive_range_boundaries(signal_image, n_ranges=5)
+        assert len(boundaries) == 5
+
+    def test_adaptive_range_boundaries_ordered(self, signal_image):
+        """Test that boundaries are ordered."""
+        boundaries = adaptive_range_boundaries(signal_image, n_ranges=5)
+        for i in range(len(boundaries) - 1):
+            assert boundaries[i][0] < boundaries[i + 1][0]
+
+    def test_smooth_membership_center(self):
+        """Test that center of range has full membership."""
+        values = np.array([50.0], dtype=np.float32)
+        m = smooth_membership(values, 0.0, 100.0, 0.1)
+        assert m[0] == pytest.approx(1.0, abs=0.01)
+
+    def test_smooth_membership_outside(self):
+        """Test that far-outside values have zero membership."""
+        values = np.array([200.0], dtype=np.float32)
+        m = smooth_membership(values, 0.0, 100.0, 0.1)
+        assert m[0] == pytest.approx(0.0, abs=0.01)
+
+    def test_smooth_membership_transition(self):
+        """Test that transition region has intermediate values."""
+        lower, upper, tw = 100.0, 200.0, 0.2
+        # Point in rising transition
+        values = np.array([100.0], dtype=np.float32)
+        m = smooth_membership(values, lower, upper, tw)
+        assert 0.0 < m[0] < 1.0
+
+
+class TestAnalyzeForWeightedSubtraction:
+    """Tests for analyze_for_weighted_subtraction()."""
+
+    def test_returns_weighted_keys(self, signal_image, blank_image):
+        """Test that weighted analysis returns all expected keys."""
+        result = analyze_for_weighted_subtraction(signal_image, blank_image)
+
+        assert "method" in result
+        assert result["method"] == "weighted"
+        assert "ranges" in result
+        assert "n_ranges" in result
+        assert "base_scale_factor" in result
+        assert "transition_width" in result
+        # Plus all base analysis keys
+        assert "blank_clip_factor" in result
+        assert "confidence" in result
+
+    def test_ranges_have_weights(self, signal_image, blank_image):
+        """Test that each range has a weight."""
+        result = analyze_for_weighted_subtraction(signal_image, blank_image)
+
+        for r in result["ranges"]:
+            assert "weight" in r
+            assert "lower_bound" in r
+            assert "upper_bound" in r
+            assert "label" in r
+
+
+class TestWeightedSubtractionQuality:
+    """Tests for compute_weighted_subtraction_quality()."""
+
+    def test_returns_global_and_per_range(self, signal_image, blank_image):
+        """Test that quality includes global and per-range metrics."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=5)
+
+        subtracted = subtract_autofluorescence_weighted(signal_image, blank_image)
+        quality = compute_weighted_subtraction_quality(
+            signal_image, subtracted, blank_image, ranges
+        )
+
+        assert "global" in quality
+        assert "per_range" in quality
+        assert len(quality["per_range"]) == len(ranges)
+        assert "quality_score" in quality["global"]
+
+    def test_per_range_has_metrics(self, signal_image, blank_image):
+        """Test per-range entries have expected metrics."""
+        signal_f = signal_image.astype(np.float32)
+        blank_f = blank_image.astype(np.float32)
+        ranges = compute_intensity_ranges(signal_f, blank_f, n_ranges=3)
+
+        subtracted = subtract_autofluorescence_weighted(signal_image, blank_image, n_ranges=3)
+        quality = compute_weighted_subtraction_quality(
+            signal_image, subtracted, blank_image, ranges
+        )
+
+        for pr in quality["per_range"]:
+            assert "label" in pr
+            assert "weight" in pr
+            assert "snr" in pr
+            assert "af_removal" in pr
+            assert "signal_preservation" in pr

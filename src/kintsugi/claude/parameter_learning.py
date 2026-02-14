@@ -332,6 +332,14 @@ class ParameterLearningEngine:
             ON parameter_records(user_approved, quality_improvement)
         """)
 
+        # Migration: add algorithm_version column if it doesn't exist
+        cursor.execute("PRAGMA table_info(parameter_records)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "algorithm_version" not in columns:
+            cursor.execute(
+                "ALTER TABLE parameter_records ADD COLUMN algorithm_version TEXT DEFAULT 'v1'"
+            )
+
         conn.commit()
         conn.close()
 
@@ -348,6 +356,8 @@ class ParameterLearningEngine:
         characteristics: ImageCharacteristics | None = None,
         channel_name: str = "",
         to_global: bool = True,
+        algorithm_version: str | None = None,
+        quality_score: float | None = None,
     ) -> int:
         """
         Record a parameter set with its outcome.
@@ -368,6 +378,14 @@ class ParameterLearningEngine:
         Returns:
             Record ID
         """
+        # Determine algorithm version from parameters if not explicit
+        if algorithm_version is None:
+            algorithm_version = parameters.get("algorithm_version", "v1")
+
+        # Support quality_score as alternative to quality_after
+        if quality_score is not None and quality_after == 0.0:
+            quality_after = quality_score
+
         record = ParameterRecord(
             tissue_type=tissue_type,
             tissue_type_normalized=normalize_tissue_type(tissue_type),
@@ -384,6 +402,7 @@ class ParameterLearningEngine:
             project_path=str(self.project_path) if self.project_path else "",
             channel_name=channel_name,
         )
+        record.algorithm_version = algorithm_version
 
         record_id = None
 
@@ -402,6 +421,8 @@ class ParameterLearningEngine:
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
 
+        algo_version = getattr(record, "algorithm_version", "v1")
+
         cursor.execute(
             """
             INSERT INTO parameter_records (
@@ -409,8 +430,9 @@ class ParameterLearningEngine:
                 marker_name, marker_name_normalized,
                 characteristics_json, operation, parameters_json,
                 quality_before, quality_after, quality_improvement,
-                user_approved, user_notes, project_path, channel_name
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                user_approved, user_notes, project_path, channel_name,
+                algorithm_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 record.timestamp,
@@ -428,6 +450,7 @@ class ParameterLearningEngine:
                 record.user_notes,
                 record.project_path,
                 record.channel_name,
+                algo_version,
             ),
         )
 
@@ -446,6 +469,7 @@ class ParameterLearningEngine:
         min_quality_improvement: float = 0.0,
         approved_only: bool = True,
         max_results: int = 5,
+        algorithm_version: str | None = None,
     ) -> dict[str, Any]:
         """
         Recommend parameters based on similar tissue/marker combinations.
@@ -476,6 +500,7 @@ class ParameterLearningEngine:
                 operation,
                 min_quality_improvement,
                 approved_only,
+                algorithm_version=algorithm_version,
             )
             # Project records get higher weight
             for r in records:
@@ -491,6 +516,7 @@ class ParameterLearningEngine:
                 operation,
                 min_quality_improvement,
                 approved_only,
+                algorithm_version=algorithm_version,
             )
             for r in records:
                 r["source"] = "global"
@@ -554,6 +580,7 @@ class ParameterLearningEngine:
         operation: str,
         min_improvement: float,
         approved_only: bool,
+        algorithm_version: str | None = None,
     ) -> list[dict[str, Any]]:
         """Query records similar to the target tissue/marker."""
         conn = sqlite3.connect(str(db_path))
@@ -570,6 +597,10 @@ class ParameterLearningEngine:
 
         if approved_only:
             query += " AND user_approved = 1"
+
+        if algorithm_version:
+            query += " AND algorithm_version = ?"
+            params.append(algorithm_version)
 
         # Order by relevance
         query += """
@@ -722,7 +753,11 @@ class ParameterLearningEngine:
             # Check type of first value
             first_value = values[0]
 
-            if isinstance(first_value, bool):
+            if key == "ranges" and isinstance(first_value, list):
+                # Special handling for ranges lists: aggregate per-range weights
+                aggregated[key] = self._aggregate_ranges(values_weights)
+
+            elif isinstance(first_value, bool):
                 # Boolean: weighted majority vote
                 true_weight = sum(w for v, w in values_weights if v)
                 false_weight = sum(w for v, w in values_weights if not v)
@@ -755,6 +790,64 @@ class ParameterLearningEngine:
                         break
 
         return aggregated
+
+    def _aggregate_ranges(
+        self,
+        ranges_weights: list[tuple[list[dict], float]],
+    ) -> list[dict]:
+        """Aggregate per-range weights across multiple records.
+
+        Only aggregates records with matching n_ranges. Falls back to the
+        most common n_ranges if they differ.
+        """
+        # Group by n_ranges
+        by_n: dict[int, list[tuple[list[dict], float]]] = {}
+        for ranges_list, weight in ranges_weights:
+            n = len(ranges_list)
+            if n not in by_n:
+                by_n[n] = []
+            by_n[n].append((ranges_list, weight))
+
+        # Use most common n_ranges
+        best_n = max(by_n, key=lambda n: len(by_n[n]))
+        matching = by_n[best_n]
+
+        if len(matching) == 1:
+            return matching[0][0]
+
+        # Average weights per range position; median boundaries
+        aggregated_ranges = []
+        for i in range(best_n):
+            weights_for_range = []
+            lowers = []
+            uppers = []
+            label = ""
+
+            for ranges_list, record_weight in matching:
+                if i < len(ranges_list):
+                    r = ranges_list[i]
+                    weights_for_range.append((r.get("weight", 1.0), record_weight))
+                    lowers.append(r.get("lower_bound", 0))
+                    uppers.append(r.get("upper_bound", 65535))
+                    if not label:
+                        label = r.get("label", "")
+
+            # Weighted average of per-range weights
+            total_w = sum(w for _, w in weights_for_range)
+            avg_weight = (
+                sum(rw * w for rw, w in weights_for_range) / total_w if total_w > 0 else 1.0
+            )
+
+            aggregated_ranges.append(
+                {
+                    "lower_bound": float(np.median(lowers)),
+                    "upper_bound": float(np.median(uppers)),
+                    "weight": round(avg_weight, 4),
+                    "label": label,
+                }
+            )
+
+        return aggregated_ranges
 
     def _calculate_confidence(
         self,

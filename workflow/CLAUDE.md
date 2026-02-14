@@ -9,7 +9,7 @@ KINTSUGI has two distinct processing modes with different resource utilization s
 | Mode | Context | GPU Policy | CPU Policy | Rationale |
 |------|---------|------------|------------|-----------|
 | **Notebook** | Interactive, user watching | GPU required, no fallback | Not used | Quality-first; user can intervene if GPU unavailable |
-| **SLURM** | Headless batch processing | GPU + CPU concurrent | CPU concurrent | Maximize throughput; use ALL available resources |
+| **SLURM** | Headless batch processing | GPU-only, overflow queues | Not used (too slow) | GPU ~8 min vs CPU ~2 hrs per cycle for stitching |
 
 **Notebook Processing (Interactive)**:
 - GPU is **required** - fails loudly if unavailable
@@ -17,40 +17,41 @@ KINTSUGI has two distinct processing modes with different resource utilization s
 - Quality parameters are non-negotiable (e.g., BaSiC iterations=500)
 - See `gpu-quality-priority` skill for details
 
-**SLURM Processing (Headless)**:
-- Maximizes throughput by running GPU and CPU jobs **concurrently**
-- Uses a **dual-pool architecture** to calculate total concurrent slots from both GPU and CPU resources
-- Jobs automatically adapt via `KINTSUGI_DEVICE_MODE` environment variable
-- Quality parameters remain unchanged - only the compute device differs
+**SLURM Processing (Headless — GPU-Only Scheduling)**:
+- **All cycles route through GPU slots** — no CPU fallback
+- Overflow cycles queue in SLURM until a GPU slot frees up
+- GPU is 15-20x faster than CPU for BaSiC illumination correction (500 DCT iterations per z-plane)
+- Snakemake `-j` is set to total GPU slots (not total slots) to limit concurrent submissions
+- Per-cycle pipeline (`stitch→decon→edf`) enables cycles to flow through freed GPU slots
+- See `gpu-only-scheduling` skill for the performance data behind this decision
 
 ## Resource Pool Calculation (Multi-Account Architecture)
 
-KINTSUGI calculates total concurrent jobs from **all** non-blocked SLURM accounts. Each account contributes **both** GPU slots and CPU slots independently:
+KINTSUGI calculates available GPU slots from **all** non-blocked SLURM accounts:
 
 - **GPU slots** per account = QOS `gres/gpu` limit (via `sacctmgr`)
-- **CPU slots** per account = `floor(0.85 * account_cpus / cpus_per_job)` (85% cap avoids starving other users)
-- GPU and CPU partitions are separate resource pools — GPU jobs on `hpg-b200` do NOT consume CPU allocation on `hpg-default`
+- **CPU slots** are still detected but **not used for scheduling** (CPU is 15-20x slower — see `gpu-only-scheduling` skill)
 - **`brusko` account is permanently blocked** — hard-coded in `BLOCKED_ACCOUNTS` frozenset in `hpc.py`
 
-**Total Concurrent** = sum(GPU slots) + sum(CPU slots) across all accounts
+**Total Concurrent** = sum(GPU slots) across all accounts (CPU pool is informational only)
 
-**Example calculation** (two accounts, each with GPUs AND CPUs):
-| Account | CPUs | Memory | GPUs | GPU Slots | CPU Slots | Calculation |
-|---------|------|--------|------|-----------|-----------|-------------|
-| `clive` | 104 | 812 GB | 3 | 3 | 11 | GPUs: 3/1; CPUs: floor(0.85*104/8) |
-| `maigan` | 80 | 625 GB | 2 | 2 | 8 | GPUs: 2/1; CPUs: floor(0.85*80/8) |
-| **Total** | | | **5** | **5** | **19** | **24 concurrent jobs** |
+**Example calculation** (two accounts):
+| Account | GPUs | GPU Slots | CPU Slots (unused) |
+|---------|------|-----------|-------------------|
+| `clive` | 3 | 3 | 11 |
+| `maigan` | 2 | 2 | 8 |
+| **Total** | **5** | **5** | 19 (not used) |
 
-## How Concurrent GPU/CPU Works
+## How GPU-Only Scheduling Works
 
 1. `detect_multi_account_resources()` / `detect_live_multi_account()` query `sacctmgr show associations` for all user accounts (filtering burst `-b` accounts and blocked accounts)
-2. Each account's GPU and CPU slots are calculated independently from its QOS limits
-3. GPU jobs are submitted on each account's GPU partition (e.g., `hpg-b200`) with `KINTSUGI_DEVICE_MODE=gpu`
-4. CPU jobs are submitted on each account's CPU partition (e.g., `hpg-default`) with `KINTSUGI_DEVICE_MODE=cpu` and guaranteed (non-preemptible) resources
-5. Job scripts read `KINTSUGI_DEVICE_MODE` and use appropriate backend (CuPy for GPU, NumPy/SciPy for CPU)
-6. CPU jobs get a 5x time multiplier (automatic) but have guaranteed memory allocation
+2. Each account's GPU slots are calculated from its QOS limits
+3. `_build_cycle_assignment()` pre-assigns ALL cycles to GPU, round-robin across accounts proportional to GPU slot counts
+4. Overflow cycles (beyond total GPU slots) still get GPU assignments — they queue in SLURM until a GPU slot frees up
+5. Snakemake `-j` = total GPU slots, so concurrent SLURM submissions match available GPUs
+6. Per-cycle pipeline (`stitch→decon→edf`) means freed GPU slots are immediately used by the next stage
 
-**Important**: `sacctmgr show associations user=USERNAME format=account -n -P` is the correct query format. The older `sacctmgr show user USERNAME format=account` returns empty results.
+**Why no CPU fallback**: BaSiC runs 500 DCT iterations per z-plane — GPU ~8 min vs CPU ~2 hrs per cycle. Queuing for GPU is faster than running on CPU.
 
 ## Snakemake Workflow (Alternative to submit.sh)
 
@@ -67,11 +68,15 @@ kintsugi workflow run .       # Submit via Snakemake (auto-sets -j)
 
 | Design Choice | Rationale |
 |---------------|-----------|
-| 3 rules with lambda resources | `ruleorder` does NOT fall back — it always picks the preferred rule, so 6 rules + ruleorder was fundamentally broken |
-| Cycle pre-assignment at DAG creation | `_build_cycle_assignment()` distributes cycles proportionally across accounts/modes before any job runs |
+| 3 per-cycle rules with lambda resources | `ruleorder` does NOT fall back — it always picks the preferred rule, so 6 rules + ruleorder was fundamentally broken |
+| GPU-only cycle assignment | `_build_cycle_assignment()` routes ALL cycles to GPU — CPU is 15-20x slower, queuing for GPU is faster |
 | Sentinel files (`.snakemake_complete`) | Stitching/deconvolution produce hundreds of files; declaring every output would create an enormous DAG |
 | Per-cycle dependencies | `stitch cyc01 → decon cyc01 → edf cyc01` allows pipelining across cycles |
 | No `--resources gpus=N` needed | GPU budget is baked into cycle pre-assignment |
+| Registration as aggregate rule (no `{cycle}` wildcard) | Registration aligns ALL cycles at once — needs all EDF outputs before starting |
+| Static account assignment for registration & QC | `_registration_assignment()` picks first GPU account; reused by QC rules |
+| Aggregate QC rules (3 stages) | QC runs once across ALL cycles for cross-cycle comparison heatmaps |
+| Dynamic worker counts | Wrapper scripts read `cpus_per_task` from Snakemake resources instead of hardcoded 4 |
 
 **Config format** (`workflow/config.yaml`):
 ```yaml
@@ -92,9 +97,10 @@ resources:
   cpu_cpus_per_task: 8
 ```
 
-**Cycle assignment example** (13 cycles, clive 3G+11C, maigan 2G+8C):
-- Cycles 1-3 → clive GPU, Cycles 4-5 → maigan GPU
-- Cycles 6-16 → clive CPU, Cycles 17+ → maigan CPU (round-robin overflow)
+**Cycle assignment example** (9 cycles, clive 3G, maigan 2G = 5 GPU slots):
+- Cycles 1-3 → clive GPU, Cycles 4-5 → maigan GPU (fills all 5 GPU slots)
+- Cycles 6-9 → overflow: round-robin clive/maigan GPU (queue in SLURM until a GPU frees up)
+- No CPU assignments — all cycles run on GPU
 
 **Lambda resource routing** (per-rule in Snakefile):
 ```python
@@ -120,30 +126,91 @@ resources:
 
 **`workflow config` behavior**: Always overwrites the Snakefile and profiles (so pipeline logic and SLURM precommand updates propagate); only copies scripts if they don't already exist.
 
-**Per-channel skip-existing checks** (inside wrapper scripts):
-- Snakemake controls the DAG at cycle level via sentinel files. If a sentinel is missing, the entire cycle reruns.
-- Wrapper scripts (`stitch.py`, `deconvolve.py`, `edf.py`) add per-channel skip-existing checks inside the job to avoid re-processing completed channels when a job was interrupted mid-cycle.
-- A channel is only skipped when ALL expected output files exist (partially-complete channels are fully reprocessed).
-- `stitch.py`: Checks all z-plane TIFs + `result_df.pkl` for CH1
-- `deconvolve.py`: Compares decon TIF count against stitched input count
-- `edf.py`: Checks if marker-named output file exists
-- Sentinel files include `skipped=N` for visibility in logs
+**QC Report Rules** (aggregate — added 2026-02-13):
 
-**What Snakemake replaces vs keeps:**
-- Replaces: `submit.sh` orchestration, dependency wiring, `.complete` polling, `--array` limit calculation
-- Keeps: Python processing code in wrapper scripts (`workflow/scripts/*.py`), `KINTSUGI_DEVICE_MODE` environment variable pattern, per-channel skip-existing inside wrapper scripts
-- Coexists with: Existing `slurm/` job scripts (run one system or the other, not both)
+The workflow includes 3 aggregate QC rules that produce rich QC reports (summary heatmaps, z-plane profiles, cross-stage comparison PDFs) after each processing stage completes. These replicate the Notebook 2 QC outputs via `Kprocess.py` functions.
+
+| Rule | Depends On | Kprocess Function | Output |
+|------|-----------|-------------------|--------|
+| `qc_stitch` | All stitch sentinels (all cycles) | `run_stitched_qc()` | `qc_plots/stitched_summary_heatmaps.pdf` + per-cycle z-profiles |
+| `qc_decon` | All decon sentinels (all cycles) | `run_decon_qc()` | `qc_plots/deconvolved_summary_heatmaps.pdf` + per-cycle z-profiles |
+| `qc_edf` | All EDF sentinels (all cycles) | `run_edf_qc()` | `qc_plots/edf_summary_heatmaps.pdf` |
+
+Key design decisions:
+- **Aggregate (not per-cycle)**: QC runs once across ALL cycles for cross-cycle comparison heatmaps
+- **Single dispatch script**: `scripts/qc_report.py` dispatches to the correct Kprocess function based on `snakemake.params.stage`
+- **Cross-stage comparison**: Each stage loads the previous stage's cached stats pickle (`cache/stitch_stats.pkl` → `decon_stats.pkl` → `edf_stats.pkl`)
+- **Headless matplotlib**: `matplotlib.use("Agg")` is set before any Kprocess import to prevent display issues on compute nodes
+- **GPU with CPU fallback**: Same pattern as processing scripts — tries CuPy, falls back to CPU
+- **Resources**: 64 GB RAM, 120 min, 1 GPU on first account (reuses `_REG_ASSIGN` from registration)
+- **`rule all` includes QC**: `all_qc_sentinels()` is included alongside registration sentinel in the default target
+- **`rule qc` standalone target**: Run `snakemake qc` to generate only QC reports without reprocessing
+
+```bash
+snakemake -n qc           # Dry run — show QC DAG
+snakemake qc --profile profiles/slurm -j 1  # Run QC only
+```
+
+**Config resources** (`workflow/config.yaml`):
+```yaml
+resources:
+  mem_qc: 64000    # 64 GB for QC report generation
+  time_qc: 120     # 2 hours
+```
+
+**Registration Rule** (aggregate — added 2026-02-13):
+
+Registration (multi-cycle alignment via VALIS) is Rule 4 in the pipeline. Unlike stitch/decon/edf which process one cycle each, registration processes ALL cycles in a single SLURM job.
+
+**Full pipeline**: `stitch → deconvolve → edf` (per-cycle, pipelined) → `registration` (all cycles) + `qc_stitch/qc_decon/qc_edf` (aggregate after each stage)
+
+| Aspect | Details |
+|--------|---------|
+| **Input** | All EDF sentinels (waits for every cycle to complete) |
+| **Output** | `data/processed/registered/.snakemake_complete` sentinel |
+| **Account** | Static via `_registration_assignment()` — first GPU account preferred |
+| **GPU usage** | VggFD feature detector (GPU); falls back to OrbFD on CPU |
+| **Script** | `scripts/registration.py` |
+| **Resources** | 64 GB RAM, 120 min (GPU) / 600 min (CPU), 4 CPUs |
+
+Key design decisions:
+- **No `{cycle}` wildcard**: Registration is a single job, not per-cycle. Uses static `_REG_ASSIGN` dict instead of `_assign(wc)` lambdas
+- **`_registration_assignment()`**: Prefers first account with `gpu_slots > 0` for VggFD; falls back to CPU with OrbFD
+- **Single-cycle handling**: If `len(CYCLES) < 2`, copies EDF → registered without alignment (no VALIS needed)
+- **Error fallback**: On VALIS failure, copies EDF images unchanged (matches notebook behavior)
+- **Skip-existing**: All-or-nothing — checks if ALL registered files exist for ALL cycles before skipping
+- **Slide matching**: Builds `cycle_to_slide_name` dict from DAPI filenames for robust `slide_dict` lookup
+
+**Registration config** (`workflow/config.yaml`):
+```yaml
+registration:
+  reference_cycle: 1          # Cycle used as fixed reference
+  reference_channel: 1        # Channel for feature detection (usually DAPI)
+  max_image_dim: 2048         # Max dimension for registration computation
+  rigid_only: false           # Set true to skip non-rigid registration
+  feature_detector: "VggFD"   # "VggFD" (GPU, better) or "OrbFD" (CPU-only)
+
+resources:
+  mem_registration: 64000     # 64 GB
+  time_registration: 120      # 2 hours
+  cpu_mem_registration: 64000 # Same for CPU (loads one image per cycle, not z-stacks)
+```
+
+**Per-channel skip-existing**: Wrapper scripts (`stitch.py`, `deconvolve.py`, `edf.py`) check per-channel completion inside jobs to resume interrupted cycles. Sentinel files include `skipped=N` in logs. Dynamic worker counts read from `snakemake.resources.cpus_per_task`.
+
+**Snakemake replaces** `submit.sh` orchestration/dependency wiring; **keeps** Python wrapper scripts (`workflow/scripts/*.py`). Run one system or the other, not both.
 
 ## Batch Processing (Multi-Dataset)
 
 KINTSUGI supports automated batch processing of multiple CODEX datasets. See `/blue/maigan/smith6jt/README.md` for the complete pipeline reference and `KINTSUGI_Batch_Processing_Guide.docx` for the 8-phase workflow.
 
 **Key scripts** (in `/blue/maigan/smith6jt/`):
-- `dataset_manifest.csv` - Central registry of all 34 datasets (source paths, parameters, sizes)
+- `dataset_manifest.csv` - Central registry of all 47 datasets (34 spleen/LN + 13 thymus; source paths, parameters, sizes)
 - `setup_all_projects.sh` - Creates KINTSUGI projects for all datasets in manifest
 - `configure_all_workflows.sh` - Generates Snakemake configs for each project
 - `stage_datasets.sh` - Submits SLURM rsync jobs to copy raw data from orange to blue (wave-based)
-- `stage_datasets_globus.py` - Alternative Globus-based staging for higher throughput
+- `stage_datasets_globus.py` - Globus-based staging for thymus datasets from PATH lab SMB share
+- `thymus_manifest.csv` - Standalone manifest for 13 thymus datasets (subset of main manifest)
 - `run_all_workflows.sh` - Runs Snakemake for all staged datasets sequentially
 - `cleanup_datasets.sh` - Verifies EDF outputs, deletes intermediates and raw data
 - `pipeline_status.sh` - Shows current state of every dataset
@@ -153,8 +220,8 @@ KINTSUGI supports automated batch processing of multiple CODEX datasets. See `/b
 1. setup_all_projects.sh      Create project dirs + copy metadata from orange
 2. configure_all_workflows.sh Generate Snakemake configs for all projects
 3. stage_datasets.sh 5        Stage next wave of raw data (orange → blue)
-4. run_all_workflows.sh       Process all staged datasets (stitch → decon → EDF)
-5. cleanup_datasets.sh        Verify EDF, delete intermediates + raw
+4. run_all_workflows.sh       Process all staged datasets (stitch → decon → EDF → registration + QC)
+5. cleanup_datasets.sh        Verify outputs, delete intermediates + raw
 6. Repeat 3-5 for next wave
 ```
 
@@ -167,32 +234,25 @@ bash run_all_workflows.sh --dry-run     # preview without executing
 bash run_all_workflows.sh --dataset CX_19-002_lymph-node_R1  # single dataset
 ```
 
-**Why sequential processing:** All datasets share the same 24 SLURM slots (5 GPU + 19 CPU across clive and maigan accounts). Running multiple Snakemake instances in parallel would cause resource contention with no throughput gain. Each Snakemake instance is a long-running coordinator that submits SLURM jobs and polls their status — run inside tmux or screen so it survives terminal disconnects.
+**Why sequential**: All datasets share 5 GPU slots — parallel Snakemake instances cause contention. Run inside tmux. Re-runs auto-skip completed datasets via sentinel files + per-channel skip-existing.
 
-**Re-run safety:** Completed datasets are automatically skipped on re-run via two mechanisms:
-1. Snakemake sentinel files (`.snakemake_complete/`) — cycle-level skip
-2. Per-channel skip-existing in wrapper scripts — channel-level resume for interrupted jobs
+**Storage**: `/orange/maigan/` (long-term, ~9.7 TB spleen/LN), PATH lab SMB (thymus, ~2.4 TB via Globus), `/blue/maigan/` (processing workspace). Peak blue usage per dataset: ~3x raw size.
 
-**Storage architecture** (HiPerGator):
-- `/orange/maigan/` - Long-term storage for raw CODEX data (~9.7 TB, 34 datasets)
-- `/blue/maigan/` - Processing workspace (~17 TB available). Raw data must be copied here.
-- Peak blue usage per dataset: ~3x raw size (raw + stitched + deconvolved intermediates)
+**CRITICAL rsync rule**: Never use bash glob `*/` on rsync source — it flattens cycle directories. Use trailing `/` and let rsync handle the tree: `rsync -av '${orange_path}/' '${RAW_DIR}/' --include='*/' --include='*.tif' --exclude='*'`
 
-**Rsync staging pattern** (preserves cycle directory structure):
-```bash
-rsync -av '${orange_path}/' '${RAW_DIR}/' \
-  --include='*/' --include='*.tif' --exclude='*'
-```
-**CRITICAL**: Never use bash glob `*/` on rsync source — it flattens cycle directories and overwrites files across cycles. Use the source path with trailing `/` and let rsync handle the tree.
+**Globus staging** (thymus datasets from PATH lab): Uses `stage_datasets_globus.py` with PATH lab GCP endpoint → HiPerGator. Transfer log: `/blue/maigan/smith6jt/globus_transfers.json`. Requires `module load globus` and session consent. See `stage_datasets_globus.py` docstring for endpoint IDs and path quirks.
 
 **Sentinel files:**
 | File | Created by | Meaning |
 |------|-----------|---------|
 | `data/raw/.staged` | `stage_datasets.sh` | Raw data rsync complete |
-| `.snakemake_complete/stitch_cyc{NN}` | Snakemake stitch rule | Stitching done for cycle |
-| `.snakemake_complete/decon_cyc{NN}` | Snakemake decon rule | Deconvolution done for cycle |
-| `.snakemake_complete/edf_cyc{NN}` | Snakemake edf rule | EDF done for cycle |
+| `data/processed/stitched/cyc{NN}/.snakemake_complete` | Snakemake stitch rule | Stitching done for cycle |
+| `data/processed/deconvolved/cyc{NN}/.snakemake_complete` | Snakemake decon rule | Deconvolution done for cycle |
+| `data/processed/edf/cyc{NN}/.snakemake_complete` | Snakemake edf rule | EDF done for cycle |
+| `data/processed/registered/.snakemake_complete` | Snakemake registration rule | All cycles registered |
+| `qc_plots/.snakemake_complete_stitch` | Snakemake qc_stitch rule | Stitch QC report done |
+| `qc_plots/.snakemake_complete_decon` | Snakemake qc_decon rule | Decon QC report done |
+| `qc_plots/.snakemake_complete_edf` | Snakemake qc_edf rule | EDF QC report done |
 | `data/processed/edf/.complete` | `cleanup_datasets.sh` | Dataset fully processed and cleaned |
 
-**Batch processing phases**:
-1. Discovery → 2. Setup + Staging → 3. Single-cycle validation → 4. SLURM batch (stitch→decon→EDF) → 5. Registration → 6. Cleanup intermediates → 7. Signal isolation (local GPU PCs) → 8. Segmentation (local GPU PCs)
+**Phases**: Discovery → Setup/Staging → Validation → SLURM batch → Cleanup → Signal isolation → Segmentation

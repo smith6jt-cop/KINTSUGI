@@ -238,6 +238,114 @@ def subtract_autofluorescence_dask(
     return subtracted.astype(np.uint16)
 
 
+def subtract_autofluorescence_weighted_dask(
+    signal,  # dask array
+    blank,  # dask array
+    blank_clip_factor: int = 0,
+    base_scale_factor: float = 1.0,
+    n_ranges: int = 5,
+    range_method: str = "percentile",
+    ranges: list[dict] | None = None,
+    transition_width: float = 0.1,
+    smooth_low: bool = False,
+    low_size: int = 2,
+    low_percentile: int = 60,
+    smooth_high: bool = False,
+    high_size: int = 2,
+    high_percentile: int = 90,
+    erosion: int = 0,
+):
+    """
+    Dask-compatible weighted autofluorescence subtraction.
+
+    Computes intensity ranges from a computed sample, then applies the
+    weight map per-chunk (pixel-local, no neighbor dependencies).
+
+    Parameters
+    ----------
+    signal : dask.array.Array
+        Signal channel
+    blank : dask.array.Array
+        Blank channel
+    (other parameters same as subtract_autofluorescence_weighted)
+
+    Returns
+    -------
+    dask.array.Array
+        Subtracted signal (uint16)
+    """
+    import dask.array as da
+
+    try:
+        import dask_image.ndfilters
+        import dask_image.ndmorph
+
+        HAS_DASK_IMAGE = True
+    except ImportError:
+        HAS_DASK_IMAGE = False
+        logger.warning("dask-image not available, smoothing/erosion disabled")
+
+    signal_float = signal.astype(np.float32)
+    blank_float = blank.astype(np.float32)
+
+    # Step 1: Clip blank
+    blank_clipped = da.clip(blank_float, blank_clip_factor, blank_float.max())
+    blank_clipped = da.where(blank_clipped <= blank_clip_factor, 0, blank_clipped)
+
+    # Step 2: Compute ranges from a sample (requires materialization)
+    if ranges is None:
+        # Sample for range computation
+        step = max(1, signal.shape[0] // 1000)
+        signal_sample = signal_float[::step, ::step].compute()
+        blank_sample = blank_clipped[::step, ::step].compute()
+        ranges = compute_intensity_ranges(
+            signal_sample, blank_sample, n_ranges=n_ranges, method=range_method
+        )
+
+    # Step 3: Build weight map per-chunk using map_blocks (pixel-local)
+    def _apply_weight_map(signal_chunk, ranges=ranges, tw=transition_width):
+        return build_weight_map(signal_chunk, ranges, tw)
+
+    weight_map = da.map_blocks(
+        _apply_weight_map,
+        signal_float,
+        dtype=np.float32,
+    )
+
+    # Step 4: Weighted subtraction
+    scaled_blank = blank_clipped * base_scale_factor * weight_map
+    subtracted = signal_float - da.minimum(signal_float, scaled_blank)
+
+    # Step 5: Post-processing
+    if smooth_low and low_percentile > 0 and HAS_DASK_IMAGE:
+        from skimage import morphology
+
+        low_threshold = da.percentile(signal_float.ravel(), low_percentile)
+        low_mask = da.where(signal_float < low_threshold, 1, 0)
+        low_mask = dask_image.ndmorph.binary_dilation(low_mask, morphology.disk(1))
+        smoothed = dask_image.ndfilters.uniform_filter(subtracted, size=low_size)
+        subtracted = da.where(low_mask, smoothed, subtracted)
+
+    if smooth_high and high_percentile < 100 and HAS_DASK_IMAGE:
+        from skimage import morphology
+
+        high_threshold = da.percentile(signal_float.ravel(), high_percentile)
+        high_mask = da.where(signal_float > high_threshold, 1, 0)
+        high_mask = dask_image.ndmorph.binary_dilation(high_mask, morphology.disk(1))
+        smoothed = dask_image.ndfilters.uniform_filter(subtracted, size=high_size)
+        subtracted = da.where(high_mask, smoothed, subtracted)
+
+    if erosion > 0 and HAS_DASK_IMAGE:
+        from skimage import morphology
+
+        erod_mask = da.where(subtracted > 0, 1, 0)
+        signal_mask = dask_image.ndmorph.binary_erosion(erod_mask, morphology.disk(erosion))
+        subtracted = da.where(signal_mask, subtracted, 0)
+
+    subtracted = da.clip(subtracted, 0, 65535)
+    return subtracted.astype(np.uint16)
+
+
 def analyze_for_subtraction(
     signal: np.ndarray,
     blank: np.ndarray,
@@ -590,6 +698,475 @@ def _calculate_suggestion_confidence(
         confidence -= 0.1
 
     return max(0.1, min(1.0, confidence))
+
+
+def compute_intensity_ranges(
+    signal: np.ndarray,
+    blank_clipped: np.ndarray,
+    n_ranges: int = 5,
+    method: str = "percentile",
+) -> list[dict]:
+    """
+    Compute intensity ranges with per-range weights for weighted subtraction.
+
+    Segments the signal histogram into N ranges and computes a weight for each
+    based on the signal-to-AF ratio within that range. In dim regions where
+    blank > signal, weight is low (gentle subtraction). In bright regions where
+    signal dominates, weight is high (aggressive AF removal).
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        Signal channel image (float32)
+    blank_clipped : np.ndarray
+        Clipped blank image (float32)
+    n_ranges : int
+        Number of intensity ranges (default: 5)
+    method : str
+        Boundary method: "percentile" or "otsu"
+
+    Returns
+    -------
+    list of dict
+        Each dict has: lower_bound, upper_bound, weight, label, pixel_fraction
+    """
+    from .utils import adaptive_range_boundaries
+
+    boundaries = adaptive_range_boundaries(signal, n_ranges=n_ranges, method=method)
+
+    ranges = []
+    flat_signal = signal.ravel()
+
+    for lower, upper, label in boundaries:
+        mask = (flat_signal >= lower) & (flat_signal < upper)
+        pixel_fraction = float(np.sum(mask)) / len(flat_signal) if len(flat_signal) > 0 else 0
+
+        if np.sum(mask) < 10:
+            # Too few pixels — use neutral weight
+            weight = 0.5
+        else:
+            signal_region = flat_signal[mask]
+            blank_region = blank_clipped.ravel()[mask]
+            weight = _compute_range_weight(signal_region, blank_region)
+
+        ranges.append(
+            {
+                "lower_bound": lower,
+                "upper_bound": upper,
+                "weight": round(weight, 4),
+                "label": label,
+                "pixel_fraction": round(pixel_fraction, 4),
+            }
+        )
+
+    return ranges
+
+
+def _compute_range_weight(
+    signal_region: np.ndarray,
+    blank_region: np.ndarray,
+) -> float:
+    """
+    Compute per-range weight based on signal-to-AF ratio.
+
+    Logic:
+    - blank_mean / signal_mean > 1.5 → 0.3-0.5 (AF dominates, protect signal)
+    - ratio 0.8-1.5 → 0.5-0.8 (mixed)
+    - ratio 0.3-0.8 → 0.8-1.0 (signal moderate)
+    - ratio < 0.3 → 1.0-1.15 (signal dominant)
+
+    Correlation within range provides a small boost.
+
+    Parameters
+    ----------
+    signal_region : np.ndarray
+        Signal values within this intensity range
+    blank_region : np.ndarray
+        Blank values within this intensity range
+
+    Returns
+    -------
+    float
+        Weight in [0.1, 1.5]
+    """
+    signal_mean = float(np.mean(signal_region))
+    blank_mean = float(np.mean(blank_region))
+
+    if signal_mean < 1:
+        # Background — minimal subtraction
+        return 0.0 if blank_mean < 1 else 0.3
+
+    ratio = blank_mean / signal_mean
+
+    if ratio > 1.5:
+        # AF dominates — protect dim signal
+        weight = 0.3 + min(0.2, 0.2 / ratio)
+    elif ratio > 0.8:
+        # Mixed region — moderate subtraction
+        weight = 0.5 + (1.5 - ratio) * (0.3 / 0.7)
+    elif ratio > 0.3:
+        # Signal moderate — near-full subtraction
+        weight = 0.8 + (0.8 - ratio) * (0.2 / 0.5)
+    else:
+        # Signal dominant — aggressive subtraction
+        weight = 1.0 + min(0.15, (0.3 - ratio) * 0.5)
+
+    # Correlation boost: if signal and blank are correlated in this range,
+    # it's likely AF, so slightly increase weight
+    if len(signal_region) > 50:
+        try:
+            std_s = float(np.std(signal_region))
+            std_b = float(np.std(blank_region))
+            if std_s > 1e-6 and std_b > 1e-6:
+                corr = float(
+                    np.mean(
+                        (signal_region - signal_mean) * (blank_region - blank_mean)
+                    )
+                    / (std_s * std_b)
+                )
+                corr = max(-1, min(1, corr))
+                if corr > 0.3:
+                    weight += corr * 0.1
+        except Exception:
+            pass
+
+    return max(0.1, min(1.5, weight))
+
+
+def build_weight_map(
+    signal: np.ndarray,
+    ranges: list[dict],
+    transition_width: float = 0.1,
+) -> np.ndarray:
+    """
+    Build per-pixel weight map with cosine transitions between ranges.
+
+    Each pixel's weight is determined by its intensity: pixels in dim ranges
+    get lower weights (gentle subtraction), bright-range pixels get higher
+    weights (aggressive AF removal). Transitions between ranges are smooth.
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        Signal channel image (2D, any numeric dtype)
+    ranges : list of dict
+        Output from compute_intensity_ranges(), each with
+        lower_bound, upper_bound, weight
+    transition_width : float
+        Fraction of range width for blending (0-0.5). Default: 0.1
+
+    Returns
+    -------
+    np.ndarray
+        Float32 weight map, same shape as signal, values in [0, 1.5]
+    """
+    from .utils import smooth_membership
+
+    signal_float = signal.astype(np.float32)
+    weight_map = np.zeros_like(signal_float)
+    total_membership = np.zeros_like(signal_float)
+
+    for r in ranges:
+        lower = r["lower_bound"]
+        upper = r["upper_bound"]
+        w = r["weight"]
+
+        membership = smooth_membership(signal_float, lower, upper, transition_width)
+        weight_map += membership * w
+        total_membership += membership
+
+    # Normalize by total membership to handle overlaps
+    valid = total_membership > 0
+    weight_map[valid] /= total_membership[valid]
+
+    # Pixels outside all ranges get weight from nearest range
+    if not np.all(valid):
+        if ranges:
+            # Below lowest range → use lowest weight
+            below = signal_float < ranges[0]["lower_bound"]
+            weight_map[below & ~valid] = ranges[0]["weight"]
+            # Above highest range → use highest weight
+            above = signal_float >= ranges[-1]["upper_bound"]
+            weight_map[above & ~valid] = ranges[-1]["weight"]
+
+    return weight_map
+
+
+def subtract_autofluorescence_weighted(
+    signal: np.ndarray,
+    blank: np.ndarray,
+    blank_clip_factor: int = 0,
+    base_scale_factor: float = 1.0,
+    n_ranges: int = 5,
+    range_method: str = "percentile",
+    ranges: list[dict] | None = None,
+    transition_width: float = 0.1,
+    smooth_low: bool = False,
+    low_size: int = 2,
+    low_percentile: int = 60,
+    smooth_high: bool = False,
+    high_size: int = 2,
+    high_percentile: int = 90,
+    erosion: int = 0,
+) -> np.ndarray:
+    """
+    Subtract autofluorescence using per-intensity-range weights.
+
+    Instead of a single global scale factor, this computes per-range weights
+    that protect dim signal (where AF may exceed signal) while aggressively
+    removing AF in bright regions.
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        Signal channel image (2D array, typically uint16)
+    blank : np.ndarray
+        Blank/autofluorescence channel image (same shape as signal)
+    blank_clip_factor : int
+        Pixel values in blank below this are set to 0. Default: 0
+    base_scale_factor : float
+        Base scale factor applied to blank before per-range weighting. Default: 1.0
+    n_ranges : int
+        Number of intensity ranges. Default: 5
+    range_method : str
+        Method for computing range boundaries: "percentile" or "otsu"
+    ranges : list of dict, optional
+        Pre-computed ranges (from compute_intensity_ranges). If provided,
+        n_ranges and range_method are ignored.
+    transition_width : float
+        Fraction of range width for smooth blending. Default: 0.1
+    smooth_low, low_size, low_percentile : as in subtract_autofluorescence
+    smooth_high, high_size, high_percentile : as in subtract_autofluorescence
+    erosion : int
+        Erosion disk radius for final cleanup. Default: 0
+
+    Returns
+    -------
+    np.ndarray
+        Subtracted signal image (uint16)
+    """
+    if signal.shape != blank.shape:
+        raise ValueError(f"Signal shape {signal.shape} != blank shape {blank.shape}")
+
+    signal_float = signal.astype(np.float32)
+    blank_float = blank.astype(np.float32)
+
+    # Step 1: Clip blank channel (same as global method)
+    blank_clipped = np.clip(blank_float, blank_clip_factor, blank_float.max())
+    blank_clipped[blank_clipped <= blank_clip_factor] = 0
+
+    # Check for near-uniform signal — fall back to global method
+    dynamic_range = float(np.max(signal_float) - np.min(signal_float))
+    if dynamic_range < 100:
+        logger.info("Near-uniform signal detected, falling back to global subtraction")
+        scaled_blank = blank_clipped * base_scale_factor
+        subtracted = signal_float - np.minimum(signal_float, scaled_blank)
+    else:
+        # Step 2: Compute ranges if not provided
+        if ranges is None:
+            # Adaptive: reduce ranges for sparse signals
+            nonzero_frac = np.sum(signal_float > 0) / signal_float.size
+            if nonzero_frac < 0.01:
+                n_ranges = min(n_ranges, 3)
+            ranges = compute_intensity_ranges(
+                signal_float, blank_clipped, n_ranges=n_ranges, method=range_method
+            )
+
+        # Step 3: Build weight map
+        weight_map = build_weight_map(signal_float, ranges, transition_width)
+
+        # Step 4: Apply weighted subtraction
+        scaled_blank = blank_clipped * base_scale_factor * weight_map
+        subtracted = signal_float - np.minimum(signal_float, scaled_blank)
+
+    # Step 5: Post-processing (same as global method)
+    if smooth_low and low_percentile > 0:
+        low_threshold = np.percentile(signal_float.ravel(), low_percentile)
+        low_mask = signal_float < low_threshold
+        low_mask = morphology.binary_dilation(low_mask, morphology.disk(1))
+        smoothed_low = ndimage.uniform_filter(subtracted, size=low_size)
+        subtracted = np.where(low_mask, smoothed_low, subtracted)
+
+    if smooth_high and high_percentile < 100:
+        high_threshold = np.percentile(signal_float.ravel(), high_percentile)
+        high_mask = signal_float > high_threshold
+        high_mask = morphology.binary_dilation(high_mask, morphology.disk(1))
+        smoothed_high = ndimage.uniform_filter(subtracted, size=high_size)
+        subtracted = np.where(high_mask, smoothed_high, subtracted)
+
+    if erosion > 0:
+        signal_mask = subtracted > 0
+        eroded_mask = morphology.binary_erosion(signal_mask, morphology.disk(erosion))
+        subtracted = np.where(eroded_mask, subtracted, 0)
+
+    subtracted = np.clip(subtracted, 0, 65535)
+    return subtracted.astype(np.uint16)
+
+
+def analyze_for_weighted_subtraction(
+    signal: np.ndarray,
+    blank: np.ndarray,
+    tissue_type: str | None = None,
+    marker_name: str | None = None,
+    n_ranges: int = 5,
+    range_method: str = "percentile",
+) -> dict:
+    """
+    Analyze signal and blank to suggest weighted subtraction parameters.
+
+    Extends analyze_for_subtraction() with range-specific parameters.
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        Signal channel image
+    blank : np.ndarray
+        Blank/autofluorescence channel image
+    tissue_type : str, optional
+        Tissue type for tissue-specific recommendations
+    marker_name : str, optional
+        Marker name for marker-specific recommendations
+    n_ranges : int
+        Number of intensity ranges. Default: 5
+    range_method : str
+        Method for boundaries: "percentile" or "otsu"
+
+    Returns
+    -------
+    dict
+        All keys from analyze_for_subtraction() plus:
+        - n_ranges: Number of ranges used
+        - range_method: Method used
+        - ranges: List of range dicts with weights
+        - base_scale_factor: Suggested base scale
+        - transition_width: Suggested transition width
+    """
+    # Get base analysis
+    base_analysis = analyze_for_subtraction(signal, blank, tissue_type, marker_name)
+
+    # Compute weighted-specific parameters
+    signal_float = signal.astype(np.float32)
+    blank_float = blank.astype(np.float32)
+
+    # Clip blank for range analysis
+    clip = base_analysis["blank_clip_factor"]
+    blank_clipped = np.clip(blank_float, clip, blank_float.max())
+    blank_clipped[blank_clipped <= clip] = 0
+
+    # Adapt n_ranges for sparse signals
+    nonzero_frac = np.sum(signal_float > 0) / signal_float.size
+    if nonzero_frac < 0.01:
+        n_ranges = min(n_ranges, 3)
+
+    ranges = compute_intensity_ranges(
+        signal_float, blank_clipped, n_ranges=n_ranges, method=range_method
+    )
+
+    # Base scale factor: use the global suggestion as starting point
+    base_scale = base_analysis["blank_scale_factor"]
+
+    result = {
+        **base_analysis,
+        "method": "weighted",
+        "n_ranges": len(ranges),
+        "range_method": range_method,
+        "ranges": ranges,
+        "base_scale_factor": base_scale,
+        "transition_width": 0.1,
+    }
+    return result
+
+
+def compute_weighted_subtraction_quality(
+    original: np.ndarray,
+    subtracted: np.ndarray,
+    blank: np.ndarray,
+    ranges: list[dict],
+) -> dict:
+    """
+    Compute quality metrics including per-range breakdown.
+
+    Parameters
+    ----------
+    original : np.ndarray
+        Original signal image
+    subtracted : np.ndarray
+        Image after weighted subtraction
+    blank : np.ndarray
+        Blank channel used
+    ranges : list of dict
+        Intensity ranges from compute_intensity_ranges()
+
+    Returns
+    -------
+    dict
+        Global quality metrics plus per-range metrics:
+        - global: snr_improvement, af_removal, signal_preservation, quality_score
+        - per_range: list of {label, snr, af_removal, signal_preservation}
+    """
+    # Global metrics (reuse existing function)
+    global_quality = compute_subtraction_quality(original, subtracted, blank)
+
+    # Per-range metrics
+    orig_flat = original.ravel().astype(np.float64)
+    sub_flat = subtracted.ravel().astype(np.float64)
+    blank_flat = blank.ravel().astype(np.float64)
+
+    per_range = []
+    for r in ranges:
+        lower, upper = r["lower_bound"], r["upper_bound"]
+        mask = (orig_flat >= lower) & (orig_flat < upper)
+
+        if np.sum(mask) < 10:
+            per_range.append(
+                {
+                    "label": r["label"],
+                    "weight": r["weight"],
+                    "pixel_count": int(np.sum(mask)),
+                    "snr": 0.0,
+                    "af_removal": 0.0,
+                    "signal_preservation": 0.0,
+                }
+            )
+            continue
+
+        orig_r = orig_flat[mask]
+        sub_r = sub_flat[mask]
+        blank_r = blank_flat[mask]
+
+        # SNR in range
+        noise = float(np.std(sub_r[sub_r < np.percentile(sub_r, 50)])) if np.any(sub_r > 0) else 1
+        signal_top = float(np.mean(np.sort(sub_r)[-max(1, int(len(sub_r) * 0.1)):]))
+        snr = signal_top / max(noise, 1)
+
+        # AF removal in range
+        orig_corr = np.corrcoef(orig_r, blank_r)[0, 1] if len(orig_r) > 10 else 0
+        sub_corr = np.corrcoef(sub_r, blank_r)[0, 1] if len(sub_r) > 10 and np.std(sub_r) > 0 else 0
+        orig_corr = 0 if np.isnan(orig_corr) else orig_corr
+        sub_corr = 0 if np.isnan(sub_corr) else sub_corr
+        af_removal = 1 - (sub_corr / max(orig_corr, 0.001)) if orig_corr > 0.01 else 0
+        af_removal = max(0, min(1, af_removal))
+
+        # Signal preservation
+        orig_nonzero = np.sum(orig_r > 0)
+        sub_nonzero = np.sum(sub_r > 0)
+        preservation = sub_nonzero / max(orig_nonzero, 1)
+
+        per_range.append(
+            {
+                "label": r["label"],
+                "weight": r["weight"],
+                "pixel_count": int(np.sum(mask)),
+                "snr": round(snr, 4),
+                "af_removal": round(af_removal, 4),
+                "signal_preservation": round(preservation, 4),
+            }
+        )
+
+    return {
+        "global": global_quality,
+        "per_range": per_range,
+    }
 
 
 def _apply_tissue_marker_adjustments(

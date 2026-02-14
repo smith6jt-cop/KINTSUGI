@@ -301,6 +301,137 @@ def compute_optimal_scale_factor(
     return round(best_scale, 2)
 
 
+def adaptive_range_boundaries(
+    signal: np.ndarray,
+    n_ranges: int = 5,
+    method: str = "percentile",
+) -> list[tuple[float, float, str]]:
+    """
+    Compute intensity range boundaries for weighted subtraction.
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        Signal channel image
+    n_ranges : int
+        Number of intensity ranges (default: 5)
+    method : str
+        Boundary computation method: "percentile" or "otsu"
+
+    Returns
+    -------
+    list of (lower, upper, label)
+        Non-overlapping intensity ranges covering the full signal range.
+    """
+    flat = signal.ravel().astype(np.float64)
+    vmin, vmax = float(np.min(flat)), float(np.max(flat))
+
+    if vmax - vmin < 1:
+        # Near-uniform image: single range
+        return [(vmin, vmax + 1, "uniform")]
+
+    labels = ["background", "very_dim", "dim", "medium", "bright"]
+    # Extend labels if n_ranges differs
+    if n_ranges <= 3:
+        labels = ["background", "dim", "bright"]
+    elif n_ranges == 4:
+        labels = ["background", "dim", "medium", "bright"]
+    elif n_ranges > 5:
+        labels = labels[:5] + [f"range_{i}" for i in range(5, n_ranges)]
+    labels = labels[:n_ranges]
+
+    if method == "percentile":
+        percentiles = np.linspace(0, 100, n_ranges + 1)
+        boundaries = [float(np.percentile(flat, p)) for p in percentiles]
+    elif method == "otsu":
+        from skimage.filters import threshold_multiotsu
+
+        try:
+            thresholds = threshold_multiotsu(signal, classes=min(n_ranges, 5))
+            boundaries = [vmin] + [float(t) for t in thresholds] + [vmax + 1]
+            # Pad or trim to match n_ranges
+            while len(boundaries) < n_ranges + 1:
+                # Subdivide largest range
+                widths = [boundaries[i + 1] - boundaries[i] for i in range(len(boundaries) - 1)]
+                largest = int(np.argmax(widths))
+                mid = (boundaries[largest] + boundaries[largest + 1]) / 2
+                boundaries.insert(largest + 1, mid)
+            boundaries = boundaries[: n_ranges + 1]
+        except (ValueError, RuntimeError):
+            # Fallback to percentile if Otsu fails
+            percentiles = np.linspace(0, 100, n_ranges + 1)
+            boundaries = [float(np.percentile(flat, p)) for p in percentiles]
+    else:
+        raise ValueError(f"Unknown method: {method}. Use 'percentile' or 'otsu'.")
+
+    # Ensure strictly increasing boundaries
+    for i in range(1, len(boundaries)):
+        if boundaries[i] <= boundaries[i - 1]:
+            boundaries[i] = boundaries[i - 1] + 1
+
+    ranges = []
+    for i in range(n_ranges):
+        ranges.append((boundaries[i], boundaries[i + 1], labels[i]))
+
+    return ranges
+
+
+def smooth_membership(
+    value: np.ndarray,
+    lower: float,
+    upper: float,
+    transition_width: float,
+) -> np.ndarray:
+    """
+    Compute cosine membership for soft range transitions.
+
+    Returns a smooth weight between 0 and 1 indicating how much `value`
+    belongs to the range [lower, upper], with cosine transitions at edges.
+
+    Parameters
+    ----------
+    value : np.ndarray
+        Pixel intensity values
+    lower : float
+        Lower boundary of the range
+    upper : float
+        Upper boundary of the range (exclusive)
+    transition_width : float
+        Fraction of the range width used for blending at edges (0-0.5)
+
+    Returns
+    -------
+    np.ndarray
+        Membership weights in [0, 1]
+    """
+    range_width = upper - lower
+    if range_width <= 0:
+        return np.zeros_like(value, dtype=np.float32)
+
+    tw = max(0.0, min(0.5, transition_width)) * range_width
+
+    membership = np.ones_like(value, dtype=np.float32)
+
+    if tw > 0:
+        # Rising edge at lower boundary
+        rising = (value >= lower - tw) & (value < lower + tw)
+        if np.any(rising):
+            t = (value[rising] - (lower - tw)) / (2 * tw)
+            membership[rising] = (1 - np.cos(np.pi * t)) / 2
+
+        # Falling edge at upper boundary
+        falling = (value >= upper - tw) & (value < upper + tw)
+        if np.any(falling):
+            t = (value[falling] - (upper - tw)) / (2 * tw)
+            membership[falling] = (1 + np.cos(np.pi * t)) / 2
+
+    # Outside range
+    membership[value < lower - tw] = 0
+    membership[value >= upper + tw] = 0
+
+    return membership
+
+
 def validate_subtraction_params(
     blank_clip_factor: int,
     blank_scale_factor: float,

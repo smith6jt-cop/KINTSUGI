@@ -105,6 +105,7 @@ async def record_successful_parameters(
     user_notes: str = "",
     channel: str | None = None,
     project_path: str | None = None,
+    algorithm_version: str | None = None,
 ) -> dict[str, Any]:
     """
     Record a successful parameter set for future learning.
@@ -159,6 +160,7 @@ async def record_successful_parameters(
         user_notes=user_notes,
         characteristics=characteristics,
         channel_name=channel or "",
+        algorithm_version=algorithm_version or parameters.get("algorithm_version"),
     )
 
     return {
@@ -357,8 +359,60 @@ def _get_heuristic_suggestion(
     dynamic_range: float,
     noise_estimate: float,
     blank_channel: str | None,
+    method: str = "global",
 ) -> dict[str, Any]:
     """Get heuristic suggestion for an operation based on image analysis."""
+
+    if operation == "blank_subtraction" and method == "weighted":
+        # Weighted subtraction heuristic
+        if blank_channel and blank_channel in _loaded_images:
+            blank_data = _loaded_images[blank_channel]["data"]
+            if hasattr(blank_data, "compute"):
+                blank_sample = blank_data[::10, ::10].compute()
+            else:
+                blank_sample = blank_data[::10, ::10]
+
+            try:
+                from kintsugi.signal.autofluorescence import (
+                    analyze_for_weighted_subtraction,
+                )
+
+                analysis = analyze_for_weighted_subtraction(sample, blank_sample)
+                return {
+                    "parameters": {
+                        "method": "weighted",
+                        "base_scale_factor": analysis["base_scale_factor"],
+                        "blank_clip_factor": analysis["blank_clip_factor"],
+                        "n_ranges": analysis["n_ranges"],
+                        "range_method": analysis["range_method"],
+                        "ranges": analysis["ranges"],
+                        "transition_width": analysis["transition_width"],
+                        "smooth_low": analysis["smooth_low"],
+                        "smooth_high": analysis["smooth_high"],
+                        "erosion": analysis["erosion"],
+                    },
+                    "rationale": (
+                        f"Weighted: {analysis['n_ranges']} ranges, "
+                        f"dim weight={analysis['ranges'][1]['weight']:.2f} "
+                        f"bright weight={analysis['ranges'][-1]['weight']:.2f}"
+                        if len(analysis["ranges"]) > 1
+                        else "Weighted subtraction"
+                    ),
+                }
+            except Exception as e:
+                logger.warning(f"Weighted analysis failed, falling back: {e}")
+
+        return {
+            "parameters": {
+                "method": "weighted",
+                "base_scale_factor": 1.0,
+                "blank_clip_factor": 0,
+                "n_ranges": 5,
+                "range_method": "percentile",
+                "transition_width": 0.1,
+            },
+            "rationale": "Default weighted parameters (no blank loaded)",
+        }
 
     if operation == "blank_subtraction":
         if blank_channel and blank_channel in _loaded_images:

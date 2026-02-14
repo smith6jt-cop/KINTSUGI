@@ -469,6 +469,80 @@ def config(project_path: str, print_only: bool):
     console.print("2. Start Claude Code - the MCP server will be available automatically")
 
 
+@mcp.command()
+@click.argument("project_dir", type=click.Path(exists=True))
+@click.option("--tissue-type", "-t", default="unknown", help="Tissue type to record")
+@click.option("--dry-run", is_flag=True, help="Preview what would be done without recording")
+@click.option("--verbose", "-v", is_flag=True, help="Show detailed progress")
+def pretrain(project_dir: str, tissue_type: str, dry_run: bool, verbose: bool):
+    """
+    Pre-populate the learning database from existing processed data.
+
+    Scans a KINTSUGI project for signal/blank pairs in data/processed/edf/
+    and computes weighted subtraction parameters for each. Records them
+    in the learning database with algorithm_version='weighted_v1' and
+    user_approved=False (bootstrap, lower weight in recommendations).
+
+    \b
+    Example:
+        kintsugi mcp pretrain /path/to/project --tissue-type "lymph node"
+        kintsugi mcp pretrain . --dry-run --verbose
+    """
+    from kintsugi.signal.bootstrap import bootstrap_from_project
+
+    console.print(
+        f"[bold]Bootstrapping weighted subtraction parameters from:[/bold] {project_dir}"
+    )
+    if dry_run:
+        console.print("[yellow]DRY RUN — no parameters will be recorded[/yellow]")
+
+    result = bootstrap_from_project(
+        project_dir=project_dir,
+        tissue_type=tissue_type,
+        dry_run=dry_run,
+        verbose=verbose,
+    )
+
+    if result["status"] == "no_data":
+        console.print(f"[yellow]{result['message']}[/yellow]")
+        return
+
+    if dry_run:
+        console.print(f"\n[bold]Found {result['pairs_found']} signal/blank pairs[/bold]")
+        if result.get("pairs"):
+            table = Table(title="Pairs Found")
+            table.add_column("Cycle", style="cyan")
+            table.add_column("Marker", style="white")
+            for p in result["pairs"]:
+                table.add_row(p["cycle"], p["marker"])
+            console.print(table)
+        return
+
+    # Show results
+    console.print(f"\n[bold]Bootstrap Results:[/bold]")
+    console.print(f"  Pairs found: {result.get('pairs_found', 0)}")
+    console.print(f"  Pairs processed: {result.get('pairs_processed', 0)}")
+    console.print(f"  Pairs recorded: {result.get('pairs_recorded', 0)}")
+
+    if result.get("results"):
+        table = Table(title="Processing Results")
+        table.add_column("Cycle", style="cyan")
+        table.add_column("Marker", style="white")
+        table.add_column("Quality", style="green")
+        table.add_column("Recorded", style="bold")
+
+        for r in result["results"]:
+            quality_str = f"{r.get('quality', 0):.3f}" if r.get("recorded") else "—"
+            recorded_str = "✓" if r.get("recorded") else f"✗ {r.get('error', '')}"
+            table.add_row(
+                r.get("cycle", ""),
+                r.get("marker", ""),
+                quality_str,
+                recorded_str,
+            )
+        console.print(table)
+
+
 # ============================================================================
 # SLURM Commands for HPC Job Submission
 # ============================================================================
@@ -941,6 +1015,14 @@ def workflow_config(project_dir: str, print_only: bool):
             "blend_depth": 0,
             "z_smooth_sigma": 1.0,
         },
+        # Registration parameters
+        "registration": {
+            "reference_cycle": 1,
+            "reference_channel": 1,
+            "max_image_dim": 2048,
+            "rigid_only": False,
+            "feature_detector": "VggFD",
+        },
         "quality_gate": {
             "max_zero_pct": 0.10,
             "max_sat_pct": 0.05,
@@ -971,12 +1053,15 @@ def workflow_config(project_dir: str, print_only: bool):
             "time_stitch": 240,
             "time_decon": 240,
             "time_edf": 60,
+            "mem_registration": 64000,
+            "time_registration": 120,
             # CPU job resources (float64 in system memory, needs more)
             "cpu_cpus_per_task": 8,
             "cpu_time_multiplier": 5,
             "cpu_mem_stitch": 48000,
             "cpu_mem_decon": 128000,
             "cpu_mem_edf": 96000,
+            "cpu_mem_registration": 64000,
         },
     }
 
@@ -1013,33 +1098,50 @@ def workflow_config(project_dir: str, print_only: bool):
     console.print(f"  wavelengths: {len(exp.wavelengths)} channels")
     if channel_names_dict:
         console.print(f"  channel_names: {sum(len(v) for v in channel_names_dict.values())} markers")
-    if pool["total_slots"] > 0:
+    if pool["total_gpu_slots"] > 0:
         acct_summary = ", ".join(
-            f"{a['name']}({a['gpu_slots']}G+{a['cpu_slots']}C)" for a in pool["accounts"]
+            f"{a['name']}({a['gpu_slots']}G)" for a in pool["accounts"]
         )
         console.print(
             f"  multi-account: {acct_summary} = "
-            f"{pool['total_gpu_slots']} GPU + {pool['total_cpu_slots']} CPU = {pool['total_slots']} slots"
+            f"{pool['total_gpu_slots']} GPU slots (GPU-only scheduling)"
         )
 
     # Copy Snakefile, profiles, and scripts from KINTSUGI installation.
     # Always overwrite Snakefile (pipeline logic) and profiles (precommand,
-    # cache redirection, SLURM settings). Only copy scripts if missing
+    # cache redirection, SLURM settings). Scripts are copied per-file: new
+    # scripts are always added, but existing scripts are not overwritten
     # (users may customize wrapper scripts per-project).
     src_wf = kintsugi_dir / "workflow"
     if src_wf.exists():
-        for item in ["Snakefile", "scripts", "profiles"]:
+        for item in ["Snakefile", "profiles"]:
             src = src_wf / item
             dst = wf_dir / item
-            always_overwrite = item in ("Snakefile", "profiles")
-            if src.exists() and (always_overwrite or not dst.exists()):
+            if src.exists():
                 if src.is_dir():
                     if dst.exists():
                         shutil.rmtree(str(dst))
                     shutil.copytree(str(src), str(dst))
                 else:
                     shutil.copy2(str(src), str(dst))
-                console.print(f"  {'Updated' if always_overwrite else 'Copied'} {item}")
+                console.print(f"  Updated {item}")
+
+        # Scripts: per-file copy (add new scripts, don't overwrite existing)
+        src_scripts = src_wf / "scripts"
+        dst_scripts = wf_dir / "scripts"
+        if src_scripts.exists():
+            dst_scripts.mkdir(parents=True, exist_ok=True)
+            added = []
+            for src_file in src_scripts.iterdir():
+                if src_file.is_file():
+                    dst_file = dst_scripts / src_file.name
+                    if not dst_file.exists():
+                        shutil.copy2(str(src_file), str(dst_file))
+                        added.append(src_file.name)
+            if added:
+                console.print(f"  Added scripts: {', '.join(added)}")
+            else:
+                console.print(f"  Scripts up to date")
 
     console.print()
     console.print("[bold]Next steps:[/bold]")
@@ -1118,23 +1220,24 @@ def workflow_check(project_dir: str):
         )
         console.print()
 
-    total_avail = pool["total_avail"]
+    gpu_avail = pool["total_gpu_avail"]
+    gpu_total = pool["total_gpu_slots"]
 
     console.print(
-        f"  Total: {pool['total_slots']} max "
-        f"({pool['total_gpu_slots']} GPU + {pool['total_cpu_slots']} CPU), "
-        f"{total_avail} available "
-        f"({pool['total_gpu_avail']} GPU + {pool['total_cpu_avail']} CPU)"
+        f"  Total GPU: {gpu_total} max, {gpu_avail} available"
+    )
+    console.print(
+        f"  (CPU pool: {pool['total_cpu_slots']} slots — not used; GPU-only scheduling)"
     )
 
-    if total_avail > 0:
+    if gpu_avail > 0:
         console.print(f"\n  [bold]Recommended:[/bold]")
         console.print(
-            f"    snakemake --profile profiles/slurm -j {total_avail}"
+            f"    snakemake --profile profiles/slurm -j {gpu_avail}"
         )
     else:
-        console.print("\n  [yellow]No slots available right now. Other users are using the full allocation.[/yellow]")
-        console.print(f"  Max allocation would give {pool['total_slots']} slots when free.")
+        console.print("\n  [yellow]No GPU slots available right now. Other users are using the full allocation.[/yellow]")
+        console.print(f"  Max allocation would give {gpu_total} GPU slots when free.")
 
 
 @workflow.command("run")
@@ -1144,7 +1247,7 @@ def workflow_check(project_dir: str):
 @click.option("--local", is_flag=True, help="Run locally instead of via SLURM")
 @click.option("--cores", default=4, type=int, help="CPU cores for local execution (default: 4)")
 @click.option(
-    "--forcerun", default=None, help="Force re-run a specific rule (stitch/deconvolve/edf)"
+    "--forcerun", default=None, help="Force re-run a specific rule (stitch/deconvolve/edf/registration)"
 )
 @click.option("--cycles", "-c", default=None, help="Override cycles: '1-3' or '1,2,5'")
 def workflow_run(
@@ -1187,7 +1290,7 @@ def workflow_run(
         raise SystemExit(1)
 
     # Build snakemake command
-    cmd = ["snakemake", "--directory", str(wf_dir)]
+    cmd = ["snakemake", "--directory", str(wf_dir), "--snakefile", str(wf_dir / "Snakefile")]
 
     if local:
         cmd.extend(["--cores", str(cores)])
@@ -1212,11 +1315,13 @@ def workflow_run(
                     "cpu_utilization_cap": res.get("cpu_utilization_cap", 0.85),
                 },
             )
-            total = pool["total_avail"] or jobs
+            # GPU-only scheduling: -j is limited to available GPU slots
+            # (all cycles queue through GPUs; CPU fallback is too slow)
+            total = pool["total_gpu_avail"] or pool["total_gpu_slots"] or jobs
 
             console.print(
-                f"  Resources: {pool['total_gpu_avail']} GPU + {pool['total_cpu_avail']} CPU "
-                f"= {total} available slots"
+                f"  Resources: {pool['total_gpu_avail']} GPU available "
+                f"(of {pool['total_gpu_slots']} total GPU slots)"
             )
 
             cmd.extend(["--profile", str(profile_dir), "-j", str(total)])
@@ -1265,6 +1370,237 @@ def workflow_run(
         console.print("[red]snakemake not found. Install with:[/red]")
         console.print("  pip install snakemake snakemake-executor-plugin-slurm")
         raise SystemExit(1)
+
+
+# ============================================================================
+# Export Commands (TissUUmaps)
+# ============================================================================
+
+
+@workflow.group("export")
+def export_group():
+    """Export processed data for TissUUmaps web visualization.
+
+    \b
+    Commands:
+        prepare  - Convert registered images to DZI tiles + generate .tmap
+        deploy   - Rsync exported data to a remote server
+        status   - Show export status for a project
+    """
+    pass
+
+
+@export_group.command("prepare")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--force", "-f", is_flag=True, help="Force reconversion of all files")
+@click.option("--dry-run", "-n", is_flag=True, help="Preview what would be exported")
+@click.option(
+    "--include-blanks", is_flag=True, help="Include blank/autofluorescence channels"
+)
+def export_prepare(project_dir: str, force: bool, dry_run: bool, include_blanks: bool):
+    """
+    Convert processed images to DZI tiles and generate a .tmap project file.
+
+    Reads registered images from data/processed/registered/, converts each to
+    a DZI tile pyramid (256x256 PNG tiles), and creates a TissUUmaps project
+    file (.tmap) with per-channel color mapping.
+
+    Also copies segmentation masks, CSV overlays, and GeoJSON regions if present.
+
+    Re-runs skip unchanged files unless --force is used.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+
+    \b
+    Examples:
+        kintsugi workflow export prepare .              # Export current project
+        kintsugi workflow export prepare . --dry-run    # Preview what would be exported
+        kintsugi workflow export prepare . --force      # Reconvert everything
+    """
+    from pathlib import Path
+
+    from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
+
+    from kintsugi.export import prepare_export
+
+    project_dir = Path(project_dir).resolve()
+
+    if not (project_dir / "kintsugi_project.json").exists():
+        # Also allow projects that have registered/ without kintsugi_project.json
+        if not (project_dir / "data" / "processed" / "registered").exists():
+            console.print(f"[red]Not a KINTSUGI project: {project_dir}[/red]")
+            console.print("No kintsugi_project.json or data/processed/registered/ found.")
+            raise SystemExit(1)
+
+    console.print(f"[bold]TissUUmaps Export[/bold]  ({project_dir.name})\n")
+
+    if dry_run:
+        result = prepare_export(
+            project_dir,
+            dry_run=True,
+            exclude_blanks=not include_blanks,
+        )
+
+        if result["status"] == "error":
+            console.print(f"[red]{result['message']}[/red]")
+            raise SystemExit(1)
+
+        console.print(f"  Export directory: {result['export_dir']}")
+        console.print(f"  Registered: {result['registered_images']} images across {result['registered_cycles']} cycles")
+        console.print(f"  Segmentation masks: {result['segmentation_masks']}")
+        console.print(f"  Overlays: {result['overlays']}")
+        console.print(f"  Total DZI conversions: {result['total_dzi_conversions']}")
+
+        if result.get("cycles"):
+            console.print("\n  [bold]Channels per cycle:[/bold]")
+            for cycle, markers in result["cycles"].items():
+                console.print(f"    {cycle}: {', '.join(markers)}")
+
+        if result.get("overlay_files"):
+            console.print(f"\n  [bold]Overlay files:[/bold] {', '.join(result['overlay_files'])}")
+
+        if result.get("masks"):
+            console.print(f"  [bold]Masks:[/bold] {', '.join(result['masks'])}")
+        return
+
+    # Real export with progress bar
+    progress = Progress(
+        TextColumn("[bold]{task.description}"),
+        BarColumn(),
+        TextColumn("{task.completed}/{task.total}"),
+        TimeRemainingColumn(),
+        console=console,
+    )
+
+    task_id = None
+
+    def on_progress(current: int, total: int, message: str) -> None:
+        nonlocal task_id
+        if task_id is None:
+            task_id = progress.add_task("Converting", total=total)
+        progress.update(task_id, completed=current, description=message)
+
+    with progress:
+        result = prepare_export(
+            project_dir,
+            force=force,
+            exclude_blanks=not include_blanks,
+            progress_callback=on_progress,
+        )
+
+    if result["status"] == "error":
+        console.print(f"\n[red]{result['message']}[/red]")
+        raise SystemExit(1)
+
+    console.print(f"\n[green]Export complete![/green]")
+    console.print(f"  Images converted: {result['images_converted']}")
+    if result["images_skipped"]:
+        console.print(f"  Images skipped (unchanged): {result['images_skipped']}")
+    if result["segmentation_masks"]:
+        console.print(f"  Segmentation masks: {result['segmentation_masks']}")
+    if result["overlays_copied"]:
+        console.print(f"  Overlays copied: {result['overlays_copied']}")
+    if result["regions_copied"]:
+        console.print(f"  Regions copied: {result['regions_copied']}")
+    console.print(f"  .tmap file: {result['tmap_path']}")
+    console.print(f"\n[dim]Deploy with: kintsugi workflow export deploy {project_dir} user@host:/path[/dim]")
+
+
+@export_group.command("deploy")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.argument("remote", type=str)
+@click.option("--dry-run", "-n", is_flag=True, help="Preview rsync transfer without sending")
+@click.option("--bwlimit", type=int, default=None, help="Bandwidth limit in KB/s")
+@click.option("--ssh-key", type=click.Path(exists=True), default=None, help="SSH private key path")
+def export_deploy(project_dir: str, remote: str, dry_run: bool, bwlimit: int | None, ssh_key: str | None):
+    """
+    Deploy exported data to a remote server via rsync.
+
+    REMOTE is the rsync destination (e.g., user@host:/var/www/tissuumaps/projects/).
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+
+    \b
+    Examples:
+        kintsugi workflow export deploy . user@server:/path
+        kintsugi workflow export deploy . user@server:/path --dry-run
+        kintsugi workflow export deploy . user@server:/path --bwlimit 10000
+    """
+    from pathlib import Path
+
+    from kintsugi.export import deploy_export
+
+    project_dir = Path(project_dir).resolve()
+    export_dir = project_dir / "data" / "exported"
+
+    if not export_dir.exists():
+        console.print(f"[red]No export directory found: {export_dir}[/red]")
+        console.print("Run 'kintsugi workflow export prepare .' first.")
+        raise SystemExit(1)
+
+    console.print(f"[bold]Deploying export[/bold]  ({project_dir.name})")
+    console.print(f"  Source: {export_dir}")
+    console.print(f"  Destination: {remote}")
+    if dry_run:
+        console.print("  [yellow]DRY RUN — no files will be transferred[/yellow]")
+    console.print()
+
+    rc = deploy_export(
+        export_dir,
+        remote,
+        dry_run=dry_run,
+        bwlimit=bwlimit,
+        ssh_key=ssh_key,
+    )
+
+    if rc == 0:
+        if not dry_run:
+            console.print("\n[green]Deploy complete![/green]")
+    else:
+        console.print(f"\n[red]rsync exited with code {rc}[/red]")
+        raise SystemExit(rc)
+
+
+@export_group.command("status")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+def export_status(project_dir: str):
+    """
+    Show export status for a project.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    """
+    from pathlib import Path
+
+    from kintsugi.export import get_export_status
+
+    project_dir = Path(project_dir).resolve()
+
+    console.print(f"[bold]Export Status[/bold]  ({project_dir.name})\n")
+
+    status = get_export_status(project_dir)
+
+    if status["status"] == "not_exported":
+        console.print("[dim]No export found. Run 'kintsugi workflow export prepare .' first.[/dim]")
+        return
+
+    console.print(f"  Export directory: {status['export_dir']}")
+    console.print(f"  DZI images: {status['dzi_count']}")
+    console.print(f"  Total size: {status['total_size_mb']} MB")
+
+    if status.get("tmap_files"):
+        console.print(f"  .tmap files: {', '.join(status['tmap_files'])}")
+
+    if status.get("manifest_entries"):
+        console.print(f"  Manifest entries: {status['manifest_entries']}")
+
+    if status.get("last_updated"):
+        console.print(f"  Last updated: {status['last_updated']}")
+
+    if status.get("overlay_files"):
+        console.print(f"  Overlay files: {', '.join(status['overlay_files'])}")
+
+    if status.get("geojson_regions"):
+        console.print(f"  GeoJSON regions: {status['geojson_regions']}")
 
 
 # ============================================================================

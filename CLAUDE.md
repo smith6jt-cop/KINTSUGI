@@ -37,63 +37,9 @@ The `.claude/settings.local.json` file is **automatically created** with the MCP
 
 ### Experiment Metadata
 
-The `/meta/experiment.json` file stores microscope and acquisition parameters. It is **auto-generated** during project creation with sensible defaults and auto-detected values (cycles, z-planes).
+`/meta/experiment.json` stores microscope parameters (tile grid, pixel sizes, wavelengths, NA, RI). Auto-generated during `kintsugi init` with sensible defaults. CLI options: `--tile-rows`, `--tile-cols`, `--xy-pixel-size`, `--z-step-size`, `--numerical-aperture`, `--tissue-ri`.
 
-**Example experiment.json:**
-```json
-{
-  "tile_rows": 5,
-  "tile_cols": 5,
-  "tile_overlap": 0.3,
-  "xy_pixel_size": 377.0,
-  "z_step_size": 1500.0,
-  "numerical_aperture": 0.75,
-  "tissue_refractive_index": 1.44,
-  "wavelengths": {
-    "1": [358.0, 461.0],
-    "2": [753.0, 775.0],
-    "3": [560.0, 575.0],
-    "4": [648.0, 668.0]
-  },
-  "channels_per_cycle": 4,
-  "n_cycles": 7,
-  "n_zplanes": 15
-}
-```
-
-**CLI options** to customize during init:
-```bash
-kintsugi init /path/to/project --name "My Experiment" \
-    --tile-rows 5 --tile-cols 5 \
-    --xy-pixel-size 377 --z-step-size 1500 \
-    --numerical-aperture 0.75 --tissue-ri 1.44
-```
-
-**CODEX/Akoya Format Compatibility:**
-`ExperimentConfig.from_dict()` automatically translates CODEX field names to KINTSUGI equivalents:
-
-| CODEX Field | KINTSUGI Field |
-|-------------|---------------|
-| `numCycles` | `n_cycles` |
-| `numZPlanes` | `n_zplanes` |
-| `regionHeight` | `tile_rows` |
-| `regionWidth` | `tile_cols` |
-| `numChannels` | `channels_per_cycle` |
-| `xyResolution` | `xy_pixel_size` |
-| `zPitch` | `z_step_size` |
-| `aperture` | `numerical_aperture` |
-
-CODEX flat wavelength lists (e.g., `[358, 488, 550, 650]`) are mapped to proper (excitation, emission) pairs using `_CODEX_FILTER_SETS` in `project.py`. The mapping uses known filter sets:
-
-| Excitation | Filter | Emission |
-|------------|--------|----------|
-| 358 nm | DAPI | 461 nm |
-| 488 nm | FITC/Alexa 488 | 525 nm |
-| 550 nm | TRITC/Cy3 | 575 nm |
-| 650 nm | Cy5 | 668 nm |
-| 750 nm | Cy7 | 775 nm |
-
-CODEX experiment.json does NOT include refractive index. For uncleared tissue (all HuBMAP CODEX datasets), RI is always **1.44**.
+**CODEX/Akoya compatibility**: `ExperimentConfig.from_dict()` auto-translates CODEX fields (`numCycles`→`n_cycles`, `regionHeight`→`tile_rows`, `xyResolution`→`xy_pixel_size`, etc.). Flat wavelength lists mapped to (excitation, emission) pairs via `_CODEX_FILTER_SETS` in `project.py`. CODEX lacks RI — default **1.44** for uncleared tissue.
 
 ### Channel Names
 
@@ -121,26 +67,7 @@ SLURM scripts and notebooks automatically load channel names from this file.
 
 ### Project Initialization Behavior
 
-When running `kintsugi init` on a directory with existing data, the command intelligently handles different scenarios:
-
-**Raw data only** (in `data/raw/`):
-- Shows data summary with cycle count
-- Options: Continue or Cancel
-- Raw data stays in place; project structure is created around it
-
-**Processed data exists** (in `data/processed/`):
-- Shows breakdown by processing stage (stitched, deconvolved, edf, etc.)
-- Options: Delete processed data, Keep processed data, or Cancel
-- If deleting, can select which stages to remove
-
-**Existing project** (has `kintsugi_project.json`):
-- If `--slurm` requested but not configured: Automatically adds SLURM
-- Otherwise: Shows status and suggests `--force` to refresh templates
-
-**Scanning data**:
-```bash
-kintsugi scan /path/to/directory   # Preview what init will find
-```
+`kintsugi init` handles existing data intelligently: raw data stays in place, processed data can be selectively deleted, existing projects get `--slurm` added or `--force` to refresh. Use `kintsugi scan /path/to/directory` to preview.
 
 ### SLURM Job Submission (HPC)
 
@@ -171,28 +98,9 @@ my_project/
 
 This eliminates the need to manually configure `config.sh` for most parameters.
 
-**SLURM output naming**: SLURM job scripts produce output that matches the notebook conventions:
-- **Deconvolution**: `data/processed/deconvolved/cyc##/CH#/*.tif` (z-plane TIFFs per channel)
-- **EDF**: `data/processed/edf/cyc##/{channel_name}.tif` (marker-named, e.g., `CD3.tif`, `DAPI-01.tif`)
+**SLURM output naming**: EDF uses marker names from `CHANNELNAMES.txt` (e.g., `CD3.tif`), falling back to `CH#`. Registration preserves those names with warped images. SLURM jobs need `KINTSUGI_DIR/notebooks` on `sys.path` for `Kio` imports.
 
-EDF output files use marker names from `CHANNELNAMES.txt` (loaded via `Kio.load_channel_names()`), falling back to `CH#` if the file is missing. This is critical for downstream compatibility with `_find_edf_file()` in `Kview_qc.py`.
-
-**PYTHONPATH in SLURM jobs**: Job scripts must include `KINTSUGI_DIR/notebooks` on `sys.path` to import notebook modules like `Kio`. Project notebooks directories may only have a subset of synced files. The required path setup is:
-```python
-sys.path.insert(0, str(PROJECT_DIR / 'notebooks'))
-sys.path.insert(0, str(KINTSUGI_DIR / 'notebooks'))  # Required for Kio, Kprocess, etc.
-sys.path.insert(0, str(KINTSUGI_DIR))
-```
-
-**Memory allocation**: GPU jobs use CuPy (float32 in GPU memory), so 48 GB CPU RAM is sufficient. CPU jobs use SciPy (float64 in system memory) and need more. Snakefile lambdas route `mem_decon`/`cpu_mem_decon` automatically based on GPU vs CPU mode.
-```bash
-# GPU jobs (CuPy does heavy lifting in GPU memory)
-export MEM_DECON=48
-export MEM_EDF=48
-# CPU jobs (float64 in system memory, needs ~2.5x more)
-export CPU_MEM_DECON=128
-export CPU_MEM_EDF=96
-```
+**Memory**: GPU jobs = 48 GB RAM (CuPy does FFT in GPU memory). CPU jobs = 128 GB (SciPy float64). Snakefile lambdas auto-route.
 
 **Add SLURM to existing project** (two equivalent methods):
 ```bash
@@ -213,7 +121,7 @@ kintsugi slurm submit . --dry-run                   # Preview commands
 kintsugi slurm status .
 ```
 
-See `workflow/CLAUDE.md` for detailed documentation on processing modes (notebook vs SLURM), multi-account resource pool calculation, concurrent GPU/CPU architecture, and Snakemake workflow design decisions.
+See `workflow/CLAUDE.md` for detailed documentation on processing modes (notebook vs SLURM), multi-account resource pool calculation, concurrent GPU/CPU architecture, Snakemake workflow design decisions, and registration rule configuration.
 
 ## Development Workspace
 
@@ -229,33 +137,7 @@ Notebooks default to mini_project for testing. Change `PROJECT_DIR` for other pr
 
 ### Automatic Project Sync
 
-**IMPORTANT**: Changes to notebook modules in the main repo are **automatically synced** to all project folders after every commit via a git post-commit hook.
-
-**Always edit the main repo first** (`KINTSUGI/notebooks/`), never edit project folders directly. The sync happens automatically via:
-- `scripts/sync_to_projects.py` - Sync script (uses MD5 checksum comparison)
-- `.git/hooks/post-commit` - Git hook that runs sync after each commit
-
-**Sync uses checksum comparison** (not timestamps) to detect changes. This ensures:
-- Notebooks saved with output in project folders don't block updates
-- Content changes are always detected regardless of file timestamps
-- Network file system timestamp issues don't cause sync failures
-
-**What gets synced:**
-- Notebook modules: `Kdecon/`, `Kstitch/`, `Kreg/`, `Kview/`, `Kview2/`, `Kseg/`
-- Python files: `Kio.py`, `Kprocess.py`, `Kutils.py`, `Kview_qc.py`, `Kpipeline.py`, `Kvis.py`
-- Notebooks: `1_Single_Channel_Eval.ipynb`, `2_Cycle_Processing.ipynb`, etc.
-
-**Project folders synced to:**
-- Test project: `KINTSUGI/test_data/mini_project/notebooks/`
-- Full project: `KINTSUGI_Projects/CODEX_SP_LN/1904CC1-1L/notebooks/`
-
-**Manual sync** (if needed):
-```bash
-python scripts/sync_to_projects.py           # Sync all projects
-python scripts/sync_to_projects.py --dry-run # Preview changes
-python scripts/sync_to_projects.py --verbose # Show detailed output
-python scripts/sync_to_projects.py --force   # Force sync all files
-```
+**Always edit `KINTSUGI/notebooks/` first** — never edit project folders directly. A git post-commit hook auto-syncs notebook modules and Python files to all project folders via `scripts/sync_to_projects.py` (MD5 checksum comparison). Manual sync: `python scripts/sync_to_projects.py [--dry-run|--force]`.
 
 ### Adding MCP Support to Existing Projects
 
@@ -286,7 +168,8 @@ kintsugi mcp tools
 
 **Signal Isolation:**
 - `load_channel` - Load channel image from project
-- `subtract_blank` - Autofluorescence subtraction
+- `subtract_blank` - Autofluorescence subtraction (`method="global"|"weighted"`)
+- `analyze_weighted_subtraction` - Preview per-range weights before applying
 - `denoise` - Basic denoising (median, Gaussian, bilateral)
 - `denoise_advanced` - Advanced denoising (N2V, NLM, BM3D, adaptive)
 - `apply_clahe` - Contrast enhancement
@@ -345,7 +228,7 @@ python -m build
 ## Architecture
 
 **Core Package** (`src/kintsugi/`):
-- `cli.py` - Click-based CLI with subcommands: check, register, template, info, mcp, init
+- `cli.py` - Click-based CLI with subcommands: check, register, template, info, mcp (config/start/tools/pretrain), init
 - `kreg.py`, `kstitch.py`, `kview2.py` - Bridge modules to notebook implementations
 - `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA)
 - `edf.py` - Extended depth of focus processing (CuPy GPU or NumPy CPU)
@@ -365,7 +248,7 @@ python -m build
 - `tools/learning.py` - Parameter learning with SQLite storage
 
 **Pure Python Modules** (`src/kintsugi/`):
-- `signal/` - Autofluorescence subtraction with intelligent parameter suggestion
+- `signal/` - Autofluorescence subtraction (global + weighted multi-range), bootstrap learning (`bootstrap.py`)
 - `denoise/` - Denoising algorithms (median, Gaussian, bilateral, NLM, N2V, CARE, BM3D-lite)
 - `qc/` - Quality control:
   - `artifact_scanner.py` - Unified `ArtifactScanner` with project/Zarr integration
@@ -406,187 +289,67 @@ See `notebooks/CLAUDE.md` for full details on autoreload behavior, troubleshooti
 - **Parameter learning**: Successful parameters are stored in SQLite databases, indexed by tissue type and marker name
 - **MCP integration**: Claude Code can access image processing tools via the MCP server
 
-## Recent Enhancements
+## Critical Fixes & Enhancements (Jan 2026)
 
-**Multi-GPU Support:**
-- Explicit device ID parameter for GPU functions (`device_id` parameter)
-- Queue-based GPU allocation to prevent OOM during parallel processing
-- Robust memory management with automatic OOM retry and chunk size reduction
+These bugs have been fixed in the current codebase. Listed here for context when investigating image quality issues.
 
-**Deconvolution Optimizations:**
-- Smart padding strategy for optimal FFT performance (power-of-2 friendly sizes)
-- Configurable output directory (`decon_dir` parameter)
+| Component | Issue | Fix | Key Detail |
+|-----------|-------|-----|------------|
+| Deconvolution | Horizontal banding (Gibbs ringing) | Enabled Tukey window edge apodization | `_create_tukey_window_3d` existed but was never called (`Kdecon/deconvolution.py`) |
+| Deconvolution | Intensity scaling saturated output | Scale to `raw_max` instead of 65535 | Preserves relative channel intensities (`Kdecon/main.py`) |
+| BaSiC Correction | Negative flatfield on sparse markers | Falls back to uniform flatfield | `flatfield_min=0.1` clamp in `transform()` (`kcorrect_gpu.py`) |
+| Stitching | Vertical stripe artifacts (~30px) | Reprocess with current code | Stripes from old pipeline code, NOT raw data. Script: `scripts/reprocess_striped_zplanes.py` |
+| EDF | Detail loss from sigma smoothing | Smooth variance map, not input image | CLIJ2-matching defaults: radius=2, sigma=10 (`edf.py`) |
 
-**Deconvolution Edge Apodization (Critical Fix - Jan 2026):**
-- Fixed severe horizontal banding (Gibbs ringing) artifacts in deconvolution output
-- Root cause: `_create_tukey_window_3d` function existed but was NEVER CALLED
-- The Tukey window provides cosine-tapered edge apodization to prevent FFT artifacts
-- Fix: Added `tukey_window = _create_tukey_window_3d(...)` call before deconvolution
-- Investigation showed raw and stitched images were NORMAL; artifacts introduced during deconvolution
-- Affected code: `notebooks/Kdecon/deconvolution.py` lines 509-512
+**GPU Processing:**
+- Multi-GPU with `device_id` parameter, queue-based allocation, automatic OOM retry
+- EDF: `blend_depth` and `z_smooth_sigma` for smooth z-transitions
 
-**Deconvolution Intensity Scaling (Critical Fix):**
-- Output scaling now preserves original intensity relationships between channels
-- Previously, histogram clipping always stretched output to full 16-bit range (0-65535)
-- This caused artificial saturation and inverted relative intensities between channels
-- Fix: Scale to `raw_max` (input maximum) instead of 65535
-- Critical for quantitative marker expression analysis where relative intensities matter
-- Affected code: `notebooks/Kdecon/main.py` lines 283-288
+**Quality Control:**
+- `ArtifactScanner` — unified artifact detection for TIFF/Zarr with JSON reports
+- `QualityGate` — pre-processing validation (stripe, saturation, low signal detection)
+- `validate_stats_cache()` / `invalidate_phase_cache()` in `Kio.py` — stale cache prevention
+- `quantify_processing_pipeline()` in `Kutils.py` — SNR/uniformity/sharpness metrics
 
-**BaSiC Illumination Correction (Critical Fixes - Jan 2026):**
-- **Negative flatfield fix**: Algorithm can produce negative flatfield values for low-signal images
-  (sparse markers, blank channels). Now falls back to uniform flatfield (no correction) when detected.
-- **Flatfield minimum threshold**: `flatfield_min` parameter in `transform()` (default 0.1) prevents
-  extreme amplification by clamping flatfield values
-- **Root cause**: Notebook logs showed "WARNING: 94.0% of flatfield clamped (min=-0.4167)" -
-  negative flatfield values were causing severe artifacts
-- Affected code: `src/kintsugi/kcorrect_gpu.py` lines 567-580 (fit), 618-630 (transform)
+**When investigating artifacts**: Always verify raw data is clean before attributing to data quality. Most historical "artifacts" were caused by the deconvolution apodization bug (now fixed). Compare fresh reprocessing vs existing files first.
 
-**Stitching Stripe Artifacts (Critical Finding - Jan 2026):**
-- Vertical stripe patterns (~30px spacing) can appear in stitched images
-- **IMPORTANT**: Stripes are NOT caused by raw data quality - investigation confirmed raw tiles are clean
-- Root cause: Stripes introduced during stitching by buggy pipeline code
-- Fix: Reprocess affected z-planes with current code using `scripts/reprocess_striped_zplanes.py`
-- Typical improvement: 2.8-5.5x reduction in stripe metrics after reprocessing
-- Diagnostic scripts: `scripts/check_raw_stripe_pattern.py`, `scripts/check_correction_vs_stitching.py`
-- When investigating stripe artifacts, always compare fresh reprocessing vs existing files first
+**Skills Registry:** `/advise`, `/retrospective`, `/skills` — search and save learnings across sessions
 
-**Artifact Detection & Mitigation:**
-- Unified `ArtifactScanner` class integrated with project structure
-- Comparative z-stack analysis for robust detection (avoids dataset-specific threshold issues)
-- Supports both TIFF files and Zarr stores
-- Generates saveable JSON reports
-- Multiple mitigation methods: notch filter, directional filter, z-plane interpolation
+## Weighted Autofluorescence Subtraction (Feb 2026)
 
-Usage:
-```python
-from kintsugi.project import KintsugiProject
-from kintsugi.qc import ArtifactScanner
+Replaces the single global `blank_scale_factor` with per-intensity-range weights. Protects dim signal (FOXP3, CD163) while aggressively removing bright autofluorescence (collagen, lipofuscin).
 
-project = KintsugiProject.load("/path/to/project")
-scanner = ArtifactScanner(project)
-report = scanner.scan_raw_data()
-print(report.summary())
-report.save(project.paths.meta / "artifacts.json")
-```
+**Algorithm**: Segment signal histogram into N ranges (default 5: background, very_dim, dim, medium, bright). Per-range weight is computed from signal-to-AF ratio — dim regions where AF > signal get weight 0.3-0.5 (gentle subtraction), bright signal regions get weight 1.0+ (aggressive removal). Cosine transitions between ranges prevent discontinuities.
 
-**Skills Registry Integration:**
-- `/advise` - Search for relevant learnings before starting new work
-- `/retrospective` - Save session learnings as new skills
-- `/skills` - List all available skills with trigger conditions
+**Key files:**
+- `signal/autofluorescence.py` — `subtract_autofluorescence_weighted()`, `compute_intensity_ranges()`, `build_weight_map()`, `analyze_for_weighted_subtraction()`, `compute_weighted_subtraction_quality()`, Dask variant
+- `signal/utils.py` — `adaptive_range_boundaries()`, `smooth_membership()`
+- `signal/subtractor.py` — `IntensityRange`, `WeightedSubtractionParameters` dataclasses, `method="weighted"` in `AutofluorescenceSubtractor`
+- `signal/bootstrap.py` — `bootstrap_from_project()` for batch pretraining
+- `claude/parameter_learning.py` — `algorithm_version` column, range aggregation
+- `mcp/tools/signal_isolation.py` — `analyze_weighted_subtraction()` tool, `method` param on `subtract_blank()`
 
-**Cache Validation (Kio.py):**
-- `validate_stats_cache()` - Check if cached statistics reference files that still exist
-- `invalidate_phase_cache()` - Delete cached statistics for a specific processing phase
-- Prevents using stale cached data when images are deleted or reprocessed
-- Usage:
-```python
-from Kio import validate_stats_cache, invalidate_phase_cache
+**CLI**: `kintsugi mcp pretrain <project_dir> [--tissue-type TYPE] [--dry-run]` — scans EDF outputs for signal/blank pairs, computes weighted parameters, records to learning database with `algorithm_version="weighted_v1"`.
 
-# Validate before using cache
-if CACHE_FILE.exists():
-    with open(CACHE_FILE, 'rb') as f:
-        cached_df = pickle.load(f)
-    if validate_stats_cache(cached_df, source_dir, phase='stitched'):
-        # Safe to use cache
-    else:
-        invalidate_phase_cache(cache_dir, phase='stitched')
-        # Recompute
-```
-
-**Quantification Comparisons (Kutils.py):**
-- `compare_raw_to_stitched()` - Compare raw tile to corrected/stitched region
-- `compare_stitched_to_deconvolved()` - Compare stitched to deconvolved image
-- `quantify_processing_pipeline()` - Comprehensive pipeline quantification
-- Metrics: SNR improvement, uniformity improvement, sharpness improvement, contrast improvement
-- Usage:
-```python
-from Kutils import quantify_processing_pipeline
-
-result = quantify_processing_pipeline(
-    raw_tile, stitched_region, deconvolved_region,
-    channel_name='CD3e', cycle='cyc01', zplane=7
-)
-print(f"Pipeline SNR improvement: {result['pipeline_snr_improvement']:.1f}x")
-```
-
-**EDF Sigma Fix (Critical Fix - Jan 2026):**
-- Fixed significant detail loss caused by incorrect sigma parameter application
-- Root cause: sigma was smoothing the INPUT IMAGE before variance calculation (destroying detail)
-- Fix: sigma now smooths the VARIANCE MAP after variance calculation (matching CLIJ2 behavior)
-- This preserves high-frequency detail while regularizing focus selection
-- Default parameters updated to match CLIJ2: radius=2, sigma=10 (was radius=5, sigma=20)
-- The "altitude map" (variance surface) is smoothed, NOT the image content
-- Affected code: `src/kintsugi/edf.py` lines 284-296
-
-**EDF Smooth Transitions:**
-- `blend_depth` parameter - Number of adjacent z-slices to blend for smooth transitions
-- `z_smooth_sigma` parameter - Gaussian smoothing for z-index map
-- Fixes abrupt transitions in areas of changing contrast
-- Usage:
-```python
-from kintsugi.edf import extended_depth_of_focus_variance
-
-edf = extended_depth_of_focus_variance(
-    stack,
-    radius_x=2,         # CLIJ2 default (was 5)
-    radius_y=2,         # CLIJ2 default (was 5)
-    sigma=10.0,         # CLIJ2 default (was 20)
-    blend_depth=2,      # Blend 2 adjacent slices
-    z_smooth_sigma=1.0  # Smooth z-index map
-)
-```
-
-**Stitched Image Quality Control:**
-- New skill `stitched-image-qc` detects saturation and tile grid patterns
-- Reprocessing script: `notebooks/reprocess_problematic_images.py`
-- Saturation detection: >50% pixels at maximum value
-- Tile grid detection: std/mean ratio > 0.8
-- See TROUBLESHOOTING.md for detailed diagnostic steps
-
-**Quality Gate (Pre-Processing Validation):**
-- `QualityGate` class detects problematic images before deconvolution/EDF
-- Useful for detecting: stripe artifacts, corruption patterns, saturation, low signal, tile grids
-- **Note**: Most "artifacts" previously attributed to raw data were actually caused by the
-  deconvolution edge apodization bug (now fixed, see above). When investigating image
-  quality issues, always verify raw data is actually bad before attributing to data quality.
-- Usage:
-```python
-from kintsugi.qc import QualityGate, check_before_processing
-
-# Create gate and check z-stack
-gate = QualityGate()
-result = gate.check_zstack(z_stack, channel="CD3", cycle="cyc01")
-
-if result.passed:
-    deconvolved = decon.process_array(z_stack)
-else:
-    print(f"Quality gate failed: {result.issues}")
-    if result.can_mitigate:
-        mitigated = gate.mitigate(z_stack, result)
-        deconvolved = decon.process_array(mitigated)
-
-# Or use convenience function with automatic handling
-stack, result = check_before_processing(
-    z_stack, channel="CD3", cycle="cyc01",
-    fail_action="mitigate"  # Options: 'raise', 'warn', 'skip', 'mitigate'
-)
-```
+**Backwards compatible**: `subtract_blank()` defaults to `method="global"` (original behavior). Uniform weights=1.0 produces identical output to global method.
 
 ## Batch Processing (Multi-Dataset)
 
-KINTSUGI supports automated batch processing of multiple CODEX datasets (8-phase workflow). See `workflow/CLAUDE.md` for batch processing details including data staging, rsync patterns, storage architecture, and sentinel file reference. See `/blue/maigan/smith6jt/README.md` for the complete pipeline script reference.
+KINTSUGI supports automated batch processing of multiple CODEX datasets (47 in manifest: spleen, lymph node, thymus). See `workflow/CLAUDE.md` for batch processing details including data staging, storage architecture, and sentinel file reference.
+
+**Data staging**: Two methods depending on source:
+- **Orange storage** (spleen/LN datasets): `stage_datasets.sh` via rsync SLURM jobs
+- **Globus** (thymus datasets from PATH lab): `stage_datasets_globus.py` — transfers from `path.ahc.ufl.edu` SMB share. See `workflow/CLAUDE.md` for endpoint details.
 
 **Quick reference — processing all staged datasets:**
 ```bash
-# Run inside tmux/screen (Snakemake is a long-running coordinator)
 tmux new -s batch
 bash /blue/maigan/smith6jt/run_all_workflows.sh           # all staged datasets
 bash /blue/maigan/smith6jt/run_all_workflows.sh --dry-run  # preview
-bash /blue/maigan/smith6jt/run_all_workflows.sh --dataset CX_19-002_lymph-node_R1  # single dataset
+bash /blue/maigan/smith6jt/run_all_workflows.sh --dataset CX_19-002_lymph-node_R1  # single
 ```
 
-Processing is sequential (one dataset at a time) because all datasets share the same 24 SLURM slots. Each Snakemake instance uses the full resource pool (5 GPU + 19 CPU across clive and maigan). Completed datasets and channels are automatically skipped on re-run.
+Processing is sequential (one dataset at a time) because all datasets share the same 5 GPU slots (across clive and maigan). GPU-only scheduling is used — CPU fallback is 15-20x slower and not worth the overhead. Each Snakemake instance uses the full GPU resource pool. Completed datasets and channels are automatically skipped on re-run.
 
 ## Dependencies
 
@@ -605,62 +368,15 @@ Optional groups in pyproject.toml:
 
 **External requirements**: libvips (native library). Java/Maven no longer required.
 
-### CuPy Installation Status (IMPORTANT — READ BEFORE MODIFYING)
+### CuPy & HPC Cache (IMPORTANT)
 
-**CuPy IS ALREADY INSTALLED** in the KINTSUGI conda environment. **DO NOT attempt to install, reinstall, or upgrade CuPy.** It is installed as `cupy-cuda12x` and is the correct version for the HiPerGator CUDA 12 stack.
+**CuPy IS INSTALLED** (`cupy-cuda12x`). Do NOT reinstall. `gpu.cupy_available` returns `False` on login nodes (no GPU hardware) — this is normal. Use `gpu.cupy_installed` for import-only check. Only reinstall via `kintsugi install gpu` after a full env rebuild.
 
-**Why CuPy may appear "unavailable":**
-- On **login nodes** (no GPU hardware), `import cupy` succeeds but GPU operations fail with `cudaErrorInsufficientDriver`
-- Functions like `_check_cupy_available()`, `gpu.cupy_available`, and `check_gpu()` test **GPU hardware availability**, not package installation
-- These returning `False` means "no GPU on this node," NOT "CuPy needs to be installed"
-- Use `gpu.cupy_installed` (import-only check) to verify the package is actually installed
-
-**If CuPy genuinely needs reinstalling** (extremely rare — only after environment rebuild):
-```bash
-kintsugi install gpu    # Installs cupy-cuda12x into the active conda env
-```
-
-### HPC Cache Redirection (IMPORTANT)
-
-All SLURM/Snakemake jobs MUST use account-specific cache directories, NOT the home directory. The system uses:
-- `~/.use_conda_maigan.sh` / `~/.use_conda_clive.sh` — Account switchers that set `BLUE_BASE` and source cache redirection
-- `~/.cache_redirect.sh` — Redirects pip, torch, numba, jupyter, XDG caches to `/blue/{account}/smith6jt/scratch/cache/`
-- The Snakemake profile precommand automatically sources the correct switcher based on `SLURM_JOB_ACCOUNT`
-
-**Never install packages or modify caches directly.** Always use the conda environment and account-specific paths.
+**HPC cache**: SLURM jobs use account-specific caches (`~/.use_conda_{account}.sh` → `~/.cache_redirect.sh`). Never install packages or modify caches directly.
 
 ## Git Submodules
 
-This repository uses Git submodules for shared components. See [docs/SUBMODULES.md](docs/SUBMODULES.md) for detailed documentation.
-
-### Quick Reference
-
-```bash
-# Clone with submodules
-git clone --recurse-submodules https://github.com/smith6jt-cop/KINTSUGI.git
-
-# Initialize submodules after regular clone
-git submodule update --init --recursive
-
-# Pull with submodule updates
-git pull --recurse-submodules
-
-# Update submodules to latest remote
-git submodule update --remote
-```
-
-### Current Submodules
-
-| Submodule | Path | Purpose |
-|-----------|------|---------|
-| Skills_Registry | `Skills_Registry/` | Shared skills and learnings for Claude Code |
-
-### Recommended Aliases
-
-```bash
-git config --global alias.clone-all 'clone --recurse-submodules'
-git config --global alias.pull-all 'pull --recurse-submodules'
-```
+`Skills_Registry/` is a Git submodule. Clone with `--recurse-submodules` or run `git submodule update --init --recursive`.
 
 ## Testing
 
@@ -677,71 +393,13 @@ CI runs on Windows/Linux/macOS with Python 3.10-3.12.
 
 ## Release and Versioning
 
-This project uses **Conventional Commits** and **automatic semantic versioning**.
-
-### Commit Message Format
-
-All commits should follow the [Conventional Commits](https://www.conventionalcommits.org/) format:
-
-```
-<type>(<scope>): <description>
-
-[optional body]
-
-[optional footer(s)]
-```
-
-**Types:**
-- `feat`: New feature (bumps MINOR version)
-- `fix`: Bug fix (bumps PATCH version)
-- `docs`: Documentation changes
-- `style`: Code style changes (formatting, etc.)
-- `refactor`: Code refactoring
-- `perf`: Performance improvements
-- `test`: Adding/updating tests
-- `build`: Build system changes
-- `ci`: CI/CD changes
-- `chore`: Maintenance tasks
-
-**Breaking Changes:** Add `!` after type or include `BREAKING CHANGE:` in footer (bumps MAJOR version).
-
-### Examples
+Uses [Conventional Commits](https://www.conventionalcommits.org/) with automatic semantic versioning. Format: `<type>(<scope>): <description>` — types: `feat` (MINOR), `fix` (PATCH), `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`. Add `!` for breaking changes (MAJOR).
 
 ```bash
-feat(mcp): add new image processing tool
-fix(segmentation): resolve edge detection issue
-docs: update installation instructions
-refactor(signal)!: change API for background subtraction
+pre-commit install && pre-commit install --hook-type commit-msg  # Enable hooks
+python scripts/release.py --auto                                  # Create release
+python scripts/release.py --dry-run --auto                       # Preview
 ```
-
-### Pre-commit Hooks
-
-Install hooks for automatic commit validation:
-
-```bash
-pre-commit install
-pre-commit install --hook-type commit-msg
-```
-
-### Creating Releases
-
-Releases are automated via GitHub Actions:
-
-1. **Automatic releases**: Push to `main` triggers version analysis and release creation
-2. **Manual releases**: Use workflow dispatch in GitHub Actions
-3. **Local release script**: `python scripts/release.py --auto`
-
-```bash
-# Preview release (dry run)
-python scripts/release.py --dry-run --auto
-
-# Manual bump
-python scripts/release.py --bump minor
-```
-
-### Changelog
-
-The `CHANGELOG.md` is automatically updated during releases based on commit messages.
 
 ## Notebook 4: Segmentation & Spatial Analysis
 

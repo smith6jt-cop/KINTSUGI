@@ -17,12 +17,32 @@ import numpy as np
 
 from .autofluorescence import (
     analyze_for_subtraction,
+    analyze_for_weighted_subtraction,
     compute_subtraction_quality,
+    compute_weighted_subtraction_quality,
     subtract_autofluorescence,
     subtract_autofluorescence_dask,
+    subtract_autofluorescence_weighted,
 )
 
 logger = logging.getLogger("kintsugi.signal.subtractor")
+
+
+@dataclass
+class IntensityRange:
+    """A single intensity range for weighted subtraction."""
+
+    lower_bound: float = 0.0
+    upper_bound: float = 65535.0
+    weight: float = 1.0
+    label: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> IntensityRange:
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
 @dataclass
@@ -50,18 +70,79 @@ class SubtractionParameters:
 
 
 @dataclass
+class WeightedSubtractionParameters:
+    """Parameters for weighted autofluorescence subtraction."""
+
+    blank_clip_factor: int = 0
+    base_scale_factor: float = 1.0
+    n_ranges: int = 5
+    range_method: str = "percentile"
+    ranges: list[IntensityRange] = field(default_factory=list)
+    transition_width: float = 0.1
+    smooth_low: bool = False
+    low_size: int = 2
+    low_percentile: int = 60
+    smooth_high: bool = False
+    high_size: int = 2
+    high_percentile: int = 90
+    erosion: int = 0
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary with nested ranges."""
+        d = asdict(self)
+        d["ranges"] = [r.to_dict() if isinstance(r, IntensityRange) else r for r in self.ranges]
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> WeightedSubtractionParameters:
+        """Create from dictionary with nested range deserialization."""
+        d = dict(d)
+        if "ranges" in d:
+            d["ranges"] = [
+                IntensityRange.from_dict(r) if isinstance(r, dict) else r
+                for r in d["ranges"]
+            ]
+        valid_keys = cls.__dataclass_fields__
+        return cls(**{k: v for k, v in d.items() if k in valid_keys})
+
+    def to_subtraction_kwargs(self) -> dict:
+        """Convert to kwargs for subtract_autofluorescence_weighted()."""
+        ranges_dicts = [r.to_dict() if isinstance(r, IntensityRange) else r for r in self.ranges]
+        return {
+            "blank_clip_factor": self.blank_clip_factor,
+            "base_scale_factor": self.base_scale_factor,
+            "n_ranges": self.n_ranges,
+            "range_method": self.range_method,
+            "ranges": ranges_dicts if ranges_dicts else None,
+            "transition_width": self.transition_width,
+            "smooth_low": self.smooth_low,
+            "low_size": self.low_size,
+            "low_percentile": self.low_percentile,
+            "smooth_high": self.smooth_high,
+            "high_size": self.high_size,
+            "high_percentile": self.high_percentile,
+            "erosion": self.erosion,
+        }
+
+
+@dataclass
 class SubtractionResult:
     """Result of autofluorescence subtraction."""
 
     image: np.ndarray
-    parameters: SubtractionParameters
+    parameters: SubtractionParameters | WeightedSubtractionParameters
     quality_metrics: dict = field(default_factory=dict)
     analysis: dict = field(default_factory=dict)
+    range_metrics: list[dict] | None = None
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def quality_passed(self, threshold: float = 0.5) -> bool:
         """Check if quality score passes threshold."""
-        return self.quality_metrics.get("quality_score", 0) >= threshold
+        # Support both flat and nested quality_metrics
+        score = self.quality_metrics.get("quality_score", 0)
+        if score == 0 and "global" in self.quality_metrics:
+            score = self.quality_metrics["global"].get("quality_score", 0)
+        return score >= threshold
 
 
 class AutofluorescenceSubtractor:
@@ -106,11 +187,13 @@ class AutofluorescenceSubtractor:
         tissue_type: str | None = None,
         auto_learn: bool = True,
         quality_threshold: float = 0.5,
+        method: str = "global",
     ):
         self.project_dir = Path(project_dir) if project_dir else None
         self.tissue_type = tissue_type
         self.auto_learn = auto_learn
         self.quality_threshold = quality_threshold
+        self.method = method  # "global" or "weighted"
 
         # Learning engine (lazy initialization)
         self._learning_engine = None
@@ -201,14 +284,75 @@ class AutofluorescenceSubtractor:
 
         return params
 
+    def suggest_weighted_parameters(
+        self,
+        signal: np.ndarray,
+        blank: np.ndarray,
+        marker: str | None = None,
+        tissue_type: str | None = None,
+        n_ranges: int = 5,
+        range_method: str = "percentile",
+    ) -> WeightedSubtractionParameters:
+        """
+        Suggest optimal parameters for weighted subtraction.
+
+        Parameters
+        ----------
+        signal, blank : np.ndarray
+            Signal and blank images
+        marker : str, optional
+            Marker name
+        tissue_type : str, optional
+            Tissue type
+        n_ranges : int
+            Number of intensity ranges
+        range_method : str
+            Method for range boundaries
+
+        Returns
+        -------
+        WeightedSubtractionParameters
+        """
+        tissue = tissue_type or self.tissue_type
+        analysis = analyze_for_weighted_subtraction(
+            signal, blank, tissue, marker, n_ranges=n_ranges, range_method=range_method
+        )
+
+        intensity_ranges = [
+            IntensityRange(
+                lower_bound=r["lower_bound"],
+                upper_bound=r["upper_bound"],
+                weight=r["weight"],
+                label=r.get("label", ""),
+            )
+            for r in analysis.get("ranges", [])
+        ]
+
+        return WeightedSubtractionParameters(
+            blank_clip_factor=analysis["blank_clip_factor"],
+            base_scale_factor=analysis["base_scale_factor"],
+            n_ranges=analysis.get("n_ranges", n_ranges),
+            range_method=analysis.get("range_method", range_method),
+            ranges=intensity_ranges,
+            transition_width=analysis.get("transition_width", 0.1),
+            smooth_low=analysis["smooth_low"],
+            low_size=analysis["low_size"],
+            low_percentile=analysis["low_percentile"],
+            smooth_high=analysis["smooth_high"],
+            high_size=analysis["high_size"],
+            high_percentile=analysis["high_percentile"],
+            erosion=analysis["erosion"],
+        )
+
     def process(
         self,
         signal: np.ndarray,
         blank: np.ndarray,
-        params: SubtractionParameters | None = None,
+        params: SubtractionParameters | WeightedSubtractionParameters | None = None,
         marker: str | None = None,
         tissue_type: str | None = None,
         use_dask: bool = False,
+        method: str | None = None,
     ) -> SubtractionResult:
         """
         Process signal channel to remove autofluorescence.
@@ -219,7 +363,7 @@ class AutofluorescenceSubtractor:
             Signal channel image
         blank : np.ndarray or dask.array.Array
             Blank channel image
-        params : SubtractionParameters, optional
+        params : SubtractionParameters or WeightedSubtractionParameters, optional
             Subtraction parameters (auto-suggested if not provided)
         marker : str, optional
             Marker name (for learning)
@@ -227,6 +371,8 @@ class AutofluorescenceSubtractor:
             Tissue type (for learning)
         use_dask : bool
             Use dask-based processing for large images
+        method : str, optional
+            Override instance method ("global" or "weighted")
 
         Returns
         -------
@@ -234,44 +380,117 @@ class AutofluorescenceSubtractor:
             Result containing processed image, parameters, and quality metrics
         """
         tissue = tissue_type or self.tissue_type
+        active_method = method or self.method
 
-        # Auto-suggest parameters if not provided
+        # Convert dask to numpy for analysis if needed
+        signal_np = signal.compute() if hasattr(signal, "compute") else signal
+        blank_np = blank.compute() if hasattr(blank, "compute") else blank
+
+        # Dispatch based on method
+        if active_method == "weighted":
+            return self._process_weighted(
+                signal, blank, signal_np, blank_np, params, marker, tissue, use_dask
+            )
+        else:
+            return self._process_global(
+                signal, blank, signal_np, blank_np, params, marker, tissue, use_dask
+            )
+
+    def _process_global(
+        self, signal, blank, signal_np, blank_np, params, marker, tissue, use_dask
+    ) -> SubtractionResult:
+        """Process using global (single scale factor) method."""
         if params is None:
-            # Convert dask to numpy for analysis
-            signal_np = signal.compute() if hasattr(signal, "compute") else signal
-            blank_np = blank.compute() if hasattr(blank, "compute") else blank
             params = self.suggest_parameters(signal_np, blank_np, marker, tissue)
 
-        # Perform subtraction
         if use_dask or hasattr(signal, "compute"):
             result_image = subtract_autofluorescence_dask(signal, blank, **params.to_dict())
-            # Compute for quality assessment
-            if hasattr(result_image, "compute"):
-                result_image_np = result_image.compute()
-            else:
-                result_image_np = result_image
+            result_image_np = (
+                result_image.compute() if hasattr(result_image, "compute") else result_image
+            )
         else:
             result_image = subtract_autofluorescence(signal, blank, **params.to_dict())
             result_image_np = result_image
 
-        # Compute quality metrics
-        signal_np = signal.compute() if hasattr(signal, "compute") else signal
-        blank_np = blank.compute() if hasattr(blank, "compute") else blank
-
         quality = compute_subtraction_quality(signal_np, result_image_np, blank_np)
 
-        # Create result
         result = SubtractionResult(
             image=result_image,
             parameters=params,
             quality_metrics=quality,
-            analysis={
-                "marker": marker,
-                "tissue_type": tissue,
-            },
+            analysis={"marker": marker, "tissue_type": tissue, "method": "global"},
         )
 
-        # Auto-learn if quality passed
+        self._auto_learn(result, marker, tissue, quality)
+        return result
+
+    def _process_weighted(
+        self, signal, blank, signal_np, blank_np, params, marker, tissue, use_dask
+    ) -> SubtractionResult:
+        """Process using per-intensity-range weighted method."""
+        if params is None:
+            params = self.suggest_weighted_parameters(signal_np, blank_np, marker, tissue)
+
+        if isinstance(params, WeightedSubtractionParameters):
+            kwargs = params.to_subtraction_kwargs()
+        else:
+            # Fallback: convert SubtractionParameters to weighted kwargs
+            kwargs = {
+                "blank_clip_factor": params.blank_clip_factor,
+                "base_scale_factor": getattr(params, "blank_scale_factor", 1.0),
+            }
+
+        result_image = subtract_autofluorescence_weighted(signal_np, blank_np, **kwargs)
+        result_image_np = result_image
+
+        # Compute weighted quality metrics if we have ranges
+        ranges = kwargs.get("ranges")
+        if ranges:
+            from .autofluorescence import compute_intensity_ranges
+
+            quality = compute_weighted_subtraction_quality(
+                signal_np, result_image_np, blank_np, ranges
+            )
+            range_metrics = quality.get("per_range")
+            quality_flat = quality.get("global", quality)
+        else:
+            # Compute ranges for quality assessment
+            signal_f = signal_np.astype(np.float32)
+            blank_f = blank_np.astype(np.float32)
+            clip = kwargs.get("blank_clip_factor", 0)
+            blank_clipped = np.clip(blank_f, clip, blank_f.max())
+            blank_clipped[blank_clipped <= clip] = 0
+
+            from .autofluorescence import compute_intensity_ranges
+
+            computed_ranges = compute_intensity_ranges(signal_f, blank_clipped)
+            quality = compute_weighted_subtraction_quality(
+                signal_np, result_image_np, blank_np, computed_ranges
+            )
+            range_metrics = quality.get("per_range")
+            quality_flat = quality.get("global", quality)
+
+        result = SubtractionResult(
+            image=result_image,
+            parameters=params,
+            quality_metrics=quality_flat,
+            analysis={"marker": marker, "tissue_type": tissue, "method": "weighted"},
+            range_metrics=range_metrics,
+        )
+
+        self._auto_learn(result, marker, tissue, quality_flat, algorithm_version="weighted_v1")
+        return result
+
+    def _auto_learn(
+        self,
+        result: SubtractionResult,
+        marker: str | None,
+        tissue: str | None,
+        quality: dict,
+        algorithm_version: str = "v1",
+    ):
+        """Record parameters if quality passed."""
+        quality_score = quality.get("quality_score", 0)
         if (
             self.auto_learn
             and result.quality_passed(self.quality_threshold)
@@ -279,20 +498,21 @@ class AutofluorescenceSubtractor:
             and marker
         ):
             try:
+                params_dict = result.parameters.to_dict()
+                params_dict["algorithm_version"] = algorithm_version
                 self.learning_engine.record_parameters(
                     operation="blank_subtraction",
                     tissue_type=tissue or "unknown",
                     marker_name=marker,
-                    parameters=params.to_dict(),
-                    quality_score=quality["quality_score"],
+                    parameters=params_dict,
+                    quality_score=quality_score,
                 )
                 logger.info(
-                    f"Recorded parameters for {marker} (quality: {quality['quality_score']:.3f})"
+                    f"Recorded {algorithm_version} parameters for {marker} "
+                    f"(quality: {quality_score:.3f})"
                 )
             except Exception as e:
                 logger.warning(f"Failed to record parameters: {e}")
-
-        return result
 
     def process_batch(
         self,

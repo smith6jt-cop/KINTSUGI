@@ -23,15 +23,20 @@ Example:
 
 from .autofluorescence import (
     analyze_for_subtraction,
+    analyze_for_weighted_subtraction,
     compute_subtraction_quality,
+    compute_weighted_subtraction_quality,
     subtract_autofluorescence,
     subtract_autofluorescence_dask,
+    subtract_autofluorescence_weighted,
     suggest_blank_channel,
 )
 from .subtractor import (
     AutofluorescenceSubtractor,
+    IntensityRange,
     SubtractionParameters,
     SubtractionResult,
+    WeightedSubtractionParameters,
 )
 from .utils import (
     apply_erosion_mask,
@@ -44,13 +49,18 @@ __all__ = [
     # Core functions
     "subtract_autofluorescence",
     "subtract_autofluorescence_dask",
+    "subtract_autofluorescence_weighted",
     "analyze_for_subtraction",
+    "analyze_for_weighted_subtraction",
     "suggest_blank_channel",
     "compute_subtraction_quality",
+    "compute_weighted_subtraction_quality",
     # Class-based interface
     "AutofluorescenceSubtractor",
     "SubtractionResult",
     "SubtractionParameters",
+    "IntensityRange",
+    "WeightedSubtractionParameters",
     # Utilities
     "clip_and_scale_blank",
     "apply_percentile_smoothing",

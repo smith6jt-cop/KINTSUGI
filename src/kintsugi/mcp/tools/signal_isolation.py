@@ -360,6 +360,79 @@ def _basic_parameter_suggestion(signal: np.ndarray, blank: np.ndarray) -> dict:
     }
 
 
+async def analyze_weighted_subtraction(
+    signal_channel: str,
+    blank_channel: str,
+    n_ranges: int = 5,
+    range_method: str = "percentile",
+    tissue_type: str = "unknown",
+    marker_name: str | None = None,
+) -> dict[str, Any]:
+    """
+    Preview range assignments and suggested weights without performing subtraction.
+
+    Shows per-range pixel percentages, AF ratios, and weights so the user
+    can understand the plan before applying.
+
+    Parameters:
+    - signal_channel: Name of loaded signal channel
+    - blank_channel: Name of loaded blank channel
+    - n_ranges: Number of intensity ranges (default: 5)
+    - range_method: Boundary method: "percentile" or "otsu"
+    - tissue_type: Tissue type for context
+    - marker_name: Marker name for context
+    """
+    try:
+        signal_data = _get_image(signal_channel)
+        blank_data = _get_image(blank_channel)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    # Convert to numpy
+    if hasattr(signal_data, "compute"):
+        if signal_data.shape[0] > 2000 or signal_data.shape[1] > 2000:
+            signal_np = signal_data[::2, ::2].compute()
+            blank_np = blank_data[::2, ::2].compute()
+        else:
+            signal_np = signal_data.compute()
+            blank_np = blank_data.compute()
+    else:
+        signal_np = np.array(signal_data)
+        blank_np = np.array(blank_data)
+
+    try:
+        from kintsugi.signal.autofluorescence import analyze_for_weighted_subtraction
+
+        analysis = analyze_for_weighted_subtraction(
+            signal_np,
+            blank_np,
+            tissue_type=tissue_type,
+            marker_name=marker_name,
+            n_ranges=n_ranges,
+            range_method=range_method,
+        )
+
+        return {
+            "status": "success",
+            "method": "weighted",
+            "n_ranges": analysis["n_ranges"],
+            "range_method": analysis["range_method"],
+            "base_scale_factor": analysis["base_scale_factor"],
+            "blank_clip_factor": analysis["blank_clip_factor"],
+            "transition_width": analysis["transition_width"],
+            "ranges": analysis["ranges"],
+            "confidence": analysis["confidence"],
+            "analysis": {
+                "signal_blank_correlation": analysis["analysis"]["correlation"],
+                "af_contribution": analysis["analysis"]["af_contribution"],
+            },
+            "tissue_type": tissue_type,
+            "marker_name": marker_name,
+        }
+    except Exception as e:
+        return {"error": f"Weighted analysis failed: {e}"}
+
+
 async def subtract_blank(
     signal_channel: str,
     blank_channel: str,
@@ -378,6 +451,10 @@ async def subtract_blank(
     project_path: str | None = None,
     record_success: bool = True,
     quality_threshold: float = 0.5,
+    method: str = "global",
+    n_ranges: int = 5,
+    range_method: str = "percentile",
+    transition_width: float = 0.1,
 ) -> dict[str, Any]:
     """
     Subtract autofluorescence/blank channel from signal.
@@ -406,6 +483,138 @@ async def subtract_blank(
     - record_success: Record successful parameters to learning database
     - quality_threshold: Minimum quality score to consider successful
     """
+    # Get loaded images
+    try:
+        signal_data = _get_image(signal_channel)
+        blank_data = _get_image(blank_channel)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    # ---- Weighted method path ----
+    if method == "weighted":
+        # Convert to numpy for weighted processing
+        if hasattr(signal_data, "compute"):
+            signal_np = signal_data.compute()
+            blank_np = blank_data.compute()
+        else:
+            signal_np = np.array(signal_data)
+            blank_np = np.array(blank_data)
+
+        try:
+            from kintsugi.signal.autofluorescence import (
+                compute_intensity_ranges,
+                compute_weighted_subtraction_quality,
+                subtract_autofluorescence_weighted,
+            )
+
+            # Auto-suggest clip factor if needed
+            if blank_clip_factor is None:
+                suggestion_result = await suggest_subtraction_parameters(
+                    signal_channel=signal_channel,
+                    blank_channel=blank_channel,
+                    tissue_type=tissue_type,
+                    marker_name=marker_name,
+                    project_path=project_path,
+                )
+                if suggestion_result.get("status") == "success":
+                    sp = suggestion_result.get("suggested_parameters", {})
+                    blank_clip_factor = sp.get("blank_clip_factor", 0)
+
+            blank_clip_factor = blank_clip_factor or 0
+            base_scale = blank_scale_factor if blank_scale_factor is not None else 1.0
+
+            result_np = subtract_autofluorescence_weighted(
+                signal_np,
+                blank_np,
+                blank_clip_factor=blank_clip_factor,
+                base_scale_factor=base_scale,
+                n_ranges=n_ranges,
+                range_method=range_method,
+                transition_width=transition_width,
+                smooth_low=smooth_low or False,
+                low_size=low_size or 2,
+                low_percentile=low_percentile or 60,
+                smooth_high=smooth_high or False,
+                high_size=high_size or 2,
+                high_percentile=high_percentile or 90,
+                erosion=erosion or 0,
+            )
+
+            # Compute quality with ranges
+            signal_f = signal_np.astype(np.float32)
+            blank_f = blank_np.astype(np.float32)
+            blank_clipped = np.clip(blank_f, blank_clip_factor, blank_f.max())
+            blank_clipped[blank_clipped <= blank_clip_factor] = 0
+            ranges = compute_intensity_ranges(
+                signal_f, blank_clipped, n_ranges=n_ranges, method=range_method
+            )
+            quality = compute_weighted_subtraction_quality(
+                signal_np, result_np, blank_np, ranges
+            )
+
+            # Store as dask for consistency
+            try:
+                import dask.array as da
+
+                result = da.from_array(result_np, chunks=(1000, 1000))
+            except ImportError:
+                result = result_np
+
+            output_name = f"{signal_channel}_subtracted"
+            _store_image(
+                output_name,
+                result,
+                {
+                    "source": signal_channel,
+                    "blank": blank_channel,
+                    "operation": "subtract_blank_weighted",
+                },
+            )
+            _add_history(
+                output_name,
+                "subtract_blank",
+                {
+                    "signal_channel": signal_channel,
+                    "blank_channel": blank_channel,
+                    "method": "weighted",
+                    "blank_clip_factor": blank_clip_factor,
+                    "base_scale_factor": base_scale,
+                    "n_ranges": n_ranges,
+                    "range_method": range_method,
+                },
+            )
+
+            stats = {
+                "min": float(np.min(result_np)),
+                "max": float(np.max(result_np)),
+                "mean": float(np.mean(result_np)),
+                "std": float(np.std(result_np)),
+            }
+
+            return {
+                "status": "success",
+                "output_name": output_name,
+                "method": "weighted",
+                "shape": list(result_np.shape),
+                "stats": stats,
+                "parameters_used": {
+                    "method": "weighted",
+                    "blank_clip_factor": blank_clip_factor,
+                    "base_scale_factor": base_scale,
+                    "n_ranges": n_ranges,
+                    "range_method": range_method,
+                    "transition_width": transition_width,
+                },
+                "range_metrics": quality.get("per_range", []),
+                "quality": quality.get("global", {}),
+            }
+
+        except ImportError as e:
+            return {"error": f"Weighted subtraction requires kintsugi.signal: {e}"}
+        except Exception as e:
+            return {"error": f"Weighted subtraction failed: {e}"}
+
+    # ---- Global method path (original) ----
     try:
         import dask.array as da
         import dask_image.ndfilters
@@ -413,13 +622,6 @@ async def subtract_blank(
         from skimage import morphology
     except ImportError as e:
         return {"error": f"Missing dependency: {e}"}
-
-    # Get loaded images
-    try:
-        signal_data = _get_image(signal_channel)
-        blank_data = _get_image(blank_channel)
-    except ValueError as e:
-        return {"error": str(e)}
 
     # Auto-suggest parameters if needed
     suggested_params = None
@@ -526,6 +728,7 @@ async def subtract_blank(
         {
             "signal_channel": signal_channel,
             "blank_channel": blank_channel,
+            "method": "global",
             "blank_clip_factor": blank_clip_factor,
             "blank_scale_factor": blank_scale_factor,
             "smooth_low": smooth_low,
@@ -549,9 +752,11 @@ async def subtract_blank(
     return {
         "status": "success",
         "output_name": output_name,
+        "method": "global",
         "shape": list(result.shape),
         "stats": stats,
         "parameters_used": {
+            "method": "global",
             "blank_clip_factor": blank_clip_factor,
             "blank_scale_factor": blank_scale_factor,
             "smooth_low": smooth_low,
