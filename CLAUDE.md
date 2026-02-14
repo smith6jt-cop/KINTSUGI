@@ -197,6 +197,32 @@ kintsugi mcp tools
 - `approve_and_learn` - Approve and record for future learning
 - `get_learning_statistics` - Database statistics
 
+### TissUUmaps Export
+
+Export processed images to web-optimized DZI tile pyramids for [TissUUmaps](https://github.com/TissUUmaps/TissUUmaps) visualization:
+
+```bash
+kintsugi workflow export prepare .              # Convert to DZI + generate .tmap
+kintsugi workflow export prepare . --dry-run    # Preview what would be exported
+kintsugi workflow export prepare . --force      # Reconvert everything
+kintsugi workflow export deploy . user@host:/path         # Deploy via rsync
+kintsugi workflow export deploy . user@host:/path -n      # Dry-run rsync
+kintsugi workflow export status .               # Show export status
+```
+
+**What it does:**
+1. Discovers registered images (`data/processed/registered/cyc##/*.tif`) and segmentation masks
+2. Converts each to DZI tile pyramid (256x256 PNG tiles) via `pyvips.dzsave()`
+3. Copies CSV overlays and h5ad files from `segmented/` and `analysis/`
+4. Generates `.tmap` project JSON with per-channel color mapping and `compositeMode: "lighter"`
+5. Writes `export_manifest.json` for skip-existing on re-runs (mtime + size comparison)
+
+**Output structure:** `data/exported/` with `images/`, `data/`, `regions/`, and `{project}.tmap`
+
+**Key files:** `src/kintsugi/export.py` (core logic), CLI commands in `cli.py` under `@workflow.group("export")`
+
+Blank/autofluorescence channels are excluded by default (use `--include-blanks` to include). 22 common immune markers have predefined color mappings (DAPI=blue, CD3=green, CD8=red, etc.).
+
 ## Build and Development Commands
 
 ```bash
@@ -228,7 +254,7 @@ python -m build
 ## Architecture
 
 **Core Package** (`src/kintsugi/`):
-- `cli.py` - Click-based CLI with subcommands: check, register, template, info, mcp (config/start/tools/pretrain), init
+- `cli.py` - Click-based CLI with subcommands: check, register, template, info, mcp (config/start/tools/pretrain), init, workflow (config/check/run/export)
 - `kreg.py`, `kstitch.py`, `kview2.py` - Bridge modules to notebook implementations
 - `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA)
 - `edf.py` - Extended depth of focus processing (CuPy GPU or NumPy CPU)
@@ -238,6 +264,7 @@ python -m build
 - `zarr_io.py` - OME-Zarr format I/O with Dask lazy loading
 - `parallel_io.py` - Parallel image loading/saving utilities
 - `dl_refinement.py` - Deep learning channel refinement
+- `export.py` - TissUUmaps export: DZI tile conversion, .tmap generation, rsync deploy
 
 **MCP Server** (`src/kintsugi/mcp/`):
 - `server.py` - FastMCP server implementation
@@ -361,6 +388,7 @@ Optional groups in pyproject.toml:
 - `[denoise]` - PyTorch for N2V/CARE denoising
 - `[viz]` - Napari visualization
 - `[analysis]` - scanpy, scimap for spatial analysis
+- `[kronos]` - KRONOS foundation model integration (PyTorch, h5py, umap-learn, scanpy)
 - `[bio]` - Bio formats I/O (OME-TIFF, LIF, etc.)
 - `[dl]` - Deep learning segmentation (InstanSeg)
 - `[full]` - All optional dependencies
@@ -404,3 +432,32 @@ python scripts/release.py --dry-run --auto                       # Preview
 ## Notebook 4: Segmentation & Spatial Analysis
 
 See `notebooks/CLAUDE.md` for Notebook 4 capabilities (InstanSeg segmentation, feature extraction, SOM clustering, spatial analysis with scanpy/scimap), key dependencies, and migration notes.
+
+## KRONOS Foundation Model Integration (Feb 2026)
+
+[KRONOS](https://github.com/mahmoodlab/KRONOS) is a panel-agnostic foundation model for spatial proteomics (Harvard/BWH, CC-BY-NC-ND-4.0). Trained via self-supervised learning on 47M single-marker patches across 175 protein markers.
+
+**Pipeline position**: Post-registration analysis — runs after EDF/registration produces aligned, marker-named 2D TIFFs.
+
+**Key files:**
+- `src/kintsugi/kronos/__init__.py` — Lazy loading, dependency checks
+- `src/kintsugi/kronos/model.py` — `KronosModel`, `KronosConfig`, `EmbeddingResult` (HDF5 save/load)
+- `src/kintsugi/kronos/markers.py` — `MarkerMapper` maps CHANNELNAMES.txt to KRONOS's 175 markers
+- `src/kintsugi/kronos/embeddings.py` — `KronosEmbedder` loads registered images, tiles, normalizes, runs inference
+- `src/kintsugi/kronos/analysis.py` — Clustering (Leiden/KMeans), UMAP/PCA, spatial search, cross-dataset comparison
+- `notebooks/5_KRONOS_Analysis.ipynb` — Standalone analysis notebook
+
+**Usage:**
+```python
+from kintsugi.kronos import KronosEmbedder, MarkerMapper
+mapper = MarkerMapper.from_project("./my_project", cache_dir="./model_assets")
+embedder = KronosEmbedder()
+result = embedder.embed_project("./my_project", mapper)
+result.save("./embeddings.h5")
+```
+
+**Prerequisites**: `pip install -e KRONOS` (from GitHub clone), HuggingFace access for model weights.
+
+**Model specs**: ViT-S/16, 175 MB weights, input `(batch, markers, 256, 256)`, output 3 embedding types (patch/marker/token). Per-marker z-score normalization via `marker_metadata.csv`.
+
+**KRONOS does NOT replace**: stitching, deconvolution, EDF, registration, segmentation masks, or signal isolation — it consumes their outputs.

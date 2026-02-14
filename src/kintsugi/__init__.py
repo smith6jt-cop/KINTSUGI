@@ -40,6 +40,7 @@ _SUBMODULE_MAPPING = {
     "segment": "segment",
     "gpu": "gpu",
     "rapids": "rapids",
+    "kronos": "kronos",
 }
 
 
@@ -154,4 +155,6 @@ __all__ = [
     # GPU utilities
     "gpu",
     "rapids",
+    # Foundation model integration
+    "kronos",
 ]
