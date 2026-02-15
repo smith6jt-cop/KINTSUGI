@@ -376,7 +376,7 @@ bash /blue/maigan/smith6jt/run_all_workflows.sh --dry-run  # preview
 bash /blue/maigan/smith6jt/run_all_workflows.sh --dataset CX_19-002_lymph-node_R1  # single
 ```
 
-Processing is sequential (one dataset at a time) because all datasets share the same 5 GPU slots (across clive and maigan). GPU-only scheduling is used — CPU fallback is 15-20x slower and not worth the overhead. Each Snakemake instance uses the full GPU resource pool. Completed datasets and channels are automatically skipped on re-run.
+Processing is sequential (one dataset at a time) because all datasets share the same 5 GPU slots (across clive and maigan). GPU-only scheduling is used — CPU is 5-25x slower per step (~13x full cycle), queuing for GPU always wins. Each Snakemake instance uses the full GPU resource pool. Completed datasets and channels are automatically skipped on re-run.
 
 ## Dependencies
 

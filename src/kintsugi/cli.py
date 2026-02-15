@@ -1315,8 +1315,9 @@ def workflow_run(
                     "cpu_utilization_cap": res.get("cpu_utilization_cap", 0.85),
                 },
             )
-            # GPU-only scheduling: -j is limited to available GPU slots
-            # (all cycles queue through GPUs; CPU fallback is too slow)
+            # GPU-only scheduling: -j is limited to available GPU slots.
+            # Measured speedups (CX_19-003): stitch 25x, decon 5x, EDF 15x.
+            # Full cycle ~22 min GPU vs ~282 min CPU — queuing always wins.
             total = pool["total_gpu_avail"] or pool["total_gpu_slots"] or jobs
 
             console.print(

@@ -9,7 +9,7 @@ KINTSUGI has two distinct processing modes with different resource utilization s
 | Mode | Context | GPU Policy | CPU Policy | Rationale |
 |------|---------|------------|------------|-----------|
 | **Notebook** | Interactive, user watching | GPU required, no fallback | Not used | Quality-first; user can intervene if GPU unavailable |
-| **SLURM** | Headless batch processing | GPU-only, overflow queues | Not used (too slow) | GPU ~8 min vs CPU ~2 hrs per cycle for stitching |
+| **SLURM** | Headless batch processing | GPU-only, overflow queues | Not used (too slow) | GPU ~22 min vs CPU ~282 min per cycle (stitch 25x, decon 5x, EDF 15x) |
 
 **Notebook Processing (Interactive)**:
 - GPU is **required** - fails loudly if unavailable
@@ -20,7 +20,7 @@ KINTSUGI has two distinct processing modes with different resource utilization s
 **SLURM Processing (Headless — GPU-Only Scheduling)**:
 - **All cycles route through GPU slots** — no CPU fallback
 - Overflow cycles queue in SLURM until a GPU slot frees up
-- GPU is 15-20x faster than CPU for BaSiC illumination correction (500 DCT iterations per z-plane)
+- Measured speedups (CX_19-003, 9x7, 4ch, 20z): stitch 25x, decon 5x, EDF 15x (~13x full cycle)
 - Snakemake `-j` is set to total GPU slots (not total slots) to limit concurrent submissions
 - Per-cycle pipeline (`stitch→decon→edf`) enables cycles to flow through freed GPU slots
 - See `gpu-only-scheduling` skill for the performance data behind this decision
@@ -30,7 +30,7 @@ KINTSUGI has two distinct processing modes with different resource utilization s
 KINTSUGI calculates available GPU slots from **all** non-blocked SLURM accounts:
 
 - **GPU slots** per account = QOS `gres/gpu` limit (via `sacctmgr`)
-- **CPU slots** are still detected but **not used for scheduling** (CPU is 15-20x slower — see `gpu-only-scheduling` skill)
+- **CPU slots** are still detected but **not used for scheduling** (CPU is 5-25x slower per step — see `gpu-only-scheduling` skill)
 - **`brusko` account is permanently blocked** — hard-coded in `BLOCKED_ACCOUNTS` frozenset in `hpc.py`
 
 **Total Concurrent** = sum(GPU slots) across all accounts (CPU pool is informational only)
@@ -51,7 +51,7 @@ KINTSUGI calculates available GPU slots from **all** non-blocked SLURM accounts:
 5. Snakemake `-j` = total GPU slots, so concurrent SLURM submissions match available GPUs
 6. Per-cycle pipeline (`stitch→decon→edf`) means freed GPU slots are immediately used by the next stage
 
-**Why no CPU fallback**: BaSiC runs 500 DCT iterations per z-plane — GPU ~8 min vs CPU ~2 hrs per cycle. Queuing for GPU is faster than running on CPU.
+**Why no CPU fallback**: Measured per-step (CX_19-003, 9x7, 4ch, 20z): stitch GPU ~8 min vs CPU ~200 min (25x), decon ~12 vs ~60 min (5x), EDF ~1.5 vs ~22 min (15x). Full cycle ~22 min GPU vs ~282 min CPU. Queuing for GPU is always faster.
 
 ## Snakemake Workflow (Alternative to submit.sh)
 
@@ -69,7 +69,7 @@ kintsugi workflow run .       # Submit via Snakemake (auto-sets -j)
 | Design Choice | Rationale |
 |---------------|-----------|
 | 3 per-cycle rules with lambda resources | `ruleorder` does NOT fall back — it always picks the preferred rule, so 6 rules + ruleorder was fundamentally broken |
-| GPU-only cycle assignment | `_build_cycle_assignment()` routes ALL cycles to GPU — CPU is 15-20x slower, queuing for GPU is faster |
+| GPU-only cycle assignment | `_build_cycle_assignment()` routes ALL cycles to GPU — CPU is 5-25x slower per step (~13x full cycle), queuing for GPU is faster |
 | Sentinel files (`.snakemake_complete`) | Stitching/deconvolution produce hundreds of files; declaring every output would create an enormous DAG |
 | Per-cycle dependencies | `stitch cyc01 → decon cyc01 → edf cyc01` allows pipelining across cycles |
 | No `--resources gpus=N` needed | GPU budget is baked into cycle pre-assignment |

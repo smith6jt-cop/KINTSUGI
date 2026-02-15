@@ -131,8 +131,16 @@ def _build_cycle_assignment():
 
     All cycles are assigned to GPU, round-robin across accounts proportional
     to each account's GPU slot count.  Overflow cycles queue in SLURM until
-    a GPU slot frees up — this is dramatically faster than CPU fallback
-    (GPU ~8 min vs CPU ~2 hours per cycle for stitching alone).
+    a GPU slot frees up — this is dramatically faster than CPU fallback.
+
+    Measured per-step timings (CX_19-003, 9x7 grid, 4ch, 20z):
+      Stitch: GPU ~8 min  vs CPU ~200 min  (25x speedup)
+      Decon:  GPU ~12 min vs CPU ~60 min   (5x speedup)
+      EDF:    GPU ~1.5 min vs CPU ~22 min  (15x speedup)
+      Total:  GPU ~22 min vs CPU ~282 min per cycle (~13x)
+
+    With 9 cycles and 5 GPU slots, GPU-only finishes in ~44 min (2 waves).
+    CPU overflow would add ~282 min per cycle.  Queuing for GPU always wins.
 
     Snakemake's -j flag (set to total GPU slots) limits concurrent SLURM
     submissions, so cycles naturally pipeline through freed GPU slots.
