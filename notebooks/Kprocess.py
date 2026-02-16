@@ -1184,12 +1184,11 @@ def run_stitched_qc(
         print("="*70)
         for cycle in range(start_cycle, end_cycle + 1):
             for channel in range(start_channel, end_channel + 1):
-                save_pdf = (cycle == start_cycle)
                 plot_zplane_profiles(
                     stats_df, cycle, channel,
                     stage_name="stitched",
                     qc_output_dir=qc_output_dir,
-                    save_pdf=save_pdf
+                    save_pdf=True
                 )
     else:
         print("No stitched images found - run stitching first")
@@ -1282,12 +1281,11 @@ def run_decon_qc(
         print("="*70)
         for cycle in range(start_cycle, end_cycle + 1):
             for channel in range(start_channel, end_channel + 1):
-                save_pdf = (cycle == start_cycle)
                 plot_zplane_profiles(
                     stats_df, cycle, channel,
                     stage_name="deconvolved",
                     qc_output_dir=qc_output_dir,
-                    save_pdf=save_pdf
+                    save_pdf=True
                 )
     else:
         print("No deconvolved images found - run deconvolution first")
