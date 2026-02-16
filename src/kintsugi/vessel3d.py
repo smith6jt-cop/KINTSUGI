@@ -37,7 +37,7 @@ import gc
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Union
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 from scipy import ndimage
@@ -124,7 +124,7 @@ class VesselSegmentationResult:
     binary_mask_native: np.ndarray | None = None
     skeleton: np.ndarray | None = None
     labeled_segments: np.ndarray | None = None
-    features: "pd.DataFrame | None" = None
+    features: pd.DataFrame | None = None
     vesselness: np.ndarray | None = None
     spacing: VesselSpacing = field(default_factory=VesselSpacing)
     marker_name: str = "vessel"
@@ -479,9 +479,7 @@ def compute_vesselness_frangi(
     for i, sigma in enumerate(sigmas):
         logger.info(f"  Scale {i + 1}/{len(sigmas)}: sigma={sigma}")
 
-        l1, l2, l3 = _hessian_eigenvalues_3d(
-            vol, sigma, use_gpu=use_gpu, device_id=device_id
-        )
+        l1, l2, l3 = _hessian_eigenvalues_3d(vol, sigma, use_gpu=use_gpu, device_id=device_id)
 
         # Frangi criteria for bright tubular structures:
         # Vessels: l1 ~ 0, l2 << 0, l3 << 0
@@ -592,17 +590,13 @@ def binarize_vessel_mask(
     # Step 1: Threshold
     mask = probability_map > threshold
     logger.info(
-        f"After threshold: {mask.sum():,} voxels "
-        f"({100.0 * mask.sum() / mask.size:.2f}%)"
+        f"After threshold: {mask.sum():,} voxels " f"({100.0 * mask.sum() / mask.size:.2f}%)"
     )
 
     # Step 2: Remove small objects
     if min_size > 0:
         mask = remove_small_objects(mask, min_size=min_size)
-        logger.info(
-            f"After small object removal (min={min_size}): "
-            f"{mask.sum():,} voxels"
-        )
+        logger.info(f"After small object removal (min={min_size}): " f"{mask.sum():,} voxels")
 
     # Step 3: Morphological closing
     if closing_radius > 0:
@@ -678,10 +672,7 @@ def prune_skeleton(
     try:
         import skan
     except ImportError:
-        logger.warning(
-            "skan not installed; skipping pruning. "
-            "Install with: pip install skan"
-        )
+        logger.warning("skan not installed; skipping pruning. " "Install with: pip install skan")
         return skeleton
 
     if spacing is None:
@@ -699,8 +690,7 @@ def prune_skeleton(
 
     n_remove = to_remove.sum()
     logger.info(
-        f"Pruning {n_remove}/{len(summary)} branches "
-        f"(< {min_branch_length_um} um, terminal)"
+        f"Pruning {n_remove}/{len(summary)} branches " f"(< {min_branch_length_um} um, terminal)"
     )
 
     if n_remove == 0:
@@ -726,7 +716,7 @@ def analyze_vessel_graph(
     skeleton: np.ndarray,
     binary_mask: np.ndarray,
     spacing: VesselSpacing | None = None,
-) -> "pd.DataFrame":
+) -> pd.DataFrame:
     """Convert skeleton to graph and extract per-segment morphometric features.
 
     Uses skan for graph construction and distance transform for radius
@@ -762,8 +752,7 @@ def analyze_vessel_graph(
         import skan
     except ImportError:
         raise ImportError(
-            "skan is required for vessel graph analysis. "
-            "Install with: pip install skan"
+            "skan is required for vessel graph analysis. " "Install with: pip install skan"
         )
 
     if spacing is None:
@@ -809,12 +798,14 @@ def analyze_vessel_graph(
 
         if radii:
             radii = np.array(radii)
-            radii_stats.append((
-                float(np.mean(radii)),
-                float(np.median(radii)),
-                float(np.min(radii)),
-                float(np.max(radii)),
-            ))
+            radii_stats.append(
+                (
+                    float(np.mean(radii)),
+                    float(np.median(radii)),
+                    float(np.min(radii)),
+                    float(np.max(radii)),
+                )
+            )
         else:
             radii_stats.append((0, 0, 0, 0))
 
@@ -1047,20 +1038,28 @@ def segment_vessels_3d(
     # Step 1: Preprocess
     logger.info("Step 1/5: Preprocessing...")
     preprocessed = preprocess_volume(
-        volume, spacing, denoise_sigma=denoise_sigma,
-        make_isotropic=make_isotropic, device=device,
+        volume,
+        spacing,
+        denoise_sigma=denoise_sigma,
+        make_isotropic=make_isotropic,
+        device=device,
     )
 
     # Step 2: Frangi vesselness
     logger.info("Step 2/5: Computing Frangi vesselness...")
     vesselness = compute_vesselness_frangi(
-        preprocessed, sigmas=sigmas, spacing=spacing, device=device,
+        preprocessed,
+        sigmas=sigmas,
+        spacing=spacing,
+        device=device,
     )
 
     # Step 3: Binarize and cleanup
     logger.info("Step 3/5: Binarization and cleanup...")
     mask = binarize_vessel_mask(
-        vesselness, threshold=threshold, min_size=min_size,
+        vesselness,
+        threshold=threshold,
+        min_size=min_size,
         closing_radius=closing_radius,
     )
 

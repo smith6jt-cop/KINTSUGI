@@ -8,7 +8,6 @@ channels without requiring interactive MCP sessions.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -113,9 +112,7 @@ def bootstrap_from_project(
             "status": "dry_run",
             "pairs_found": len(pairs),
             "cycles": len(cycle_dirs),
-            "pairs": [
-                {"cycle": p["cycle"], "marker": p["marker"]} for p in pairs
-            ],
+            "pairs": [{"cycle": p["cycle"], "marker": p["marker"]} for p in pairs],
         }
 
     # Load pairs and compute weighted parameters
@@ -256,9 +253,7 @@ def _analyze_and_record_pair(
     )
 
     # Compute quality
-    quality = compute_weighted_subtraction_quality(
-        signal, subtracted, blank, analysis["ranges"]
-    )
+    quality = compute_weighted_subtraction_quality(signal, subtracted, blank, analysis["ranges"])
     quality_score = quality.get("global", {}).get("quality_score", 0)
 
     # Build parameter dict for recording

@@ -37,7 +37,7 @@ def ortho_view(
     figsize: tuple[int, int] = (14, 5),
     vmin: float | None = None,
     vmax: float | None = None,
-) -> "matplotlib.figure.Figure":
+) -> matplotlib.figure.Figure:
     """Three-panel orthogonal slice viewer (XY, XZ, YZ).
 
     Parameters
@@ -112,7 +112,7 @@ def overlay_mask_on_raw(
     mask_color: tuple[float, float, float] = (1.0, 0.2, 0.2),
     figsize: tuple[int, int] = (12, 6),
     title: str = "",
-) -> "matplotlib.figure.Figure":
+) -> matplotlib.figure.Figure:
     """Side-by-side comparison of raw data and mask overlay.
 
     Parameters
@@ -151,9 +151,7 @@ def overlay_mask_on_raw(
     # Create RGB overlay
     overlay = np.stack([raw_norm] * 3, axis=-1)
     for c in range(3):
-        overlay[mask_slice, c] = (
-            overlay[mask_slice, c] * (1 - alpha) + mask_color[c] * alpha
-        )
+        overlay[mask_slice, c] = overlay[mask_slice, c] * (1 - alpha) + mask_color[c] * alpha
 
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
@@ -177,7 +175,7 @@ def render_skeleton_mip(
     raw: np.ndarray | None = None,
     figsize: tuple[int, int] = (12, 6),
     title: str = "",
-) -> "matplotlib.figure.Figure":
+) -> matplotlib.figure.Figure:
     """Max-intensity projection with skeleton overlay.
 
     Parameters
@@ -225,10 +223,10 @@ def render_skeleton_mip(
 
 
 def plot_vessel_features(
-    df: "pd.DataFrame",
+    df: pd.DataFrame,
     figsize: tuple[int, int] = (16, 10),
     title: str = "",
-) -> "matplotlib.figure.Figure":
+) -> matplotlib.figure.Figure:
     """Histogram panel of vessel morphometric features.
 
     Parameters
@@ -256,7 +254,12 @@ def plot_vessel_features(
         ax.set_xlabel("Diameter (um)")
         ax.set_ylabel("Count")
         ax.set_title(f"Vessel Diameter (n={len(diameters)})")
-        ax.axvline(diameters.median(), color="red", linestyle="--", label=f"median={diameters.median():.1f}")
+        ax.axvline(
+            diameters.median(),
+            color="red",
+            linestyle="--",
+            label=f"median={diameters.median():.1f}",
+        )
         ax.legend(fontsize=8)
 
     # 2. Branch length distribution
@@ -267,7 +270,9 @@ def plot_vessel_features(
         ax.set_xlabel("Branch Length (um)")
         ax.set_ylabel("Count")
         ax.set_title(f"Branch Length (n={len(lengths)})")
-        ax.axvline(lengths.median(), color="red", linestyle="--", label=f"median={lengths.median():.1f}")
+        ax.axvline(
+            lengths.median(), color="red", linestyle="--", label=f"median={lengths.median():.1f}"
+        )
         ax.legend(fontsize=8)
 
     # 3. Tortuosity distribution
@@ -297,8 +302,11 @@ def plot_vessel_features(
     if "mean_diameter_um" in df.columns and "branch_length_um" in df.columns:
         ax = axes[1, 1]
         ax.scatter(
-            df["branch_length_um"], df["mean_diameter_um"],
-            s=3, alpha=0.3, color="steelblue",
+            df["branch_length_um"],
+            df["mean_diameter_um"],
+            s=3,
+            alpha=0.3,
+            color="steelblue",
         )
         ax.set_xlabel("Branch Length (um)")
         ax.set_ylabel("Diameter (um)")
@@ -319,8 +327,13 @@ def plot_vessel_features(
     if "tortuosity" in df.columns:
         stats_text += f"Mean tortuosity: {df['tortuosity'].mean():.2f}\n"
     ax.text(
-        0.1, 0.5, stats_text, transform=ax.transAxes,
-        fontsize=12, verticalalignment="center", fontfamily="monospace",
+        0.1,
+        0.5,
+        stats_text,
+        transform=ax.transAxes,
+        fontsize=12,
+        verticalalignment="center",
+        fontfamily="monospace",
     )
     ax.set_title("Summary Statistics")
 

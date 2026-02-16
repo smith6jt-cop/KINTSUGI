@@ -553,9 +553,7 @@ class TestWeightedSubtraction:
     def test_backwards_compatibility_uniform_weights(self, signal_image, blank_image):
         """Uniform weights=1.0 should approximate global method."""
         # Create uniform ranges with weight=1.0
-        uniform_ranges = [
-            {"lower_bound": 0, "upper_bound": 65536, "weight": 1.0, "label": "all"}
-        ]
+        uniform_ranges = [{"lower_bound": 0, "upper_bound": 65536, "weight": 1.0, "label": "all"}]
 
         result_weighted = subtract_autofluorescence_weighted(
             signal_image,
@@ -564,9 +562,7 @@ class TestWeightedSubtraction:
             ranges=uniform_ranges,
             transition_width=0.0,
         )
-        result_global = subtract_autofluorescence(
-            signal_image, blank_image, blank_scale_factor=1.0
-        )
+        result_global = subtract_autofluorescence(signal_image, blank_image, blank_scale_factor=1.0)
 
         # Should be very close (small float rounding differences OK)
         np.testing.assert_allclose(
@@ -580,14 +576,10 @@ class TestWeightedSubtraction:
         signal, blank = dim_signal_with_bright_af
 
         # Global method at scale=1.0 — destroys dim cells (blank >> signal)
-        result_global = subtract_autofluorescence(
-            signal, blank, blank_scale_factor=1.0
-        )
+        result_global = subtract_autofluorescence(signal, blank, blank_scale_factor=1.0)
 
         # Weighted method — should preserve dim cells
-        result_weighted = subtract_autofluorescence_weighted(
-            signal, blank, base_scale_factor=1.0
-        )
+        result_weighted = subtract_autofluorescence_weighted(signal, blank, base_scale_factor=1.0)
 
         # Dim region: rows 0:77, signal ~3000-6000, blank ~7000-9000
         # Global: min(signal, blank*1.0) = signal → subtracts all → 0
@@ -608,9 +600,7 @@ class TestWeightedSubtraction:
             {"lower_bound": 20000, "upper_bound": 65536, "weight": 1.1, "label": "bright"},
         ]
 
-        result = subtract_autofluorescence_weighted(
-            signal_image, blank_image, ranges=custom_ranges
-        )
+        result = subtract_autofluorescence_weighted(signal_image, blank_image, ranges=custom_ranges)
         assert result.shape == signal_image.shape
         assert result.dtype == np.uint16
 

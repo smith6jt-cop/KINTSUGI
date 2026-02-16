@@ -1815,9 +1815,7 @@ class KintsugiProject:
             try:
                 with open(exp_path) as f:
                     exp_data = json.load(f)
-                overlap_raw = exp_data.get(
-                    "tileOverlapX", exp_data.get("tile_overlap", None)
-                )
+                overlap_raw = exp_data.get("tileOverlapX", exp_data.get("tile_overlap", None))
                 if overlap_raw is not None:
                     val = float(overlap_raw)
                     # Handle both fraction (0.3) and percent (30) formats
