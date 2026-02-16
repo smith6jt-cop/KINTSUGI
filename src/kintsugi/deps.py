@@ -74,9 +74,9 @@ OPTIONAL_GROUPS = {
     },
     "analysis": {
         "description": "Spatial analysis (scanpy, scimap)",
-        "packages": ["scanpy", "anndata", "phenograph", "scimap"],
-        "install_cmd": "pip install scanpy anndata phenograph scimap umap-learn hdbscan",
-        "conda_cmd": "conda install scanpy anndata -c conda-forge && pip install scimap phenograph",
+        "packages": ["scanpy", "anndata", "phenograph", "scimap", "skan", "networkx"],
+        "install_cmd": "pip install scanpy anndata phenograph scimap umap-learn hdbscan skan networkx",
+        "conda_cmd": "conda install scanpy anndata networkx -c conda-forge && pip install scimap phenograph skan",
     },
     "bio": {
         "description": "Bio formats I/O (OME-TIFF, LIF, etc.)",
@@ -100,6 +100,7 @@ NOTEBOOK_REQUIREMENTS = {
     "5_DL_Channel_Refinement": [],  # Core only
     "Image_Registration_Workflow": [],  # Core only
     "Vessel_Analysis": ["viz", "analysis"],
+    "2.5_Vessel_3D_Segmentation": ["analysis"],
 }
 
 
