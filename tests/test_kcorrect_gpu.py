@@ -17,6 +17,10 @@ from kintsugi.kcorrect_gpu import (
     get_available_gpus,
 )
 
+# CuPy may be installed (CUPY_AVAILABLE=True) but no GPU hardware on login nodes.
+# Use check_gpu() to detect actual GPU hardware availability.
+GPU_HARDWARE_AVAILABLE, _gpu_reason = check_gpu()
+
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -123,6 +127,7 @@ class TestKCorrectGPU:
         assert corrector.device == "cpu"
         assert corrector.xp == np
 
+    @pytest.mark.skipif(not GPU_HARDWARE_AVAILABLE, reason="No GPU hardware available")
     def test_initialization_auto(self):
         """Test initialization with auto backend selection."""
         corrector = KCorrectGPU(use_gpu="auto")
@@ -356,7 +361,7 @@ class TestUtilityFunctions:
 # =============================================================================
 
 
-@pytest.mark.skipif(not CUPY_AVAILABLE, reason="CuPy not available")
+@pytest.mark.skipif(not GPU_HARDWARE_AVAILABLE, reason="No GPU hardware available")
 class TestGPUBackend:
     """Tests for GPU backend (only run if CuPy available)."""
 
