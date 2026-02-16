@@ -231,6 +231,7 @@ def all_qc_sentinels():
         f"{PROJECT}/qc_plots/.snakemake_complete_stitch",
         f"{PROJECT}/qc_plots/.snakemake_complete_decon",
         f"{PROJECT}/qc_plots/.snakemake_complete_edf",
+        f"{PROJECT}/qc_plots/.snakemake_complete_registration",
     ]
 
 
@@ -508,5 +509,31 @@ rule qc_edf:
         cpus_per_task=4,
     log:
         f"{PROJECT}/slurm/logs/snakemake/qc_edf.log",
+    script:
+        "scripts/qc_report.py"
+
+
+rule qc_registration:
+    input:
+        reg_done=f"{PROJECT}/data/processed/registered/.snakemake_complete",
+    output:
+        sentinel=f"{PROJECT}/qc_plots/.snakemake_complete_registration",
+    params:
+        stage="registration",
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        cycles=CYCLES,
+        channels=CHANNELS,
+        n_zplanes=N_ZPLANES,
+        channel_names=CHANNEL_NAMES,
+    resources:
+        mem_mb=RES.get("mem_qc_registration", 16000),
+        runtime=RES.get("time_qc_registration", 30),
+        slurm_partition=_REG_ASSIGN["partition"],
+        slurm_account=_REG_ASSIGN["account"],
+        gres="",
+        cpus_per_task=2,
+    log:
+        f"{PROJECT}/slurm/logs/snakemake/qc_registration.log",
     script:
         "scripts/qc_report.py"

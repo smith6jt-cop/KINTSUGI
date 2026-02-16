@@ -1404,3 +1404,383 @@ def run_edf_qc(
     print("="*70)
 
     return stats_df
+
+
+# ===========================================================================
+# Registration QC
+# ===========================================================================
+# Green/magenta DAPI overlays at full resolution to evaluate nuclei overlap.
+# No GPU needed — pyvips streaming I/O + numpy compositing + matplotlib.
+
+
+def _discover_registered_dapi(registered_dir, start_cycle, end_cycle):
+    """Find DAPI TIFFs in registered/cyc##/ directories.
+
+    Handles naming conventions:
+      - Cycle 1 (reference): DAPI-01.tif
+      - Other cycles: DAPI_cyc02.tif, DAPI_cyc03.tif, etc.
+
+    Returns:
+        dict: {cycle_number: Path} mapping, e.g. {1: Path(".../cyc01/DAPI-01.tif")}
+    """
+    registered_dir = Path(registered_dir)
+    dapi_files = {}
+
+    for cyc in range(start_cycle, end_cycle + 1):
+        cyc_dir = registered_dir / f"cyc{cyc:02d}"
+        if not cyc_dir.exists():
+            continue
+
+        # Try common DAPI naming patterns
+        candidates = [
+            cyc_dir / f"DAPI-{cyc:02d}.tif",       # Reference cycle: DAPI-01.tif
+            cyc_dir / f"DAPI_cyc{cyc:02d}.tif",     # Moving cycles: DAPI_cyc02.tif
+            cyc_dir / "DAPI.tif",                     # Plain DAPI.tif
+        ]
+
+        for candidate in candidates:
+            if candidate.exists():
+                dapi_files[cyc] = candidate
+                break
+        else:
+            # Fallback: glob for anything with DAPI in the name
+            dapi_glob = sorted(cyc_dir.glob("DAPI*.tif"))
+            if dapi_glob:
+                dapi_files[cyc] = dapi_glob[0]
+
+    return dapi_files
+
+
+def _select_crop_positions(img_height, img_width, crop_size, n_crops=4):
+    """Select deterministic crop positions with 10% edge margin.
+
+    Returns list of (row, col) top-left corners for:
+      center, upper-left, upper-right, lower-center
+    """
+    margin_y = int(img_height * 0.10)
+    margin_x = int(img_width * 0.10)
+
+    positions = []
+    labels = []
+
+    # Center
+    cy = (img_height - crop_size) // 2
+    cx = (img_width - crop_size) // 2
+    positions.append((cy, cx))
+    labels.append("Center")
+
+    # Upper-left (with margin)
+    positions.append((margin_y, margin_x))
+    labels.append("Upper-left")
+
+    # Upper-right (with margin)
+    positions.append((margin_y, img_width - crop_size - margin_x))
+    labels.append("Upper-right")
+
+    # Lower-center
+    positions.append((img_height - crop_size - margin_y, cx))
+    labels.append("Lower-center")
+
+    # Clamp to valid range and limit to n_crops
+    valid_positions = []
+    valid_labels = []
+    for (r, c), label in zip(positions[:n_crops], labels[:n_crops]):
+        r = max(0, min(r, img_height - crop_size))
+        c = max(0, min(c, img_width - crop_size))
+        valid_positions.append((r, c))
+        valid_labels.append(label)
+
+    return valid_positions, valid_labels
+
+
+def _load_crop_pyvips(tiff_path, row, col, crop_size):
+    """Load a crop from a large TIFF via pyvips random access.
+
+    Returns numpy array (crop_size, crop_size) as float32.
+    """
+    import pyvips
+
+    img = pyvips.Image.new_from_file(str(tiff_path), access="random")
+    # Extract crop region
+    crop = img.crop(col, row, crop_size, crop_size)
+    # Convert to numpy
+    data = np.ndarray(
+        buffer=crop.write_to_memory(),
+        dtype=np.uint16,
+        shape=[crop.height, crop.width],
+    )
+    return data.astype(np.float32)
+
+
+def _normalize_uint8(img, plow=1, phigh=99.5):
+    """Percentile-clip and rescale to uint8 for display."""
+    lo = np.percentile(img, plow)
+    hi = np.percentile(img, phigh)
+    if hi <= lo:
+        hi = lo + 1
+    clipped = np.clip((img - lo) / (hi - lo), 0, 1)
+    return (clipped * 255).astype(np.uint8)
+
+
+def _make_green_magenta(ref_crop, mov_crop):
+    """Create green/magenta overlay: green=reference, magenta=moving.
+
+    White/gray = well-aligned (both signals overlap).
+    Green fringe = reference-only signal.
+    Magenta fringe = moving-only signal.
+    """
+    ref_u8 = _normalize_uint8(ref_crop)
+    mov_u8 = _normalize_uint8(mov_crop)
+
+    rgb = np.zeros((*ref_u8.shape, 3), dtype=np.uint8)
+    rgb[:, :, 0] = mov_u8     # Red channel = moving (magenta = R+B)
+    rgb[:, :, 1] = ref_u8     # Green channel = reference
+    rgb[:, :, 2] = mov_u8     # Blue channel = moving (magenta = R+B)
+    return rgb
+
+
+def run_registration_qc(
+    project_dir,
+    cache_file,
+    start_cycle,
+    end_cycle,
+    qc_output_dir=None,
+    channel_name_dict=None,
+    crop_size=1000,
+    n_crops=4,
+):
+    """Generate registration QC: green/magenta DAPI overlays and metrics.
+
+    Produces:
+      1. registration_qc_overlay_grid.pdf — Contact sheet of DAPI overlays
+         Rows = moving cycles, Columns = crop positions
+         Green = reference DAPI, Magenta = moving DAPI
+         White/gray = good alignment, color fringing = misalignment
+
+      2. registration_qc_metrics.pdf — Bar chart of rigid_D per cycle
+         with 2px threshold line
+
+    Parameters
+    ----------
+    project_dir : str or Path
+        Project root directory.
+    cache_file : str or Path
+        Path to write cache pickle (for consistency with other QC functions).
+    start_cycle : int
+        First cycle number.
+    end_cycle : int
+        Last cycle number.
+    qc_output_dir : str or Path, optional
+        Directory for QC output PDFs. Defaults to project_dir/qc_plots.
+    channel_name_dict : dict, optional
+        Not used for registration QC (DAPI only), kept for API consistency.
+    crop_size : int
+        Size of each square crop in pixels. Default 1000.
+    n_crops : int
+        Number of crop positions. Default 4.
+
+    Returns
+    -------
+    pd.DataFrame or None
+        Summary table with registration metrics per cycle.
+    """
+    project_dir = Path(project_dir)
+    registered_dir = project_dir / "data" / "processed" / "registered"
+
+    if qc_output_dir is None:
+        qc_output_dir = project_dir / "qc_plots"
+    qc_output_dir = Path(qc_output_dir)
+    qc_output_dir.mkdir(parents=True, exist_ok=True)
+
+    n_cycles = end_cycle - start_cycle + 1
+    if n_cycles < 2:
+        print("Single-cycle project — no registration QC needed.")
+        return None
+
+    # Discover DAPI files
+    dapi_files = _discover_registered_dapi(registered_dir, start_cycle, end_cycle)
+    if len(dapi_files) < 2:
+        print(f"WARNING: Found only {len(dapi_files)} registered DAPI files, need >= 2")
+        return None
+
+    ref_cycle = start_cycle
+    if ref_cycle not in dapi_files:
+        print(f"WARNING: Reference cycle {ref_cycle} DAPI not found")
+        return None
+
+    print(f"Registration QC: {len(dapi_files)} cycles, reference=cycle {ref_cycle}")
+    print(f"  Crop size: {crop_size}x{crop_size}, positions: {n_crops}")
+
+    # -----------------------------------------------------------------------
+    # Load VALIS summary CSV for metrics (optional)
+    # -----------------------------------------------------------------------
+    valis_csv = (
+        registered_dir / "registration_data" / "edf" / "data" / "edf_summary.csv"
+    )
+    valis_df = None
+    if valis_csv.exists():
+        try:
+            valis_df = pd.read_csv(valis_csv)
+            print(f"  VALIS summary: {len(valis_df)} rows from {valis_csv.name}")
+        except Exception as e:
+            print(f"  WARNING: Could not read VALIS summary: {e}")
+
+    # -----------------------------------------------------------------------
+    # Determine image dimensions from reference DAPI
+    # -----------------------------------------------------------------------
+    import pyvips
+
+    ref_img = pyvips.Image.new_from_file(str(dapi_files[ref_cycle]), access="random")
+    img_height = ref_img.height
+    img_width = ref_img.width
+    print(f"  Image size: {img_width}x{img_height}")
+
+    positions, pos_labels = _select_crop_positions(
+        img_height, img_width, crop_size, n_crops
+    )
+
+    # -----------------------------------------------------------------------
+    # Load reference crops (reused for all moving cycles)
+    # -----------------------------------------------------------------------
+    ref_crops = []
+    for (r, c) in positions:
+        ref_crops.append(_load_crop_pyvips(dapi_files[ref_cycle], r, c, crop_size))
+
+    # -----------------------------------------------------------------------
+    # Build overlay grid: rows=moving cycles, cols=crop positions
+    # -----------------------------------------------------------------------
+    moving_cycles = sorted([c for c in dapi_files if c != ref_cycle])
+
+    if not moving_cycles:
+        print("No moving cycles to compare.")
+        return None
+
+    n_rows = len(moving_cycles)
+    n_cols = len(positions)
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(4 * n_cols, 4 * n_rows),
+        squeeze=False,
+    )
+
+    for row_idx, mov_cyc in enumerate(moving_cycles):
+        for col_idx, ((r, c), label) in enumerate(zip(positions, pos_labels)):
+            ax = axes[row_idx, col_idx]
+            try:
+                mov_crop = _load_crop_pyvips(dapi_files[mov_cyc], r, c, crop_size)
+                overlay = _make_green_magenta(ref_crops[col_idx], mov_crop)
+                ax.imshow(overlay)
+            except Exception as e:
+                ax.text(
+                    0.5, 0.5, f"Error:\n{e}", transform=ax.transAxes,
+                    ha='center', va='center', fontsize=8,
+                )
+
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+            if row_idx == 0:
+                ax.set_title(label, fontsize=10)
+            if col_idx == 0:
+                ax.set_ylabel(f"Cyc {mov_cyc} \u2192 {ref_cycle}", fontsize=10)
+
+    fig.suptitle(
+        f"Registration QC \u2014 Green=Cyc{ref_cycle} (ref), Magenta=moving\n"
+        f"White/gray=aligned, color fringing=misaligned",
+        fontsize=12, y=1.02,
+    )
+    fig.tight_layout()
+    overlay_path = qc_output_dir / "registration_qc_overlay_grid.pdf"
+    fig.savefig(overlay_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved overlay grid: {overlay_path}")
+
+    # -----------------------------------------------------------------------
+    # Metrics bar chart from VALIS summary (if available)
+    # -----------------------------------------------------------------------
+    summary_rows = []
+
+    if valis_df is not None and "rigid_D" in valis_df.columns:
+        # Build per-cycle metrics from the 'from' column
+        for _, row in valis_df.iterrows():
+            from_name = str(row.get("from", ""))
+            orig_d = row.get("original_D", np.nan)
+            rigid_d = row.get("rigid_D", np.nan)
+            nonrigid_d = row.get("non_rigid_D", np.nan)
+
+            # Extract cycle number from DAPI name
+            cyc_num = None
+            if "cyc" in from_name.lower():
+                import re as _re
+
+                m = _re.search(r"cyc(\d+)", from_name, _re.IGNORECASE)
+                if m:
+                    cyc_num = int(m.group(1))
+            elif from_name.startswith("DAPI-"):
+                # Reference cycle: DAPI-01 → cycle 1
+                try:
+                    cyc_num = int(from_name.split("-")[1])
+                except (ValueError, IndexError):
+                    pass
+
+            summary_rows.append({
+                "cycle": cyc_num,
+                "from": from_name,
+                "original_D": orig_d,
+                "rigid_D": rigid_d,
+                "non_rigid_D": nonrigid_d,
+            })
+
+        summary_df = pd.DataFrame(summary_rows)
+        summary_df = summary_df.dropna(subset=["cycle"])
+        summary_df["cycle"] = summary_df["cycle"].astype(int)
+        summary_df = summary_df.sort_values("cycle")
+
+        # Print summary table
+        print("\n" + "=" * 70)
+        print("REGISTRATION METRICS (from VALIS summary)")
+        print("=" * 70)
+        print(
+            summary_df[["cycle", "from", "original_D", "rigid_D"]].to_string(
+                index=False
+            )
+        )
+
+        # Bar chart of rigid_D
+        plot_df = summary_df[summary_df["rigid_D"].notna()].copy()
+        if len(plot_df) > 0:
+            fig2, ax2 = plt.subplots(figsize=(max(6, len(plot_df) * 0.8), 4))
+            ax2.bar(
+                plot_df["cycle"].astype(str),
+                plot_df["rigid_D"],
+                color=[
+                    "#2ecc71" if d < 2 else "#e74c3c" for d in plot_df["rigid_D"]
+                ],
+                edgecolor="black",
+                linewidth=0.5,
+            )
+            ax2.axhline(
+                y=2.0, color="red", linestyle="--", linewidth=1, label="2px threshold"
+            )
+            ax2.set_xlabel("Cycle")
+            ax2.set_ylabel("Rigid Registration Error (pixels)")
+            ax2.set_title("Registration Accuracy per Cycle (rigid_D)")
+            ax2.legend()
+            fig2.tight_layout()
+            metrics_path = qc_output_dir / "registration_qc_metrics.pdf"
+            fig2.savefig(metrics_path, dpi=150, bbox_inches="tight")
+            plt.close(fig2)
+            print(f"  Saved metrics chart: {metrics_path}")
+
+        # Cache the summary
+        cache_path = Path(cache_file)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(cache_path, "wb") as f:
+            pickle.dump(summary_df, f)
+
+        return summary_df
+
+    else:
+        print("  No VALIS summary CSV found \u2014 overlay grid only (no metrics chart)")
+        return None

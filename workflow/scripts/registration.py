@@ -1,9 +1,14 @@
 """
 Snakemake wrapper for KINTSUGI registration (multi-cycle alignment via VALIS).
 
-Aligns EDF images across all cycles using rigid + non-rigid registration.
+Aligns EDF images across all cycles using rigid registration.
 Unlike stitch/decon/edf which process one cycle each, registration processes
 ALL cycles in a single job (it needs the full set for alignment).
+
+Non-rigid registration (OpticalFlowWarper) is disabled by default because it
+degrades accuracy for CODEX tissue-on-slide data where inter-cycle deformation
+is primarily rigid (translation/rotation from stage repositioning). Tested across
+12 datasets: non-rigid D was worse than rigid D in 11/12 cases, up to 3.5x worse.
 
 Snakemake guarantees:
   - All EDF outputs exist before this script runs
@@ -50,8 +55,10 @@ reg_cfg = wf_config.get("registration", {})
 REFERENCE_CYCLE = int(reg_cfg.get("reference_cycle", 1))
 REFERENCE_CHANNEL = int(reg_cfg.get("reference_channel", 1))
 MAX_IMAGE_DIM = int(reg_cfg.get("max_image_dim", 2048))
-RIGID_ONLY = bool(reg_cfg.get("rigid_only", False))
+RIGID_ONLY = bool(reg_cfg.get("rigid_only", True))
 FEATURE_DETECTOR = str(reg_cfg.get("feature_detector", "VggFD"))
+IMGS_ORDERED = bool(reg_cfg.get("imgs_ordered", True))
+ALIGN_TO_REFERENCE = bool(reg_cfg.get("align_to_reference", True))
 
 # ---------------------------------------------------------------------------
 # GPU initialization (for VggFD feature detector)
@@ -107,6 +114,8 @@ print(f"Reference cycle: {REFERENCE_CYCLE}")
 print(f"Feature detector: {FEATURE_DETECTOR}")
 print(f"Max image dim: {MAX_IMAGE_DIM}")
 print(f"Rigid only: {RIGID_ONLY}")
+print(f"Images ordered: {IMGS_ORDERED}")
+print(f"Align to reference: {ALIGN_TO_REFERENCE}")
 print(f"Device mode: {DEVICE_MODE}")
 print(f"Input: {EDF_DIR}")
 print(f"Output: {REGISTERED_DIR}")
@@ -267,6 +276,8 @@ try:
         max_image_dim_px=MAX_IMAGE_DIM,
         max_processed_image_dim_px=MAX_IMAGE_DIM,
         feature_detector_cls=fd_cls,
+        imgs_ordered=IMGS_ORDERED,
+        align_to_reference=ALIGN_TO_REFERENCE,
     )
 
     # Rigid registration
@@ -357,6 +368,8 @@ try:
         f"method={'rigid' if RIGID_ONLY else 'rigid+nonrigid'}\n"
         f"feature_detector={FEATURE_DETECTOR}\n"
         f"reference_cycle={REFERENCE_CYCLE}\n"
+        f"imgs_ordered={IMGS_ORDERED}\n"
+        f"align_to_reference={ALIGN_TO_REFERENCE}\n"
         f"warped={n_warped}\n"
         f"copied={n_copied}\n"
         f"duration_minutes={elapsed:.1f}\n"

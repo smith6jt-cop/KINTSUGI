@@ -342,6 +342,27 @@ These bugs have been fixed in the current codebase. Listed here for context when
 
 **Skills Registry:** `/advise`, `/retrospective`, `/skills` — search and save learnings across sessions
 
+## Registration: Rigid-Only for CODEX (Feb 2026)
+
+VALIS non-rigid registration (OpticalFlowWarper) **degrades** quality for CODEX tissue-on-slide data. Tested across 12 datasets: 11/12 had worse `non_rigid_D` than `rigid_D` (up to 3.4x worse). CODEX inter-cycle deformation is purely rigid (stage repositioning).
+
+**Correct parameters** (`workflow/config.yaml`):
+```yaml
+registration:
+  rigid_only: true            # Non-rigid degrades CODEX data
+  imgs_ordered: true          # Keep sequential cycle order (VALIS default reorders by similarity)
+  align_to_reference: true    # Direct alignment to reference (prevents serial error accumulation)
+  reference_cycle: 1
+  feature_detector: "VggFD"
+  max_image_dim: 2048
+```
+
+**Key files:** `workflow/scripts/registration.py` (wrapper), `notebooks/Kreg/registration.py` (VALIS Valis class), `notebooks/2_Cycle_Processing.ipynb` (cells 36-38)
+
+**Registration QC**: Green/magenta DAPI overlay at **full resolution** (1000x1000 crop) — whole-image thumbnails are too zoomed out to evaluate nuclei overlap. White/gray = aligned, color fringing = misaligned.
+
+**Batch re-registration**: Remove sentinel + `registration_data/` + `cyc*/` under `registered/`, update config, re-run Snakemake. Script: `/blue/maigan/smith6jt/reregister_all.sh`. See `valis-registration-codex` skill for full diagnosis.
+
 ## Weighted Autofluorescence Subtraction (Feb 2026)
 
 Replaces the single global `blank_scale_factor` with per-intensity-range weights. Protects dim signal (FOXP3, CD163) while aggressively removing bright autofluorescence (collagen, lipofuscin).
@@ -420,6 +441,18 @@ Optional groups in pyproject.toml:
 Tests are in `tests/` with fixtures in `conftest.py`. Key fixtures: `sample_image`, `sample_multichannel_image`, `sample_stack`, `sample_tiff`, `sample_config`, `temp_dir`.
 
 CI runs on Windows/Linux/macOS with Python 3.10-3.12.
+
+**Suite status** (Feb 2026): 390 passed, 16 skipped (GPU hardware + dask_image optional dep).
+
+**GPU skip pattern**: On HPC login nodes, CuPy is installed (`CUPY_AVAILABLE=True`) but no GPU hardware exists. Tests that need actual GPU hardware must use `check_gpu()` from `kcorrect_gpu.py`, not `CUPY_AVAILABLE`:
+```python
+from kintsugi.kcorrect_gpu import check_gpu
+GPU_HARDWARE_AVAILABLE, _reason = check_gpu()
+
+@pytest.mark.skipif(not GPU_HARDWARE_AVAILABLE, reason="No GPU hardware available")
+```
+
+**Dev dependencies**: `pytest-asyncio` is required for MCP tool tests (27 async tests). Install with `pip install pytest-asyncio` or `pip install -e ".[dev]"`.
 
 ## Code Style
 

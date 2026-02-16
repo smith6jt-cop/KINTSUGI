@@ -1020,8 +1020,10 @@ def workflow_config(project_dir: str, print_only: bool):
             "reference_cycle": 1,
             "reference_channel": 1,
             "max_image_dim": 2048,
-            "rigid_only": False,
+            "rigid_only": True,
             "feature_detector": "VggFD",
+            "imgs_ordered": True,
+            "align_to_reference": True,
         },
         "quality_gate": {
             "max_zero_pct": 0.10,
@@ -1055,6 +1057,8 @@ def workflow_config(project_dir: str, print_only: bool):
             "time_edf": 60,
             "mem_registration": 64000,
             "time_registration": 120,
+            "mem_qc_registration": 16000,
+            "time_qc_registration": 30,
             # CPU job resources (float64 in system memory, needs more)
             "cpu_cpus_per_task": 8,
             "cpu_time_multiplier": 5,

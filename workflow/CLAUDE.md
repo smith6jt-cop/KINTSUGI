@@ -75,7 +75,7 @@ kintsugi workflow run .       # Submit via Snakemake (auto-sets -j)
 | No `--resources gpus=N` needed | GPU budget is baked into cycle pre-assignment |
 | Registration as aggregate rule (no `{cycle}` wildcard) | Registration aligns ALL cycles at once — needs all EDF outputs before starting |
 | Static account assignment for registration & QC | `_registration_assignment()` picks first GPU account; reused by QC rules |
-| Aggregate QC rules (3 stages) | QC runs once across ALL cycles for cross-cycle comparison heatmaps |
+| Aggregate QC rules (4 stages) | QC runs once across ALL cycles for cross-cycle comparison heatmaps + registration overlays |
 | Dynamic worker counts | Wrapper scripts read `cpus_per_task` from Snakemake resources instead of hardcoded 4 |
 
 **Config format** (`workflow/config.yaml`):
@@ -128,13 +128,14 @@ resources:
 
 **QC Report Rules** (aggregate — added 2026-02-13):
 
-The workflow includes 3 aggregate QC rules that produce rich QC reports (summary heatmaps, z-plane profiles, cross-stage comparison PDFs) after each processing stage completes. These replicate the Notebook 2 QC outputs via `Kprocess.py` functions.
+The workflow includes 4 aggregate QC rules that produce rich QC reports (summary heatmaps, z-plane profiles, cross-stage comparison PDFs, registration overlays) after each processing stage completes. These replicate the Notebook 2 QC outputs via `Kprocess.py` functions.
 
 | Rule | Depends On | Kprocess Function | Output |
 |------|-----------|-------------------|--------|
 | `qc_stitch` | All stitch sentinels (all cycles) | `run_stitched_qc()` | `qc_plots/stitched_summary_heatmaps.pdf` + z-profiles for ALL cycles |
 | `qc_decon` | All decon sentinels (all cycles) | `run_decon_qc()` | `qc_plots/deconvolved_summary_heatmaps.pdf` + z-profiles for ALL cycles |
 | `qc_edf` | All EDF sentinels (all cycles) | `run_edf_qc()` | `qc_plots/edf_summary_heatmaps.pdf` |
+| `qc_registration` | Registration sentinel | `run_registration_qc()` | `qc_plots/registration_qc_overlay_grid.pdf` + `registration_qc_metrics.pdf` |
 
 Key design decisions:
 - **Aggregate (not per-cycle)**: QC runs once across ALL cycles for cross-cycle comparison heatmaps
@@ -154,15 +155,17 @@ snakemake qc --profile profiles/slurm -j 1  # Run QC only
 **Config resources** (`workflow/config.yaml`):
 ```yaml
 resources:
-  mem_qc: 64000    # 64 GB for QC report generation
-  time_qc: 120     # 2 hours
+  mem_qc: 64000              # 64 GB for stitch/decon/edf QC
+  time_qc: 120               # 2 hours
+  mem_qc_registration: 16000 # 16 GB (no GPU, pyvips streaming)
+  time_qc_registration: 30   # 30 min
 ```
 
 **Registration Rule** (aggregate — added 2026-02-13):
 
 Registration (multi-cycle alignment via VALIS) is Rule 4 in the pipeline. Unlike stitch/decon/edf which process one cycle each, registration processes ALL cycles in a single SLURM job.
 
-**Full pipeline**: `stitch → deconvolve → edf` (per-cycle, pipelined) → `registration` (all cycles) + `qc_stitch/qc_decon/qc_edf` (aggregate after each stage)
+**Full pipeline**: `stitch → deconvolve → edf` (per-cycle, pipelined) → `registration` (all cycles) + `qc_stitch/qc_decon/qc_edf` (aggregate after each stage) + `qc_registration` (after registration)
 
 | Aspect | Details |
 |--------|---------|
@@ -180,6 +183,9 @@ Key design decisions:
 - **Error fallback**: On VALIS failure, copies EDF images unchanged (matches notebook behavior)
 - **Skip-existing**: All-or-nothing — checks if ALL registered files exist for ALL cycles before skipping
 - **Slide matching**: Builds `cycle_to_slide_name` dict from DAPI filenames for robust `slide_dict` lookup
+- **Rigid-only for CODEX** (Feb 2026): Non-rigid registration (OpticalFlowWarper) degrades quality for CODEX tissue-on-slide data — tested 12 datasets, 11/12 had worse non_rigid_D than rigid_D (up to 3.4x worse). CODEX inter-cycle deformation is purely rigid (stage repositioning). See `valis-registration-codex` skill for full analysis.
+- **`imgs_ordered=True`**: Prevents VALIS from reordering cycles by feature similarity. CODEX cycles must stay in sequential acquisition order.
+- **`align_to_reference=True`**: All cycles align directly to cycle 1, preventing error accumulation from serial chain alignment (cyc N → cyc N-1 → ... → cyc 1)
 
 **Registration config** (`workflow/config.yaml`):
 ```yaml
@@ -187,8 +193,10 @@ registration:
   reference_cycle: 1          # Cycle used as fixed reference
   reference_channel: 1        # Channel for feature detection (usually DAPI)
   max_image_dim: 2048         # Max dimension for registration computation
-  rigid_only: false           # Set true to skip non-rigid registration
+  rigid_only: true            # Non-rigid degrades CODEX data (tested 12 datasets, see valis-registration-codex skill)
   feature_detector: "VggFD"   # "VggFD" (GPU, better) or "OrbFD" (CPU-only)
+  imgs_ordered: true          # Keep sequential cycle order (don't reorder by similarity)
+  align_to_reference: true    # All cycles align directly to reference (not serial chain)
 
 resources:
   mem_registration: 64000     # 64 GB
@@ -253,9 +261,10 @@ bash run_all_workflows.sh --dataset CX_19-002_lymph-node_R1  # single dataset
 | `qc_plots/.snakemake_complete_stitch` | Snakemake qc_stitch rule | Stitch QC report done |
 | `qc_plots/.snakemake_complete_decon` | Snakemake qc_decon rule | Decon QC report done |
 | `qc_plots/.snakemake_complete_edf` | Snakemake qc_edf rule | EDF QC report done |
+| `qc_plots/.snakemake_complete_registration` | Snakemake qc_registration rule | Registration QC overlays done |
 | `data/processed/edf/.complete` | `cleanup_datasets.sh` | Dataset fully processed and cleaned |
 
-**Cleanup QC Guard** (added 2026-02-16): `cleanup_datasets.sh` checks all 3 QC sentinels (`qc_plots/.snakemake_complete_{stitch,decon,edf}`) before proceeding. If any are missing, the dataset is skipped with "QC not complete". If all are present, the user is prompted to confirm QC review before deletion. Use `--force` to skip the interactive prompt (for re-runs after initial review). In `--dry-run` mode, shows what would be prompted without blocking.
+**Cleanup QC Guard** (added 2026-02-16): `cleanup_datasets.sh` checks all 4 QC sentinels (`qc_plots/.snakemake_complete_{stitch,decon,edf,registration}`) before proceeding. If any are missing, the dataset is skipped with "QC not complete". If all are present, the user is prompted to confirm QC review before deletion. Use `--force` to skip the interactive prompt (for re-runs after initial review). In `--dry-run` mode, shows what would be prompted without blocking.
 
 ```bash
 ./cleanup_datasets.sh              # Interactive: checks QC, prompts before each dataset

@@ -88,6 +88,18 @@ quality_gate:
   min_valid_slices: 3
 
 # ---------------------------------------------------------------------------
+# Registration parameters (multi-cycle alignment via VALIS)
+# ---------------------------------------------------------------------------
+registration:
+  reference_cycle: 1          # Cycle used as fixed reference
+  reference_channel: 1        # Channel for feature detection (usually DAPI)
+  max_image_dim: 2048         # Max dimension for registration computation
+  rigid_only: true            # Non-rigid degrades CODEX data (tested 12 datasets)
+  feature_detector: "VggFD"   # "VggFD" (GPU, better) or "OrbFD" (CPU-only)
+  imgs_ordered: true          # Keep sequential cycle order (don't reorder by similarity)
+  align_to_reference: true    # All cycles align directly to reference (not serial)
+
+# ---------------------------------------------------------------------------
 # SLURM resource defaults (dual-pool architecture)
 # ---------------------------------------------------------------------------
 resources:

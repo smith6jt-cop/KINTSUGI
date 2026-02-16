@@ -79,7 +79,7 @@ except Exception as e:
 # ---------------------------------------------------------------------------
 # Import Kprocess QC functions
 # ---------------------------------------------------------------------------
-from Kprocess import run_stitched_qc, run_decon_qc, run_edf_qc
+from Kprocess import run_stitched_qc, run_decon_qc, run_edf_qc, run_registration_qc
 
 # ---------------------------------------------------------------------------
 # Cache helpers
@@ -88,6 +88,7 @@ CACHE_NAMES = {
     "stitch": "stitch_stats.pkl",
     "decon": "decon_stats.pkl",
     "edf": "edf_stats.pkl",
+    "registration": "registration_stats.pkl",
 }
 
 
@@ -183,6 +184,19 @@ elif STAGE == "edf":
         edf_dir=str(DATA_DIR / "edf"),
         decon_stats_df=decon_stats_df,
         gpu_device_ids=gpu_ids,
+        channel_name_dict=channel_name_dict,
+    )
+
+elif STAGE == "registration":
+    cache_file = str(CACHE_DIR / CACHE_NAMES["registration"])
+
+    log_info("Running registration QC")
+    stats_df = run_registration_qc(
+        project_dir=str(PROJECT_DIR),
+        cache_file=cache_file,
+        start_cycle=START_CYCLE,
+        end_cycle=END_CYCLE,
+        qc_output_dir=str(QC_DIR),
         channel_name_dict=channel_name_dict,
     )
 
