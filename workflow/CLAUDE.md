@@ -132,8 +132,8 @@ The workflow includes 3 aggregate QC rules that produce rich QC reports (summary
 
 | Rule | Depends On | Kprocess Function | Output |
 |------|-----------|-------------------|--------|
-| `qc_stitch` | All stitch sentinels (all cycles) | `run_stitched_qc()` | `qc_plots/stitched_summary_heatmaps.pdf` + per-cycle z-profiles |
-| `qc_decon` | All decon sentinels (all cycles) | `run_decon_qc()` | `qc_plots/deconvolved_summary_heatmaps.pdf` + per-cycle z-profiles |
+| `qc_stitch` | All stitch sentinels (all cycles) | `run_stitched_qc()` | `qc_plots/stitched_summary_heatmaps.pdf` + z-profiles for ALL cycles |
+| `qc_decon` | All decon sentinels (all cycles) | `run_decon_qc()` | `qc_plots/deconvolved_summary_heatmaps.pdf` + z-profiles for ALL cycles |
 | `qc_edf` | All EDF sentinels (all cycles) | `run_edf_qc()` | `qc_plots/edf_summary_heatmaps.pdf` |
 
 Key design decisions:
@@ -212,7 +212,7 @@ KINTSUGI supports automated batch processing of multiple CODEX datasets. See `/b
 - `stage_datasets_globus.py` - Globus-based staging for thymus datasets from PATH lab SMB share
 - `thymus_manifest.csv` - Standalone manifest for 13 thymus datasets (subset of main manifest)
 - `run_all_workflows.sh` - Runs Snakemake for all staged datasets sequentially
-- `cleanup_datasets.sh` - Verifies EDF outputs, deletes intermediates and raw data
+- `cleanup_datasets.sh` - Verifies EDF outputs + QC sentinels, prompts for QC review, deletes intermediates and raw data (`--force` skips prompt)
 - `pipeline_status.sh` - Shows current state of every dataset
 
 **Pipeline lifecycle:**
@@ -221,7 +221,7 @@ KINTSUGI supports automated batch processing of multiple CODEX datasets. See `/b
 2. configure_all_workflows.sh Generate Snakemake configs for all projects
 3. stage_datasets.sh 5        Stage next wave of raw data (orange → blue)
 4. run_all_workflows.sh       Process all staged datasets (stitch → decon → EDF → registration + QC)
-5. cleanup_datasets.sh        Verify outputs, delete intermediates + raw
+5. cleanup_datasets.sh        Verify outputs + QC, prompt review, delete intermediates + raw
 6. Repeat 3-5 for next wave
 ```
 
@@ -255,4 +255,12 @@ bash run_all_workflows.sh --dataset CX_19-002_lymph-node_R1  # single dataset
 | `qc_plots/.snakemake_complete_edf` | Snakemake qc_edf rule | EDF QC report done |
 | `data/processed/edf/.complete` | `cleanup_datasets.sh` | Dataset fully processed and cleaned |
 
-**Phases**: Discovery → Setup/Staging → Validation → SLURM batch → Cleanup → Signal isolation → Segmentation
+**Cleanup QC Guard** (added 2026-02-16): `cleanup_datasets.sh` checks all 3 QC sentinels (`qc_plots/.snakemake_complete_{stitch,decon,edf}`) before proceeding. If any are missing, the dataset is skipped with "QC not complete". If all are present, the user is prompted to confirm QC review before deletion. Use `--force` to skip the interactive prompt (for re-runs after initial review). In `--dry-run` mode, shows what would be prompted without blocking.
+
+```bash
+./cleanup_datasets.sh              # Interactive: checks QC, prompts before each dataset
+./cleanup_datasets.sh --force      # Skip prompts (after initial QC review)
+./cleanup_datasets.sh --dry-run    # Preview without deleting
+```
+
+**Phases**: Discovery → Setup/Staging → Validation → SLURM batch → **QC Review** → Cleanup → Signal isolation → Segmentation

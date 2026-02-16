@@ -378,6 +378,15 @@ bash /blue/maigan/smith6jt/run_all_workflows.sh --dataset CX_19-002_lymph-node_R
 
 Processing is sequential (one dataset at a time) because all datasets share the same 5 GPU slots (across clive and maigan). GPU-only scheduling is used — CPU is 5-25x slower per step (~13x full cycle), queuing for GPU always wins. Each Snakemake instance uses the full GPU resource pool. Completed datasets and channels are automatically skipped on re-run.
 
+**Cleanup with QC guard:**
+```bash
+bash /blue/maigan/smith6jt/cleanup_datasets.sh              # checks QC sentinels, prompts review
+bash /blue/maigan/smith6jt/cleanup_datasets.sh --force      # skip prompts (after initial review)
+bash /blue/maigan/smith6jt/cleanup_datasets.sh --dry-run    # preview without deleting
+```
+
+Cleanup verifies all 3 QC sentinel files exist before allowing deletion of intermediates and raw data. See `workflow/CLAUDE.md` for full batch pipeline lifecycle.
+
 ## Dependencies
 
 Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, pyvips, valis-wsi
