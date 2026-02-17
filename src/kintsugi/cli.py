@@ -981,8 +981,8 @@ def workflow_config(project_dir: str, print_only: bool):
 
     config_dict = {
         # Paths
-        "project_dir": str(project_dir),
-        "kintsugi_dir": str(kintsugi_dir),
+        "project_dir": project_dir.as_posix(),
+        "kintsugi_dir": kintsugi_dir.as_posix(),
         # Processing scope
         "cycles": cycles_list,
         "channels": channels_list,
