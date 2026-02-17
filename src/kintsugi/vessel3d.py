@@ -589,14 +589,12 @@ def binarize_vessel_mask(
 
     # Step 1: Threshold
     mask = probability_map > threshold
-    logger.info(
-        f"After threshold: {mask.sum():,} voxels " f"({100.0 * mask.sum() / mask.size:.2f}%)"
-    )
+    logger.info(f"After threshold: {mask.sum():,} voxels ({100.0 * mask.sum() / mask.size:.2f}%)")
 
     # Step 2: Remove small objects
     if min_size > 0:
         mask = remove_small_objects(mask, min_size=min_size)
-        logger.info(f"After small object removal (min={min_size}): " f"{mask.sum():,} voxels")
+        logger.info(f"After small object removal (min={min_size}): {mask.sum():,} voxels")
 
     # Step 3: Morphological closing
     if closing_radius > 0:
@@ -672,7 +670,7 @@ def prune_skeleton(
     try:
         import skan
     except ImportError:
-        logger.warning("skan not installed; skipping pruning. " "Install with: pip install skan")
+        logger.warning("skan not installed; skipping pruning. Install with: pip install skan")
         return skeleton
 
     if spacing is None:
@@ -690,7 +688,7 @@ def prune_skeleton(
 
     n_remove = to_remove.sum()
     logger.info(
-        f"Pruning {n_remove}/{len(summary)} branches " f"(< {min_branch_length_um} um, terminal)"
+        f"Pruning {n_remove}/{len(summary)} branches (< {min_branch_length_um} um, terminal)"
     )
 
     if n_remove == 0:
@@ -752,7 +750,7 @@ def analyze_vessel_graph(
         import skan
     except ImportError:
         raise ImportError(
-            "skan is required for vessel graph analysis. " "Install with: pip install skan"
+            "skan is required for vessel graph analysis. Install with: pip install skan"
         )
 
     if spacing is None:

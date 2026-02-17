@@ -23,18 +23,14 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Install ruff
+      - name: Install linting tools
         run: pip install "ruff>=0.9.0,<1.0"
 
-      - name: Run ruff
+      - name: Run ruff linter
         run: ruff check src/ tests/
 
-      - name: Check formatting with black
-        uses: psf/black@stable
-        with:
-          options: "--check --diff --config pyproject.toml"
-          src: "src/ tests/"
-          version: "26.1.0"
+      - name: Check formatting with ruff
+        run: ruff format --check --diff src/ tests/
 
   test:
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})

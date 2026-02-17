@@ -770,7 +770,9 @@ class EDFProcessor:
             z_start_idx = (z_start - 1) if z_start is not None else 0
             z_end_idx = z_end if z_end is not None else stack.shape[0]
             stack = stack[z_start_idx:z_end_idx]
-            logger.info(f"Using Z-slices {z_start_idx+1} to {z_end_idx} ({stack.shape[0]} slices)")
+            logger.info(
+                f"Using Z-slices {z_start_idx + 1} to {z_end_idx} ({stack.shape[0]} slices)"
+            )
 
         n_slices, height, width = stack.shape
 
@@ -846,7 +848,7 @@ class EDFProcessor:
 
         # Build macro
         macro = f"""
-        run("CLIJ2 Macro Extensions", "cl_device=[{device or ''}] automatic_output_naming=false");
+        run("CLIJ2 Macro Extensions", "cl_device=[{device or ""}] automatic_output_naming=false");
         Ext.CLIJ2_clear();
 
         input = "input_stack";

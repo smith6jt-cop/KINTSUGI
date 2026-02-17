@@ -427,12 +427,12 @@ class TestBM3DLiteKDTree:
         ssim_opt = ssim(gradient_image, optimized, data_range=255)
 
         # Quality should be within tolerance
-        assert (
-            abs(psnr_opt - psnr_orig) < 0.5
-        ), f"PSNR diff {psnr_opt - psnr_orig:.2f} dB exceeds 0.5 dB"
-        assert (
-            abs(ssim_opt - ssim_orig) < 0.015
-        ), f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.015"
+        assert abs(psnr_opt - psnr_orig) < 0.5, (
+            f"PSNR diff {psnr_opt - psnr_orig:.2f} dB exceeds 0.5 dB"
+        )
+        assert abs(ssim_opt - ssim_orig) < 0.015, (
+            f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.015"
+        )
 
     def test_quality_gradient_sigma25(self, gradient_image):
         """Test quality on gradient image with medium noise."""
@@ -444,9 +444,9 @@ class TestBM3DLiteKDTree:
         psnr_orig = psnr(gradient_image, original, data_range=255)
         psnr_opt = psnr(gradient_image, optimized, data_range=255)
 
-        assert (
-            abs(psnr_opt - psnr_orig) < 0.5
-        ), f"PSNR diff {psnr_opt - psnr_orig:.2f} dB exceeds 0.5 dB"
+        assert abs(psnr_opt - psnr_orig) < 0.5, (
+            f"PSNR diff {psnr_opt - psnr_orig:.2f} dB exceeds 0.5 dB"
+        )
 
     def test_quality_shapes(self, shapes_image):
         """Test edge preservation on shapes image."""
@@ -458,9 +458,9 @@ class TestBM3DLiteKDTree:
         ssim_orig = ssim(shapes_image, original, data_range=255)
         ssim_opt = ssim(shapes_image, optimized, data_range=255)
 
-        assert (
-            abs(ssim_opt - ssim_orig) < 0.03
-        ), f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.03"
+        assert abs(ssim_opt - ssim_orig) < 0.03, (
+            f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.03"
+        )
 
     def test_quality_cell_like(self, cell_image):
         """Test on cell-like image mimicking real use case."""
@@ -472,9 +472,9 @@ class TestBM3DLiteKDTree:
         psnr_orig = psnr(cell_image, original, data_range=255)
         psnr_opt = psnr(cell_image, optimized, data_range=255)
 
-        assert (
-            abs(psnr_opt - psnr_orig) < 0.5
-        ), f"PSNR diff {psnr_opt - psnr_orig:.2f} dB exceeds 0.5 dB"
+        assert abs(psnr_opt - psnr_orig) < 0.5, (
+            f"PSNR diff {psnr_opt - psnr_orig:.2f} dB exceeds 0.5 dB"
+        )
 
     def test_performance_improvement(self, gradient_image):
         """Test that KD-tree version is faster."""
@@ -538,9 +538,9 @@ class TestNLMOpenCV:
         ssim_opt = ssim(gradient_image, optimized, data_range=255)
 
         # Allow slightly larger tolerance due to implementation differences
-        assert (
-            abs(psnr_opt - psnr_orig) < 1.0
-        ), f"PSNR diff {psnr_opt - psnr_orig:.2f} dB exceeds 1.0 dB"
+        assert abs(psnr_opt - psnr_orig) < 1.0, (
+            f"PSNR diff {psnr_opt - psnr_orig:.2f} dB exceeds 1.0 dB"
+        )
         # OpenCV's uint8 implementation introduces quantization differences;
         # allow a slightly larger tolerance while keeping PSNR closely matched.
         assert abs(ssim_opt - ssim_orig) < 0.1, f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.1"
@@ -555,9 +555,9 @@ class TestNLMOpenCV:
         psnr_orig = psnr(gradient_image, original, data_range=255)
         psnr_opt = psnr(gradient_image, optimized, data_range=255)
 
-        assert (
-            abs(psnr_opt - psnr_orig) < 1.0
-        ), f"PSNR diff {psnr_opt - psnr_orig:.2f} dB exceeds 1.0 dB"
+        assert abs(psnr_opt - psnr_orig) < 1.0, (
+            f"PSNR diff {psnr_opt - psnr_orig:.2f} dB exceeds 1.0 dB"
+        )
 
     def test_quality_shapes(self, shapes_image):
         """Test edge preservation on shapes image."""
@@ -569,9 +569,9 @@ class TestNLMOpenCV:
         ssim_orig = ssim(shapes_image, original, data_range=255)
         ssim_opt = ssim(shapes_image, optimized, data_range=255)
 
-        assert (
-            abs(ssim_opt - ssim_orig) < 0.03
-        ), f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.03"
+        assert abs(ssim_opt - ssim_orig) < 0.03, (
+            f"SSIM diff {ssim_opt - ssim_orig:.4f} exceeds 0.03"
+        )
 
     def test_performance_improvement(self, gradient_image):
         """Test that OpenCV version is significantly faster."""

@@ -639,10 +639,10 @@ class TestQualityGate:
             pct_zero = np.sum(slice_data == 0) / total_pixels
             pct_sat = np.sum(slice_data >= 64000) / total_pixels
             if pct_zero > max_zero_pct:
-                excluded_reasons.append(f"z={z_idx+1}: {pct_zero*100:.1f}% zeros")
+                excluded_reasons.append(f"z={z_idx + 1}: {pct_zero * 100:.1f}% zeros")
                 continue
             if pct_sat > max_sat_pct:
-                excluded_reasons.append(f"z={z_idx+1}: {pct_sat*100:.1f}% saturated")
+                excluded_reasons.append(f"z={z_idx + 1}: {pct_sat * 100:.1f}% saturated")
                 continue
             valid_z_indices.append(z_idx)
         return valid_z_indices, excluded_reasons
@@ -846,6 +846,6 @@ class TestSentinelFormat:
         }
         for script_name, expected_stage in expected_stages.items():
             content = (scripts_dir / script_name).read_text()
-            assert (
-                f"stage={expected_stage}" in content
-            ), f"{script_name} missing stage={expected_stage}"
+            assert f"stage={expected_stage}" in content, (
+                f"{script_name} missing stage={expected_stage}"
+            )

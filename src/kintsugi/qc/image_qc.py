@@ -139,14 +139,14 @@ class ImageQC:
         coverage = compute_tissue_coverage(img)
         metrics["tissue_coverage"] = coverage
         if coverage < self.min_tissue_coverage:
-            issues.append(f"Low tissue coverage ({coverage*100:.1f}%)")
+            issues.append(f"Low tissue coverage ({coverage * 100:.1f}%)")
             recommendations.append("Check tissue mounting or field of view selection")
 
         # 3. Saturation
         saturation_metrics = self._check_saturation(img)
         metrics.update(saturation_metrics)
         if saturation_metrics["saturated_pct"] > self.max_saturation_pct:
-            issues.append(f"High saturation ({saturation_metrics['saturated_pct']*100:.2f}%)")
+            issues.append(f"High saturation ({saturation_metrics['saturated_pct'] * 100:.2f}%)")
             recommendations.append("Reduce exposure time or laser power")
 
         # 4. Dynamic range
@@ -154,7 +154,7 @@ class ImageQC:
         metrics.update(dr_metrics)
         if dr_metrics["dynamic_range_utilization"] < self.min_dynamic_range_pct:
             issues.append(
-                f"Poor dynamic range utilization ({dr_metrics['dynamic_range_utilization']*100:.1f}%)"
+                f"Poor dynamic range utilization ({dr_metrics['dynamic_range_utilization'] * 100:.1f}%)"
             )
             recommendations.append("Increase exposure or check staining quality")
 
@@ -164,7 +164,7 @@ class ImageQC:
         artifact_area = sum(w * h for _, _, w, h in artifact_regions)
         artifact_pct = artifact_area / (img.shape[0] * img.shape[1])
         if artifact_pct > self.max_artifact_area_pct:
-            issues.append(f"Significant artifacts detected ({artifact_pct*100:.1f}%)")
+            issues.append(f"Significant artifacts detected ({artifact_pct * 100:.1f}%)")
             recommendations.append("Review acquisition settings or clean optical path")
 
         # 6. Illumination uniformity

@@ -420,9 +420,9 @@ class TestSigmaFixRegression:
         max_contrast = max(diff_x.max(), diff_y.max())
 
         # Should have significant contrast (checkerboard pattern)
-        assert (
-            max_contrast > 1000
-        ), "Detail was lost - sigma may be smoothing input instead of variance"
+        assert max_contrast > 1000, (
+            "Detail was lost - sigma may be smoothing input instead of variance"
+        )
 
     def test_sigma_zero_vs_nonzero_preserves_intensity(self, focused_zstack):
         """Test that sigma doesn't change the intensity values significantly.

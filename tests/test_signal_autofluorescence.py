@@ -161,7 +161,9 @@ class TestSubtractAutofluorescence:
     def test_output_non_negative(self, signal_image, blank_image):
         """Test that output is always non-negative."""
         result = subtract_autofluorescence(
-            signal_image, blank_image, blank_scale_factor=3.0  # Aggressive subtraction
+            signal_image,
+            blank_image,
+            blank_scale_factor=3.0,  # Aggressive subtraction
         )
         assert np.all(result >= 0)
 
