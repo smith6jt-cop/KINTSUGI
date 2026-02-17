@@ -26,12 +26,14 @@ jobs:
       - name: Install linting tools
         run: |
           pip install ruff "black==26.1.0"
+          black --version
+          ruff --version
 
       - name: Run ruff
         run: ruff check src/ tests/
 
       - name: Check formatting with black
-        run: black --check src/ tests/
+        run: black --check --diff src/ tests/
 
   test:
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
