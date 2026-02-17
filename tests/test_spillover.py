@@ -6,17 +6,12 @@ Tests cover utility functions, parameter estimation, QC metrics, and
 redseapy are skipped if the package is not installed.
 """
 
-import tempfile
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
 
 from kintsugi.spillover.spillover_qc import compute_spillover_metrics
 from kintsugi.spillover.utils import (
-    KNOWN_NUCLEAR_MARKERS,
-    KNOWN_SURFACE_MARKERS,
     estimate_element_size,
     identify_surface_markers,
     load_markers_csv,
@@ -69,7 +64,7 @@ def dense_cell_mask():
 def large_cell_mask():
     """Create a mask with large cells (median area > 400)."""
     mask = np.zeros((500, 500), dtype=np.int32)
-    mask[10:60, 10:60] = 1   # 50x50 = 2500 pixels
+    mask[10:60, 10:60] = 1  # 50x50 = 2500 pixels
     mask[10:60, 70:120] = 2
     mask[70:120, 10:60] = 3
     mask[70:120, 70:120] = 4
@@ -80,9 +75,16 @@ def large_cell_mask():
 def marker_names():
     """Common CODEX marker panel."""
     return [
-        "DAPI", "CD3", "CD20", "CD8",
-        "CD68", "FoxP3", "Ki67", "PanCK",
-        "CD45", "Blank",
+        "DAPI",
+        "CD3",
+        "CD20",
+        "CD8",
+        "CD68",
+        "FoxP3",
+        "Ki67",
+        "PanCK",
+        "CD45",
+        "Blank",
     ]
 
 
@@ -93,13 +95,15 @@ def sample_quantification():
     n_cells = 500
 
     # Uncorrected: some spillover creating double-positives
-    uncorrected = pd.DataFrame({
-        "CD3": np.random.exponential(100, n_cells),
-        "CD20": np.random.exponential(100, n_cells),
-        "CD8": np.random.exponential(80, n_cells),
-        "CD4": np.random.exponential(80, n_cells),
-        "CD68": np.random.exponential(60, n_cells),
-    })
+    uncorrected = pd.DataFrame(
+        {
+            "CD3": np.random.exponential(100, n_cells),
+            "CD20": np.random.exponential(100, n_cells),
+            "CD8": np.random.exponential(80, n_cells),
+            "CD4": np.random.exponential(80, n_cells),
+            "CD68": np.random.exponential(60, n_cells),
+        }
+    )
     # Add spillover: some CD3+ cells artificially get CD20 signal
     spillover_mask = uncorrected["CD3"] > 150
     uncorrected.loc[spillover_mask, "CD20"] += 120
@@ -267,7 +271,8 @@ class TestSpilloverMetrics:
         """Should compute double-positive reduction metrics."""
         corrected, uncorrected = sample_quantification
         metrics = compute_spillover_metrics(
-            corrected, uncorrected,
+            corrected,
+            uncorrected,
             mutually_exclusive_pairs=[("CD3", "CD20")],
         )
 
@@ -287,20 +292,20 @@ class TestSpilloverMetrics:
         """Corrected data should have lower double-positive rate."""
         corrected, uncorrected = sample_quantification
         metrics = compute_spillover_metrics(
-            corrected, uncorrected,
+            corrected,
+            uncorrected,
             mutually_exclusive_pairs=[("CD3", "CD20")],
         )
         pair = metrics["pair_metrics"][("CD3", "CD20")]
-        assert pair["dp_reduction_pct"] >= 0, (
-            "Corrected data should have fewer double-positives"
-        )
+        assert pair["dp_reduction_pct"] >= 0, "Corrected data should have fewer double-positives"
 
     def test_missing_markers_skipped(self):
         """Pairs with missing markers should be silently skipped."""
         corrected = pd.DataFrame({"CD3": [1, 2, 3]})
         uncorrected = pd.DataFrame({"CD3": [1, 2, 3]})
         metrics = compute_spillover_metrics(
-            corrected, uncorrected,
+            corrected,
+            uncorrected,
             mutually_exclusive_pairs=[("CD3", "NotPresent")],
         )
         assert metrics["summary"]["pairs_evaluated"] == 0
@@ -310,7 +315,7 @@ class TestSpilloverMetrics:
         corrected, uncorrected = sample_quantification
         metrics = compute_spillover_metrics(corrected, uncorrected)
         assert len(metrics["per_marker_change"]) > 0
-        for marker, change in metrics["per_marker_change"].items():
+        for _marker, change in metrics["per_marker_change"].items():
             assert "mean_before" in change
             assert "mean_after" in change
             assert "fold_change" in change
@@ -337,13 +342,15 @@ class TestSpilloverVisualization:
         corrected, uncorrected = sample_quantification
         save_path = tmp_path / "test_biaxial.png"
         fig = plot_spillover_comparison(
-            corrected, uncorrected,
+            corrected,
+            uncorrected,
             marker_pair=("CD3", "CD20"),
             save_path=save_path,
         )
         assert fig is not None
         assert save_path.exists()
         import matplotlib.pyplot as plt
+
         plt.close(fig)
 
     def test_biaxial_missing_marker(self, sample_quantification):
@@ -353,7 +360,8 @@ class TestSpilloverVisualization:
         corrected, uncorrected = sample_quantification
         with pytest.raises(ValueError, match="not found"):
             plot_spillover_comparison(
-                corrected, uncorrected,
+                corrected,
+                uncorrected,
                 marker_pair=("CD3", "NotPresent"),
             )
 
@@ -364,13 +372,15 @@ class TestSpilloverVisualization:
         corrected, uncorrected = sample_quantification
         save_path = tmp_path / "test_heatmap.png"
         fig = plot_spillover_summary_heatmap(
-            corrected, uncorrected,
+            corrected,
+            uncorrected,
             marker_names=["CD3", "CD20", "CD8", "CD68"],
             save_path=save_path,
         )
         assert fig is not None
         assert save_path.exists()
         import matplotlib.pyplot as plt
+
         plt.close(fig)
 
 
@@ -444,7 +454,7 @@ class TestRedseaWrapper:
         image = np.random.randint(0, 5000, (100, 100, 2), dtype=np.uint16)
         output_dir = tmp_path / "spillover_output"
 
-        result = run_redsea_correction(
+        run_redsea_correction(
             multichannel_image=image,
             segmentation_mask=simple_cell_mask,
             marker_names=markers,
@@ -456,7 +466,7 @@ class TestRedseaWrapper:
 
     def test_markers_of_interest(self, simple_cell_mask):
         """Correcting only a subset of markers should work."""
-        from kintsugi.spillover import run_redsea_correction
+        from kintsugi.spillover import SpilloverResult, run_redsea_correction
 
         markers = ["CD3", "CD20", "CD8", "DAPI"]
         image = np.random.randint(0, 5000, (100, 100, 4), dtype=np.uint16)

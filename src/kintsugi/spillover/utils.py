@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -21,34 +20,80 @@ logger = logging.getLogger(__name__)
 # do not spill laterally between cells.
 KNOWN_SURFACE_MARKERS = {
     # T cell markers
-    "CD3", "CD3e", "CD4", "CD8", "CD8a",
+    "CD3",
+    "CD3e",
+    "CD4",
+    "CD8",
+    "CD8a",
     # B cell markers
-    "CD19", "CD20", "CD21",
+    "CD19",
+    "CD20",
+    "CD21",
     # Myeloid / macrophage markers
-    "CD11b", "CD11c", "CD14", "CD15", "CD16", "CD33", "CD68", "CD163",
+    "CD11b",
+    "CD11c",
+    "CD14",
+    "CD15",
+    "CD16",
+    "CD33",
+    "CD68",
+    "CD163",
     # General leukocyte markers
-    "CD45", "CD45RA", "CD45RO",
+    "CD45",
+    "CD45RA",
+    "CD45RO",
     # NK cell markers
     "CD56",
     # Other membrane markers
-    "CD31", "CD34", "CD35", "CD44",
-    "PanCK", "Pan-CK", "PanKeratin", "E-cadherin", "EpCAM",
-    "HLA-DR", "PD-L1", "PD-1", "CTLA-4", "LAG-3", "TIM-3",
-    "CD1c", "CD25", "CD27", "CD38", "CD57", "CD103", "CD138",
+    "CD31",
+    "CD34",
+    "CD35",
+    "CD44",
+    "PanCK",
+    "Pan-CK",
+    "PanKeratin",
+    "E-cadherin",
+    "EpCAM",
+    "HLA-DR",
+    "PD-L1",
+    "PD-1",
+    "CTLA-4",
+    "LAG-3",
+    "TIM-3",
+    "CD1c",
+    "CD25",
+    "CD27",
+    "CD38",
+    "CD57",
+    "CD103",
+    "CD138",
 }
 
 # Markers known to be nuclear/intracellular (should NOT be corrected)
 KNOWN_NUCLEAR_MARKERS = {
-    "DAPI", "Hoechst", "FoxP3", "FOXP3", "Ki67", "Ki-67",
-    "Granzyme B", "GranzymeB", "GrB",
-    "pSTAT3", "pSTAT5", "pERK", "pS6",
-    "Blank", "Empty", "AF", "Autofluorescence",
+    "DAPI",
+    "Hoechst",
+    "FoxP3",
+    "FOXP3",
+    "Ki67",
+    "Ki-67",
+    "Granzyme B",
+    "GranzymeB",
+    "GrB",
+    "pSTAT3",
+    "pSTAT5",
+    "pERK",
+    "pS6",
+    "Blank",
+    "Empty",
+    "AF",
+    "Autofluorescence",
 }
 
 
 def identify_surface_markers(
     marker_names: list[str],
-    known_surface_markers: Optional[set[str]] = None,
+    known_surface_markers: set[str] | None = None,
 ) -> list[str]:
     """Identify which markers are surface/membrane markers for spillover correction.
 
@@ -117,8 +162,7 @@ def estimate_element_size(segmentation_mask: np.ndarray) -> int:
     median_area = np.median(areas)
 
     logger.info(
-        f"Cell statistics: n={len(areas)}, mean_area={mean_area:.0f}, "
-        f"median_area={median_area:.0f}"
+        f"Cell statistics: n={len(areas)}, mean_area={mean_area:.0f}, median_area={median_area:.0f}"
     )
 
     # Empirical mapping from Bai et al.
@@ -173,7 +217,7 @@ def validate_segmentation_mask(mask: np.ndarray) -> dict:
 
 def write_markers_csv(
     marker_names: list[str],
-    output_path: Union[str, Path],
+    output_path: str | Path,
 ) -> Path:
     """Write marker names to a CSV file in the format expected by redseapy.
 
@@ -195,7 +239,7 @@ def write_markers_csv(
     return output_path
 
 
-def load_markers_csv(csv_path: Union[str, Path]) -> list[str]:
+def load_markers_csv(csv_path: str | Path) -> list[str]:
     """Load marker names from a CSV file.
 
     Parameters
@@ -210,7 +254,5 @@ def load_markers_csv(csv_path: Union[str, Path]) -> list[str]:
     """
     df = pd.read_csv(csv_path)
     if "marker_name" not in df.columns:
-        raise ValueError(
-            f"CSV must have 'marker_name' column. Found: {list(df.columns)}"
-        )
+        raise ValueError(f"CSV must have 'marker_name' column. Found: {list(df.columns)}")
     return df["marker_name"].tolist()

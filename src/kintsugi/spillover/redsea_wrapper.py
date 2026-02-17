@@ -17,7 +17,6 @@ import logging
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -65,13 +64,13 @@ def _check_redseapy():
 
 
 def run_redsea_correction(
-    multichannel_image: Union[np.ndarray, str, Path],
-    segmentation_mask: Union[np.ndarray, str, Path],
+    multichannel_image: np.ndarray | str | Path,
+    segmentation_mask: np.ndarray | str | Path,
     marker_names: list[str],
-    markers_of_interest: Optional[list[str]] = None,
+    markers_of_interest: list[str] | None = None,
     element_shape: str = "star",
     element_size: int = 2,
-    output_dir: Optional[Union[str, Path]] = None,
+    output_dir: str | Path | None = None,
 ) -> SpilloverResult:
     """Run REDSEA spillover correction on multiplexed image data.
 
@@ -116,9 +115,7 @@ def run_redsea_correction(
     # --- Validate element_shape ---
     shape_map = {"star": 2, "diamond": 2, "square": 1}
     if element_shape not in shape_map:
-        raise ValueError(
-            f"element_shape must be 'star' or 'square', got '{element_shape}'"
-        )
+        raise ValueError(f"element_shape must be 'star' or 'square', got '{element_shape}'")
     element_shape_int = shape_map[element_shape]
 
     # --- Handle in-memory arrays vs file paths ---
@@ -126,9 +123,7 @@ def run_redsea_correction(
     temp_dir_obj = None
 
     try:
-        if isinstance(multichannel_image, np.ndarray) or isinstance(
-            segmentation_mask, np.ndarray
-        ):
+        if isinstance(multichannel_image, np.ndarray) or isinstance(segmentation_mask, np.ndarray):
             # Need temp files for redseapy (it expects file paths)
             import tifffile
 
@@ -159,7 +154,9 @@ def run_redsea_correction(
             markers_csv_path = Path(temp_dir_obj.name) / "markers.csv"
         else:
             markers_csv_path = (
-                Path(output_dir) / "markers.csv" if output_dir else Path(tempfile.mktemp(suffix=".csv"))
+                Path(output_dir) / "markers.csv"
+                if output_dir
+                else Path(tempfile.mktemp(suffix=".csv"))
             )
         write_markers_csv(marker_names, markers_csv_path)
 
@@ -197,9 +194,7 @@ def run_redsea_correction(
         uncorrected_path = out_dir / "single_cell_before_redsea.csv"
 
         if not corrected_path.exists():
-            raise RuntimeError(
-                f"REDSEA did not produce expected output: {corrected_path}"
-            )
+            raise RuntimeError(f"REDSEA did not produce expected output: {corrected_path}")
 
         corrected_df = pd.read_csv(corrected_path)
         uncorrected_df = pd.read_csv(uncorrected_path)
@@ -221,9 +216,7 @@ def run_redsea_correction(
             n_markers=len(corrected_df.columns),
         )
 
-        logger.info(
-            f"REDSEA complete: {result.n_cells} cells x {result.n_markers} markers"
-        )
+        logger.info(f"REDSEA complete: {result.n_cells} cells x {result.n_markers} markers")
         return result
 
     finally:

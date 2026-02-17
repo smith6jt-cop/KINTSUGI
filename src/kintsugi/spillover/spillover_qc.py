@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -21,19 +20,19 @@ logger = logging.getLogger(__name__)
 # These pairs should NOT co-express on the same cell; double-positives
 # indicate spillover contamination.
 DEFAULT_EXCLUSIVE_PAIRS = [
-    ("CD3", "CD20"),      # T cell / B cell
-    ("CD3e", "CD20"),     # T cell / B cell (alternative name)
-    ("CD4", "CD8"),       # Helper T / Cytotoxic T
-    ("CD4", "CD8a"),      # Helper T / Cytotoxic T (alternative name)
-    ("CD3", "PanCK"),     # T cell / Epithelial
-    ("CD3e", "PanCK"),    # T cell / Epithelial
-    ("CD20", "CD68"),     # B cell / Macrophage
-    ("CD3", "CD68"),      # T cell / Macrophage
-    ("CD3e", "CD68"),     # T cell / Macrophage
+    ("CD3", "CD20"),  # T cell / B cell
+    ("CD3e", "CD20"),  # T cell / B cell (alternative name)
+    ("CD4", "CD8"),  # Helper T / Cytotoxic T
+    ("CD4", "CD8a"),  # Helper T / Cytotoxic T (alternative name)
+    ("CD3", "PanCK"),  # T cell / Epithelial
+    ("CD3e", "PanCK"),  # T cell / Epithelial
+    ("CD20", "CD68"),  # B cell / Macrophage
+    ("CD3", "CD68"),  # T cell / Macrophage
+    ("CD3e", "CD68"),  # T cell / Macrophage
 ]
 
 
-def _find_column(df: pd.DataFrame, marker: str) -> Optional[str]:
+def _find_column(df: pd.DataFrame, marker: str) -> str | None:
     """Find column matching a marker name (handles suffixes like _mean)."""
     if marker in df.columns:
         return marker
@@ -79,7 +78,7 @@ def _get_threshold(series: pd.Series, method: str = "otsu") -> float:
 def compute_spillover_metrics(
     corrected: pd.DataFrame,
     uncorrected: pd.DataFrame,
-    mutually_exclusive_pairs: Optional[list[tuple[str, str]]] = None,
+    mutually_exclusive_pairs: list[tuple[str, str]] | None = None,
     threshold_method: str = "otsu",
 ) -> dict:
     """Compute QC metrics comparing pre/post spillover correction.
@@ -129,13 +128,9 @@ def compute_spillover_metrics(
 
         # Double-positive rates
         uncorr_dp = (
-            (uncorrected[col_a_uncorr] > thresh_a)
-            & (uncorrected[col_b_uncorr] > thresh_b)
+            (uncorrected[col_a_uncorr] > thresh_a) & (uncorrected[col_b_uncorr] > thresh_b)
         ).sum()
-        corr_dp = (
-            (corrected[col_a_corr] > thresh_a)
-            & (corrected[col_b_corr] > thresh_b)
-        ).sum()
+        corr_dp = ((corrected[col_a_corr] > thresh_a) & (corrected[col_b_corr] > thresh_b)).sum()
 
         n_cells = len(uncorrected)
         uncorr_dp_pct = 100 * uncorr_dp / n_cells if n_cells > 0 else 0
@@ -143,22 +138,14 @@ def compute_spillover_metrics(
 
         # Single-positive preservation
         uncorr_sp_a = (
-            (uncorrected[col_a_uncorr] > thresh_a)
-            & (uncorrected[col_b_uncorr] <= thresh_b)
+            (uncorrected[col_a_uncorr] > thresh_a) & (uncorrected[col_b_uncorr] <= thresh_b)
         ).sum()
-        corr_sp_a = (
-            (corrected[col_a_corr] > thresh_a)
-            & (corrected[col_b_corr] <= thresh_b)
-        ).sum()
+        corr_sp_a = ((corrected[col_a_corr] > thresh_a) & (corrected[col_b_corr] <= thresh_b)).sum()
 
         uncorr_sp_b = (
-            (uncorrected[col_a_uncorr] <= thresh_a)
-            & (uncorrected[col_b_uncorr] > thresh_b)
+            (uncorrected[col_a_uncorr] <= thresh_a) & (uncorrected[col_b_uncorr] > thresh_b)
         ).sum()
-        corr_sp_b = (
-            (corrected[col_a_corr] <= thresh_a)
-            & (corrected[col_b_corr] > thresh_b)
-        ).sum()
+        corr_sp_b = ((corrected[col_a_corr] <= thresh_a) & (corrected[col_b_corr] > thresh_b)).sum()
 
         pair_metrics[(marker_a, marker_b)] = {
             "uncorrected_dp_count": int(uncorr_dp),
@@ -191,9 +178,7 @@ def compute_spillover_metrics(
                 }
 
     # Summary
-    total_dp_reduction = sum(
-        m["dp_reduction_pct"] for m in pair_metrics.values()
-    )
+    total_dp_reduction = sum(m["dp_reduction_pct"] for m in pair_metrics.values())
     avg_dp_reduction = total_dp_reduction / pairs_evaluated if pairs_evaluated > 0 else 0
 
     return {
@@ -212,7 +197,7 @@ def plot_spillover_comparison(
     uncorrected: pd.DataFrame,
     marker_pair: tuple[str, str],
     threshold_method: str = "otsu",
-    save_path: Optional[Union[str, Path]] = None,
+    save_path: str | Path | None = None,
 ):
     """Generate biaxial scatter plots comparing pre/post correction for a marker pair.
 
@@ -239,6 +224,7 @@ def plot_spillover_comparison(
         The generated figure.
     """
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -250,9 +236,7 @@ def plot_spillover_comparison(
     col_b_uncorr = _find_column(uncorrected, marker_b)
 
     if not all([col_a_corr, col_b_corr, col_a_uncorr, col_b_uncorr]):
-        raise ValueError(
-            f"Markers {marker_a}/{marker_b} not found in both DataFrames"
-        )
+        raise ValueError(f"Markers {marker_a}/{marker_b} not found in both DataFrames")
 
     # Thresholds from uncorrected data
     thresh_a = _get_threshold(uncorrected[col_a_uncorr], threshold_method)
@@ -285,9 +269,15 @@ def plot_spillover_comparison(
 
         # Annotate quadrant
         ax.text(
-            0.95, 0.95, f"{dp_pct:.1f}%",
-            transform=ax.transAxes, ha="right", va="top",
-            fontsize=12, fontweight="bold", color="red",
+            0.95,
+            0.95,
+            f"{dp_pct:.1f}%",
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize=12,
+            fontweight="bold",
+            color="red",
         )
 
     fig.suptitle(f"Spillover Correction: {marker_a} vs {marker_b}", fontsize=14)
@@ -306,7 +296,7 @@ def plot_spillover_summary_heatmap(
     corrected: pd.DataFrame,
     uncorrected: pd.DataFrame,
     marker_names: list[str],
-    save_path: Optional[Union[str, Path]] = None,
+    save_path: str | Path | None = None,
 ):
     """Generate a heatmap of fold-change in co-expression for all marker pairs.
 
@@ -327,6 +317,7 @@ def plot_spillover_summary_heatmap(
         The generated heatmap figure.
     """
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
