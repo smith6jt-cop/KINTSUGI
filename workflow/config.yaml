@@ -133,3 +133,14 @@ resources:
   cpu_mem_stitch: 48000
   cpu_mem_decon: 48000
   cpu_mem_edf: 48000
+
+# ---------------------------------------------------------------------------
+# Spillover correction (REDSEA) - post-segmentation
+# ---------------------------------------------------------------------------
+# REDSEA corrects lateral signal spillover between neighboring cells.
+# Only relevant for densely-packed immune tissues. CPU-only (no GPU needed).
+# Reference: Bai et al., Front. Immunol. 12:652631 (2021)
+redsea:
+  element_shape: "star"          # "star" (diamond, recommended) or "square"
+  element_size: 0                # 0 = auto-estimate from cell size (2-4 typical)
+  markers_of_interest: []        # Empty = auto-detect surface markers

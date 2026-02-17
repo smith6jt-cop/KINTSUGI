@@ -118,6 +118,7 @@ analysis = [
     "hdbscan>=0.8.0",
     "skan>=0.11.0",
     "networkx>=3.0",
+    "redseapy>=0.1",
 ]
 
 # Slide/bioformats I/O
