@@ -40,10 +40,21 @@ jobs:
           if git diff --quiet; then
             echo "All files formatted correctly."
           else
-            echo "::error::Files would be reformatted by black. See diff below:"
-            git diff
+            echo "::error::Files would be reformatted by black."
+            git diff --stat
+            git diff > /tmp/black-diff.txt
+            echo "--- First 200 lines of diff ---"
+            head -200 /tmp/black-diff.txt
             exit 1
           fi
+
+      - name: Upload formatting diff
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: black-formatting-diff
+          path: /tmp/black-diff.txt
+          retention-days: 5
 
   test:
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
