@@ -25,7 +25,7 @@ jobs:
 
       - name: Install linting tools
         run: |
-          pip install ruff black
+          pip install ruff "black>=24.0"
 
       - name: Run ruff
         run: ruff check src/ tests/
