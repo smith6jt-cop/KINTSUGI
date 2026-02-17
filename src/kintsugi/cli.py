@@ -1020,10 +1020,17 @@ def workflow_config(project_dir: str, print_only: bool):
             "reference_cycle": 1,
             "reference_channel": 1,
             "max_image_dim": 2048,
-            "rigid_only": True,
+            "rigid_only": False,
             "feature_detector": "VggFD",
             "imgs_ordered": True,
             "align_to_reference": True,
+            "non_rigid": {
+                "max_dim": 4096,
+                "smoothing_method": "gauss",
+                "sigma_ratio": 0.01,
+                "n_grid_pts": 50,
+                "fold_penalty": 1e-6,
+            },
         },
         "quality_gate": {
             "max_zero_pct": 0.10,

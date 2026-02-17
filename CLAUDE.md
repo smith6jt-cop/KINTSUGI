@@ -342,26 +342,53 @@ These bugs have been fixed in the current codebase. Listed here for context when
 
 **Skills Registry:** `/advise`, `/retrospective`, `/skills` — search and save learnings across sessions
 
-## Registration: Rigid-Only for CODEX (Feb 2026)
+## Registration: Tuned Non-Rigid for CODEX (Feb 2026)
 
-VALIS non-rigid registration (OpticalFlowWarper) **degrades** quality for CODEX tissue-on-slide data. Tested across 12 datasets: 11/12 had worse `non_rigid_D` than `rigid_D` (up to 3.4x worse). CODEX inter-cycle deformation is purely rigid (stage repositioning).
+Registration uses rigid + non-rigid alignment with tuned smoothing parameters. Three critical bugs were fixed:
 
-**Correct parameters** (`workflow/config.yaml`):
+1. **Params not unpacked** (ROOT CAUSE): `serial_non_rigid.py:438` passed `non_rigid_reg_class(params=init_kwargs)` instead of `**init_kwargs` — all smoothing params silently ignored. The earlier "rigid-only is best" conclusion (11/12 datasets worse with non-rigid) was based on this broken code — all tests ran with unsmoothed OpticalFlowWarper.
+2. **Coarse non-rigid at 1024px**: VALIS `max_non_rigid_registration_dim_px` defaults to `DEFAULT_MAX_PROCESSED_IMG_SIZE = 1024` (NOT `DEFAULT_MAX_NON_RIGID_REG_SIZE = 3000`). This coarse pass poisoned alignment before the 4096px micro pass. Fix: disable coarse NR by not passing `non_rigid_registrar_cls` to Valis init.
+3. **Missing non-rigid config in Valis init**: `registration.py` didn't pass `non_rigid_registrar_cls` or `non_rigid_reg_params` to Valis, so `register()` used defaults (unsmoothed OpticalFlowWarper at 1024px).
+
+**Three VALIS dimension parameters** (often confused):
+- `max_image_dim_px` (default 1024) — max saved output image size
+- `max_processed_image_dim_px` (default 1024) — rigid feature detection resolution
+- `max_non_rigid_registration_dim_px` (default 1024) — coarse non-rigid field resolution
+
+**Current architecture**: Coarse NR is **disabled** (`non_rigid_registrar_cls=None` in Valis init). Non-rigid runs exclusively via `register_micro()` at 4096px with tuned smoothing. Rigid feature detection at 4096px for better matching.
+
+**Optical flow algorithm**: CUDA TVL1 (default) or CPU DeepFlow (fallback). Both use default OpenCV parameters — no tuning knobs exposed.
+
+**Sigma math**: `sigma_pixels = sigma_ratio * max(image_dim_px)`. At 4096px: ratio 0.01 = 41px sigma, ratio 0.005 = 20px sigma, ratio 0.05 = 205px sigma (extreme over-smoothing, washes out all local corrections).
+
+**Smoothing methods**: Only `"gauss"` and `None` work. `"inpaint"` and `"regularize"` are broken in the VALIS code (untested paths). With `smoothing_method="gauss"`, `n_grid_pts` and `fold_penalty` are **no-ops** — they only apply to the broken "regularize"/"inpaint" methods.
+
+**Current parameters** (`workflow/config.yaml`):
 ```yaml
 registration:
-  rigid_only: true            # Non-rigid degrades CODEX data
+  rigid_only: false           # Non-rigid enabled with tuned smoothing
   imgs_ordered: true          # Keep sequential cycle order (VALIS default reorders by similarity)
   align_to_reference: true    # Direct alignment to reference (prevents serial error accumulation)
   reference_cycle: 1
   feature_detector: "VggFD"
-  max_image_dim: 2048
+  max_image_dim: 4096         # Rigid feature detection resolution (was 2048, improved feature matching)
+  non_rigid:
+    max_dim: 4096             # Displacement field resolution for register_micro()
+    smoothing_method: "gauss" # Prevents noisy displacement fields
+    sigma_ratio: 0.01         # sigma = 0.01 * 4096 = ~41px. Default in OpticalFlowWarper is 0.005 (20px)
+    n_grid_pts: 50            # No-op with "gauss" (only used by broken "regularize"/"inpaint")
+    fold_penalty: 1.0e-6      # No-op with "gauss" (only used by broken "regularize")
 ```
 
-**Key files:** `workflow/scripts/registration.py` (wrapper), `notebooks/Kreg/registration.py` (VALIS Valis class), `notebooks/2_Cycle_Processing.ipynb` (cells 36-38)
+**Key files:** `workflow/scripts/registration.py` (wrapper), `notebooks/Kreg/registration.py` (VALIS Valis class, line 1771 for dimension defaults), `notebooks/Kreg/serial_non_rigid.py` (line 438, params bug), `notebooks/Kreg/non_rigid_registrars.py` (OpticalFlowWarper)
 
-**Registration QC**: Green/magenta DAPI overlay at **full resolution** (1000x1000 crop) — whole-image thumbnails are too zoomed out to evaluate nuclei overlap. White/gray = aligned, color fringing = misaligned.
+**Registration QC**: Green/magenta DAPI overlay at **full resolution** (1000x1000 crop) — whole-image thumbnails are too zoomed out to evaluate nuclei overlap. White/gray = aligned, color fringing = misaligned. **Average metrics are meaningless** — poor registration is localized; use spatial NCC heatmaps or targeted overlays.
 
-**Batch re-registration**: Remove sentinel + `registration_data/` + `cyc*/` under `registered/`, update config, re-run Snakemake. Script: `/blue/maigan/smith6jt/reregister_all.sh`. See `valis-registration-codex` skill for full diagnosis.
+**VALIS metrics**: `D` values are at processing resolution, not original. Use `rTRE = D / max(processed_shape)` for cross-experiment comparison at different `max_image_dim` settings.
+
+**Batch re-registration**: Remove sentinel + `registration_data/` + `cyc*/` under `registered/`, update config, re-run Snakemake. Script: `/blue/maigan/smith6jt/reregister_all.sh`. All 47 batch-processed datasets may need re-registration once optimal non-rigid parameters are determined.
+
+**Tuning guide** (`sigma_pixels = sigma_ratio * max_dim`): Over-smoothing → decrease `sigma_ratio` to 0.005 (20px at 4096). Under-correcting → increase `max_dim` to 8192. Over-warping → increase `sigma_ratio` to 0.02 (82px at 4096). Do NOT use `smoothing_method: "regularize"` — it's broken.
 
 ## Weighted Autofluorescence Subtraction (Feb 2026)
 
@@ -386,8 +413,8 @@ Replaces the single global `blank_scale_factor` with per-intensity-range weights
 KINTSUGI supports automated batch processing of multiple CODEX datasets (47 in manifest: spleen, lymph node, thymus). See `workflow/CLAUDE.md` for batch processing details including data staging, storage architecture, and sentinel file reference.
 
 **Data staging**: Two methods depending on source:
-- **Orange storage** (spleen/LN datasets): `stage_datasets.sh` via rsync SLURM jobs
-- **Globus** (thymus datasets from PATH lab): `stage_datasets_globus.py` — transfers from `path.ahc.ufl.edu` SMB share. See `workflow/CLAUDE.md` for endpoint details.
+- **Orange storage** (spleen/LN datasets): `stage_datasets.sh` via rsync SLURM jobs (CPU partition, no GPU conflict)
+- **Globus** (thymus datasets from PATH lab): `stage_datasets_globus.py` — transfers from `path.ahc.ufl.edu` SMB share via cifs mount at `/mnt/ahc_share/SHARE/HuBMAP/`. **CRITICAL: Use cifs mount, NOT GVFS** — GVFS causes EOF errors under sustained I/O. Always `globus endpoint activate <UUID>` before transfers.
 
 **Quick reference — processing all staged datasets:**
 ```bash
@@ -406,7 +433,11 @@ bash /blue/maigan/smith6jt/cleanup_datasets.sh --force      # skip prompts (afte
 bash /blue/maigan/smith6jt/cleanup_datasets.sh --dry-run    # preview without deleting
 ```
 
-Cleanup verifies all 3 QC sentinel files exist before allowing deletion of intermediates and raw data. See `workflow/CLAUDE.md` for full batch pipeline lifecycle.
+Cleanup verifies stitch/decon/edf QC sentinel files exist before allowing deletion of intermediates and raw data. Registration QC is NOT required — registration reads EDF outputs, not intermediates. `--force` only skips the interactive review prompt; sentinel checks are always enforced. Never use `--force` without confirming QC has been reviewed.
+
+**EDF blank channel workaround**: Some datasets have all-zeros channels (e.g., CC3-C CH2). EDF script exits non-zero when a channel has 0 valid z-slices, even if other channels succeed. Workaround: manually create `.snakemake_complete` sentinels for cycles where all non-blank channels processed correctly, then run QC.
+
+See `workflow/CLAUDE.md` for full batch pipeline lifecycle.
 
 ## Dependencies
 

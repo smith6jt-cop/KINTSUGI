@@ -183,7 +183,8 @@ Key design decisions:
 - **Error fallback**: On VALIS failure, copies EDF images unchanged (matches notebook behavior)
 - **Skip-existing**: All-or-nothing — checks if ALL registered files exist for ALL cycles before skipping
 - **Slide matching**: Builds `cycle_to_slide_name` dict from DAPI filenames for robust `slide_dict` lookup
-- **Rigid-only for CODEX** (Feb 2026): Non-rigid registration (OpticalFlowWarper) degrades quality for CODEX tissue-on-slide data — tested 12 datasets, 11/12 had worse non_rigid_D than rigid_D (up to 3.4x worse). CODEX inter-cycle deformation is purely rigid (stage repositioning). See `valis-registration-codex` skill for full analysis.
+- **Non-rigid architecture** (Feb 2026): Three bugs were fixed: (1) `serial_non_rigid.py:438` passed `params=init_kwargs` instead of `**init_kwargs` — all smoothing params silently ignored, (2) coarse NR at 1024px poisoned alignment — `max_non_rigid_registration_dim_px` defaults to `DEFAULT_MAX_PROCESSED_IMG_SIZE = 1024`, not `DEFAULT_MAX_NON_RIGID_REG_SIZE = 3000`, (3) Valis init didn't pass `non_rigid_registrar_cls`. Current approach: coarse NR is **disabled** (`non_rigid_registrar_cls=None` explicit in Valis init), non-rigid runs exclusively via `register_micro()` at 4096px with tuned smoothing. `register_micro()` handles `None` bk_dxdy (no prior coarse NR) by creating zero displacement fields. The earlier "rigid-only is best" conclusion (11/12 datasets worse) was based on broken non-rigid code — the skill has been updated.
+- **Three VALIS dimension parameters**: `max_image_dim_px` (saved output size), `max_processed_image_dim_px` (rigid feature detection), `max_non_rigid_registration_dim_px` (coarse NR field) — all default to 1024. Conflating them causes silent quality loss.
 - **`imgs_ordered=True`**: Prevents VALIS from reordering cycles by feature similarity. CODEX cycles must stay in sequential acquisition order.
 - **`align_to_reference=True`**: All cycles align directly to cycle 1, preventing error accumulation from serial chain alignment (cyc N → cyc N-1 → ... → cyc 1)
 
@@ -192,17 +193,31 @@ Key design decisions:
 registration:
   reference_cycle: 1          # Cycle used as fixed reference
   reference_channel: 1        # Channel for feature detection (usually DAPI)
-  max_image_dim: 2048         # Max dimension for registration computation
-  rigid_only: true            # Non-rigid degrades CODEX data (tested 12 datasets, see valis-registration-codex skill)
+  max_image_dim: 4096         # Rigid feature detection resolution (was 2048)
+  rigid_only: false           # Non-rigid enabled with tuned smoothing
   feature_detector: "VggFD"   # "VggFD" (GPU, better) or "OrbFD" (CPU-only)
   imgs_ordered: true          # Keep sequential cycle order (don't reorder by similarity)
   align_to_reference: true    # All cycles align directly to reference (not serial chain)
+  non_rigid:
+    max_dim: 4096             # Displacement field resolution for register_micro() only
+    smoothing_method: "gauss" # Only "gauss" and None work ("inpaint"/"regularize" are broken)
+    sigma_ratio: 0.01         # sigma = 0.01 * 4096 = ~41px (was 0.05 = 205px, extreme over-smoothing)
+    n_grid_pts: 50            # No-op with "gauss" (only used by broken "regularize"/"inpaint")
+    fold_penalty: 1.0e-6      # No-op with "gauss" (only used by broken "regularize")
 
 resources:
-  mem_registration: 64000     # 64 GB
+  mem_registration: 64000     # 64 GB (sufficient for non-rigid at 4096px with 13 cycles)
   time_registration: 120      # 2 hours
   cpu_mem_registration: 64000 # Same for CPU (loads one image per cycle, not z-stacks)
 ```
+
+**VALIS metrics**: `D` values are at processing resolution, not original. Use `rTRE = D / max(processed_shape)` for cross-experiment comparison at different `max_image_dim` settings. Average metrics are meaningless — poor registration is localized; use spatial NCC heatmaps or targeted overlays.
+
+**Non-rigid parameter tuning guide** (`sigma_pixels = sigma_ratio * max_dim`):
+- If **over-smoothing** (aligned but blurry): decrease `sigma_ratio` to 0.005 (20px at 4096)
+- If **under-correcting** (still misaligned): increase `max_dim` to 8192 or decrease `sigma_ratio` to 0.005
+- If **over-warping** (tissue distorted): increase `sigma_ratio` to 0.02 (82px at 4096)
+- Do NOT use `smoothing_method: "regularize"` — it's broken in VALIS
 
 **Per-channel skip-existing**: Wrapper scripts (`stitch.py`, `deconvolve.py`, `edf.py`) check per-channel completion inside jobs to resume interrupted cycles. Sentinel files include `skipped=N` in logs. Dynamic worker counts read from `snakemake.resources.cpus_per_task`.
 

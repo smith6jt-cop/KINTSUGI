@@ -1009,6 +1009,10 @@ class OpticalFlowWarper(NonRigidRegistrar):
         self.n_grid_pts = n_grid_pts
         self.use_cuda = False
 
+        if self.smoothing_method is not None:
+            print(f"  OpticalFlowWarper: smoothing={self.smoothing_method}, "
+                  f"sigma_ratio={self.sigma_ratio}, n_grid_pts={self.n_grid_pts}")
+
         if optical_flow_obj is None:
             # Try CUDA acceleration first if requested
             if use_gpu:

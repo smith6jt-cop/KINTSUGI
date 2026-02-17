@@ -1,14 +1,16 @@
 """
 Snakemake wrapper for KINTSUGI registration (multi-cycle alignment via VALIS).
 
-Aligns EDF images across all cycles using rigid registration.
+Aligns EDF images across all cycles using rigid + optional non-rigid registration.
 Unlike stitch/decon/edf which process one cycle each, registration processes
 ALL cycles in a single job (it needs the full set for alignment).
 
-Non-rigid registration (OpticalFlowWarper) is disabled by default because it
-degrades accuracy for CODEX tissue-on-slide data where inter-cycle deformation
-is primarily rigid (translation/rotation from stage repositioning). Tested across
-12 datasets: non-rigid D was worse than rigid D in 11/12 cases, up to 3.5x worse.
+Non-rigid registration (OpticalFlowWarper) is enabled by default with Gaussian
+smoothing to prevent noisy displacement fields. Key parameters:
+  - max_dim=4096: Displacement field resolution (was incorrectly 2048 in earlier runs)
+  - smoothing_method="gauss" with sigma_ratio=0.01: sigma = 0.01 * 4096 = ~41 pixels.
+    Moderate smoothing prevents over-warping while correcting real non-rigid deformation.
+  - non_rigid_registrar_cls=None in Valis init: Disables harmful coarse NR pass at 1024px
 
 Snakemake guarantees:
   - All EDF outputs exist before this script runs
@@ -59,6 +61,14 @@ RIGID_ONLY = bool(reg_cfg.get("rigid_only", True))
 FEATURE_DETECTOR = str(reg_cfg.get("feature_detector", "VggFD"))
 IMGS_ORDERED = bool(reg_cfg.get("imgs_ordered", True))
 ALIGN_TO_REFERENCE = bool(reg_cfg.get("align_to_reference", True))
+
+# Non-rigid parameters (OpticalFlowWarper via VALIS register_micro)
+NR_CFG = reg_cfg.get("non_rigid", {})
+NR_MAX_DIM = int(NR_CFG.get("max_dim", 4096))
+NR_SMOOTHING = NR_CFG.get("smoothing_method", "gauss")
+NR_SIGMA_RATIO = float(NR_CFG.get("sigma_ratio", 0.01))
+NR_N_GRID_PTS = int(NR_CFG.get("n_grid_pts", 50))
+NR_FOLD_PENALTY = float(NR_CFG.get("fold_penalty", 1e-6))
 
 # ---------------------------------------------------------------------------
 # GPU initialization (for VggFD feature detector)
@@ -116,6 +126,9 @@ print(f"Max image dim: {MAX_IMAGE_DIM}")
 print(f"Rigid only: {RIGID_ONLY}")
 print(f"Images ordered: {IMGS_ORDERED}")
 print(f"Align to reference: {ALIGN_TO_REFERENCE}")
+if not RIGID_ONLY:
+    print(f"Non-rigid max dim: {NR_MAX_DIM}")
+    print(f"Non-rigid smoothing: {NR_SMOOTHING} (sigma_ratio={NR_SIGMA_RATIO})")
 print(f"Device mode: {DEVICE_MODE}")
 print(f"Input: {EDF_DIR}")
 print(f"Output: {REGISTERED_DIR}")
@@ -205,7 +218,7 @@ if len(CYCLES) < 2:
 # ---------------------------------------------------------------------------
 # Multi-cycle registration via VALIS
 # ---------------------------------------------------------------------------
-from Kreg import registration, feature_detectors
+from Kreg import registration, feature_detectors, non_rigid_registrars
 
 # Step 1: Collect DAPI/reference images from each cycle
 print("\n[1/4] Collecting reference images...")
@@ -268,6 +281,10 @@ try:
         log_warn(f"'{FEATURE_DETECTOR}' not found, using OrbFD")
         fd_cls = feature_detectors.OrbFD
 
+    # NOTE: non_rigid_registrar_cls=None disables the coarse non-rigid pass
+    # in register(). The coarse pass defaults to 1024px resolution — too low
+    # for CODEX nuclei patterns — and degrades alignment for every cycle.
+    # Non-rigid is done exclusively in register_micro() at NR_MAX_DIM (4096px).
     registrar = registration.Valis(
         src_dir=str(EDF_DIR),
         dst_dir=str(reg_output_dir),
@@ -275,6 +292,7 @@ try:
         reference_img_f=dapi_images[ref_idx],
         max_image_dim_px=MAX_IMAGE_DIM,
         max_processed_image_dim_px=MAX_IMAGE_DIM,
+        non_rigid_registrar_cls=None,
         feature_detector_cls=fd_cls,
         imgs_ordered=IMGS_ORDERED,
         align_to_reference=ALIGN_TO_REFERENCE,
@@ -289,9 +307,20 @@ try:
 
     # Non-rigid registration (unless rigid_only)
     if not RIGID_ONLY:
-        log_info("Computing non-rigid transformations...")
+        log_info(
+            f"Computing non-rigid transformations "
+            f"(max_dim={NR_MAX_DIM}, smoothing={NR_SMOOTHING})..."
+        )
         non_rigid_registrar, non_rigid_summary = registrar.register_micro(
-            max_non_rigid_registration_dim_px=MAX_IMAGE_DIM
+            max_non_rigid_registration_dim_px=NR_MAX_DIM,
+            non_rigid_registrar_cls=non_rigid_registrars.OpticalFlowWarper,
+            non_rigid_reg_params={
+                "smoothing_method": NR_SMOOTHING,
+                "sigma_ratio": NR_SIGMA_RATIO,
+                "n_grid_pts": NR_N_GRID_PTS,
+                "fold_penalty": NR_FOLD_PENALTY,
+            },
+            align_to_reference=ALIGN_TO_REFERENCE,
         )
 
     # Step 3: Warp all channels
@@ -361,19 +390,28 @@ try:
     # Write sentinel
     sentinel = Path(snakemake.output.sentinel)
     sentinel.parent.mkdir(parents=True, exist_ok=True)
-    sentinel.write_text(
-        f"stage=registration\n"
-        f"completed={datetime.now().isoformat()}\n"
-        f"cycles={len(CYCLES)}\n"
-        f"method={'rigid' if RIGID_ONLY else 'rigid+nonrigid'}\n"
-        f"feature_detector={FEATURE_DETECTOR}\n"
-        f"reference_cycle={REFERENCE_CYCLE}\n"
-        f"imgs_ordered={IMGS_ORDERED}\n"
-        f"align_to_reference={ALIGN_TO_REFERENCE}\n"
-        f"warped={n_warped}\n"
-        f"copied={n_copied}\n"
-        f"duration_minutes={elapsed:.1f}\n"
-    )
+    sentinel_lines = [
+        f"stage=registration\n",
+        f"completed={datetime.now().isoformat()}\n",
+        f"cycles={len(CYCLES)}\n",
+        f"method={'rigid' if RIGID_ONLY else 'rigid+nonrigid'}\n",
+        f"feature_detector={FEATURE_DETECTOR}\n",
+        f"reference_cycle={REFERENCE_CYCLE}\n",
+        f"imgs_ordered={IMGS_ORDERED}\n",
+        f"align_to_reference={ALIGN_TO_REFERENCE}\n",
+    ]
+    if not RIGID_ONLY:
+        sentinel_lines.extend([
+            f"non_rigid_max_dim={NR_MAX_DIM}\n",
+            f"non_rigid_smoothing={NR_SMOOTHING}\n",
+            f"non_rigid_sigma_ratio={NR_SIGMA_RATIO}\n",
+        ])
+    sentinel_lines.extend([
+        f"warped={n_warped}\n",
+        f"copied={n_copied}\n",
+        f"duration_minutes={elapsed:.1f}\n",
+    ])
+    sentinel.write_text("".join(sentinel_lines))
     print(f"Sentinel written: {sentinel}")
     log_footer(0)
 

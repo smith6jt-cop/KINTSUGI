@@ -4849,7 +4849,12 @@ class Valis(object):
 
             nr_obj = non_rigid_registrar.non_rigid_obj_dict[slide_obj.name]
             # Will be combining original and new dxdy as pyvips Images
-            if not isinstance(slide_obj.bk_dxdy[0], pyvips.Image):
+            if slide_obj.bk_dxdy is None:
+                # No prior non-rigid displacement (coarse NR disabled) —
+                # micro displacement becomes the full displacement
+                vips_current_bk_dxdy = pyvips.Image.black(out_shape[1], out_shape[0], bands=2).cast("float")
+                vips_current_fwd_dxdy = pyvips.Image.black(out_shape[1], out_shape[0], bands=2).cast("float")
+            elif not isinstance(slide_obj.bk_dxdy[0], pyvips.Image):
                 vips_current_bk_dxdy = warp_tools.numpy2vips(np.dstack(slide_obj.bk_dxdy)).cast("float")
                 vips_current_fwd_dxdy = warp_tools.numpy2vips(np.dstack(slide_obj.fwd_dxdy)).cast("float")
             else:

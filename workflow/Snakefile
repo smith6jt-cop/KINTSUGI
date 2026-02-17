@@ -513,6 +513,18 @@ rule qc_edf:
         "scripts/qc_report.py"
 
 
+def _qc_registration_assignment():
+    """Pick CPU partition for registration QC (no GPU needed)."""
+    for acct in ACCOUNTS:
+        if acct.get("partition_cpu"):
+            return {"account": acct["name"], "partition": acct["partition_cpu"]}
+    # Fallback to registration assignment account with hpg-default
+    return {"account": _REG_ASSIGN["account"], "partition": "hpg-default"}
+
+
+_QC_REG_ASSIGN = _qc_registration_assignment()
+
+
 rule qc_registration:
     input:
         reg_done=f"{PROJECT}/data/processed/registered/.snakemake_complete",
@@ -529,8 +541,8 @@ rule qc_registration:
     resources:
         mem_mb=RES.get("mem_qc_registration", 16000),
         runtime=RES.get("time_qc_registration", 30),
-        slurm_partition=_REG_ASSIGN["partition"],
-        slurm_account=_REG_ASSIGN["account"],
+        slurm_partition=_QC_REG_ASSIGN["partition"],
+        slurm_account=_QC_REG_ASSIGN["account"],
         gres="",
         cpus_per_task=2,
     log:

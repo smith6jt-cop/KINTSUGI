@@ -1493,6 +1493,283 @@ def _select_crop_positions(img_height, img_width, crop_size, n_crops=4):
     return valid_positions, valid_labels
 
 
+def _compute_spatial_ncc_grid(ref_path, mov_path, tile_size=512):
+    """Compute local NCC between reference and moving images on a tile grid.
+
+    Parameters
+    ----------
+    ref_path : str or Path
+        Path to reference DAPI TIFF.
+    mov_path : str or Path
+        Path to moving DAPI TIFF.
+    tile_size : int
+        Side length of each square tile in pixels.
+
+    Returns
+    -------
+    ncc_grid : np.ndarray
+        2D array of NCC values, shape (n_rows, n_cols). NaN for zero-variance tiles.
+    img_height : int
+        Image height in pixels.
+    img_width : int
+        Image width in pixels.
+    """
+    import math
+
+    import pyvips
+
+    ref_img = pyvips.Image.new_from_file(str(ref_path), access="random")
+    mov_img = pyvips.Image.new_from_file(str(mov_path), access="random")
+    # Use minimum dimensions — registered images may differ slightly
+    img_height = min(ref_img.height, mov_img.height)
+    img_width = min(ref_img.width, mov_img.width)
+
+    n_rows = math.ceil(img_height / tile_size)
+    n_cols = math.ceil(img_width / tile_size)
+    ncc_grid = np.full((n_rows, n_cols), np.nan, dtype=np.float64)
+
+    for i in range(n_rows):
+        y = i * tile_size
+        h = min(tile_size, img_height - y)
+        for j in range(n_cols):
+            x = j * tile_size
+            w = min(tile_size, img_width - x)
+
+            ref_tile = np.ndarray(
+                buffer=ref_img.crop(x, y, w, h).write_to_memory(),
+                dtype=np.uint16, shape=[h, w],
+            ).astype(np.float32)
+            mov_tile = np.ndarray(
+                buffer=mov_img.crop(x, y, w, h).write_to_memory(),
+                dtype=np.uint16, shape=[h, w],
+            ).astype(np.float32)
+
+            r = ref_tile - ref_tile.mean()
+            m = mov_tile - mov_tile.mean()
+            r_norm = np.linalg.norm(r)
+            m_norm = np.linalg.norm(m)
+
+            # Skip zero-variance tiles (background)
+            if r_norm < 1e-10 or m_norm < 1e-10:
+                continue
+
+            ncc_grid[i, j] = np.dot(r.ravel(), m.ravel()) / (r_norm * m_norm)
+
+    return ncc_grid, img_height, img_width
+
+
+def _plot_spatial_ncc_heatmaps(
+    ncc_grids, moving_cycles, ref_cycle, img_height, img_width, tile_size,
+    qc_output_dir,
+):
+    """Render per-cycle NCC heatmaps and save as a single PDF.
+
+    Parameters
+    ----------
+    ncc_grids : dict
+        {cycle_number: ncc_grid} from _compute_spatial_ncc_grid.
+    moving_cycles : list of int
+        Sorted list of moving cycle numbers.
+    ref_cycle : int
+        Reference cycle number.
+    img_height, img_width : int
+        Image dimensions in pixels.
+    tile_size : int
+        Tile size used for NCC computation.
+    qc_output_dir : Path
+        Directory for output PDF.
+
+    Returns
+    -------
+    Path
+        Path to the saved PDF.
+    """
+    import math
+
+    from matplotlib.colors import Normalize
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+    n_moving = len(moving_cycles)
+    n_cols = min(4, n_moving)
+    n_rows = math.ceil(n_moving / n_cols)
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(5 * n_cols, 4 * n_rows),
+        squeeze=False,
+    )
+
+    cmap = plt.cm.RdYlGn.copy()
+    cmap.set_bad("0.85")
+    norm = Normalize(vmin=0.5, vmax=1.0)
+
+    for idx, mov_cyc in enumerate(moving_cycles):
+        row_idx = idx // n_cols
+        col_idx = idx % n_cols
+        ax = axes[row_idx, col_idx]
+        grid = ncc_grids[mov_cyc]
+
+        im = ax.imshow(
+            grid, cmap=cmap, norm=norm,
+            interpolation="bilinear", origin="upper",
+            extent=[0, img_width, img_height, 0],
+        )
+        mean_val = np.nanmean(grid)
+        min_val = np.nanmin(grid)
+        ax.set_title(
+            f"Cyc {mov_cyc}\u2192{ref_cycle}  "
+            f"(mean={mean_val:.3f}, min={min_val:.3f})",
+            fontsize=9,
+        )
+        # Axis ticks at tile boundaries
+        x_ticks = np.arange(0, img_width + 1, tile_size * 4)
+        y_ticks = np.arange(0, img_height + 1, tile_size * 4)
+        ax.set_xticks(x_ticks)
+        ax.set_yticks(y_ticks)
+        ax.tick_params(labelsize=7)
+
+    # Hide unused axes
+    for idx in range(n_moving, n_rows * n_cols):
+        row_idx = idx // n_cols
+        col_idx = idx % n_cols
+        axes[row_idx, col_idx].set_visible(False)
+
+    # Shared colorbar
+    fig.subplots_adjust(right=0.92)
+    cbar_ax = fig.add_axes([0.94, 0.15, 0.02, 0.7])
+    fig.colorbar(
+        plt.cm.ScalarMappable(norm=norm, cmap=cmap),
+        cax=cbar_ax, label="NCC",
+    )
+
+    fig.suptitle(
+        f"Spatial NCC Heatmap \u2014 tile={tile_size}px  "
+        f"(red=poor, green=good, gray=background)",
+        fontsize=12, y=1.02,
+    )
+
+    out_path = Path(qc_output_dir) / "registration_qc_spatial_ncc.pdf"
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
+def _plot_targeted_overlays(
+    dapi_files, ref_cycle, ncc_grids, moving_cycles, tile_size, crop_size,
+    n_targeted, qc_output_dir,
+):
+    """Render green/magenta overlays at the worst-NCC tile positions per cycle.
+
+    Parameters
+    ----------
+    dapi_files : dict
+        {cycle_number: Path} mapping to registered DAPI TIFFs.
+    ref_cycle : int
+        Reference cycle number.
+    ncc_grids : dict
+        {cycle_number: ncc_grid} from _compute_spatial_ncc_grid.
+    moving_cycles : list of int
+        Sorted list of moving cycle numbers.
+    tile_size : int
+        Tile size used for NCC computation.
+    crop_size : int
+        Size of the overlay crop in pixels.
+    n_targeted : int
+        Number of worst-NCC tiles to show per cycle.
+    qc_output_dir : Path
+        Directory for output PDF.
+
+    Returns
+    -------
+    Path
+        Path to the saved PDF.
+    """
+    import pyvips
+
+    n_rows = len(moving_cycles)
+    n_cols = n_targeted
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(4 * n_cols, 4 * n_rows),
+        squeeze=False,
+    )
+
+    ref_img = pyvips.Image.new_from_file(str(dapi_files[ref_cycle]), access="random")
+    img_height = ref_img.height
+    img_width = ref_img.width
+
+    for row_idx, mov_cyc in enumerate(moving_cycles):
+        grid = ncc_grids[mov_cyc]
+
+        # Find n_targeted worst (lowest) non-NaN tiles
+        valid_mask = ~np.isnan(grid)
+        if not valid_mask.any():
+            for col_idx in range(n_cols):
+                axes[row_idx, col_idx].text(
+                    0.5, 0.5, "No valid tiles", transform=axes[row_idx, col_idx].transAxes,
+                    ha="center", va="center", fontsize=9,
+                )
+                axes[row_idx, col_idx].set_xticks([])
+                axes[row_idx, col_idx].set_yticks([])
+            continue
+
+        flat_indices = np.argsort(grid[valid_mask])[:n_targeted]
+        valid_coords = np.argwhere(valid_mask)
+        worst_tiles = valid_coords[flat_indices]
+
+        mov_img = pyvips.Image.new_from_file(str(dapi_files[mov_cyc]), access="random")
+
+        for col_idx in range(n_cols):
+            ax = axes[row_idx, col_idx]
+
+            if col_idx >= len(worst_tiles):
+                ax.set_visible(False)
+                continue
+
+            tile_i, tile_j = worst_tiles[col_idx]
+            ncc_val = grid[tile_i, tile_j]
+
+            # Center the crop on the worst tile
+            center_y = tile_i * tile_size + tile_size // 2
+            center_x = tile_j * tile_size + tile_size // 2
+            y = center_y - crop_size // 2
+            x = center_x - crop_size // 2
+
+            # Clamp to image bounds
+            y = max(0, min(y, img_height - crop_size))
+            x = max(0, min(x, img_width - crop_size))
+
+            try:
+                ref_crop = _load_crop_pyvips(dapi_files[ref_cycle], y, x, crop_size)
+                mov_crop = _load_crop_pyvips(dapi_files[mov_cyc], y, x, crop_size)
+                overlay = _make_green_magenta(ref_crop, mov_crop)
+                ax.imshow(overlay)
+            except Exception as e:
+                ax.text(
+                    0.5, 0.5, f"Error:\n{e}", transform=ax.transAxes,
+                    ha="center", va="center", fontsize=8,
+                )
+
+            ax.set_title(f"NCC={ncc_val:.3f} @({x},{y})", fontsize=9)
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+            if col_idx == 0:
+                ax.set_ylabel(f"Cyc {mov_cyc}\u2192{ref_cycle}", fontsize=10)
+
+    fig.suptitle(
+        f"Targeted Overlays \u2014 {n_targeted} worst-NCC positions per cycle\n"
+        f"Green=Cyc{ref_cycle} (ref), Magenta=moving",
+        fontsize=12, y=1.02,
+    )
+    fig.tight_layout()
+    out_path = Path(qc_output_dir) / "registration_qc_targeted_overlays.pdf"
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
 def _load_crop_pyvips(tiff_path, row, col, crop_size):
     """Load a crop from a large TIFF via pyvips random access.
 
@@ -1548,6 +1825,8 @@ def run_registration_qc(
     channel_name_dict=None,
     crop_size=1000,
     n_crops=4,
+    spatial_tile_size=512,
+    n_targeted_crops=3,
 ):
     """Generate registration QC: green/magenta DAPI overlays and metrics.
 
@@ -1559,6 +1838,12 @@ def run_registration_qc(
 
       2. registration_qc_metrics.pdf — Bar chart of rigid_D per cycle
          with 2px threshold line
+
+      3. registration_qc_spatial_ncc.pdf — Per-cycle heatmap of local NCC
+         on a tile grid, showing spatially localized alignment quality.
+
+      4. registration_qc_targeted_overlays.pdf — Green/magenta overlays at
+         the worst-NCC tile positions per cycle.
 
     Parameters
     ----------
@@ -1578,6 +1863,10 @@ def run_registration_qc(
         Size of each square crop in pixels. Default 1000.
     n_crops : int
         Number of crop positions. Default 4.
+    spatial_tile_size : int
+        Tile size for spatial NCC grid computation. Default 512.
+    n_targeted_crops : int
+        Number of worst-NCC positions to show per cycle. Default 3.
 
     Returns
     -------
@@ -1695,6 +1984,39 @@ def run_registration_qc(
     fig.savefig(overlay_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"  Saved overlay grid: {overlay_path}")
+
+    # -----------------------------------------------------------------------
+    # Spatial NCC heatmaps — tile-level alignment quality
+    # -----------------------------------------------------------------------
+    print("\n  Computing spatial alignment heatmaps...")
+    ncc_grids = {}
+    for mov_cyc in moving_cycles:
+        ncc_grid, _, _ = _compute_spatial_ncc_grid(
+            dapi_files[ref_cycle], dapi_files[mov_cyc],
+            tile_size=spatial_tile_size,
+        )
+        ncc_grids[mov_cyc] = ncc_grid
+        mean_ncc = np.nanmean(ncc_grid)
+        min_ncc = np.nanmin(ncc_grid)
+        print(f"    Cyc {mov_cyc}: mean={mean_ncc:.4f}, min={min_ncc:.4f}")
+
+    ncc_path = _plot_spatial_ncc_heatmaps(
+        ncc_grids, moving_cycles, ref_cycle,
+        img_height, img_width, spatial_tile_size,
+        qc_output_dir,
+    )
+    print(f"  Saved spatial NCC heatmap: {ncc_path}")
+
+    # -----------------------------------------------------------------------
+    # Targeted overlays at worst-NCC positions
+    # -----------------------------------------------------------------------
+    print(f"\n  Generating targeted overlays ({n_targeted_crops} worst per cycle)...")
+    targeted_path = _plot_targeted_overlays(
+        dapi_files, ref_cycle, ncc_grids, moving_cycles,
+        spatial_tile_size, crop_size, n_targeted_crops,
+        qc_output_dir,
+    )
+    print(f"  Saved targeted overlays: {targeted_path}")
 
     # -----------------------------------------------------------------------
     # Metrics bar chart from VALIS summary (if available)

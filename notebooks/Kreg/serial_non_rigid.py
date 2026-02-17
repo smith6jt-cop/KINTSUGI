@@ -435,7 +435,7 @@ class NonRigidZImage(object):
 
         init_kwargs, reg_kwargs = self.split_params(params, non_rigid_reg_class)
 
-        non_rigid_reg = non_rigid_reg_class(params=init_kwargs)
+        non_rigid_reg = non_rigid_reg_class(**init_kwargs)
 
         if self.moving_xy is not None and self.fixed_xy is not None and \
            issubclass(non_rigid_reg_class, non_rigid_registrars.NonRigidRegistrarXY):
