@@ -490,9 +490,7 @@ def pretrain(project_dir: str, tissue_type: str, dry_run: bool, verbose: bool):
     """
     from kintsugi.signal.bootstrap import bootstrap_from_project
 
-    console.print(
-        f"[bold]Bootstrapping weighted subtraction parameters from:[/bold] {project_dir}"
-    )
+    console.print(f"[bold]Bootstrapping weighted subtraction parameters from:[/bold] {project_dir}")
     if dry_run:
         console.print("[yellow]DRY RUN — no parameters will be recorded[/yellow]")
 
@@ -519,7 +517,7 @@ def pretrain(project_dir: str, tissue_type: str, dry_run: bool, verbose: bool):
         return
 
     # Show results
-    console.print(f"\n[bold]Bootstrap Results:[/bold]")
+    console.print("\n[bold]Bootstrap Results:[/bold]")
     console.print(f"  Pairs found: {result.get('pairs_found', 0)}")
     console.print(f"  Pairs processed: {result.get('pairs_processed', 0)}")
     console.print(f"  Pairs recorded: {result.get('pairs_recorded', 0)}")
@@ -883,7 +881,6 @@ def workflow_config(project_dir: str, print_only: bool):
     PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
     """
     import json
-    import re
     import shutil
     from pathlib import Path
 
@@ -922,7 +919,9 @@ def workflow_config(project_dir: str, print_only: bool):
             f"  Loaded channel names: {sum(len(v) for v in channel_names_dict.values())} markers"
         )
     except FileNotFoundError:
-        console.print("[yellow]  Warning: meta/CHANNELNAMES.txt not found — EDF will use CH# names[/yellow]")
+        console.print(
+            "[yellow]  Warning: meta/CHANNELNAMES.txt not found — EDF will use CH# names[/yellow]"
+        )
     except Exception as e:
         console.print(f"[yellow]  Warning: Could not load channel names: {e}[/yellow]")
 
@@ -976,12 +975,14 @@ def workflow_config(project_dir: str, print_only: bool):
 
     # Build config dict and dump via PyYAML for correct types
     # Convert channel_names_dict keys to int for YAML (Snakemake reads as int)
-    channel_names_yaml = {int(k): v for k, v in channel_names_dict.items()} if channel_names_dict else {}
+    channel_names_yaml = (
+        {int(k): v for k, v in channel_names_dict.items()} if channel_names_dict else {}
+    )
 
     config_dict = {
         # Paths
-        "project_dir": str(project_dir),
-        "kintsugi_dir": str(kintsugi_dir),
+        "project_dir": project_dir.as_posix(),
+        "kintsugi_dir": kintsugi_dir.as_posix(),
         # Processing scope
         "cycles": cycles_list,
         "channels": channels_list,
@@ -1101,11 +1102,11 @@ def workflow_config(project_dir: str, print_only: bool):
     console.print(f"  xy_pixel_size: {exp.xy_pixel_size}")
     console.print(f"  wavelengths: {len(exp.wavelengths)} channels")
     if channel_names_dict:
-        console.print(f"  channel_names: {sum(len(v) for v in channel_names_dict.values())} markers")
-    if pool["total_gpu_slots"] > 0:
-        acct_summary = ", ".join(
-            f"{a['name']}({a['gpu_slots']}G)" for a in pool["accounts"]
+        console.print(
+            f"  channel_names: {sum(len(v) for v in channel_names_dict.values())} markers"
         )
+    if pool["total_gpu_slots"] > 0:
+        acct_summary = ", ".join(f"{a['name']}({a['gpu_slots']}G)" for a in pool["accounts"])
         console.print(
             f"  multi-account: {acct_summary} = "
             f"{pool['total_gpu_slots']} GPU slots (GPU-only scheduling)"
@@ -1145,7 +1146,7 @@ def workflow_config(project_dir: str, print_only: bool):
             if added:
                 console.print(f"  Added scripts: {', '.join(added)}")
             else:
-                console.print(f"  Scripts up to date")
+                console.print("  Scripts up to date")
 
     console.print()
     console.print("[bold]Next steps:[/bold]")
@@ -1215,9 +1216,7 @@ def workflow_check(project_dir: str):
         console.print(
             f"    In use:     {usage['cpus']} CPUs, {usage['mem_gb']}GB, {usage['gpus']} GPUs"
         )
-        console.print(
-            f"    GPU slots: {acct['gpu_slots']} max, {acct['gpu_avail']} available"
-        )
+        console.print(f"    GPU slots: {acct['gpu_slots']} max, {acct['gpu_avail']} available")
         console.print(
             f"    CPU slots: {acct['cpu_slots']} max ({int(util_cap * 100)}% cap), "
             f"{acct['cpu_avail']} available"
@@ -1227,20 +1226,16 @@ def workflow_check(project_dir: str):
     gpu_avail = pool["total_gpu_avail"]
     gpu_total = pool["total_gpu_slots"]
 
-    console.print(
-        f"  Total GPU: {gpu_total} max, {gpu_avail} available"
-    )
-    console.print(
-        f"  (CPU pool: {pool['total_cpu_slots']} slots — not used; GPU-only scheduling)"
-    )
+    console.print(f"  Total GPU: {gpu_total} max, {gpu_avail} available")
+    console.print(f"  (CPU pool: {pool['total_cpu_slots']} slots — not used; GPU-only scheduling)")
 
     if gpu_avail > 0:
-        console.print(f"\n  [bold]Recommended:[/bold]")
-        console.print(
-            f"    snakemake --profile profiles/slurm -j {gpu_avail}"
-        )
+        console.print("\n  [bold]Recommended:[/bold]")
+        console.print(f"    snakemake --profile profiles/slurm -j {gpu_avail}")
     else:
-        console.print("\n  [yellow]No GPU slots available right now. Other users are using the full allocation.[/yellow]")
+        console.print(
+            "\n  [yellow]No GPU slots available right now. Other users are using the full allocation.[/yellow]"
+        )
         console.print(f"  Max allocation would give {gpu_total} GPU slots when free.")
 
 
@@ -1251,7 +1246,9 @@ def workflow_check(project_dir: str):
 @click.option("--local", is_flag=True, help="Run locally instead of via SLURM")
 @click.option("--cores", default=4, type=int, help="CPU cores for local execution (default: 4)")
 @click.option(
-    "--forcerun", default=None, help="Force re-run a specific rule (stitch/deconvolve/edf/registration)"
+    "--forcerun",
+    default=None,
+    help="Force re-run a specific rule (stitch/deconvolve/edf/registration)",
 )
 @click.option("--cycles", "-c", default=None, help="Override cycles: '1-3' or '1,2,5'")
 def workflow_run(
@@ -1399,9 +1396,7 @@ def export_group():
 @click.argument("project_dir", type=click.Path(exists=True), default=".")
 @click.option("--force", "-f", is_flag=True, help="Force reconversion of all files")
 @click.option("--dry-run", "-n", is_flag=True, help="Preview what would be exported")
-@click.option(
-    "--include-blanks", is_flag=True, help="Include blank/autofluorescence channels"
-)
+@click.option("--include-blanks", is_flag=True, help="Include blank/autofluorescence channels")
 def export_prepare(project_dir: str, force: bool, dry_run: bool, include_blanks: bool):
     """
     Convert processed images to DZI tiles and generate a .tmap project file.
@@ -1451,7 +1446,9 @@ def export_prepare(project_dir: str, force: bool, dry_run: bool, include_blanks:
             raise SystemExit(1)
 
         console.print(f"  Export directory: {result['export_dir']}")
-        console.print(f"  Registered: {result['registered_images']} images across {result['registered_cycles']} cycles")
+        console.print(
+            f"  Registered: {result['registered_images']} images across {result['registered_cycles']} cycles"
+        )
         console.print(f"  Segmentation masks: {result['segmentation_masks']}")
         console.print(f"  Overlays: {result['overlays']}")
         console.print(f"  Total DZI conversions: {result['total_dzi_conversions']}")
@@ -1497,7 +1494,7 @@ def export_prepare(project_dir: str, force: bool, dry_run: bool, include_blanks:
         console.print(f"\n[red]{result['message']}[/red]")
         raise SystemExit(1)
 
-    console.print(f"\n[green]Export complete![/green]")
+    console.print("\n[green]Export complete![/green]")
     console.print(f"  Images converted: {result['images_converted']}")
     if result["images_skipped"]:
         console.print(f"  Images skipped (unchanged): {result['images_skipped']}")
@@ -1508,7 +1505,9 @@ def export_prepare(project_dir: str, force: bool, dry_run: bool, include_blanks:
     if result["regions_copied"]:
         console.print(f"  Regions copied: {result['regions_copied']}")
     console.print(f"  .tmap file: {result['tmap_path']}")
-    console.print(f"\n[dim]Deploy with: kintsugi workflow export deploy {project_dir} user@host:/path[/dim]")
+    console.print(
+        f"\n[dim]Deploy with: kintsugi workflow export deploy {project_dir} user@host:/path[/dim]"
+    )
 
 
 @export_group.command("deploy")
@@ -1517,7 +1516,9 @@ def export_prepare(project_dir: str, force: bool, dry_run: bool, include_blanks:
 @click.option("--dry-run", "-n", is_flag=True, help="Preview rsync transfer without sending")
 @click.option("--bwlimit", type=int, default=None, help="Bandwidth limit in KB/s")
 @click.option("--ssh-key", type=click.Path(exists=True), default=None, help="SSH private key path")
-def export_deploy(project_dir: str, remote: str, dry_run: bool, bwlimit: int | None, ssh_key: str | None):
+def export_deploy(
+    project_dir: str, remote: str, dry_run: bool, bwlimit: int | None, ssh_key: str | None
+):
     """
     Deploy exported data to a remote server via rsync.
 

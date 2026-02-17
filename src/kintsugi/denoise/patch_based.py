@@ -177,7 +177,6 @@ def denoise_bm3d_lite(
 
             # Check if within search window
             if abs(other_y - ref_y) <= half_window and abs(other_x - ref_x) <= half_window:
-
                 # Compute similarity in DCT domain (faster than spatial)
                 diff = np.sum((patch_dcts[j] - ref_dct) ** 2)
                 if diff < (patch_size**2) * (sigma**2) * 2:

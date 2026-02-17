@@ -548,9 +548,7 @@ async def subtract_blank(
             ranges = compute_intensity_ranges(
                 signal_f, blank_clipped, n_ranges=n_ranges, method=range_method
             )
-            quality = compute_weighted_subtraction_quality(
-                signal_np, result_np, blank_np, ranges
-            )
+            quality = compute_weighted_subtraction_quality(signal_np, result_np, blank_np, ranges)
 
             # Store as dask for consistency
             try:

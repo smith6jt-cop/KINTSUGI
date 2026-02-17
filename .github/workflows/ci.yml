@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -25,13 +27,14 @@ jobs:
 
       - name: Install linting tools
         run: |
-          pip install ruff black
+          pip install "ruff==0.15.1"
+          ruff version
 
-      - name: Run ruff
+      - name: Run ruff linter
         run: ruff check src/ tests/
 
-      - name: Check formatting with black
-        run: black --check src/ tests/
+      - name: Check formatting with ruff
+        run: ruff format --check --diff src/ tests/
 
   test:
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
@@ -116,13 +119,31 @@ jobs:
           Write-Output "Extracting to $dest..."
           Expand-Archive -Path $zipPath -DestinationPath $dest -Force
 
+          # Diagnostic: show top-level extracted contents
+          Write-Output "Extracted contents:"
+          Get-ChildItem $dest | ForEach-Object { Write-Output "  $_" }
+
+          # The archive often nests under a version-named folder (e.g., vips-dev-8.16/)
+          # Search recursively for a 'bin' directory containing libvips DLLs
           $binDir = Get-ChildItem $dest -Recurse -Directory | Where-Object { $_.Name -eq 'bin' } | Select-Object -First 1
+
+          # Fallback: search for libvips-42.dll anywhere in the extracted tree
+          if (-not $binDir) {
+            Write-Output "No 'bin' directory found, searching for libvips DLL..."
+            $dllFile = Get-ChildItem $dest -Recurse -File -Filter "libvips-42.dll" | Select-Object -First 1
+            if ($dllFile) {
+              $binDir = $dllFile.Directory
+            }
+          }
+
           if ($binDir) {
             Write-Output "Adding to PATH: $($binDir.FullName)"
             $binDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
             Write-Output "libvips installed successfully"
           } else {
-            Write-Error "Could not find bin directory in extracted archive"
+            Write-Output "Full tree for debugging:"
+            Get-ChildItem $dest -Recurse -Depth 3 | ForEach-Object { Write-Output "  $($_.FullName)" }
+            Write-Error "Could not find bin directory or libvips DLL in extracted archive"
             throw "libvips bin directory not found"
           }
         env:

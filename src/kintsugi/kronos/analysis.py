@@ -313,7 +313,9 @@ def spatial_search(
     # Compute distances
     if metric == "cosine":
         # Normalize
-        query_norm = query_embedding / (np.linalg.norm(query_embedding, axis=1, keepdims=True) + 1e-8)
+        query_norm = query_embedding / (
+            np.linalg.norm(query_embedding, axis=1, keepdims=True) + 1e-8
+        )
         db_norm = db_matrix / (np.linalg.norm(db_matrix, axis=1, keepdims=True) + 1e-8)
         similarities = (query_norm @ db_norm.T).squeeze()
         distances = 1.0 - similarities
@@ -328,12 +330,14 @@ def spatial_search(
 
     results = []
     for idx in top_indices:
-        results.append({
-            "index": int(idx),
-            "distance": float(distances[idx]),
-            "coords": all_coords[idx].tolist(),
-            "dataset_idx": all_dataset_idx[idx],
-        })
+        results.append(
+            {
+                "index": int(idx),
+                "distance": float(distances[idx]),
+                "coords": all_coords[idx].tolist(),
+                "dataset_idx": all_dataset_idx[idx],
+            }
+        )
 
     return results
 
@@ -374,9 +378,7 @@ def compare_datasets(
 
     # Concatenate all embeddings
     all_embeddings = np.concatenate([r.patch_embeddings for r in results], axis=0)
-    dataset_labels = np.concatenate(
-        [np.full(r.n_patches, i) for i, r in enumerate(results)]
-    )
+    dataset_labels = np.concatenate([np.full(r.n_patches, i) for i, r in enumerate(results)])
 
     # Reduce dimensions
     reduced = reduce_dimensions(all_embeddings, method=method)

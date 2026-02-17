@@ -99,8 +99,7 @@ class WeightedSubtractionParameters:
         d = dict(d)
         if "ranges" in d:
             d["ranges"] = [
-                IntensityRange.from_dict(r) if isinstance(r, dict) else r
-                for r in d["ranges"]
+                IntensityRange.from_dict(r) if isinstance(r, dict) else r for r in d["ranges"]
             ]
         valid_keys = cls.__dataclass_fields__
         return cls(**{k: v for k, v in d.items() if k in valid_keys})

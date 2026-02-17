@@ -28,7 +28,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Marker → color mapping for common immune markers
 # Colors as hex strings for TissUUmaps layerFilters
@@ -61,9 +60,21 @@ _MARKER_COLORS: dict[str, str] = {
 
 # Fallback color cycle for unknown markers
 _FALLBACK_COLORS = [
-    "#00ff00", "#ff0000", "#ffff00", "#00ffff", "#ff00ff",
-    "#ff8000", "#80ff00", "#0080ff", "#ff0080", "#80ff80",
-    "#ff8080", "#8080ff", "#c0ff00", "#00ffc0", "#c000ff",
+    "#00ff00",
+    "#ff0000",
+    "#ffff00",
+    "#00ffff",
+    "#ff00ff",
+    "#ff8000",
+    "#80ff00",
+    "#0080ff",
+    "#ff0080",
+    "#80ff80",
+    "#ff8080",
+    "#8080ff",
+    "#c0ff00",
+    "#00ffc0",
+    "#c000ff",
 ]
 
 
@@ -205,8 +216,14 @@ def discover_segmentation_masks(
         return results
 
     seen: set[Path] = set()
-    for pattern in ["*label*.tif", "*mask*.tif", "*segmentation*.tif",
-                     "*label*.tiff", "*mask*.tiff", "*segmentation*.tiff"]:
+    for pattern in [
+        "*label*.tif",
+        "*mask*.tif",
+        "*segmentation*.tif",
+        "*label*.tiff",
+        "*mask*.tiff",
+        "*segmentation*.tiff",
+    ]:
         for tif in sorted(segmented_dir.rglob(pattern)):
             if tif not in seen:
                 seen.add(tif)
@@ -317,11 +334,13 @@ def generate_tmap(
             # First DAPI visible by default, everything else hidden
             visible = _is_dapi(marker_name) and cycle_name == "cyc01"
 
-            layers.append({
-                "tileSource": tile_source,
-                "name": f"{marker_name} ({cycle_name})",
-                "visible": visible,
-            })
+            layers.append(
+                {
+                    "tileSource": tile_source,
+                    "name": f"{marker_name} ({cycle_name})",
+                    "visible": visible,
+                }
+            )
 
             color = _marker_color(marker_name, color_index)
             layer_filters.append([{"name": "Color", "value": color}])
@@ -332,25 +351,29 @@ def generate_tmap(
     # --- Segmentation mask layers ---
     for mask_name, _ in segmentation_masks:
         tile_source = f"images/segmented/{mask_name}.dzi"
-        layers.append({
-            "tileSource": tile_source,
-            "name": mask_name,
-            "visible": False,
-        })
+        layers.append(
+            {
+                "tileSource": tile_source,
+                "name": mask_name,
+                "visible": False,
+            }
+        )
         layer_filters.append([{"name": "Color", "value": "#ffffff"}])
 
     # --- Marker files (CSV overlays) ---
     marker_files: list[dict[str, Any]] = []
     for overlay_name, overlay_path in overlays.items():
         if overlay_path.suffix == ".csv":
-            marker_files.append({
-                "path": f"data/{overlay_path.name}",
-                "title": overlay_name.replace("_", " ").title(),
-                "expectedHeader": {
-                    "X": "centroid_1",
-                    "Y": "centroid_0",
-                },
-            })
+            marker_files.append(
+                {
+                    "path": f"data/{overlay_path.name}",
+                    "title": overlay_name.replace("_", " ").title(),
+                    "expectedHeader": {
+                        "X": "centroid_1",
+                        "Y": "centroid_0",
+                    },
+                }
+            )
 
     # --- Regions (GeoJSON) ---
     regions: dict[str, str] = {}
@@ -401,12 +424,8 @@ def _extract_h5ad_phenotypes(source: Path, data_dir: Path) -> Path | None:
         obs = adata.obs
 
         # Find spatial coordinate columns
-        x_col = next(
-            (c for c in ["centroid_1", "X_centroid", "x"] if c in obs.columns), None
-        )
-        y_col = next(
-            (c for c in ["centroid_0", "Y_centroid", "y"] if c in obs.columns), None
-        )
+        x_col = next((c for c in ["centroid_1", "X_centroid", "x"] if c in obs.columns), None)
+        y_col = next((c for c in ["centroid_0", "Y_centroid", "y"] if c in obs.columns), None)
         if not x_col or not y_col:
             return None
 
@@ -547,9 +566,7 @@ def prepare_export(
                 continue
 
             if progress_callback:
-                progress_callback(
-                    current, total_images, f"{marker_name} ({cycle_name})"
-                )
+                progress_callback(current, total_images, f"{marker_name} ({cycle_name})")
 
             dzi_path = convert_to_dzi(source_path, cycle_out, marker_name)
             stat = source_path.stat()
@@ -577,9 +594,7 @@ def prepare_export(
         if progress_callback:
             progress_callback(current, total_images, f"mask: {mask_name}")
 
-        dzi_path = convert_to_dzi(
-            source_path, seg_out, mask_name, is_label=True
-        )
+        dzi_path = convert_to_dzi(source_path, seg_out, mask_name, is_label=True)
         stat = source_path.stat()
         manifest.entries[key] = _ManifestEntry(
             source=str(source_path),
@@ -618,9 +633,7 @@ def prepare_export(
             region_count += 1
 
     # Generate .tmap
-    tmap_path = generate_tmap(
-        project_name, export_dir, registered, masks, all_overlays
-    )
+    tmap_path = generate_tmap(project_name, export_dir, registered, masks, all_overlays)
 
     # Save manifest
     manifest.save(manifest_path)

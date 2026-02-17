@@ -111,7 +111,9 @@ class KronosEmbedder:
         # Compute dataset-level stats for any unmatched markers
         unmatched = [m for m in used_mappings if not m.matched]
         if unmatched:
-            logger.info("Computing dataset-level normalization for %d unmatched markers", len(unmatched))
+            logger.info(
+                "Computing dataset-level normalization for %d unmatched markers", len(unmatched)
+            )
             self.compute_dataset_normalization(patches, used_mappings)
 
         # Get normalization parameters and marker IDs
@@ -130,7 +132,9 @@ class KronosEmbedder:
 
         logger.info("Running KRONOS inference on %d patches...", len(patches))
         patch_emb, marker_emb, token_emb = self.model.embed_batched(
-            patches_tensor, mean_tensor, std_tensor,
+            patches_tensor,
+            mean_tensor,
+            std_tensor,
             marker_ids=marker_ids_tensor,
             is_raw_16bit=True,  # KINTSUGI images are 16-bit
         )
@@ -212,7 +216,9 @@ class KronosEmbedder:
         )
 
         patch_emb, marker_emb, token_emb = self.model.embed_batched(
-            patches_tensor, mean_tensor, std_tensor,
+            patches_tensor,
+            mean_tensor,
+            std_tensor,
             marker_ids=marker_ids_tensor,
             is_raw_16bit=True,
         )

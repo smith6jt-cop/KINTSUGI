@@ -71,7 +71,7 @@ class QualityGateResult:
     def __str__(self) -> str:
         if self.passed:
             return f"Quality gate PASSED (score={self.quality_score:.2f})"
-        return f"Quality gate FAILED (score={self.quality_score:.2f}): " f"{'; '.join(self.issues)}"
+        return f"Quality gate FAILED (score={self.quality_score:.2f}): {'; '.join(self.issues)}"
 
 
 class QualityGate:
@@ -617,7 +617,7 @@ def check_before_processing(
 
     if fail_action == "raise":
         raise ValueError(
-            f"Quality gate failed for {cycle or ''}/{channel or ''}: " f"{'; '.join(result.issues)}"
+            f"Quality gate failed for {cycle or ''}/{channel or ''}: {'; '.join(result.issues)}"
         )
     elif fail_action == "skip":
         logger.warning(f"Skipping {cycle or ''}/{channel or ''}: {result}")

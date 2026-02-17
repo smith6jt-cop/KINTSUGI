@@ -202,7 +202,7 @@ def artifact_detection_tuner(
             ax4 = axes[1, 1]
             if z_index in current_mitigated:
                 im4 = ax4.imshow(current_mitigated[z_index], cmap="gray")
-                ax4.set_title(f'Mitigated ({current_decisions.get(z_index, "?")})')
+                ax4.set_title(f"Mitigated ({current_decisions.get(z_index, '?')})")
                 plt.colorbar(im4, ax=ax4, fraction=0.046)
             else:
                 ax4.text(

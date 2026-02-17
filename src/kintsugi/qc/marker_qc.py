@@ -178,7 +178,7 @@ class MarkerQC:
             metrics["background_ratio"] = float(background_ratio)
 
             if background_ratio > self.max_background_pct:
-                issues.append(f"High background ({background_ratio*100:.0f}%)")
+                issues.append(f"High background ({background_ratio * 100:.0f}%)")
 
         # 4. Distribution quality
         distribution_quality = self._assess_distribution(intensities)
@@ -199,11 +199,11 @@ class MarkerQC:
                 expected_low, expected_high = expected
                 if observed < expected_low * (1 - self.positive_rate_tolerance):
                     issues.append(
-                        f"Lower than expected positive rate ({observed*100:.1f}% < {expected_low*100:.0f}%)"
+                        f"Lower than expected positive rate ({observed * 100:.1f}% < {expected_low * 100:.0f}%)"
                     )
                 elif observed > expected_high * (1 + self.positive_rate_tolerance):
                     issues.append(
-                        f"Higher than expected positive rate ({observed*100:.1f}% > {expected_high*100:.0f}%)"
+                        f"Higher than expected positive rate ({observed * 100:.1f}% > {expected_high * 100:.0f}%)"
                     )
             else:
                 metrics["expected_positive_rate"] = expected
