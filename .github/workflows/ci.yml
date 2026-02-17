@@ -25,32 +25,21 @@ jobs:
 
       - name: Install linting tools
         run: |
-          pip install "ruff>=0.9.0,<1.0" "black==26.1.0" "pytokens==0.4.1"
+          pip install "ruff>=0.9.0,<1.0" "black==26.1.0"
           echo "--- Tool versions ---"
           python --version
           black --version
           ruff version
-          pip show pytokens | grep Version
-          pip freeze | sort
 
       - name: Run ruff
         run: ruff check src/ tests/
 
       - name: Check formatting with black
         run: |
-          black --verbose src/ tests/ 2>&1 | grep -E "^(would reformat|reformatted|error)" || true
-          black src/ tests/
-          if git diff --quiet; then
-            echo "All files formatted correctly."
-          else
-            echo "::error::Files would be reformatted by black."
-            echo "### Black formatting diff" >> $GITHUB_STEP_SUMMARY
-            echo '```diff' >> $GITHUB_STEP_SUMMARY
-            git diff >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            git diff
-            exit 1
-          fi
+          echo "Working directory: $(pwd)"
+          echo "Config file:"
+          ls -la pyproject.toml
+          black --check --diff --config pyproject.toml src/ tests/
 
   test:
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
