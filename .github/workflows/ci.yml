@@ -25,15 +25,25 @@ jobs:
 
       - name: Install linting tools
         run: |
-          pip install ruff "black==26.1.0"
+          pip install "ruff>=0.9.0,<1.0" "black==26.1.0"
+          echo "--- Tool versions ---"
+          python --version
           black --version
-          ruff --version
+          ruff version
 
       - name: Run ruff
         run: ruff check src/ tests/
 
       - name: Check formatting with black
-        run: black --check --diff src/ tests/
+        run: |
+          black src/ tests/
+          if git diff --quiet; then
+            echo "All files formatted correctly."
+          else
+            echo "::error::Files would be reformatted by black. See diff below:"
+            git diff
+            exit 1
+          fi
 
   test:
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
