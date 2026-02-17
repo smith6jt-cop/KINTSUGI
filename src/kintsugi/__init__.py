@@ -43,6 +43,7 @@ _SUBMODULE_MAPPING = {
     "kronos": "kronos",
     "vessel3d": "vessel3d",
     "vessel3d_viz": "vessel3d_viz",
+    "spillover": "spillover",
 }
 
 
@@ -162,4 +163,6 @@ __all__ = [
     # 3D vessel segmentation
     "vessel3d",
     "vessel3d_viz",
+    # Spillover correction
+    "spillover",
 ]

@@ -413,6 +413,43 @@ rule registration:
 
 
 # ===========================================================================
+# Rule 5: Spillover Correction (REDSEA) — optional post-segmentation
+# ===========================================================================
+# CPU-only job. Requires a multichannel image and cell segmentation mask.
+# Produces corrected/uncorrected per-cell quantification CSVs.
+# This rule is NOT part of the default 'all' target — invoke explicitly:
+#   snakemake spillover_correction --profile profiles/slurm
+#
+# Reference: Bai et al., Front. Immunol. 12:652631 (2021)
+
+REDSEA_CFG = config.get("redsea", {})
+
+rule spillover_correction:
+    input:
+        image=f"{PROJECT}/data/processed/signal_isolated/{{sample}}.ome.tif",
+        mask=f"{PROJECT}/data/processed/segmented/{{sample}}_cellMask.tif",
+        markers=f"{PROJECT}/meta/markers.csv",
+    output:
+        corrected=f"{PROJECT}/data/processed/spillover_corrected/{{sample}}_corrected.csv",
+        uncorrected=f"{PROJECT}/data/processed/spillover_corrected/{{sample}}_uncorrected.csv",
+        sentinel=f"{PROJECT}/data/processed/spillover_corrected/.{{sample}}_spillover.complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+    resources:
+        mem_mb=65536,
+        runtime=120,
+        slurm_partition=_REG_ASSIGN["partition"],
+        slurm_account=_REG_ASSIGN["account"],
+        gres="",
+        cpus_per_task=8,
+    log:
+        f"{PROJECT}/slurm/logs/snakemake/spillover_{{sample}}.log",
+    script:
+        "scripts/spillover_correction.py"
+
+
+# ===========================================================================
 # QC Report Rules (aggregate — one per stage, all cycles)
 # ===========================================================================
 # Each QC rule runs AFTER all cycles for its stage complete.
