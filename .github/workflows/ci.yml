@@ -36,10 +36,20 @@ jobs:
 
       - name: Check formatting with black
         run: |
-          echo "Working directory: $(pwd)"
-          echo "Config file:"
-          ls -la pyproject.toml
-          black --check --diff --config pyproject.toml src/ tests/
+          set +e
+          black --check --diff --verbose --config pyproject.toml src/ tests/ > /tmp/black-output.txt 2>&1
+          BLACK_EXIT=$?
+          echo "### Black output" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          head -50 /tmp/black-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '...' >> $GITHUB_STEP_SUMMARY
+          grep -E "^(would reformat|---|\+\+\+|@@|error|Oh no)" /tmp/black-output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          if [ $BLACK_EXIT -ne 0 ]; then
+            echo "::error::Black check failed (exit $BLACK_EXIT)"
+            tail -30 /tmp/black-output.txt
+            exit 1
+          fi
 
   test:
     name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
