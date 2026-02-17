@@ -156,8 +156,7 @@ class TestWorkflowConfig:
         res = cfg["resources"]
         # Should have standard resource keys (memory, time limits, etc.)
         assert any(
-            key in res
-            for key in ["accounts", "total_slots", "mem_stitch", "mem_decon", "mem_edf"]
+            key in res for key in ["accounts", "total_slots", "mem_stitch", "mem_decon", "mem_edf"]
         )
 
     def test_config_print_only(self, runner, project_dir):
