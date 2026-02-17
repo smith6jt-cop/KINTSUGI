@@ -134,7 +134,7 @@ class CAREDenoiser:
         """
         if model_name not in PRETRAINED_MODELS:
             raise ValueError(
-                f"Unknown model: {model_name}. " f"Available: {list(PRETRAINED_MODELS.keys())}"
+                f"Unknown model: {model_name}. Available: {list(PRETRAINED_MODELS.keys())}"
             )
 
         model_info = PRETRAINED_MODELS[model_name]
@@ -186,7 +186,7 @@ class CAREDenoiser:
 
         except ImportError:
             raise ImportError(
-                "PyTorch is required for CARE denoising. " "Install with: pip install torch"
+                "PyTorch is required for CARE denoising. Install with: pip install torch"
             )
 
     def _build_model(self, n_channels: int = 1):

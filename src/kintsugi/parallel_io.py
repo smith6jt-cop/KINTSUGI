@@ -259,7 +259,9 @@ class ChannelProcessor:
         self.use_gpu_basic = use_gpu_basic
         self.preload_tiles = preload_tiles
         self.tile_loader = TileLoader(
-            use_mmap=True, cache_size=0, n_workers=4  # Don't cache between z-planes
+            use_mmap=True,
+            cache_size=0,
+            n_workers=4,  # Don't cache between z-planes
         )
 
     def process_zplane(

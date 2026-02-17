@@ -242,20 +242,24 @@ def get_user_slurm_accounts() -> list[str]:
     try:
         result = subprocess.run(
             [
-                "sacctmgr", "show", "associations",
+                "sacctmgr",
+                "show",
+                "associations",
                 f"user={os.environ.get('USER', '')}",
-                "format=account", "-n", "-P",
+                "format=account",
+                "-n",
+                "-P",
             ],
             capture_output=True,
             text=True,
             timeout=10,
         )
         if result.returncode == 0:
-            accounts = list(dict.fromkeys(
-                line.strip()
-                for line in result.stdout.strip().split("\n")
-                if line.strip()
-            ))
+            accounts = list(
+                dict.fromkeys(
+                    line.strip() for line in result.stdout.strip().split("\n") if line.strip()
+                )
+            )
             return _filter_blocked(accounts)
     except (subprocess.SubprocessError, FileNotFoundError, OSError):
         pass
@@ -402,13 +406,13 @@ def detect_current_usage(account: str) -> dict[str, int]:
                 # Match investment line: "Investment (maigan):     4       32     0        0     4       32"
                 m = re.match(
                     rf"\s*Investment\s+\({re.escape(account)}\):"
-                    r"\s+(\d+)\s+(\d+)"   # running: cpu, mem
-                    r"\s+(\d+)\s+(\d+)"   # pending: cpu, mem
+                    r"\s+(\d+)\s+(\d+)"  # running: cpu, mem
+                    r"\s+(\d+)\s+(\d+)"  # pending: cpu, mem
                     r"\s+(\d+)\s+(\d+)",  # total:   cpu, mem
                     line,
                 )
                 if m:
-                    usage["cpus"] = int(m.group(5))   # total CPUs
+                    usage["cpus"] = int(m.group(5))  # total CPUs
                     usage["mem_gb"] = int(m.group(6))  # total MEM(GB)
                     break
             # slurmInfo doesn't show GPU usage per account, estimate from squeue
@@ -488,7 +492,9 @@ def _count_gpu_usage_squeue(account: str) -> int:
         return 0
 
 
-def _compute_slots(alloc: dict, usage: dict, cpus_per_job: int, mem_per_job: int, has_gpus: bool) -> int:
+def _compute_slots(
+    alloc: dict, usage: dict, cpus_per_job: int, mem_per_job: int, has_gpus: bool
+) -> int:
     """Compute available job slots from allocation minus current usage."""
     avail_cpus = max(0, alloc["cpus"] - usage["cpus"])
     avail_mem = max(0, alloc["mem_gb"] - usage["mem_gb"])
@@ -559,10 +565,16 @@ def detect_dual_pool_resources(
 
     gpu_alloc = detect_account_resources(gpu_account)
     has_cpu_pool = cpu_account and cpu_account != gpu_account
-    cpu_alloc = detect_account_resources(cpu_account) if has_cpu_pool else {"cpus": 0, "gpus": 0, "mem_gb": 0}
+    cpu_alloc = (
+        detect_account_resources(cpu_account)
+        if has_cpu_pool
+        else {"cpus": 0, "gpus": 0, "mem_gb": 0}
+    )
 
     gpu_usage = detect_current_usage(gpu_account)
-    cpu_usage = detect_current_usage(cpu_account) if has_cpu_pool else {"cpus": 0, "gpus": 0, "mem_gb": 0}
+    cpu_usage = (
+        detect_current_usage(cpu_account) if has_cpu_pool else {"cpus": 0, "gpus": 0, "mem_gb": 0}
+    )
 
     zero_usage = {"cpus": 0, "gpus": 0, "mem_gb": 0}
 
@@ -572,7 +584,9 @@ def detect_dual_pool_resources(
 
     # Available slots (allocation minus current usage)
     gpu_slots_avail = _compute_slots(gpu_alloc, gpu_usage, cpus_per_gpu, mem_per_gpu, has_gpus=True)
-    cpu_slots_avail = _compute_slots(cpu_alloc, cpu_usage, cpus_per_cpu, mem_per_cpu, has_gpus=False)
+    cpu_slots_avail = _compute_slots(
+        cpu_alloc, cpu_usage, cpus_per_cpu, mem_per_cpu, has_gpus=False
+    )
 
     return {
         "gpu_slots": gpu_slots_max,
@@ -649,14 +663,16 @@ def detect_multi_account_resources(
         gpu_slots = alloc["gpus"]
         cpu_slots = math.floor(util_cap * alloc["cpus"] / cpus_per_cpu) if cpus_per_cpu > 0 else 0
 
-        account_details.append({
-            "name": acct_name,
-            "gpu_slots": gpu_slots,
-            "cpu_slots": cpu_slots,
-            "partition_gpu": partition_gpu,
-            "partition_cpu": partition_cpu,
-            "alloc": alloc,
-        })
+        account_details.append(
+            {
+                "name": acct_name,
+                "gpu_slots": gpu_slots,
+                "cpu_slots": cpu_slots,
+                "partition_gpu": partition_gpu,
+                "partition_cpu": partition_cpu,
+                "alloc": alloc,
+            }
+        )
         total_gpu += gpu_slots
         total_cpu += cpu_slots
 
@@ -730,17 +746,19 @@ def detect_live_multi_account(
         cpu_avail_by_mem = avail_mem // mem_per_cpu if mem_per_cpu > 0 else cpu_avail_by_cpus
         cpu_avail = min(cpu_avail_by_cpus, cpu_avail_by_mem)
 
-        account_details.append({
-            "name": acct_name,
-            "gpu_slots": gpu_slots,
-            "cpu_slots": cpu_slots,
-            "gpu_avail": gpu_avail,
-            "cpu_avail": cpu_avail,
-            "partition_gpu": partition_gpu,
-            "partition_cpu": partition_cpu,
-            "alloc": alloc,
-            "usage": usage,
-        })
+        account_details.append(
+            {
+                "name": acct_name,
+                "gpu_slots": gpu_slots,
+                "cpu_slots": cpu_slots,
+                "gpu_avail": gpu_avail,
+                "cpu_avail": cpu_avail,
+                "partition_gpu": partition_gpu,
+                "partition_cpu": partition_cpu,
+                "alloc": alloc,
+                "usage": usage,
+            }
+        )
         total_gpu += gpu_slots
         total_cpu += cpu_slots
         total_gpu_avail += gpu_avail

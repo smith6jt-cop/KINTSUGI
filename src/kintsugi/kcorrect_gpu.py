@@ -731,7 +731,7 @@ def check_gpu() -> tuple[bool, str]:
 
         device = cp.cuda.Device()
         mem = device.mem_info
-        return True, f"GPU available: Device {device.id} with {mem[1]/1e9:.1f} GB"
+        return True, f"GPU available: Device {device.id} with {mem[1] / 1e9:.1f} GB"
     except Exception as e:
         return False, f"GPU error: {e}"
 

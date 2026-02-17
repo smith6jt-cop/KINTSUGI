@@ -108,7 +108,7 @@ class N2VDenoiser:
 
         except ImportError:
             raise ImportError(
-                "PyTorch is required for N2V denoising. " "Install with: pip install torch"
+                "PyTorch is required for N2V denoising. Install with: pip install torch"
             )
 
     def _build_model(self, n_channels: int = 1):

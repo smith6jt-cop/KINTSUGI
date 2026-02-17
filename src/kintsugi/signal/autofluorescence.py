@@ -819,9 +819,7 @@ def _compute_range_weight(
             std_b = float(np.std(blank_region))
             if std_s > 1e-6 and std_b > 1e-6:
                 corr = float(
-                    np.mean(
-                        (signal_region - signal_mean) * (blank_region - blank_mean)
-                    )
+                    np.mean((signal_region - signal_mean) * (blank_region - blank_mean))
                     / (std_s * std_b)
                 )
                 corr = max(-1, min(1, corr))
@@ -1136,7 +1134,7 @@ def compute_weighted_subtraction_quality(
 
         # SNR in range
         noise = float(np.std(sub_r[sub_r < np.percentile(sub_r, 50)])) if np.any(sub_r > 0) else 1
-        signal_top = float(np.mean(np.sort(sub_r)[-max(1, int(len(sub_r) * 0.1)):]))
+        signal_top = float(np.mean(np.sort(sub_r)[-max(1, int(len(sub_r) * 0.1)) :]))
         snr = signal_top / max(noise, 1)
 
         # AF removal in range

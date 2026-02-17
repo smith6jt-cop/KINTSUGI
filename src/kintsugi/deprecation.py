@@ -44,9 +44,9 @@ def deprecated_notebook(
         def wrapper(*args, **kwargs):
             message = (
                 f"\n"
-                f"{'='*60}\n"
+                f"{'=' * 60}\n"
                 f"DEPRECATION NOTICE: {notebook_name}\n"
-                f"{'='*60}\n"
+                f"{'=' * 60}\n"
                 f"\n"
                 f"This notebook/functionality is deprecated and will be removed\n"
                 f"in KINTSUGI version {version}.\n"
@@ -61,7 +61,7 @@ def deprecated_notebook(
                 f"For migration guidance, see:\n"
                 f"  - KINTSUGI documentation\n"
                 f"  - notebooks/MIGRATION_GUIDE.md\n"
-                f"{'='*60}\n"
+                f"{'=' * 60}\n"
             )
 
             warnings.warn(message, KintsugiDeprecationWarning, stacklevel=2)

@@ -157,7 +157,7 @@ class KronosModel:
         return self._model is not None
 
     @property
-    def precision(self) -> "torch.dtype | None":
+    def precision(self) -> torch.dtype | None:
         return self._precision
 
     @property
@@ -165,7 +165,7 @@ class KronosModel:
         return self._embedding_dim
 
     @property
-    def device(self) -> "torch.device":
+    def device(self) -> torch.device:
         if self._device is None:
             import torch
 
@@ -231,12 +231,12 @@ class KronosModel:
 
     def forward(
         self,
-        batch: "torch.Tensor",
-        mean: "torch.Tensor",
-        std: "torch.Tensor",
-        marker_ids: "torch.Tensor | None" = None,
+        batch: torch.Tensor,
+        mean: torch.Tensor,
+        std: torch.Tensor,
+        marker_ids: torch.Tensor | None = None,
         is_raw_16bit: bool = True,
-    ) -> tuple["torch.Tensor", "torch.Tensor", "torch.Tensor"]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Run inference on a batch.
 
         Applies two-step normalization:
@@ -288,9 +288,7 @@ class KronosModel:
 
         with torch.no_grad():
             if batch_marker_ids is not None:
-                patch_emb, marker_emb, token_emb = self._model(
-                    batch, marker_ids=batch_marker_ids
-                )
+                patch_emb, marker_emb, token_emb = self._model(batch, marker_ids=batch_marker_ids)
             else:
                 patch_emb, marker_emb, token_emb = self._model(batch)
 
@@ -298,10 +296,10 @@ class KronosModel:
 
     def embed_batched(
         self,
-        patches: "torch.Tensor",
-        mean: "torch.Tensor",
-        std: "torch.Tensor",
-        marker_ids: "torch.Tensor | None" = None,
+        patches: torch.Tensor,
+        mean: torch.Tensor,
+        std: torch.Tensor,
+        marker_ids: torch.Tensor | None = None,
         batch_size: int | None = None,
         is_raw_16bit: bool = True,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -327,7 +325,6 @@ class KronosModel:
         tuple of np.ndarray
             (patch_embeddings, marker_embeddings, token_embeddings)
         """
-        import torch
 
         bs = batch_size or self.config.batch_size
         n_patches = patches.shape[0]
@@ -339,7 +336,9 @@ class KronosModel:
         for i in range(0, n_patches, bs):
             batch = patches[i : i + bs]
             p_emb, m_emb, t_emb = self.forward(
-                batch, mean, std,
+                batch,
+                mean,
+                std,
                 marker_ids=marker_ids,
                 is_raw_16bit=is_raw_16bit,
             )

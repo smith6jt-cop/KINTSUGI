@@ -41,6 +41,8 @@ _SUBMODULE_MAPPING = {
     "gpu": "gpu",
     "rapids": "rapids",
     "kronos": "kronos",
+    "vessel3d": "vessel3d",
+    "vessel3d_viz": "vessel3d_viz",
 }
 
 
@@ -157,4 +159,7 @@ __all__ = [
     "rapids",
     # Foundation model integration
     "kronos",
+    # 3D vessel segmentation
+    "vessel3d",
+    "vessel3d_viz",
 ]
