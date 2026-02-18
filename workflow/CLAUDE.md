@@ -188,6 +188,25 @@ Key design decisions:
 - **`imgs_ordered=True`**: Prevents VALIS from reordering cycles by feature similarity. CODEX cycles must stay in sequential acquisition order.
 - **`align_to_reference=True`**: All cycles align directly to cycle 1, preventing error accumulation from serial chain alignment (cyc N → cyc N-1 → ... → cyc 1)
 
+**Dimension Normalization** (added Feb 2026):
+
+EDF images can have inconsistent dimensions across cycles (e.g., 7472x12662 vs 7479x12660) due to minor stitching variations. VALIS requires all input images to have identical dimensions — mismatched sizes cause registration failures or silent misalignment.
+
+- `normalize_dimensions: true` in config triggers automatic padding of all input images to `(max_h, max_w)` across all cycles
+- Images are padded (not cropped) to preserve all tissue content, using zero-fill on the right/bottom edges
+- Padded images are written to a temporary staging directory: `kintsugi_reg_staging_XXXXXXXX` (8-character random suffix)
+- The staging directory is automatically cleaned up after registration completes (success or failure)
+- This is the default behavior (`registration.normalize_dimensions: true`); set to `false` only if all input images are guaranteed to have identical dimensions
+- The staging directory is created alongside the EDF output directory, not inside it, to avoid polluting the processed data tree
+
+**Validated Registration Results** (Feb 2026):
+
+| Dataset | Cycles | Runtime | Non-rigid improvement | Mean D (rigid → non-rigid) |
+|---------|--------|---------|----------------------|---------------------------|
+| CX_19-001_SP_CC2-A28 | 13 | 67.9 min | 11/12 cycles improved | 1.12 → 0.77 |
+
+This confirms the params unpacking bug fix (`serial_non_rigid.py:438`, `params=init_kwargs` → `**init_kwargs`) was the root cause of previously poor non-rigid registration quality. The earlier "rigid-only is best" conclusion (11/12 datasets worse with non-rigid) was based on broken code where all smoothing parameters were silently ignored.
+
 **Registration config** (`workflow/config.yaml`):
 ```yaml
 registration:
@@ -198,6 +217,7 @@ registration:
   feature_detector: "VggFD"   # "VggFD" (GPU, better) or "OrbFD" (CPU-only)
   imgs_ordered: true          # Keep sequential cycle order (don't reorder by similarity)
   align_to_reference: true    # All cycles align directly to reference (not serial chain)
+  normalize_dimensions: true  # Pad images to uniform (max_h, max_w) via temp staging dir
   non_rigid:
     max_dim: 4096             # Displacement field resolution for register_micro() only
     smoothing_method: "gauss" # Only "gauss" and None work ("inpaint"/"regularize" are broken)
@@ -218,6 +238,15 @@ resources:
 - If **under-correcting** (still misaligned): increase `max_dim` to 8192 or decrease `sigma_ratio` to 0.005
 - If **over-warping** (tissue distorted): increase `sigma_ratio` to 0.02 (82px at 4096)
 - Do NOT use `smoothing_method: "regularize"` — it's broken in VALIS
+
+**Stale Snakemake Coordinators** (operational hazard):
+
+When a Snakemake coordinator process is running in the background (e.g., inside tmux) and it detects a cancelled SLURM job, it may automatically resubmit the failed rule. This can create duplicate registration jobs writing to the same output directory, leading to corrupted results or race conditions.
+
+- **Before manual resubmission**: Always check `squeue -u $USER` for duplicate jobs targeting the same dataset
+- **Kill stale coordinators**: Before re-running `snakemake --profile profiles/slurm`, ensure no previous Snakemake process is still alive (`ps aux | grep snakemake`)
+- **Symptom**: Multiple SLURM jobs with the same name (e.g., two `registration` jobs for the same project) running simultaneously
+- **Prevention**: Use `tmux` to manage Snakemake sessions and explicitly cancel (`Ctrl-C`) before restarting
 
 **Per-channel skip-existing**: Wrapper scripts (`stitch.py`, `deconvolve.py`, `edf.py`) check per-channel completion inside jobs to resume interrupted cycles. Sentinel files include `skipped=N` in logs. Dynamic worker counts read from `snakemake.resources.cpus_per_task`.
 

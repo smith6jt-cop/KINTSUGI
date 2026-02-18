@@ -139,6 +139,8 @@ Notebooks default to mini_project for testing. Change `PROJECT_DIR` for other pr
 
 **Always edit `KINTSUGI/notebooks/` first** — never edit project folders directly. A git post-commit hook auto-syncs notebook modules and Python files to all project folders via `scripts/sync_to_projects.py` (MD5 checksum comparison). Manual sync: `python scripts/sync_to_projects.py [--dry-run|--force]`.
 
+**Auto-discovery**: `sync_to_projects.py` auto-discovers project folders by globbing `KINTSUGI_Projects/*/notebooks`. No manual updates to `DEFAULT_PROJECT_FOLDERS` are needed when new batch projects are added.
+
 ### Adding MCP Support to Existing Projects
 
 If you're not using `kintsugi init`, or need to add MCP support to an existing project, run:
@@ -380,7 +382,11 @@ registration:
     sigma_ratio: 0.01         # sigma = 0.01 * 4096 = ~41px. Default in OpticalFlowWarper is 0.005 (20px)
     n_grid_pts: 50            # No-op with "gauss" (only used by broken "regularize"/"inpaint")
     fold_penalty: 1.0e-6      # No-op with "gauss" (only used by broken "regularize")
+    normalize_dimensions: true # Normalize anisotropic images to square aspect ratio for uniform flow
 ```
+
+**Validated Results**:
+- **CX_19-001_SP_CC2-A28** (Feb 18, 2026): 13 cycles, 4 channels/cycle, 52 TIFFs warped in 67.9 min. Non-rigid improves on rigid for 11/12 cycles (mean rigid D=1.12, mean NR D=0.77). Only cyc02 slightly worse (NR 1.27 vs rigid 1.16) — typical for adjacent-to-reference cycle where rigid is already near-optimal. Confirms the params unpacking fix (bug #1 above) was the ROOT CAUSE of the earlier "rigid-only is best" conclusion across all 47 datasets.
 
 **Key files:** `workflow/scripts/registration.py` (wrapper), `notebooks/Kreg/registration.py` (VALIS Valis class, line 1771 for dimension defaults), `notebooks/Kreg/serial_non_rigid.py` (line 438, params bug), `notebooks/Kreg/non_rigid_registrars.py` (OpticalFlowWarper)
 
