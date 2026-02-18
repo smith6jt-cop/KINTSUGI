@@ -93,11 +93,18 @@ quality_gate:
 registration:
   reference_cycle: 1          # Cycle used as fixed reference
   reference_channel: 1        # Channel for feature detection (usually DAPI)
-  max_image_dim: 2048         # Max dimension for registration computation
-  rigid_only: true            # Non-rigid degrades CODEX data (tested 12 datasets)
+  max_image_dim: 4096         # Rigid feature detection resolution
+  rigid_only: false           # Non-rigid enabled with tuned smoothing
   feature_detector: "VggFD"   # "VggFD" (GPU, better) or "OrbFD" (CPU-only)
   imgs_ordered: true          # Keep sequential cycle order (don't reorder by similarity)
   align_to_reference: true    # All cycles align directly to reference (not serial)
+  normalize_dimensions: true  # Pad images to uniform (max_h, max_w) for VALIS
+  non_rigid:
+    max_dim: 4096             # Displacement field resolution for register_micro()
+    smoothing_method: "gauss" # Only "gauss" and None work
+    sigma_ratio: 0.01         # sigma = 0.01 * 4096 = ~41px
+    n_grid_pts: 50            # No-op with "gauss"
+    fold_penalty: 1.0e-6      # No-op with "gauss"
 
 # ---------------------------------------------------------------------------
 # SLURM resource defaults (dual-pool architecture)
@@ -144,3 +151,15 @@ redsea:
   element_shape: "star"          # "star" (diamond, recommended) or "square"
   element_size: 0                # 0 = auto-estimate from cell size (2-4 typical)
   markers_of_interest: []        # Empty = auto-detect surface markers
+
+# ---------------------------------------------------------------------------
+# 3D Vessel Segmentation (Frangi + skeleton) - standalone
+# ---------------------------------------------------------------------------
+# Segments blood/lymphatic vessels from deconvolved 3D z-stacks.
+# Invoke explicitly: snakemake vessel3d --profile profiles/slurm --config vessel_cycle=3
+vessel3d:
+  channel: 2              # Channel index (1-based) for vessel marker
+  marker: "CD31"          # Marker name for output filenames
+  sigmas: [1, 2, 4, 8]   # Frangi scale space (microns)
+  min_size: 500           # Min object volume (voxels)
+  prune_min_um: 5.0       # Min branch length before pruning (microns)

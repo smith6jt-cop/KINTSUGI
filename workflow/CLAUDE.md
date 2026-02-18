@@ -180,7 +180,7 @@ Key design decisions:
 - **No `{cycle}` wildcard**: Registration is a single job, not per-cycle. Uses static `_REG_ASSIGN` dict instead of `_assign(wc)` lambdas
 - **`_registration_assignment()`**: Prefers first account with `gpu_slots > 0` for VggFD; falls back to CPU with OrbFD
 - **Single-cycle handling**: If `len(CYCLES) < 2`, copies EDF → registered without alignment (no VALIS needed)
-- **Error fallback**: On VALIS failure, copies EDF images unchanged (matches notebook behavior)
+- **Error handling**: On VALIS failure, raises the exception (fails loudly). No fallback copy of EDF images — silent failures mask registration problems
 - **Skip-existing**: All-or-nothing — checks if ALL registered files exist for ALL cycles before skipping
 - **Slide matching**: Builds `cycle_to_slide_name` dict from DAPI filenames for robust `slide_dict` lookup
 - **Non-rigid architecture** (Feb 2026): Three bugs were fixed: (1) `serial_non_rigid.py:438` passed `params=init_kwargs` instead of `**init_kwargs` — all smoothing params silently ignored, (2) coarse NR at 1024px poisoned alignment — `max_non_rigid_registration_dim_px` defaults to `DEFAULT_MAX_PROCESSED_IMG_SIZE = 1024`, not `DEFAULT_MAX_NON_RIGID_REG_SIZE = 3000`, (3) Valis init didn't pass `non_rigid_registrar_cls`. Current approach: coarse NR is **disabled** (`non_rigid_registrar_cls=None` explicit in Valis init), non-rigid runs exclusively via `register_micro()` at 4096px with tuned smoothing. `register_micro()` handles `None` bk_dxdy (no prior coarse NR) by creating zero displacement fields. The earlier "rigid-only is best" conclusion (11/12 datasets worse) was based on broken non-rigid code — the skill has been updated.
@@ -204,6 +204,11 @@ EDF images can have inconsistent dimensions across cycles (e.g., 7472x12662 vs 7
 | Dataset | Cycles | Runtime | Non-rigid improvement | Mean D (rigid → non-rigid) |
 |---------|--------|---------|----------------------|---------------------------|
 | CX_19-001_SP_CC2-A28 | 13 | 67.9 min | 11/12 cycles improved | 1.12 → 0.77 |
+| CX_19-002_lymph-node_R1 | 9 | 29.5 min | improved | — |
+| CX_19-002_lymph-node_R3 | 9 | 27.6 min | improved | — |
+| CX_19-003_lymph-node_R1 | 9 | 40.8 min | improved | — |
+
+Batch re-registration in progress: 4/16 datasets complete (as of Feb 2026).
 
 This confirms the params unpacking bug fix (`serial_non_rigid.py:438`, `params=init_kwargs` → `**init_kwargs`) was the root cause of previously poor non-rigid registration quality. The earlier "rigid-only is best" conclusion (11/12 datasets worse with non-rigid) was based on broken code where all smoothing parameters were silently ignored.
 
@@ -247,6 +252,18 @@ When a Snakemake coordinator process is running in the background (e.g., inside 
 - **Kill stale coordinators**: Before re-running `snakemake --profile profiles/slurm`, ensure no previous Snakemake process is still alive (`ps aux | grep snakemake`)
 - **Symptom**: Multiple SLURM jobs with the same name (e.g., two `registration` jobs for the same project) running simultaneously
 - **Prevention**: Use `tmux` to manage Snakemake sessions and explicitly cancel (`Ctrl-C`) before restarting
+
+**Batch Re-Registration** (`/blue/maigan/smith6jt/reregister_all.sh`):
+
+Wave-based parallel execution across multi-account GPU pool:
+- Waves of 5 projects (3 clive GPUs + 2 maigan GPUs), wait for wave completion before next
+- Account distribution: reorders `resources.accounts` list in each project's `config.yaml` so `_registration_assignment()` picks the target account
+- Targets only `registered/.snakemake_complete` + `qc_plots/.snakemake_complete_registration` — avoids GPU QC rules (qc_stitch/qc_decon/qc_edf) that would compete for GPU slots
+- Idempotent: skips projects with `non_rigid_smoothing=gauss` in registration sentinel
+- Phase 1: updates config, copies scripts/Snakefile, cleans old data + staging dirs + stale locks
+- Phase 2: launches snakemake per project as background processes, waits per wave
+
+**Race condition hazard**: If old SLURM registration jobs (from killed coordinators) are still running when Phase 1 cleans data, they can write back stale results. Cancel old jobs before relaunching.
 
 **Per-channel skip-existing**: Wrapper scripts (`stitch.py`, `deconvolve.py`, `edf.py`) check per-channel completion inside jobs to resume interrupted cycles. Sentinel files include `skipped=N` in logs. Dynamic worker counts read from `snakemake.resources.cpus_per_task`.
 

@@ -499,33 +499,9 @@ except Exception as e:
             shutil.rmtree(staging_dir)
             print(f"  Cleaned up staging directory: {staging_dir}")
 
-    # Fallback: copy EDF images without transformation
-    print("\nFalling back to copying EDF images without transformation...")
-    n_copied = 0
-    for cyc in CYCLES:
-        cycle_edf = EDF_DIR / cyc_fmt(cyc)
-        cycle_reg = REGISTERED_DIR / cyc_fmt(cyc)
-        cycle_reg.mkdir(parents=True, exist_ok=True)
-        for channel_file in cycle_edf.glob("*.tif"):
-            shutil.copy2(channel_file, cycle_reg / channel_file.name)
-            n_copied += 1
-        print(f"  {cyc_fmt(cyc)}: copied {len(list(cycle_edf.glob('*.tif')))} files")
-
+    # Fail loudly — no fallback copy of EDF images
     elapsed = (time.time() - start_time) / 60
-    summary_after("registration", PROJECT_DIR, elapsed * 60, exit_code=0)
-
-    # Still write sentinel (fallback completed successfully)
-    sentinel = Path(snakemake.output.sentinel)
-    sentinel.parent.mkdir(parents=True, exist_ok=True)
-    sentinel.write_text(
-        f"stage=registration\n"
-        f"completed={datetime.now().isoformat()}\n"
-        f"cycles={len(CYCLES)}\n"
-        f"method=fallback_copy\n"
-        f"error={str(e)}\n"
-        f"copied={n_copied}\n"
-        f"duration_minutes={elapsed:.1f}\n"
-    )
-    print(f"Sentinel written (fallback): {sentinel}")
-    log_footer(0)
+    summary_after("registration", PROJECT_DIR, elapsed * 60, exit_code=1)
+    log_footer(1)
+    raise
 

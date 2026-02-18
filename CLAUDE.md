@@ -385,16 +385,30 @@ registration:
     normalize_dimensions: true # Normalize anisotropic images to square aspect ratio for uniform flow
 ```
 
-**Validated Results**:
-- **CX_19-001_SP_CC2-A28** (Feb 18, 2026): 13 cycles, 4 channels/cycle, 52 TIFFs warped in 67.9 min. Non-rigid improves on rigid for 11/12 cycles (mean rigid D=1.12, mean NR D=0.77). Only cyc02 slightly worse (NR 1.27 vs rigid 1.16) — typical for adjacent-to-reference cycle where rigid is already near-optimal. Confirms the params unpacking fix (bug #1 above) was the ROOT CAUSE of the earlier "rigid-only is best" conclusion across all 47 datasets.
+**Validated Results** (batch re-registration in progress, 4/16 completed):
+
+| Dataset | Cycles | TIFFs Warped | Time (min) |
+|---------|--------|-------------|------------|
+| CX_19-001_SP_CC2-A28 | 13 | 52 | 67.9 |
+| CX_19-002_lymph-node_R1 | 9 | 36 | 29.5 |
+| CX_19-002_lymph-node_R3 | 9 | 36 | 27.6 |
+| CX_19-003_lymph-node_R1 | 9 | 36 | 40.8 |
+
+Non-rigid improves on rigid for the vast majority of cycles. Confirms the params unpacking fix (bug #1 above) was the ROOT CAUSE of the earlier "rigid-only is best" conclusion across all 47 datasets.
 
 **Key files:** `workflow/scripts/registration.py` (wrapper), `notebooks/Kreg/registration.py` (VALIS Valis class, line 1771 for dimension defaults), `notebooks/Kreg/serial_non_rigid.py` (line 438, params bug), `notebooks/Kreg/non_rigid_registrars.py` (OpticalFlowWarper)
 
 **Registration QC**: Green/magenta DAPI overlay at **full resolution** (1000x1000 crop) — whole-image thumbnails are too zoomed out to evaluate nuclei overlap. White/gray = aligned, color fringing = misaligned. **Average metrics are meaningless** — poor registration is localized; use spatial NCC heatmaps or targeted overlays.
 
+**Error handling**: Registration failures now raise loudly (no silent fallback copy of EDF images). The old fallback_copy behavior was removed because it masked registration problems.
+
 **VALIS metrics**: `D` values are at processing resolution, not original. Use `rTRE = D / max(processed_shape)` for cross-experiment comparison at different `max_image_dim` settings.
 
-**Batch re-registration**: Remove sentinel + `registration_data/` + `cyc*/` under `registered/`, update config, re-run Snakemake. Script: `/blue/maigan/smith6jt/reregister_all.sh`. All 47 batch-processed datasets may need re-registration once optimal non-rigid parameters are determined.
+**Batch re-registration**: Remove sentinel + `registration_data/` + `cyc*/` under `registered/`, update config, re-run Snakemake. Script: `/blue/maigan/smith6jt/reregister_all.sh`. Key features:
+- Wave-based parallel execution: 5 projects per wave (3 clive + 2 maigan GPUs)
+- Targets only registration + qc_registration (CPU-only) to avoid GPU QC contention
+- Account distribution via config.yaml reordering (controls `_registration_assignment()`)
+- Idempotent: skips projects with `non_rigid_smoothing=gauss` in sentinel
 
 **Tuning guide** (`sigma_pixels = sigma_ratio * max_dim`): Over-smoothing → decrease `sigma_ratio` to 0.005 (20px at 4096). Under-correcting → increase `max_dim` to 8192. Over-warping → increase `sigma_ratio` to 0.02 (82px at 4096). Do NOT use `smoothing_method: "regularize"` — it's broken.
 

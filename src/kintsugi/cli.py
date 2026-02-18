@@ -1039,6 +1039,20 @@ def workflow_config(project_dir: str, print_only: bool):
             "max_sat_pct": 0.05,
             "min_valid_slices": 3,
         },
+        # Spillover correction (REDSEA)
+        "redsea": {
+            "element_shape": "star",
+            "element_size": 0,
+            "markers_of_interest": [],
+        },
+        # 3D Vessel Segmentation
+        "vessel3d": {
+            "channel": 2,
+            "marker": "CD31",
+            "sigmas": [1, 2, 4, 8],
+            "min_size": 500,
+            "prune_min_um": 5.0,
+        },
         # SLURM resources
         "resources": {
             "accounts": [
@@ -1615,6 +1629,172 @@ def export_status(project_dir: str):
 
     if status.get("geojson_regions"):
         console.print(f"  GeoJSON regions: {status['geojson_regions']}")
+
+
+# ============================================================================
+# Vessel 3D Segmentation Command
+# ============================================================================
+
+
+@workflow.command("vessel3d")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--cycle", type=int, required=True, help="Cycle number with vessel marker")
+@click.option("--channel", type=int, default=2, help="Channel index (1-based, default: 2)")
+@click.option("--marker", default="CD31", help="Marker name (default: CD31)")
+@click.option("--dry-run", "-n", is_flag=True, help="Preview without executing")
+def workflow_vessel3d(
+    project_dir: str, cycle: int, channel: int, marker: str, dry_run: bool
+):
+    """
+    Run 3D vessel segmentation on a deconvolved z-stack.
+
+    Segments blood/lymphatic vessels using Frangi vesselness filtering,
+    morphological cleanup, skeletonization, and graph-based morphometry.
+
+    Requires deconvolution output for the target cycle. Runs as a standalone
+    Snakemake rule (not part of the default pipeline).
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+
+    \b
+    Examples:
+        kintsugi workflow vessel3d . --cycle 3                   # CD31 in cycle 3
+        kintsugi workflow vessel3d . --cycle 5 --marker CD34     # CD34 in cycle 5
+        kintsugi workflow vessel3d . --cycle 3 --dry-run         # Preview
+    """
+    from pathlib import Path
+
+    project_dir = Path(project_dir).resolve()
+    wf_dir = project_dir / "workflow"
+
+    if not (wf_dir / "config.yaml").exists():
+        console.print("[red]No workflow/config.yaml found.[/red]")
+        console.print("Run 'kintsugi workflow config .' first.")
+        raise SystemExit(1)
+
+    # Build snakemake command targeting vessel3d for the specified cycle
+    cyc_str = f"{cycle:02d}"
+    target = f"{project_dir}/data/processed/vessel_3d/cyc{cyc_str}/.snakemake_complete"
+
+    cmd = [
+        "snakemake",
+        "--directory", str(wf_dir),
+        "--snakefile", str(wf_dir / "Snakefile"),
+        "--configfile", str(wf_dir / "config.yaml"),
+        "--config",
+        f"vessel3d={{channel: {channel}, marker: {marker}}}",
+        target,
+    ]
+
+    profile_dir = wf_dir / "profiles" / "slurm"
+    if profile_dir.exists():
+        cmd.extend(["--profile", str(profile_dir), "-j", "1"])
+    else:
+        cmd.extend(["--cores", "4"])
+
+    if dry_run:
+        cmd.append("-n")
+
+    console.print(f"[bold]Vessel 3D Segmentation[/bold]  (cycle {cycle}, {marker})\n")
+    console.print(f"[bold]Running:[/bold] {' '.join(cmd)}")
+    console.print()
+
+    try:
+        result = subprocess.run(cmd, check=False)
+        if result.returncode != 0:
+            raise SystemExit(result.returncode)
+    except FileNotFoundError:
+        console.print("[red]snakemake not found. Install with:[/red]")
+        console.print("  pip install snakemake snakemake-executor-plugin-slurm")
+        raise SystemExit(1)
+
+
+# ============================================================================
+# Spillover Correction Command
+# ============================================================================
+
+
+@workflow.command("spillover")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.argument("sample", required=False, default=None)
+@click.option(
+    "--element-shape",
+    default="star",
+    type=click.Choice(["star", "square"]),
+    help="Structuring element shape (default: star)",
+)
+@click.option("--dry-run", "-n", is_flag=True, help="Preview without executing")
+def workflow_spillover(
+    project_dir: str, sample: str | None, element_shape: str, dry_run: bool
+):
+    """
+    Run REDSEA spillover correction on segmented data.
+
+    Corrects lateral signal spillover between neighboring cells using REDSEA
+    (Bai et al., 2021). Requires signal-isolated images and cell segmentation masks.
+
+    SAMPLE is the sample name (matches files in signal_isolated/ and segmented/).
+    If omitted, runs for all available samples.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+
+    \b
+    Examples:
+        kintsugi workflow spillover .                            # All samples
+        kintsugi workflow spillover . sample_01                  # Specific sample
+        kintsugi workflow spillover . --element-shape square     # Square kernel
+        kintsugi workflow spillover . --dry-run                  # Preview
+    """
+    from pathlib import Path
+
+    project_dir = Path(project_dir).resolve()
+    wf_dir = project_dir / "workflow"
+
+    if not (wf_dir / "config.yaml").exists():
+        console.print("[red]No workflow/config.yaml found.[/red]")
+        console.print("Run 'kintsugi workflow config .' first.")
+        raise SystemExit(1)
+
+    cmd = [
+        "snakemake",
+        "--directory", str(wf_dir),
+        "--snakefile", str(wf_dir / "Snakefile"),
+        "--configfile", str(wf_dir / "config.yaml"),
+        "--config",
+        f"redsea={{element_shape: {element_shape}}}",
+    ]
+
+    # Target specific sample or all spillover targets
+    if sample:
+        target = (
+            f"{project_dir}/data/processed/spillover_corrected/"
+            f".{sample}_spillover.complete"
+        )
+        cmd.append(target)
+    else:
+        cmd.append("spillover_correction")
+
+    profile_dir = wf_dir / "profiles" / "slurm"
+    if profile_dir.exists():
+        cmd.extend(["--profile", str(profile_dir), "-j", "1"])
+    else:
+        cmd.extend(["--cores", "4"])
+
+    if dry_run:
+        cmd.append("-n")
+
+    console.print(f"[bold]Spillover Correction[/bold]  ({element_shape} kernel)\n")
+    console.print(f"[bold]Running:[/bold] {' '.join(cmd)}")
+    console.print()
+
+    try:
+        result = subprocess.run(cmd, check=False)
+        if result.returncode != 0:
+            raise SystemExit(result.returncode)
+    except FileNotFoundError:
+        console.print("[red]snakemake not found. Install with:[/red]")
+        console.print("  pip install snakemake snakemake-executor-plugin-slurm")
+        raise SystemExit(1)
 
 
 # ============================================================================

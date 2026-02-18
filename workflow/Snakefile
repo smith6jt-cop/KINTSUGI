@@ -450,6 +450,38 @@ rule spillover_correction:
 
 
 # ===========================================================================
+# Rule 6: 3D Vessel Segmentation (Frangi + skeleton)
+# ===========================================================================
+# Standalone — NOT in default 'all' target. Invoke explicitly:
+#   snakemake vessel3d --profile profiles/slurm --config vessel_cycle=3 vessel_channel=2
+# Requires deconvolved z-stack (full 3D, before EDF collapses z).
+
+VESSEL_CFG = config.get("vessel3d", {})
+
+rule vessel3d:
+    input:
+        decon_done=f"{PROJECT}/data/processed/deconvolved/cyc{{cycle}}/.snakemake_complete",
+    output:
+        sentinel=f"{PROJECT}/data/processed/vessel_3d/cyc{{cycle}}/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channel=VESSEL_CFG.get("channel", 2),
+        marker=VESSEL_CFG.get("marker", "CD31"),
+    resources:
+        mem_mb=RES.get("mem_vessel3d", 256000),
+        runtime=RES.get("time_vessel3d", 240),
+        slurm_partition=_REG_ASSIGN["partition"],
+        slurm_account=_REG_ASSIGN["account"],
+        gres="gpu:1" if _REG_ASSIGN["mode"] == "gpu" else "",
+        cpus_per_task=4,
+    log:
+        f"{PROJECT}/slurm/logs/snakemake/vessel3d_cyc{{cycle}}.log",
+    script:
+        "scripts/vessel3d.py"
+
+
+# ===========================================================================
 # QC Report Rules (aggregate — one per stage, all cycles)
 # ===========================================================================
 # Each QC rule runs AFTER all cycles for its stage complete.
