@@ -881,7 +881,7 @@ class SerialNonRigidRegistrar(object):
             elif self.mask is not None:
                 reg_mask = self.mask
             else:
-                reg_mask is None
+                reg_mask = None
 
             nr_reg_params = self.update_img_params(non_rigid_reg_params, img_params, moving_name=moving_obj.name, fixed_name=fixed_obj.name, is_tiler=is_tiler)
             updated_dxdy = moving_obj.calc_deformation(registered_fixed_image=fixed_obj.registered_img,
@@ -917,7 +917,16 @@ class SerialNonRigidRegistrar(object):
             if moving_obj.stack_idx == self.ref_img_idx:
                 continue
 
-            overlap_mask = None
+            # Use tissue mask if available (matches register_serial behavior)
+            if moving_obj.mask is not None:
+                if self.mask is not None:
+                    overlap_mask = preprocessing.combine_masks(self.mask, moving_obj.mask, op="and")
+                else:
+                    overlap_mask = moving_obj.mask
+            elif self.mask is not None:
+                overlap_mask = self.mask
+            else:
+                overlap_mask = None
 
             nr_reg_params = self.update_img_params(non_rigid_reg_params, img_params, moving_name=moving_obj.name, fixed_name=ref_nr_obj.name, is_tiler=is_tiler)
 

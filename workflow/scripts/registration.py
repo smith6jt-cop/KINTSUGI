@@ -22,6 +22,7 @@ the entire job is skipped. Registration is all-or-nothing (no partial resume).
 
 import shutil
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
@@ -69,6 +70,7 @@ NR_SMOOTHING = NR_CFG.get("smoothing_method", "gauss")
 NR_SIGMA_RATIO = float(NR_CFG.get("sigma_ratio", 0.01))
 NR_N_GRID_PTS = int(NR_CFG.get("n_grid_pts", 50))
 NR_FOLD_PENALTY = float(NR_CFG.get("fold_penalty", 1e-6))
+NORMALIZE_DIMS = bool(reg_cfg.get("normalize_dimensions", True))
 
 # ---------------------------------------------------------------------------
 # GPU initialization (for VggFD feature detector)
@@ -129,6 +131,7 @@ print(f"Align to reference: {ALIGN_TO_REFERENCE}")
 if not RIGID_ONLY:
     print(f"Non-rigid max dim: {NR_MAX_DIM}")
     print(f"Non-rigid smoothing: {NR_SMOOTHING} (sigma_ratio={NR_SIGMA_RATIO})")
+print(f"Normalize dimensions: {NORMALIZE_DIMS}")
 print(f"Device mode: {DEVICE_MODE}")
 print(f"Input: {EDF_DIR}")
 print(f"Output: {REGISTERED_DIR}")
@@ -267,6 +270,71 @@ if ref_idx is None:
 print(f"\nReference image: {dapi_images[ref_idx]}")
 print(f"Registering {len(dapi_images)} cycles...")
 
+# ---------------------------------------------------------------------------
+# Dimension normalization: pad images to uniform (max_h, max_w) if needed
+# ---------------------------------------------------------------------------
+staging_dir = None  # Set if we create a staging directory
+
+if NORMALIZE_DIMS:
+    # Check dimensions across all EDF cycle directories
+    dims_by_cycle = {}
+    for cyc in CYCLES:
+        cycle_dir = EDF_DIR / cyc_fmt(cyc)
+        if not cycle_dir.exists():
+            continue
+        first_tif = next(cycle_dir.glob("*.tif"), None)
+        if first_tif is not None:
+            img = imread(str(first_tif))
+            dims_by_cycle[int(cyc)] = img.shape[:2]
+
+    if dims_by_cycle:
+        unique_dims = set(dims_by_cycle.values())
+        if len(unique_dims) > 1:
+            max_h = max(h for h, w in unique_dims)
+            max_w = max(w for h, w in unique_dims)
+            log_warn(
+                f"EDF images have inconsistent dimensions: "
+                f"{dict(dims_by_cycle)}. Padding to ({max_h}, {max_w})"
+            )
+
+            # Create temp staging directory with padded copies
+            staging_dir = Path(tempfile.mkdtemp(
+                prefix="kintsugi_reg_staging_",
+                dir=str(DATA_DIR / "processed"),
+            ))
+
+            for cyc in CYCLES:
+                src_cycle = EDF_DIR / cyc_fmt(cyc)
+                dst_cycle = staging_dir / cyc_fmt(cyc)
+                dst_cycle.mkdir(parents=True, exist_ok=True)
+
+                if not src_cycle.exists():
+                    continue
+
+                h, w = dims_by_cycle.get(int(cyc), (max_h, max_w))
+                needs_pad = (h != max_h) or (w != max_w)
+
+                for tif in sorted(src_cycle.glob("*.tif")):
+                    if needs_pad:
+                        img = imread(str(tif))
+                        padded = np.zeros((max_h, max_w), dtype=img.dtype)
+                        padded[:img.shape[0], :img.shape[1]] = img
+                        imsave(str(dst_cycle / tif.name), padded, check_contrast=False)
+                    else:
+                        shutil.copy2(tif, dst_cycle / tif.name)
+
+            # Update EDF_DIR and DAPI image paths to use staging
+            original_edf_dir = EDF_DIR
+            EDF_DIR = staging_dir
+            dapi_images = [
+                str(staging_dir / Path(p).relative_to(original_edf_dir))
+                for p in dapi_images
+            ]
+            print(f"  Padded images staged to: {staging_dir}")
+        else:
+            dims = next(iter(unique_dims))
+            print(f"  All EDF images have uniform dimensions: {dims}")
+
 # Step 2: Initialize VALIS registrar
 print("\n[2/4] Running VALIS registration...")
 
@@ -370,12 +438,13 @@ try:
     registrar.save_registrar(str(registrar_path))
     print(f"  Saved: {registrar_path}")
 
-    # QC overlay images
-    try:
-        log_dir = Path(snakemake.log[0]).parent
-        _save_registration_qc(registrar, log_dir)
-    except Exception as e:
-        log_warn(f"QC image generation failed: {e}")
+    # Clean up staging directory if dimension normalization was used
+    if staging_dir is not None and staging_dir.exists():
+        shutil.rmtree(staging_dir)
+        print(f"  Cleaned up staging directory: {staging_dir}")
+
+    # Note: thumbnail QC removed — run_registration_qc() in Kprocess.py produces
+    # full-resolution spatial NCC heatmaps and targeted overlays (qc_registration rule).
 
     elapsed = (time.time() - start_time) / 60
     print(f"\n{'='*60}")
@@ -399,6 +468,8 @@ try:
         f"reference_cycle={REFERENCE_CYCLE}\n",
         f"imgs_ordered={IMGS_ORDERED}\n",
         f"align_to_reference={ALIGN_TO_REFERENCE}\n",
+        f"normalize_dimensions={NORMALIZE_DIMS}\n",
+        f"dimensions_normalized={staging_dir is not None}\n",
     ]
     if not RIGID_ONLY:
         sentinel_lines.extend([
@@ -420,6 +491,13 @@ except Exception as e:
     import traceback
 
     traceback.print_exc()
+
+    # Restore original EDF_DIR before cleanup (staging may have overridden it)
+    if staging_dir is not None:
+        EDF_DIR = DATA_DIR / "processed" / "edf"
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir)
+            print(f"  Cleaned up staging directory: {staging_dir}")
 
     # Fallback: copy EDF images without transformation
     print("\nFalling back to copying EDF images without transformation...")
@@ -451,78 +529,3 @@ except Exception as e:
     print(f"Sentinel written (fallback): {sentinel}")
     log_footer(0)
 
-
-# ---------------------------------------------------------------------------
-# QC helpers
-# ---------------------------------------------------------------------------
-def _save_registration_qc(registrar, log_dir):
-    """Save overlay QC images to log directory."""
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    # Get reference slide
-    ref_slide = None
-    for slide_obj in registrar.slide_dict.values():
-        if slide_obj.is_ref:
-            ref_slide = slide_obj
-            break
-
-    if ref_slide is None:
-        return
-
-    # Create overlay for each non-reference slide
-    for slide_obj in registrar.slide_dict.values():
-        if slide_obj.is_ref:
-            continue
-
-        try:
-            fig, axes = plt.subplots(1, 2, figsize=(16, 8))
-
-            # Before (processed images)
-            if ref_slide.processed_img is not None and slide_obj.processed_img is not None:
-                ref_img = ref_slide.processed_img
-                mov_img = slide_obj.processed_img
-                overlay = np.zeros((*ref_img.shape[:2], 3), dtype=np.float32)
-                r = ref_img.astype(np.float32)
-                m = mov_img.astype(np.float32)
-                if r.max() > 0:
-                    r = r / r.max()
-                if m.max() > 0:
-                    m = m / m.max()
-                overlay[..., 0] = r[:overlay.shape[0], :overlay.shape[1]]
-                overlay[..., 1] = m[:overlay.shape[0], :overlay.shape[1]]
-                axes[0].imshow(overlay)
-                axes[0].set_title("Before Registration")
-                axes[0].axis("off")
-
-            # After (registered images)
-            if hasattr(ref_slide, "reg_img") and hasattr(slide_obj, "reg_img"):
-                if ref_slide.reg_img is not None and slide_obj.reg_img is not None:
-                    ref_reg = ref_slide.reg_img
-                    mov_reg = slide_obj.reg_img
-                    overlay_reg = np.zeros((*ref_reg.shape[:2], 3), dtype=np.float32)
-                    r2 = ref_reg.astype(np.float32)
-                    m2 = mov_reg.astype(np.float32)
-                    if r2.max() > 0:
-                        r2 = r2 / r2.max()
-                    if m2.max() > 0:
-                        m2 = m2 / m2.max()
-                    overlay_reg[..., 0] = r2[:overlay_reg.shape[0], :overlay_reg.shape[1]]
-                    overlay_reg[..., 1] = m2[:overlay_reg.shape[0], :overlay_reg.shape[1]]
-                    axes[1].imshow(overlay_reg)
-                    axes[1].set_title("After Registration")
-                    axes[1].axis("off")
-
-            plt.suptitle(f"Registration QC: {slide_obj.name}")
-            plt.tight_layout()
-            qc_path = log_dir / f"reg_qc_{slide_obj.name}.png"
-            plt.savefig(str(qc_path), dpi=100, bbox_inches="tight")
-            plt.close()
-            log_info(f"QC saved: {qc_path.name}")
-
-        except Exception as e:
-            log_warn(f"QC image failed for {slide_obj.name}: {e}")

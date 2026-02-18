@@ -21,6 +21,7 @@ or default to known project locations.
 """
 
 import argparse
+import glob
 import hashlib
 import os
 import shutil
@@ -29,13 +30,28 @@ from pathlib import Path
 from datetime import datetime
 
 
-# Default project folders to sync
-DEFAULT_PROJECT_FOLDERS = [
+# Static project folders (always synced)
+_STATIC_PROJECT_FOLDERS = [
     # Test project (mini_project)
     "/blue/maigan/smith6jt/KINTSUGI/test_data/mini_project/notebooks",
     # Full project (1904CC1-1L)
     "/blue/maigan/smith6jt/KINTSUGI_Projects/CODEX_SP_LN/1904CC1-1L/notebooks",
 ]
+
+# Auto-discover batch project directories under KINTSUGI_Projects/
+_BATCH_PROJECT_GLOB = "/blue/maigan/smith6jt/KINTSUGI_Projects/*/notebooks"
+
+
+def _discover_default_project_folders() -> list[str]:
+    """Build the default project folder list with auto-discovery of batch projects."""
+    folders = list(_STATIC_PROJECT_FOLDERS)
+    for path in sorted(glob.glob(_BATCH_PROJECT_GLOB)):
+        if path not in folders:
+            folders.append(path)
+    return folders
+
+
+DEFAULT_PROJECT_FOLDERS = _discover_default_project_folders()
 
 # Directories to sync (relative to notebooks/)
 SYNC_DIRECTORIES = [

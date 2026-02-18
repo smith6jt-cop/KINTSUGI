@@ -1020,11 +1020,12 @@ def workflow_config(project_dir: str, print_only: bool):
         "registration": {
             "reference_cycle": 1,
             "reference_channel": 1,
-            "max_image_dim": 2048,
+            "max_image_dim": 4096,
             "rigid_only": False,
             "feature_detector": "VggFD",
             "imgs_ordered": True,
             "align_to_reference": True,
+            "normalize_dimensions": True,
             "non_rigid": {
                 "max_dim": 4096,
                 "smoothing_method": "gauss",

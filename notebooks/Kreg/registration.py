@@ -4482,7 +4482,10 @@ class Valis(object):
         if any([d for d in all_nr_d if d is not None]):
             mean_nr_d = np.average(np.array(all_nr_d)[measure_idx], weights=weights)
             mean_nr_tre = np.average(np.array(all_nr_tre)[measure_idx], weights=weights)
-            non_rigid_min = (self.end_non_rigid_time - self.start_time)/60
+            if self.end_non_rigid_time is not None:
+                non_rigid_min = (self.end_non_rigid_time - self.start_time)/60
+            else:
+                non_rigid_min = 0.0
 
             self.summary_df["mean_non_rigid_D"] = [mean_nr_d]*self.size
             self.summary_df["non_rigid_time_minutes"] = [non_rigid_min]*self.size
@@ -4927,6 +4930,13 @@ class Valis(object):
                     cropped_fwd_dxdy.cast("float").tiffsave(full_temp_fwd_f, compression="lzw", lossless=True, tile=True, bigtiff=True)
                     os.remove(slide_obj._fwd_dxdy_f)
                     os.rename(full_temp_fwd_f, slide_obj._fwd_dxdy_f)
+
+        # Record timing for measure_error() — needed when coarse NR is disabled
+        # (non_rigid_registrar_cls=None in __init__) and register_micro() is the
+        # only non-rigid pass. Without this, end_non_rigid_time stays None and
+        # measure_error() crashes with 'NoneType' - float.
+        if self.end_non_rigid_time is None:
+            self.end_non_rigid_time = time()
 
         # Update dxdy padding attributes here, in the event that previous displacements were also saved as files
         # Updating these attributes earlier will cause errors

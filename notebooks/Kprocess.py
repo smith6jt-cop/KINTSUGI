@@ -1614,11 +1614,12 @@ def _plot_spatial_ncc_heatmaps(
             interpolation="bilinear", origin="upper",
             extent=[0, img_width, img_height, 0],
         )
-        mean_val = np.nanmean(grid)
         min_val = np.nanmin(grid)
+        p5_val = np.nanpercentile(grid[~np.isnan(grid)], 5) if np.any(~np.isnan(grid)) else np.nan
+        n_poor = int(np.nansum(grid < 0.7))
         ax.set_title(
             f"Cyc {mov_cyc}\u2192{ref_cycle}  "
-            f"(mean={mean_val:.3f}, min={min_val:.3f})",
+            f"(min={min_val:.3f}, p5={p5_val:.3f}, poor={n_poor})",
             fontsize=9,
         )
         # Axis ticks at tile boundaries
@@ -1828,7 +1829,7 @@ def run_registration_qc(
     spatial_tile_size=512,
     n_targeted_crops=3,
 ):
-    """Generate registration QC: green/magenta DAPI overlays and metrics.
+    """Generate registration QC: green/magenta DAPI overlays and spatial metrics.
 
     Produces:
       1. registration_qc_overlay_grid.pdf — Contact sheet of DAPI overlays
@@ -1836,8 +1837,8 @@ def run_registration_qc(
          Green = reference DAPI, Magenta = moving DAPI
          White/gray = good alignment, color fringing = misalignment
 
-      2. registration_qc_metrics.pdf — Bar chart of rigid_D per cycle
-         with 2px threshold line
+      2. registration_qc_metrics.pdf — Per-cycle spatial NCC quality chart
+         showing min NCC and p5 NCC (worst-tile metrics, NOT averages).
 
       3. registration_qc_spatial_ncc.pdf — Per-cycle heatmap of local NCC
          on a tile grid, showing spatially localized alignment quality.
@@ -1996,9 +1997,12 @@ def run_registration_qc(
             tile_size=spatial_tile_size,
         )
         ncc_grids[mov_cyc] = ncc_grid
-        mean_ncc = np.nanmean(ncc_grid)
+        valid = ncc_grid[~np.isnan(ncc_grid)]
         min_ncc = np.nanmin(ncc_grid)
-        print(f"    Cyc {mov_cyc}: mean={mean_ncc:.4f}, min={min_ncc:.4f}")
+        p5_ncc = np.percentile(valid, 5) if len(valid) > 0 else np.nan
+        p25_ncc = np.percentile(valid, 25) if len(valid) > 0 else np.nan
+        n_poor = int(np.sum(valid < 0.7))
+        print(f"    Cyc {mov_cyc}: min={min_ncc:.4f}, p5={p5_ncc:.4f}, p25={p25_ncc:.4f}, n_poor(<0.7)={n_poor}")
 
     ncc_path = _plot_spatial_ncc_heatmaps(
         ncc_grids, moving_cycles, ref_cycle,
@@ -2019,90 +2023,82 @@ def run_registration_qc(
     print(f"  Saved targeted overlays: {targeted_path}")
 
     # -----------------------------------------------------------------------
-    # Metrics bar chart from VALIS summary (if available)
+    # Per-cycle spatial NCC summary (replaces average-based VALIS metrics)
     # -----------------------------------------------------------------------
+    ncc_threshold = 0.7
     summary_rows = []
+    for mov_cyc in moving_cycles:
+        grid = ncc_grids[mov_cyc]
+        valid = grid[~np.isnan(grid)]
+        n_valid = len(valid)
+        summary_rows.append({
+            "cycle": mov_cyc,
+            "min_ncc": np.min(valid) if n_valid > 0 else np.nan,
+            "p5_ncc": np.percentile(valid, 5) if n_valid > 0 else np.nan,
+            "p25_ncc": np.percentile(valid, 25) if n_valid > 0 else np.nan,
+            "median_ncc": np.median(valid) if n_valid > 0 else np.nan,
+            "n_poor": int(np.sum(valid < ncc_threshold)) if n_valid > 0 else 0,
+            "n_tiles": n_valid,
+            "pct_poor": 100.0 * np.sum(valid < ncc_threshold) / n_valid if n_valid > 0 else 0.0,
+        })
 
-    if valis_df is not None and "rigid_D" in valis_df.columns:
-        # Build per-cycle metrics from the 'from' column
-        for _, row in valis_df.iterrows():
-            from_name = str(row.get("from", ""))
-            orig_d = row.get("original_D", np.nan)
-            rigid_d = row.get("rigid_D", np.nan)
-            nonrigid_d = row.get("non_rigid_D", np.nan)
+    summary_df = pd.DataFrame(summary_rows)
+    summary_df = summary_df.sort_values("cycle")
 
-            # Extract cycle number from DAPI name
-            cyc_num = None
-            if "cyc" in from_name.lower():
-                import re as _re
-
-                m = _re.search(r"cyc(\d+)", from_name, _re.IGNORECASE)
-                if m:
-                    cyc_num = int(m.group(1))
-            elif from_name.startswith("DAPI-"):
-                # Reference cycle: DAPI-01 → cycle 1
-                try:
-                    cyc_num = int(from_name.split("-")[1])
-                except (ValueError, IndexError):
-                    pass
-
-            summary_rows.append({
-                "cycle": cyc_num,
-                "from": from_name,
-                "original_D": orig_d,
-                "rigid_D": rigid_d,
-                "non_rigid_D": nonrigid_d,
-            })
-
-        summary_df = pd.DataFrame(summary_rows)
-        summary_df = summary_df.dropna(subset=["cycle"])
-        summary_df["cycle"] = summary_df["cycle"].astype(int)
-        summary_df = summary_df.sort_values("cycle")
-
-        # Print summary table
-        print("\n" + "=" * 70)
-        print("REGISTRATION METRICS (from VALIS summary)")
-        print("=" * 70)
-        print(
-            summary_df[["cycle", "from", "original_D", "rigid_D"]].to_string(
-                index=False
-            )
+    # Print spatial quality table
+    print(f"\n{'=' * 85}")
+    print(f"SPATIAL REGISTRATION QUALITY (NCC threshold={ncc_threshold})")
+    print(f"{'=' * 85}")
+    print(
+        summary_df[["cycle", "min_ncc", "p5_ncc", "p25_ncc", "median_ncc", "n_poor", "pct_poor"]].to_string(
+            index=False,
+            float_format=lambda x: f"{x:.4f}" if not np.isnan(x) else "NaN",
         )
+    )
 
-        # Bar chart of rigid_D
-        plot_df = summary_df[summary_df["rigid_D"].notna()].copy()
-        if len(plot_df) > 0:
-            fig2, ax2 = plt.subplots(figsize=(max(6, len(plot_df) * 0.8), 4))
-            ax2.bar(
-                plot_df["cycle"].astype(str),
-                plot_df["rigid_D"],
-                color=[
-                    "#2ecc71" if d < 2 else "#e74c3c" for d in plot_df["rigid_D"]
-                ],
-                edgecolor="black",
-                linewidth=0.5,
-            )
-            ax2.axhline(
-                y=2.0, color="red", linestyle="--", linewidth=1, label="2px threshold"
-            )
-            ax2.set_xlabel("Cycle")
-            ax2.set_ylabel("Rigid Registration Error (pixels)")
-            ax2.set_title("Registration Accuracy per Cycle (rigid_D)")
-            ax2.legend()
-            fig2.tight_layout()
-            metrics_path = qc_output_dir / "registration_qc_metrics.pdf"
-            fig2.savefig(metrics_path, dpi=150, bbox_inches="tight")
-            plt.close(fig2)
-            print(f"  Saved metrics chart: {metrics_path}")
-
-        # Cache the summary
-        cache_path = Path(cache_file)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(cache_path, "wb") as f:
-            pickle.dump(summary_df, f)
-
-        return summary_df
-
+    # Flag cycles with poor regions
+    worst_cycles = summary_df[summary_df["n_poor"] > 0]
+    if len(worst_cycles) > 0:
+        print(f"\n  WARNING: {len(worst_cycles)} cycle(s) have tiles with NCC < {ncc_threshold}")
+        for _, row in worst_cycles.iterrows():
+            print(f"    Cyc {int(row['cycle'])}: {int(row['n_poor'])} poor tiles ({row['pct_poor']:.1f}%), min={row['min_ncc']:.4f}")
     else:
-        print("  No VALIS summary CSV found \u2014 overlay grid only (no metrics chart)")
-        return None
+        print(f"\n  All tiles above NCC threshold ({ncc_threshold}) — registration looks uniform")
+
+    # Bar chart: per-cycle min NCC and p5 NCC (spatial quality, not averages)
+    if len(summary_df) > 0:
+        fig2, ax2 = plt.subplots(figsize=(max(6, len(summary_df) * 0.8), 4))
+        x = np.arange(len(summary_df))
+        width = 0.35
+        bars_min = ax2.bar(
+            x - width / 2, summary_df["min_ncc"], width,
+            label="min NCC (worst tile)",
+            color=["#e74c3c" if v < ncc_threshold else "#f39c12" for v in summary_df["min_ncc"]],
+            edgecolor="black", linewidth=0.5,
+        )
+        bars_p5 = ax2.bar(
+            x + width / 2, summary_df["p5_ncc"], width,
+            label="p5 NCC (5th percentile)",
+            color=["#e74c3c" if v < ncc_threshold else "#2ecc71" for v in summary_df["p5_ncc"]],
+            edgecolor="black", linewidth=0.5,
+        )
+        ax2.axhline(y=ncc_threshold, color="red", linestyle="--", linewidth=1, label=f"NCC={ncc_threshold} threshold")
+        ax2.set_xticks(x)
+        ax2.set_xticklabels([f"Cyc {int(c)}" for c in summary_df["cycle"]], fontsize=8)
+        ax2.set_ylabel("NCC")
+        ax2.set_title("Spatial Registration Quality per Cycle (worst-tile metrics)")
+        ax2.set_ylim(0, 1.05)
+        ax2.legend(fontsize=8)
+        fig2.tight_layout()
+        metrics_path = qc_output_dir / "registration_qc_metrics.pdf"
+        fig2.savefig(metrics_path, dpi=150, bbox_inches="tight")
+        plt.close(fig2)
+        print(f"  Saved spatial quality chart: {metrics_path}")
+
+    # Cache the summary
+    cache_path = Path(cache_file)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(cache_path, "wb") as f:
+        pickle.dump(summary_df, f)
+
+    return summary_df
