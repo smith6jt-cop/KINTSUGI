@@ -41,6 +41,7 @@ from kintsugi.qc.artifact_scanner import (
     ArtifactReport,
     ArtifactScanner,
     ChannelScanResult,
+    detect_general_artifacts,
     scan_project_artifacts,
 )
 from kintsugi.qc.batch_qc import (
@@ -50,10 +51,13 @@ from kintsugi.qc.batch_qc import (
 )
 from kintsugi.qc.cell_qc import (
     CellQC,
+    detect_cycle_dropout,
     detect_doublets,
     detect_outliers,
     filter_by_intensity,
     filter_by_morphology,
+    filter_cells_pipeline,
+    prune_marker_outliers,
 )
 from kintsugi.qc.image_qc import (
     ImageQC,
@@ -164,6 +168,7 @@ __all__ = [
     "ArtifactItem",
     "ChannelScanResult",
     "scan_project_artifacts",
+    "detect_general_artifacts",
     # Stripe Detection (low-level)
     "StripeArtifactResult",
     "detect_stripe_artifact",
@@ -193,6 +198,9 @@ __all__ = [
     "filter_by_intensity",
     "filter_by_morphology",
     "detect_doublets",
+    "detect_cycle_dropout",
+    "prune_marker_outliers",
+    "filter_cells_pipeline",
     # Marker QC
     "MarkerQC",
     "validate_marker_expression",

@@ -572,6 +572,151 @@ class ArtifactScanner:
         return np.array(images)
 
 
+def detect_general_artifacts(
+    image: np.ndarray,
+    downscale_factor: int = 4,
+    erosion_size: int = 3,
+    h_tolerance: float | None = None,
+    flood_tolerance: float | None = None,
+    min_artifact_size: int = 100,
+) -> np.ndarray:
+    """
+    Detect general imaging artifacts using flood-fill from intensity peaks.
+
+    Inspired by CyLinter's ``artifact_detector_v3`` algorithm. This approach
+    is complementary to KINTSUGI's existing stripe artifact detection — it
+    detects arbitrary high-contrast regions that may correspond to tissue
+    folding, air bubbles, bright debris, or other imaging artifacts.
+
+    Algorithm:
+    1. Downscale image for computational efficiency
+    2. Apply erosion + local contrast enhancement to highlight artifact boundaries
+    3. Use h-maxima transform to find local intensity peaks (artifact centers)
+    4. Apply flood-fill from each peak with automatically determined tolerance
+    5. Return a binary artifact mask
+
+    Parameters
+    ----------
+    image : np.ndarray
+        2D grayscale image (uint8 or uint16).
+    downscale_factor : int
+        Factor to downscale by for detection. Results are upscaled to
+        original resolution. Default 4.
+    erosion_size : int
+        Size of erosion structuring element. Default 3.
+    h_tolerance : float, optional
+        Height parameter for h-maxima transform. If None, auto-computed
+        as 0.2 * (max - median) of the processed image.
+    flood_tolerance : float, optional
+        Tolerance for flood-fill. If None, auto-computed as
+        0.15 * (max - median) of the processed image.
+    min_artifact_size : int
+        Minimum size (in pixels at downscaled resolution) for a region
+        to be considered an artifact. Default 100.
+
+    Returns
+    -------
+    np.ndarray
+        Binary mask (same shape as input) where True = artifact region.
+        Can be used for cell exclusion or as a ``Kview2`` overlay.
+    """
+    from scipy import ndimage as ndi
+    from skimage.morphology import reconstruction
+    from skimage.transform import resize
+
+    img = np.asarray(image, dtype=np.float32)
+    original_shape = img.shape
+
+    # Step 1: Downscale
+    if downscale_factor > 1:
+        new_shape = (
+            img.shape[0] // downscale_factor,
+            img.shape[1] // downscale_factor,
+        )
+        small = resize(img, new_shape, preserve_range=True, anti_aliasing=True)
+    else:
+        small = img.copy()
+
+    # Step 2: Erosion to suppress noise + highlight artifact edges
+    struct = np.ones((erosion_size, erosion_size))
+    eroded = ndi.grey_erosion(small, footprint=struct)
+
+    # Check if image has sufficient dynamic range for artifact detection
+    img_global_range = small.max() - small.min()
+    if img_global_range < 50:  # Nearly uniform image
+        return np.zeros(original_shape, dtype=bool)
+
+    # Local contrast enhancement (difference of Gaussians)
+    smooth_low = ndi.gaussian_filter(eroded, sigma=2)
+    smooth_high = ndi.gaussian_filter(eroded, sigma=10)
+    enhanced = np.clip(smooth_low - smooth_high, 0, None)
+
+    # Step 3: H-maxima transform to find peaks
+    img_max = enhanced.max()
+    img_median = np.median(enhanced)
+    img_range = img_max - img_median
+
+    if img_range < 1e-6:
+        # Uniform image — no artifacts
+        return np.zeros(original_shape, dtype=bool)
+
+    if h_tolerance is None:
+        h_tolerance = 0.2 * img_range
+    if flood_tolerance is None:
+        flood_tolerance = 0.15 * img_range
+
+    # H-maxima: suppress peaks lower than h_tolerance
+    seed = enhanced - h_tolerance
+    seed = np.clip(seed, enhanced.min(), None)
+    dilated = reconstruction(seed, enhanced, method="dilation")
+    h_maxima = enhanced - dilated
+
+    # Find peak locations
+    peak_mask = h_maxima > (h_tolerance * 0.5)
+    labeled_peaks, n_peaks = ndi.label(peak_mask)
+
+    if n_peaks == 0:
+        return np.zeros(original_shape, dtype=bool)
+
+    # Step 4: Flood-fill from each peak
+    artifact_mask = np.zeros(small.shape, dtype=bool)
+
+    for peak_id in range(1, n_peaks + 1):
+        peak_coords = np.where(labeled_peaks == peak_id)
+        # Use the brightest pixel in this peak region as seed
+        peak_values = enhanced[peak_coords]
+        brightest_idx = np.argmax(peak_values)
+        seed_y = peak_coords[0][brightest_idx]
+        seed_x = peak_coords[1][brightest_idx]
+        seed_value = enhanced[seed_y, seed_x]
+
+        # Simple tolerance-based flood fill
+        flood_low = seed_value - flood_tolerance
+        flood_high = seed_value + flood_tolerance
+
+        # Use connected component analysis on thresholded region
+        region = (enhanced >= flood_low) & (enhanced <= flood_high)
+        labeled_region, _ = ndi.label(region)
+        seed_label = labeled_region[seed_y, seed_x]
+
+        if seed_label > 0:
+            component = labeled_region == seed_label
+            if np.sum(component) >= min_artifact_size:
+                artifact_mask |= component
+
+    # Step 5: Upscale mask to original resolution
+    if downscale_factor > 1:
+        full_mask = resize(
+            artifact_mask.astype(np.float32),
+            original_shape,
+            preserve_range=True,
+            order=0,  # Nearest-neighbor to preserve binary boundaries
+        )
+        return full_mask > 0.5
+    else:
+        return artifact_mask
+
+
 def scan_project_artifacts(
     project: KintsugiProject,
     source: str = "raw",

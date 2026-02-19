@@ -633,8 +633,16 @@ def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool
     """
     Submit SLURM jobs for a KINTSUGI project.
 
-    This is a convenience wrapper around the submit.sh script. It will use
-    the configuration from PROJECT_DIR/slurm/config.sh.
+    DEPRECATED: This command uses the legacy submit.sh script. For new
+    projects, use the Snakemake-based workflow instead:
+
+    \b
+        kintsugi workflow config .   # Generate Snakemake config
+        kintsugi workflow run .      # Submit via Snakemake
+
+    The Snakemake workflow provides automatic dependency management, failure
+    recovery, skip-existing, and aggregate QC reports. This command will be
+    removed in KINTSUGI v3.0.0.
 
     PROJECT_DIR is the path to your KINTSUGI project directory.
 
@@ -646,7 +654,23 @@ def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool
         kintsugi slurm submit . --dry-run         # Preview commands
         kintsugi slurm submit . --use-burst       # Also submit burst jobs
     """
+    import warnings
+
     from pathlib import Path
+
+    warnings.warn(
+        "kintsugi slurm submit is deprecated. Use 'kintsugi workflow run' instead. "
+        "See 'kintsugi workflow --help' for details. "
+        "This command will be removed in KINTSUGI v3.0.0.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    console.print(
+        "[yellow]WARNING: 'kintsugi slurm submit' is deprecated.[/yellow]\n"
+        "Use the Snakemake-based workflow instead:\n"
+        "  kintsugi workflow config .   # Generate config\n"
+        "  kintsugi workflow run .      # Submit jobs\n"
+    )
 
     project_dir = Path(project_dir).resolve()
 
