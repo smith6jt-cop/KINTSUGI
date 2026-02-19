@@ -371,42 +371,92 @@ def _hessian_eigenvalues_3d(
     Hzx = gf(vol, sigma=sigma, order=[1, 0, 1]) * s2
     Hyx = gf(vol, sigma=sigma, order=[0, 1, 1]) * s2
 
-    # Compute eigenvalues analytically for symmetric 3x3 matrix
-    # Using the method from skimage.feature.hessian_matrix_eigvals
-    # For 3D, we need to solve the cubic characteristic equation
-    # Instead, compute per-voxel eigenvalues via numpy
+    # Analytical eigenvalues for symmetric 3x3 Hessian via Cardano's method.
+    # Operates element-wise on the 6 Hessian arrays — avoids allocating the
+    # massive (N, 3, 3) matrix that caused GPU OOM on large stitched volumes.
+    #
+    # For symmetric 3x3 matrix [[a,b,c],[b,d,e],[c,e,f]]:
+    #   a=Hzz, b=Hzy, c=Hzx, d=Hyy, e=Hyx, f=Hxx
 
     shape = vol.shape
-    # Stack Hessian into (N, 3, 3) for batch eigenvalue computation
-    N = np.prod(shape)
+    del vol  # free GPU copy of input volume
 
-    H = xp.empty((N, 3, 3), dtype=xp.float32)
-    H[:, 0, 0] = Hzz.ravel()
-    H[:, 0, 1] = Hzy.ravel()
-    H[:, 0, 2] = Hzx.ravel()
-    H[:, 1, 0] = Hzy.ravel()
-    H[:, 1, 1] = Hyy.ravel()
-    H[:, 1, 2] = Hyx.ravel()
-    H[:, 2, 0] = Hzx.ravel()
-    H[:, 2, 1] = Hyx.ravel()
-    H[:, 2, 2] = Hxx.ravel()
+    # Trace / 3
+    q = (Hzz + Hyy + Hxx) / 3.0
 
-    # Free intermediate arrays
-    del Hzz, Hyy, Hxx, Hzy, Hzx, Hyx
+    # Shift diagonal: a-q, d-q, f-q (free diagonals immediately after)
+    a_q = Hzz - q
+    del Hzz
+    d_q = Hyy - q
+    del Hyy
+    f_q = Hxx - q
+    del Hxx
 
-    # Compute eigenvalues
-    eigvals = xp.linalg.eigvalsh(H)  # shape (N, 3), sorted ascending
+    # p² = ( (a-q)² + (d-q)² + (f-q)² + 2*(b² + c² + e²) ) / 6
+    p2 = (a_q * a_q + d_q * d_q + f_q * f_q
+          + 2.0 * (Hzy * Hzy + Hzx * Hzx + Hyx * Hyx)) / 6.0
 
-    # Sort by absolute value: |l1| <= |l2| <= |l3|
-    abs_eigvals = xp.abs(eigvals)
-    sort_idx = xp.argsort(abs_eigvals, axis=1)
-    eigvals_sorted = xp.take_along_axis(eigvals, sort_idx, axis=1)
+    p = xp.sqrt(xp.maximum(p2, xp.float32(1e-30)))
+    del p2
 
-    l1 = eigvals_sorted[:, 0].reshape(shape)
-    l2 = eigvals_sorted[:, 1].reshape(shape)
-    l3 = eigvals_sorted[:, 2].reshape(shape)
+    # Determinant of B = (A - q*I) / p
+    # det(B) = (1/p³) * det(A - q*I)
+    # det([[a-q, b, c],[b, d-q, e],[c, e, f-q]])
+    inv_p = 1.0 / p
+    b_ = Hzy * inv_p
+    c_ = Hzx * inv_p
+    e_ = Hyx * inv_p
+    aq = a_q * inv_p
+    dq = d_q * inv_p
+    fq = f_q * inv_p
+    del a_q, d_q, f_q, inv_p
 
-    del H, eigvals, eigvals_sorted, abs_eigvals, sort_idx
+    det_B = (aq * (dq * fq - e_ * e_)
+             - b_ * (b_ * fq - e_ * c_)
+             + c_ * (b_ * e_ - dq * c_))
+    del aq, dq, fq, b_, c_, e_
+
+    # r = det_B / 2, clamp to [-1, 1] for numerical stability
+    r = xp.clip(det_B * xp.float32(0.5), xp.float32(-1.0), xp.float32(1.0))
+    del det_B
+
+    # phi = arccos(r) / 3
+    phi = xp.arccos(r) / 3.0
+    del r
+
+    # Eigenvalues (sorted: eig1 >= eig2 >= eig3)
+    TWO_PI_3 = xp.float32(2.0 * np.pi / 3.0)
+    two_p = 2.0 * p
+    del p
+
+    eig1 = q + two_p * xp.cos(phi)
+    eig3 = q + two_p * xp.cos(phi + TWO_PI_3)
+    eig2 = 3.0 * q - eig1 - eig3  # trace identity
+    del phi, two_p, q
+
+    # Free off-diagonal Hessian components (diagonals already freed above)
+    del Hzy, Hzx, Hyx
+
+    # Sort by absolute value using a 3-element sorting network (Knuth).
+    # Three compare-and-swap steps guarantee |l1| <= |l2| <= |l3|.
+    # Each step creates 2 new arrays and frees the 2 old ones.
+
+    # Step 1: compare-swap positions 0 and 2
+    swap = xp.abs(eig1) > xp.abs(eig3)
+    eig1, eig3 = xp.where(swap, eig3, eig1), xp.where(swap, eig1, eig3)
+    del swap
+
+    # Step 2: compare-swap positions 0 and 1
+    swap = xp.abs(eig1) > xp.abs(eig2)
+    eig1, eig2 = xp.where(swap, eig2, eig1), xp.where(swap, eig1, eig2)
+    del swap
+
+    # Step 3: compare-swap positions 1 and 2
+    swap = xp.abs(eig2) > xp.abs(eig3)
+    eig2, eig3 = xp.where(swap, eig3, eig2), xp.where(swap, eig2, eig3)
+    del swap
+
+    l1, l2, l3 = eig1, eig2, eig3
 
     if use_gpu:
         l1 = cp.asnumpy(l1)

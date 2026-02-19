@@ -278,7 +278,7 @@ rule stitch:
         device_mode=lambda wc: _assign(wc)["mode"],
 
     resources:
-        mem_mb=lambda wc: RES.get("mem_stitch", 48000) if _is_gpu(wc) else RES.get("cpu_mem_stitch", 48000),
+        mem_mb=lambda wc: RES.get("mem_stitch", 4000) if _is_gpu(wc) else RES.get("cpu_mem_stitch", 48000),
         runtime=lambda wc: RES.get("time_stitch", 240) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
         slurm_partition=lambda wc: _assign(wc)["partition"],
         slurm_account=lambda wc: _assign(wc)["account"],
@@ -307,7 +307,7 @@ rule deconvolve:
         device_mode=lambda wc: _assign(wc)["mode"],
 
     resources:
-        mem_mb=lambda wc: RES.get("mem_decon", 48000) if _is_gpu(wc) else RES.get("cpu_mem_decon", 128000),
+        mem_mb=lambda wc: RES.get("mem_decon", 4000) if _is_gpu(wc) else RES.get("cpu_mem_decon", 128000),
         runtime=lambda wc: RES.get("time_decon", 240) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
         slurm_partition=lambda wc: _assign(wc)["partition"],
         slurm_account=lambda wc: _assign(wc)["account"],
@@ -338,7 +338,7 @@ rule edf:
         channel_names=CHANNEL_NAMES,
 
     resources:
-        mem_mb=lambda wc: RES.get("mem_edf", 48000) if _is_gpu(wc) else RES.get("cpu_mem_edf", 96000),
+        mem_mb=lambda wc: RES.get("mem_edf", 4000) if _is_gpu(wc) else RES.get("cpu_mem_edf", 96000),
         runtime=lambda wc: RES.get("time_edf", 60) * (1 if _is_gpu(wc) else CPU_TIME_MULT),
         slurm_partition=lambda wc: _assign(wc)["partition"],
         slurm_account=lambda wc: _assign(wc)["account"],
@@ -455,8 +455,31 @@ rule spillover_correction:
 # Standalone — NOT in default 'all' target. Invoke explicitly:
 #   snakemake vessel3d --profile profiles/slurm --config vessel_cycle=3 vessel_channel=2
 # Requires deconvolved z-stack (full 3D, before EDF collapses z).
+#
+# Runs on CPU (hpg-turin / L4 nodes have 771 GB RAM). Frangi Hessian needs
+# ~72 GB float32 for isotropic 9x7 volumes — exceeds L4's 24 GB VRAM.
+# No GPU slot requested, so it doesn't block GPU scheduling for other jobs.
 
 VESSEL_CFG = config.get("vessel3d", {})
+
+
+def _vessel3d_assignment():
+    """Pick account + partition for vessel3d: CPU-only on Turin (L4 nodes).
+
+    Vessel3d Frangi filter on isotropic volumes (40x7487x10061) needs ~72 GB
+    for 6 Hessian arrays in float32 — exceeds L4's 24 GB VRAM.  Turin nodes
+    have 771 GB RAM, so CPU mode works well without blocking a GPU slot.
+    """
+    # Use vessel3d-specific partition if configured, else default to hpg-turin
+    v3d_partition = VESSEL_CFG.get("partition", "hpg-turin")
+    for acct in ACCOUNTS:
+        if acct.get("gpu_slots", 0) > 0:
+            return {"account": acct["name"], "partition": v3d_partition, "mode": "cpu"}
+    # Fallback
+    return {"account": _REG_ASSIGN["account"], "partition": v3d_partition, "mode": "cpu"}
+
+
+_V3D_ASSIGN = _vessel3d_assignment()
 
 rule vessel3d:
     input:
@@ -468,13 +491,14 @@ rule vessel3d:
         kintsugi_dir=KINTSUGI,
         channel=VESSEL_CFG.get("channel", 2),
         marker=VESSEL_CFG.get("marker", "CD31"),
+        device=VESSEL_CFG.get("device", "cpu"),
     resources:
         mem_mb=RES.get("mem_vessel3d", 256000),
         runtime=RES.get("time_vessel3d", 240),
-        slurm_partition=_REG_ASSIGN["partition"],
-        slurm_account=_REG_ASSIGN["account"],
-        gres="gpu:1" if _REG_ASSIGN["mode"] == "gpu" else "",
-        cpus_per_task=4,
+        slurm_partition=_V3D_ASSIGN["partition"],
+        slurm_account=_V3D_ASSIGN["account"],
+        gres="",
+        cpus_per_task=int(VESSEL_CFG.get("cpus", 8)),
     log:
         f"{PROJECT}/slurm/logs/snakemake/vessel3d_cyc{{cycle}}.log",
     script:
@@ -618,3 +642,72 @@ rule qc_registration:
         f"{PROJECT}/slurm/logs/snakemake/qc_registration.log",
     script:
         "scripts/qc_report.py"
+
+
+# ===========================================================================
+# Rule: Cleanup Safety Gate
+# ===========================================================================
+# Produces a .cleanup_safe sentinel ONLY when ALL declared consumers of
+# intermediate data are complete (including optional stages like vessel3d
+# if configured in optional_stages). This integrates with the DAG —
+# Snakemake won't mark it done until ALL dependencies are met.
+#
+# Invoke explicitly:
+#   snakemake cleanup_safe --profile profiles/slurm
+#   kintsugi workflow cleanup execute .   # (preferred — uses Python safety module)
+
+OPTIONAL_CFG = config.get("optional_stages", {})
+
+
+def _cleanup_safe_inputs():
+    """Build list of ALL sentinel files that must exist before cleanup is safe."""
+    inputs = {}
+
+    # QC sentinels (stitch, decon, edf — registration NOT required)
+    inputs["qc_stitch"] = f"{PROJECT}/qc_plots/.snakemake_complete_stitch"
+    inputs["qc_decon"] = f"{PROJECT}/qc_plots/.snakemake_complete_decon"
+    inputs["qc_edf"] = f"{PROJECT}/qc_plots/.snakemake_complete_edf"
+
+    # All EDF sentinels (primary consumer of deconvolved data)
+    for c in CYCLES:
+        inputs[f"edf_cyc{cyc_fmt(c)}"] = (
+            f"{PROJECT}/data/processed/edf/cyc{cyc_fmt(c)}/.snakemake_complete"
+        )
+
+    # Optional: vessel3d sentinels (second consumer of deconvolved data)
+    v3d_cfg = OPTIONAL_CFG.get("vessel3d", {})
+    if isinstance(v3d_cfg, dict) and v3d_cfg.get("enabled", False):
+        v3d_cycles = v3d_cfg.get("cycles", [])
+        if v3d_cycles:
+            for c in v3d_cycles:
+                inputs[f"vessel3d_cyc{cyc_fmt(c)}"] = (
+                    f"{PROJECT}/data/processed/vessel_3d/cyc{cyc_fmt(c)}/.snakemake_complete"
+                )
+        else:
+            # Empty list = all cycles
+            for c in CYCLES:
+                inputs[f"vessel3d_cyc{cyc_fmt(c)}"] = (
+                    f"{PROJECT}/data/processed/vessel_3d/cyc{cyc_fmt(c)}/.snakemake_complete"
+                )
+
+    return inputs
+
+
+rule cleanup_safe:
+    """Sentinel: all consumers of intermediate data are complete.
+
+    Use `kintsugi workflow cleanup execute .` (preferred) or target this
+    rule to verify cleanup safety via Snakemake's DAG:
+        snakemake cleanup_safe --profile profiles/slurm
+    """
+    input:
+        **_cleanup_safe_inputs(),
+    output:
+        sentinel=f"{PROJECT}/data/processed/.cleanup_safe",
+    run:
+        with open(output.sentinel, "w") as f:
+            import datetime
+            f.write(f"cleanup_safe {datetime.datetime.now().isoformat()}\n")
+            f.write(f"inputs: {len(input)}\n")
+            for k, v in dict(input).items():
+                f.write(f"  {k}: {v}\n")

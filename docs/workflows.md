@@ -90,8 +90,13 @@ stitched_df = run_stitched_qc(
 
 Remove autofluorescence and isolate true signal.
 
-> **Note:** The notebook-based approach (`3_Signal_Isolation.ipynb`) is deprecated.
-> Use the Claude-guided workflow or Python API instead.
+KINTSUGI provides two autofluorescence subtraction methods:
+- **Global**: Single scale factor for the entire image — simple and effective for bright markers
+- **Weighted multi-range**: Per-intensity-range weights that protect dim markers while aggressively removing AF in bright regions
+
+For detailed documentation including the weighted multi-range algorithm, parameter reference, and learning system, see [Signal Isolation](signal_isolation.md).
+
+**Notebook**: `notebooks/3_Signal_Isolation_QC.ipynb`
 
 ### Option A: Claude-Guided Workflow (Recommended)
 
@@ -108,37 +113,37 @@ pip install kintsugi[claude]
 Claude Code can:
 - Load and analyze channels
 - Suggest optimal parameters based on image characteristics
-- Apply processing with real-time feedback
+- Apply processing with real-time feedback (global or weighted subtraction)
 - Learn from successful parameters for future recommendations
 
 ### Option B: Python API
 
 ```python
-from kintsugi.denoise import adaptive_denoise, denoise_nlm
-from kintsugi.qc import ImageQC
+from kintsugi.signal.subtractor import AutofluorescenceSubtractor
 
-# Load and assess image quality
-qc = ImageQC()
-result = qc.assess(image)
-print(f"Quality: {result.quality_score}, Issues: {result.issues}")
+# Global subtraction (default) — good for bright markers
+subtractor = AutofluorescenceSubtractor(project_dir="./my_project", tissue_type="tonsil")
+result = subtractor.process(signal, blank, marker="CD3")
 
-# Adaptive denoising (auto-selects best method)
-denoised = adaptive_denoise(image, strength="auto")
-
-# Or use specific methods
-denoised = denoise_nlm(image, patch_size=7, patch_distance=11)
+# Weighted subtraction — protects dim markers like FOXP3, CD163
+subtractor = AutofluorescenceSubtractor(
+    project_dir="./my_project", tissue_type="tonsil", method="weighted"
+)
+result = subtractor.process(signal, blank, marker="FOXP3")
+print(f"Quality: {result.quality_metrics['quality_score']:.3f}")
 ```
 
-### Option C: Legacy Notebook
+### Option C: Interactive Tuners (Notebook)
 
-**Notebook**: `notebooks/3_Signal_Isolation.ipynb` (DEPRECATED)
+The notebook provides widget-based parameter tuning for blank subtraction, denoising, CLAHE, and background cleaning. See `notebooks/3_Signal_Isolation_QC.ipynb` Section 3B.
 
 ### Steps:
 1. Load registered images
 2. Identify autofluorescence channels
-3. Subtract autofluorescence
-4. Apply filtering
-5. Generate final signal images
+3. Subtract autofluorescence (global or weighted)
+4. Apply denoising and filtering
+5. Assess quality
+6. Save results and record parameters for learning
 
 ## Workflow 4: Segmentation Analysis
 

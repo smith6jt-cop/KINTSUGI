@@ -27,6 +27,7 @@ KINTSUGI_DIR = Path(snakemake.params.kintsugi_dir)
 CYCLE = snakemake.wildcards.cycle
 CHANNEL = int(snakemake.params.channel)
 MARKER = str(snakemake.params.marker)
+DEVICE = str(getattr(snakemake.params, "device", "auto"))
 
 # Setup Python path
 sys.path.insert(0, str(PROJECT_DIR / "notebooks"))
@@ -83,6 +84,7 @@ print(f"Sigmas: {SIGMAS}")
 print(f"Min size: {MIN_SIZE} voxels")
 print(f"Prune min: {PRUNE_MIN_UM} um")
 print(f"Spacing: XY={XY_PIXEL_SIZE:.3f} um, Z={Z_STEP_SIZE:.3f} um")
+print(f"Device: {DEVICE}")
 
 # ---------------------------------------------------------------------------
 # Load deconvolved z-stack for target channel
@@ -90,14 +92,20 @@ print(f"Spacing: XY={XY_PIXEL_SIZE:.3f} um, Z={Z_STEP_SIZE:.3f} um")
 start_time = time.time()
 
 # Find z-plane files for the target channel
+# Structure 1: flat — cyc02/*_CH2_*.tif or cyc02/*CH2*.tif
 zplane_files = sorted(DECON_DIR.glob(f"*_CH{CHANNEL}_*.tif"))
 if not zplane_files:
-    # Try alternative naming
     zplane_files = sorted(DECON_DIR.glob(f"*CH{CHANNEL}*.tif"))
+# Structure 2: subdirectory per channel — cyc02/CH2/deconv_*.tif
+if not zplane_files:
+    ch_subdir = DECON_DIR / f"CH{CHANNEL}"
+    if ch_subdir.is_dir():
+        zplane_files = sorted(ch_subdir.glob("*.tif"))
 
 if not zplane_files:
     print(f"ERROR: No z-plane files found for channel {CHANNEL} in {DECON_DIR}")
-    print(f"Available files: {list(DECON_DIR.glob('*.tif'))[:10]}")
+    print(f"Available files (flat): {list(DECON_DIR.glob('*.tif'))[:10]}")
+    print(f"Available subdirs: {[d.name for d in DECON_DIR.iterdir() if d.is_dir()]}")
     log_footer(1)
     sys.exit(1)
 
@@ -120,7 +128,7 @@ try:
         sigmas=SIGMAS,
         min_size=MIN_SIZE,
         prune_min_length_um=PRUNE_MIN_UM,
-        device="auto",
+        device=DEVICE,
         marker_name=MARKER,
     )
 

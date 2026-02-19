@@ -600,6 +600,8 @@ export_vessel_results(result, "data/processed/vessel_3d/")
 - `vessel_graph_{marker}.graphml` — NetworkX graph
 - `vessel_2d_projection_{marker}.tif` — MIP for Notebook 4 spatial analysis
 
-**Dependencies**: `skan>=0.11.0` and `networkx>=3.0` added to the `analysis` optional group. GPU acceleration via CuPy (existing `gpu` group). Skeletonization is CPU-only.
+**Dependencies**: `skan>=0.11.0` and `networkx>=3.0` in the `analysis` optional group. GPU acceleration via CuPy (existing `gpu` group). Skeletonization is CPU-only.
+
+**GPU memory**: Hessian eigenvalues use Cardano's analytical formula for symmetric 3x3 matrices — operates element-wise on 6 Hessian arrays. The naive `(N, 3, 3)` + `eigvalsh` approach OOMs on stitched volumes (108 GB allocation for 3 billion voxels). Sorting uses a 3-element sorting network (compare-swap) to avoid index array allocation.
 
 **SLURM**: `03b_vessel3d.sh` runs between `03_deconvolution.sh` and `04_edf.sh`. Environment variables: `VESSEL_CYCLE`, `VESSEL_CHANNEL`, `VESSEL_MARKER`, `VESSEL_SIGMAS`, `VESSEL_MIN_SIZE`. Recommended: 256 GB RAM, 4 h wall time.

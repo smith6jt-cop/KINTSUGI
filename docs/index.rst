@@ -39,6 +39,7 @@ Quick Links
    :caption: User Guide
 
    workflows
+   signal_isolation
    cli
    api
 
