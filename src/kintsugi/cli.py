@@ -1053,6 +1053,21 @@ def workflow_config(project_dir: str, print_only: bool):
             "min_size": 500,
             "prune_min_um": 5.0,
         },
+        # Optional pipeline stages (cleanup safety system)
+        # Declare which optional stages are planned for this project.
+        # Cleanup will BLOCK deletion of intermediate data consumed by
+        # enabled optional stages until their sentinels are present.
+        # If this section is absent, cleanup conservatively blocks deletion
+        # of deconvolved/ data with a warning to update the config.
+        "optional_stages": {
+            "vessel3d": {
+                "enabled": False,  # Set true if 3D vessel segmentation is planned
+                "cycles": [],  # Which cycles need it (empty = none planned)
+            },
+            "spillover": {
+                "enabled": False,  # Set true if spillover correction is planned
+            },
+        },
         # SLURM resources
         "resources": {
             "accounts": [
@@ -1629,6 +1644,417 @@ def export_status(project_dir: str):
 
     if status.get("geojson_regions"):
         console.print(f"  GeoJSON regions: {status['geojson_regions']}")
+
+
+# ============================================================================
+# Cleanup Commands (Pipeline-Aware Safety System)
+# ============================================================================
+
+
+@workflow.group("cleanup")
+def cleanup_group():
+    """Pipeline-aware cleanup of intermediate data.
+
+    Checks ALL downstream consumers before deleting intermediate files.
+    Stages data to a recoverable trash directory instead of permanent deletion.
+
+    \b
+    Commands:
+        status   - Show per-directory safe/blocked status with reasons
+        plan     - Dry-run showing what would be deleted and sizes
+        execute  - Run cleanup with full safety checks
+        recover  - List and restore trashed data
+        purge    - Permanently delete old trash entries
+    """
+    pass
+
+
+@cleanup_group.command("status")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+def cleanup_status(project_dir: str):
+    """
+    Show cleanup safety status for each intermediate directory.
+
+    Checks pipeline dependency graph and reports which directories can
+    be safely deleted and which are blocked by incomplete consumers.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    """
+    from pathlib import Path
+
+    from kintsugi.cleanup import assess_cleanup_safety
+
+    project_dir = Path(project_dir).resolve()
+
+    console.print(f"[bold]Cleanup Status[/bold]  ({project_dir.name})\n")
+
+    manifest = assess_cleanup_safety(project_dir)
+
+    if manifest.warnings:
+        for warning in manifest.warnings:
+            console.print(f"  [yellow]Warning: {warning}[/yellow]")
+        console.print()
+
+    if not manifest.entries:
+        console.print("[dim]No intermediate directories found.[/dim]")
+        return
+
+    table = Table(title="Directory Status")
+    table.add_column("Directory", style="cyan")
+    table.add_column("Status", style="bold")
+    table.add_column("Size", style="dim", justify="right")
+    table.add_column("Consumers", style="white")
+    table.add_column("Reason", style="white", max_width=60)
+
+    for entry in manifest.entries:
+        if entry.status == "safe":
+            status_str = "[green]SAFE[/green]"
+        elif entry.status == "blocked":
+            status_str = "[red]BLOCKED[/red]"
+        elif entry.status == "already_deleted":
+            status_str = "[dim]GONE[/dim]"
+        else:
+            status_str = entry.status
+
+        size_str = ""
+        if entry.size_bytes > 0:
+            if entry.size_gb >= 1:
+                size_str = f"{entry.size_gb:.1f} GB"
+            else:
+                size_str = f"{entry.size_mb:.0f} MB"
+
+        consumers_str = ", ".join(entry.consumers)
+        table.add_row(
+            entry.directory + "/",
+            status_str,
+            size_str,
+            consumers_str,
+            entry.reason,
+        )
+
+    console.print(table)
+
+    if manifest.safe_entries:
+        total_gb = manifest.total_reclaimable_gb
+        console.print(f"\n  [green]Reclaimable: {total_gb:.1f} GB[/green]")
+        console.print(
+            f"  Run: kintsugi workflow cleanup execute {project_dir}"
+        )
+
+    if manifest.blocked_entries:
+        console.print(
+            f"\n  [yellow]{len(manifest.blocked_entries)} director(ies) blocked. "
+            "See reasons above.[/yellow]"
+        )
+
+
+@cleanup_group.command("plan")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+def cleanup_plan(project_dir: str):
+    """
+    Dry-run: show what would be deleted and sizes.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    """
+    from pathlib import Path
+
+    from kintsugi.cleanup import _dir_size, assess_cleanup_safety
+
+    project_dir = Path(project_dir).resolve()
+
+    console.print(f"[bold]Cleanup Plan[/bold]  ({project_dir.name})\n")
+
+    manifest = assess_cleanup_safety(project_dir)
+
+    if manifest.warnings:
+        for warning in manifest.warnings:
+            console.print(f"  [yellow]Warning: {warning}[/yellow]")
+        console.print()
+
+    # Show what would be deleted
+    will_delete = []
+    will_skip = []
+
+    for entry in manifest.entries:
+        if entry.status == "safe":
+            will_delete.append(entry)
+        elif entry.status == "blocked":
+            will_skip.append(entry)
+
+    # Also check raw/
+    raw_dir = project_dir / "data" / "raw"
+    if raw_dir.exists():
+        from kintsugi.cleanup import _check_stage_sentinels, _get_cycles, _get_stage
+
+        config = {}
+        try:
+            import yaml
+
+            cfg_path = project_dir / "workflow" / "config.yaml"
+            if cfg_path.exists():
+                with open(cfg_path) as f:
+                    config = yaml.safe_load(f) or {}
+        except Exception:
+            pass
+        cycles = _get_cycles(config, project_dir)
+        stitch_stage = _get_stage("stitch")
+        if stitch_stage and cycles:
+            complete, _ = _check_stage_sentinels(project_dir, stitch_stage, cycles)
+            if complete:
+                raw_size = _dir_size(raw_dir)
+                will_delete.append(type("Entry", (), {
+                    "directory": "raw",
+                    "size_bytes": raw_size,
+                    "size_gb": raw_size / (1024**3),
+                    "reason": "All stitch sentinels present",
+                })())
+
+    if will_delete:
+        console.print("  [bold green]WILL DELETE:[/bold green]")
+        total = 0
+        for entry in will_delete:
+            size = entry.size_bytes
+            total += size
+            if size >= 1024**3:
+                size_str = f"{size / 1024**3:.1f} GB"
+            elif size >= 1024**2:
+                size_str = f"{size / 1024**2:.0f} MB"
+            else:
+                size_str = f"{size} bytes"
+            console.print(f"    {entry.directory}/  ({size_str})")
+        console.print(f"\n    Total: {total / 1024**3:.1f} GB")
+    else:
+        console.print("  [dim]Nothing to delete.[/dim]")
+
+    if will_skip:
+        console.print("\n  [bold yellow]BLOCKED (will skip):[/bold yellow]")
+        for entry in will_skip:
+            console.print(f"    {entry.directory}/  — {entry.reason}")
+
+
+@cleanup_group.command("execute")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--no-trash", is_flag=True, help="Permanent delete (skip trash staging)")
+@click.option("--force", is_flag=True, help="Skip interactive prompt (safety checks still enforced)")
+@click.option("--skip-vessel3d", is_flag=True, help="Override vessel3d block (escape hatch)")
+def cleanup_execute(project_dir: str, no_trash: bool, force: bool, skip_vessel3d: bool):
+    """
+    Execute cleanup with full pipeline safety checks.
+
+    By default, moves data to data/.trash/ for recovery. Use --no-trash
+    for permanent deletion. Safety checks (sentinel verification) are
+    ALWAYS enforced — --force only skips the interactive confirmation.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+
+    \b
+    Examples:
+        kintsugi workflow cleanup execute .                 # Interactive + trash
+        kintsugi workflow cleanup execute . --force         # Skip prompt + trash
+        kintsugi workflow cleanup execute . --no-trash      # Permanent delete
+        kintsugi workflow cleanup execute . --skip-vessel3d # Override vessel3d block
+    """
+    from pathlib import Path
+
+    from kintsugi.cleanup import assess_cleanup_safety, execute_cleanup
+
+    project_dir = Path(project_dir).resolve()
+
+    console.print(f"[bold]Cleanup Execute[/bold]  ({project_dir.name})\n")
+
+    manifest = assess_cleanup_safety(project_dir)
+
+    if manifest.warnings:
+        for warning in manifest.warnings:
+            console.print(f"  [yellow]Warning: {warning}[/yellow]")
+        console.print()
+
+    safe_count = len(manifest.safe_entries)
+    blocked_count = len(manifest.blocked_entries)
+
+    if safe_count == 0 and not skip_vessel3d:
+        console.print("[dim]Nothing safe to delete.[/dim]")
+        if blocked_count > 0:
+            console.print(
+                f"  {blocked_count} director(ies) blocked. "
+                "Run 'kintsugi workflow cleanup status .' for details."
+            )
+        return
+
+    # Show summary
+    console.print(f"  Safe to delete: {safe_count} directories")
+    if blocked_count > 0:
+        console.print(f"  Blocked: {blocked_count} directories")
+    if manifest.total_reclaimable_gb > 0:
+        console.print(f"  Reclaimable: {manifest.total_reclaimable_gb:.1f} GB")
+
+    use_trash = not no_trash
+    if use_trash:
+        console.print("  Method: move to data/.trash/ (recoverable)")
+    else:
+        console.print("  Method: [red]permanent delete[/red]")
+
+    if skip_vessel3d:
+        console.print("  [yellow]Override: skipping vessel3d safety check[/yellow]")
+
+    # Interactive confirmation
+    if not force:
+        console.print()
+        response = click.prompt(
+            "  Proceed with cleanup?",
+            type=click.Choice(["y", "n"], case_sensitive=False),
+            default="n",
+        )
+        if response.lower() != "y":
+            console.print("[yellow]Cancelled.[/yellow]")
+            return
+
+    # Execute
+    result = execute_cleanup(
+        project_dir,
+        manifest=manifest,
+        use_trash=use_trash,
+        skip_vessel3d=skip_vessel3d,
+    )
+
+    # Report results
+    if result["deleted"]:
+        console.print(f"\n  [green]Deleted {len(result['deleted'])} director(ies):[/green]")
+        for d in result["deleted"]:
+            size = d.get("size_bytes", 0)
+            size_str = f"{size / 1024**3:.1f} GB" if size >= 1024**3 else f"{size / 1024**2:.0f} MB"
+            if d.get("trash_path"):
+                console.print(f"    {d['directory']}/  ({size_str}) -> .trash/")
+            else:
+                console.print(f"    {d['directory']}/  ({size_str}) [deleted]")
+
+    if result["skipped"]:
+        console.print(f"\n  [yellow]Skipped {len(result['skipped'])} director(ies):[/yellow]")
+        for s in result["skipped"]:
+            console.print(f"    {s['directory']}/  — {s['reason']}")
+
+    if result["errors"]:
+        console.print(f"\n  [red]Errors: {len(result['errors'])}[/red]")
+        for e in result["errors"]:
+            console.print(f"    {e['directory']}/  — {e['error']}")
+
+
+@cleanup_group.command("recover")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--entry", default=None, help="Name of trash entry to recover")
+def cleanup_recover(project_dir: str, entry: str | None):
+    """
+    List and restore trashed data.
+
+    Without --entry, lists all items in data/.trash/.
+    With --entry, restores the specified item to its original location.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+
+    \b
+    Examples:
+        kintsugi workflow cleanup recover .                          # List trash
+        kintsugi workflow cleanup recover . --entry deconvolved_20260219_120000  # Restore
+    """
+    from pathlib import Path
+
+    from kintsugi.cleanup import list_trash, recover_trash
+
+    project_dir = Path(project_dir).resolve()
+
+    if entry is None:
+        # List trash contents
+        entries = list_trash(project_dir)
+        if not entries:
+            console.print("[dim]Trash is empty.[/dim]")
+            return
+
+        console.print(f"[bold]Trash Contents[/bold]  ({project_dir.name})\n")
+        table = Table()
+        table.add_column("Entry", style="cyan")
+        table.add_column("Original Path", style="white")
+        table.add_column("Timestamp", style="dim")
+        table.add_column("Size", style="dim", justify="right")
+
+        for e in entries:
+            name = Path(e["current_path"]).name
+            size = e.get("size_bytes", 0)
+            size_str = f"{size / 1024**3:.1f} GB" if size >= 1024**3 else f"{size / 1024**2:.0f} MB"
+            table.add_row(
+                name,
+                e.get("original_path", "unknown"),
+                e.get("timestamp", "unknown"),
+                size_str,
+            )
+
+        console.print(table)
+        console.print(
+            "\n[dim]Recover with: kintsugi workflow cleanup recover . --entry <name>[/dim]"
+        )
+    else:
+        result = recover_trash(project_dir, entry)
+        if "error" in result:
+            console.print(f"[red]{result['error']}[/red]")
+            raise SystemExit(1)
+        console.print(f"[green]Recovered: {result['recovered']}[/green]")
+
+
+@cleanup_group.command("purge")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--days", default=7, type=int, help="Delete entries older than N days (default: 7)")
+@click.option("--all", "purge_all", is_flag=True, help="Delete ALL trash entries")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+def cleanup_purge(project_dir: str, days: int, purge_all: bool, force: bool):
+    """
+    Permanently delete old trash entries.
+
+    By default, deletes entries older than 7 days. Use --all to purge everything.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+
+    \b
+    Examples:
+        kintsugi workflow cleanup purge .              # Entries > 7 days
+        kintsugi workflow cleanup purge . --days 1     # Entries > 1 day
+        kintsugi workflow cleanup purge . --all        # Everything
+    """
+    from pathlib import Path
+
+    from kintsugi.cleanup import list_trash, purge_trash
+
+    project_dir = Path(project_dir).resolve()
+
+    entries = list_trash(project_dir)
+    if not entries:
+        console.print("[dim]Trash is empty.[/dim]")
+        return
+
+    console.print(f"[bold]Purge Trash[/bold]  ({project_dir.name})")
+    console.print(f"  Entries in trash: {len(entries)}")
+    if purge_all:
+        console.print("  [red]Will delete ALL trash entries permanently[/red]")
+    else:
+        console.print(f"  Will delete entries older than {days} days")
+
+    if not force:
+        response = click.prompt(
+            "\n  Proceed?",
+            type=click.Choice(["y", "n"], case_sensitive=False),
+            default="n",
+        )
+        if response.lower() != "y":
+            console.print("[yellow]Cancelled.[/yellow]")
+            return
+
+    result = purge_trash(project_dir, max_age_days=days, purge_all=purge_all)
+
+    if result["purged"]:
+        total_gb = result["total_bytes"] / (1024**3)
+        console.print(
+            f"\n  [green]Purged {len(result['purged'])} entries ({total_gb:.1f} GB)[/green]"
+        )
+    else:
+        console.print("\n  [dim]No entries matched the age criteria.[/dim]")
 
 
 # ============================================================================
