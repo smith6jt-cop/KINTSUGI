@@ -233,12 +233,13 @@ kintsugi install gpu
 Install additional capabilities as needed:
 
 ```bash
-kintsugi install gpu        # GPU acceleration (CuPy + PyTorch)
+kintsugi install gpu        # GPU acceleration (CuPy for CUDA)
+kintsugi install torch      # PyTorch for deep learning models
+kintsugi install bio        # Spatial biology analysis (scanpy, scimap, squidpy)
 kintsugi install viz        # Napari visualization
-kintsugi install dl         # Deep learning segmentation (InstanSeg)
-kintsugi install analysis   # Spatial analysis (scanpy, scimap)
-kintsugi install bio        # Bio formats I/O
-kintsugi install full       # All optional features
+kintsugi install claude     # Claude Code MCP integration
+kintsugi install dev        # Development tools (pytest, ruff, black, mypy)
+kintsugi install all        # All optional features
 ```
 
 ### HPC-Specific Notes

@@ -16,11 +16,11 @@ channels:
 #   pip install -e .
 #
 # Optional features (run after base install):
-#   kintsugi install gpu        # GPU acceleration (PyTorch + CuPy)
+#   kintsugi install gpu        # GPU acceleration (CuPy for CUDA)
+#   kintsugi install torch      # PyTorch for deep learning models
+#   kintsugi install bio        # Spatial biology analysis (scanpy, scimap, squidpy)
 #   kintsugi install viz        # Napari visualization
-#   kintsugi install analysis   # Spatial analysis (scanpy, scimap)
-#   kintsugi install dl         # Deep learning segmentation
-#   kintsugi install full       # All optional features
+#   kintsugi install all        # All optional features
 # =============================================================================
 
 dependencies:

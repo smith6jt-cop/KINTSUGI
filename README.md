@@ -111,23 +111,26 @@ kintsugi check
 After installing the base environment, add optional features as needed using the `kintsugi install` command:
 
 ```bash
-# GPU acceleration (PyTorch + CuPy for CUDA)
+# GPU acceleration (CuPy for CUDA)
 kintsugi install gpu
+
+# PyTorch for deep learning models
+kintsugi install torch
+
+# Spatial biology analysis (scanpy, scimap, squidpy)
+kintsugi install bio
 
 # Napari interactive visualization
 kintsugi install viz
 
-# Deep learning segmentation (InstanSeg)
-kintsugi install dl
+# Claude Code MCP integration
+kintsugi install claude
 
-# Spatial analysis (scanpy, scimap)
-kintsugi install analysis
-
-# Bio formats I/O (OME-TIFF, LIF, etc.)
-kintsugi install bio
+# Development tools (pytest, ruff, black, mypy)
+kintsugi install dev
 
 # All optional features
-kintsugi install full
+kintsugi install all
 ```
 
 ### Multi-GPU Acceleration
@@ -193,7 +196,7 @@ kintsugi template -o my_config.json
 | **libvips** | High-performance image I/O | `conda install libvips` (Linux), `brew install vips` (macOS), or Zenodo (Windows) |
 | **VALIS** | Image registration | Included in base install |
 | **CuPy** | GPU acceleration (optional) | `kintsugi install gpu` |
-| **PyTorch** | Deep learning (optional) | `kintsugi install gpu` or `kintsugi install dl` |
+| **PyTorch** | Deep learning (optional) | `kintsugi install torch` |
 | **RAPIDS** | GPU data science (optional) | See [installation docs](docs/installation.md#rapids-gpu-accelerated-data-science-optional) |
 
 > **Note:** Java, Maven, and FIJI/CLIJ2 are no longer required. KINTSUGI now uses pure Python
