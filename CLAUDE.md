@@ -605,3 +605,57 @@ export_vessel_results(result, "data/processed/vessel_3d/")
 **GPU memory**: Hessian eigenvalues use Cardano's analytical formula for symmetric 3x3 matrices — operates element-wise on 6 Hessian arrays. The naive `(N, 3, 3)` + `eigvalsh` approach OOMs on stitched volumes (108 GB allocation for 3 billion voxels). Sorting uses a 3-element sorting network (compare-swap) to avoid index array allocation.
 
 **SLURM**: `03b_vessel3d.sh` runs between `03_deconvolution.sh` and `04_edf.sh`. Environment variables: `VESSEL_CYCLE`, `VESSEL_CHANNEL`, `VESSEL_MARKER`, `VESSEL_SIGMAS`, `VESSEL_MIN_SIZE`. Recommended: 256 GB RAM, 4 h wall time.
+
+## Pipeline-Aware Cleanup (Feb 2026)
+
+Safe deletion of intermediate data (`stitched/`, `deconvolved/`, `raw/`) with dependency graph validation, QC gating, and staged deletion with recovery.
+
+**Root cause**: 14 datasets lost deconvolved z-stacks when the old `cleanup_datasets.sh` ran before vessel3d completed — it only checked EDF, missing that `deconvolved/` has two consumers (edf + vessel3d).
+
+**Key files:**
+- `src/kintsugi/cleanup.py` — Core module: dependency graph, assessment, trash staging, recovery
+- `tests/test_cleanup.py` — 42 tests covering all safety scenarios
+- `src/kintsugi/cli.py` — CLI commands under `@workflow.group("cleanup")`
+- `workflow/Snakefile` — `cleanup_safe` rule aggregates all consumer sentinels
+
+**CLI usage:**
+```bash
+kintsugi workflow cleanup status .                    # Show what's safe/blocked and why
+kintsugi workflow cleanup plan .                      # Dry-run: what would be deleted
+kintsugi workflow cleanup execute .                   # Delete safe intermediates (trash mode)
+kintsugi workflow cleanup execute . --no-trash        # Permanent deletion
+kintsugi workflow cleanup execute . --skip-vessel3d   # Override vessel3d blocking (emergency)
+kintsugi workflow cleanup execute . --force           # Skip interactive confirmation
+kintsugi workflow cleanup recover .                   # List trash entries
+kintsugi workflow cleanup recover . --entry NAME      # Restore from trash
+kintsugi workflow cleanup purge .                     # Delete trash entries >7 days old
+kintsugi workflow cleanup purge . --all               # Delete all trash entries
+```
+
+**Safety mechanisms:**
+1. **Dependency graph** — `deconvolved/` requires BOTH edf AND vessel3d (if enabled) to complete
+2. **Conservative default** — if `optional_stages` absent from config, blocks deletion with guidance
+3. **QC gate** — all cleanup blocked until stitch/decon/edf QC sentinels present
+4. **Staged deletion** — `data/.trash/{dir}_{timestamp}/` with JSON receipt for recovery
+5. **Per-cycle verification** — vessel3d can require only specific cycles (e.g., `cycles: [2, 3]`)
+
+**Config integration** (`workflow/config.yaml`):
+```yaml
+optional_stages:
+  vessel3d:
+    enabled: false    # Set true if vessel3d is planned for this dataset
+    cycles: []        # Empty = all cycles; or specify [2, 3] for subset
+  spillover:
+    enabled: false    # Placeholder for future spillover correction stage
+```
+
+**Decision logic:**
+- If `optional_stages` section missing → BLOCK deconvolved deletion (conservative)
+- If `vessel3d.enabled: false` → deconvolved SAFE (only edf needs it)
+- If `vessel3d.enabled: true` + all sentinels present → deconvolved SAFE
+- If `vessel3d.enabled: true` + sentinels missing → deconvolved BLOCKED
+- If any QC sentinel missing → EVERYTHING BLOCKED
+
+**Snakemake integration:** `snakemake cleanup_safe --profile profiles/slurm` verifies safety via DAG (preferred method is the Python CLI).
+
+**Batch processing:** `cleanup_datasets.sh` is now a thin wrapper calling `kintsugi workflow cleanup` for each staged dataset.
