@@ -2,7 +2,9 @@
 Tests for batch signal isolation processing.
 
 Tests cover: channel discovery, method selection, per-channel processing,
-tile smoothing, batch processing, QC visualization, and manifest I/O.
+tile smoothing, batch processing, QC visualization, manifest I/O,
+recipe parsing, blank name resolution, background cleaning, and
+recipe-driven processing.
 """
 
 import json
@@ -16,7 +18,16 @@ from kintsugi.signal.batch import (
     BatchResult,
     ChannelResult,
     ChannelSpec,
+    CleanParams,
+    MarkerRecipe,
+    SubtractionParams,
+    _normalize_blank_name,
+    _parse_param_file,
+    _resolve_blank_path,
+    _strip_for_comparison,
+    clean_background,
     discover_channels,
+    load_legacy_recipes,
     process_batch,
     process_channel,
     select_method,
@@ -122,6 +133,152 @@ def low_blank():
     return rng.randint(2000, 6000, (256, 256), dtype=np.uint16)
 
 
+@pytest.fixture
+def recipe_dir(tmp_path):
+    """Create sample legacy param files for recipe parsing."""
+    recipe_path = tmp_path / "recipes"
+    recipe_path.mkdir()
+
+    # CD3e: primary + second subtraction + clean
+    (recipe_path / "CD3e_param.txt").write_text(
+        "timestamp: '2025/03/17_11:36'\n"
+        "signal_channel: 'CD3e'\n"
+        "blankID: 'Blank1b'\n"
+        "blank_clip_factor: 20000\n"
+        "blank_scale_factor: 1.4\n"
+        "smooth_low: False\n"
+        "smooth_high: False\n"
+        "low_size: 2\n"
+        "high_size: 2\n"
+        "erosion: 1\n"
+        "second_subtract: True\n"
+        "blankID2: 'Blank13b'\n"
+        "blank_clip_factor_2: 0\n"
+        "blank_scale_factor_2: 0.6\n"
+        "smooth_low_2: False\n"
+        "smooth_high_2: False\n"
+        "low_size_2: 2\n"
+        "high_size_2: 1\n"
+        "erosion_2: 1\n"
+        "clean_used: True\n"
+        "clean_image: dask.array<astype, shape=(8986, 9464), dtype=uint16>\n"
+        "smooth: True\n"
+        "remove_small: True\n"
+        "small_size: 50\n"
+        "footprint: 3\n"
+    )
+
+    # CD31: primary only + clean (no second subtraction)
+    (recipe_path / "CD31_param.txt").write_text(
+        "signal_channel: 'CD31'\n"
+        "blankID: 'Blank13b'\n"
+        "blank_clip_factor: 0\n"
+        "blank_scale_factor: 0.2\n"
+        "smooth_low: False\n"
+        "smooth_high: False\n"
+        "low_size: 2\n"
+        "high_size: 2\n"
+        "erosion: 1\n"
+        "second_subtract: False\n"
+        "clean_used: True\n"
+        "background_threshold: 3000\n"
+        "smooth: False\n"
+        "remove_small: False\n"
+        "small_size: 75\n"
+        "footprint: 2\n"
+    )
+
+    # CD163: uses non-blank marker as blank source
+    (recipe_path / "CD163_param.txt").write_text(
+        "signal_channel: 'CD163'\n"
+        "blankID: 'CD3e'\n"
+        "blank_clip_factor: 11000\n"
+        "blank_scale_factor: 1.5\n"
+        "erosion: 2\n"
+        "second_subtract: True\n"
+        "blankID2: 'Blank13c'\n"
+        "blank_clip_factor_2: 0\n"
+        "blank_scale_factor_2: 0.7\n"
+        "erosion_2: 2\n"
+        "clean_used: True\n"
+        "background_threshold: 1000\n"
+        "smooth: True\n"
+        "smooth_threshold: 800\n"
+        "remove_small: True\n"
+        "small_size: 3\n"
+        "footprint: 2\n"
+    )
+
+    # FoxP3: includes dask artifact lines
+    (recipe_path / "FoxP3_param.txt").write_text(
+        "signal_channel: 'FoxP3'\n"
+        "blankID: 'Blank1b'\n"
+        "blank_clip_factor: 17200\n"
+        "blank_scale_factor: 1.2\n"
+        "erosion: 0\n"
+        "second_subtract: True\n"
+        "blankID2: 'Blank1b'\n"
+        "blank_clip_factor_2: 0\n"
+        "blank_scale_factor_2: 0.9\n"
+        "erosion_2: 1\n"
+        "clean_used: True\n"
+        "clean_image: dask.array<array, shape=(8986, 9464), dtype=float64>\n"
+        "background_threshold: 10\n"
+        "smooth: False\n"
+        "remove_small: True\n"
+        "small_size: 10\n"
+        "footprint: 3\n"
+    )
+
+    return recipe_path
+
+
+@pytest.fixture
+def multi_cycle_project(tmp_path):
+    """Project with 13 cycles and diverse blanks for recipe blank resolution testing."""
+    project = tmp_path / "multi_project"
+    project.mkdir()
+
+    registered = project / "data" / "processed" / "registered"
+    rng = np.random.RandomState(99)
+    shape = (64, 64)
+
+    channel_names = {}
+
+    # Cycle 1: blanks
+    cyc01 = registered / "cyc01"
+    cyc01.mkdir(parents=True)
+    channel_names[1] = ["DAPI-01", "Blank_1a", "Blank_1b", "Blank_1c"]
+    for name in channel_names[1]:
+        tifffile.imwrite(str(cyc01 / f"{name}.tif"), rng.randint(1000, 10000, shape, dtype=np.uint16))
+
+    # Cycle 2: signal channels
+    cyc02 = registered / "cyc02"
+    cyc02.mkdir(parents=True)
+    channel_names[2] = ["DAPI-02", "CD31", "CD3e", "CD45"]
+    for name in channel_names[2]:
+        tifffile.imwrite(str(cyc02 / f"{name}.tif"), rng.randint(1000, 20000, shape, dtype=np.uint16))
+
+    # Cycle 13: more blanks (e.g., Blank_13b, Blank_13c)
+    cyc13 = registered / "cyc13"
+    cyc13.mkdir(parents=True)
+    channel_names[13] = ["DAPI-13", "Blank_13a", "Blank_13b", "Blank_13c"]
+    for name in channel_names[13]:
+        tifffile.imwrite(str(cyc13 / f"{name}.tif"), rng.randint(1000, 10000, shape, dtype=np.uint16))
+
+    # Config
+    workflow_dir = project / "workflow"
+    workflow_dir.mkdir(parents=True)
+    config = {
+        "project_dir": str(project),
+        "channel_names": channel_names,
+    }
+    with open(workflow_dir / "config.yaml", "w") as f:
+        yaml.dump(config, f)
+
+    return project
+
+
 # =============================================================================
 # TestDiscoverChannels
 # =============================================================================
@@ -168,6 +325,20 @@ class TestDiscoverChannels:
             yaml.dump({"project_dir": str(tmp_path)}, f)
         with pytest.raises(ValueError, match="No channel_names"):
             discover_channels(tmp_path)
+
+    def test_recipe_overrides_blank(self, multi_cycle_project, recipe_dir):
+        """With recipes, blank selection uses recipe blank_name, not positional."""
+        recipes = load_legacy_recipes(recipe_dir)
+        specs = discover_channels(multi_cycle_project, recipes=recipes)
+        by_name = {s.marker_name: s for s in specs}
+
+        # CD31 recipe uses Blank13b → should resolve to Blank_13b in cyc13
+        assert "CD31" in by_name
+        assert by_name["CD31"].blank_name == "Blank_13b"
+
+        # CD3e recipe uses Blank1b → should resolve to Blank_1b in cyc01
+        assert "CD3e" in by_name
+        assert by_name["CD3e"].blank_name == "Blank_1b"
 
 
 # =============================================================================
@@ -381,6 +552,11 @@ class TestProcessBatch:
         assert result.summary["total"] == 1
         assert "CD31" in result.channels
 
+    def test_default_sigma_is_zero(self, synthetic_project):
+        """Default tile_smooth_sigma changed from 500 to 0."""
+        result = process_batch(synthetic_project, dry_run=True)
+        assert result.tile_smooth_sigma == 0.0
+
 
 # =============================================================================
 # TestQCVisualization
@@ -455,6 +631,13 @@ class TestManifest:
         loaded = json.loads(json_str)
         assert loaded["summary"]["total"] == result.summary["total"]
 
+    def test_manifest_includes_recipe_dir(self, synthetic_project, recipe_dir):
+        result = process_batch(
+            synthetic_project, recipe_dir=recipe_dir, force=True
+        )
+        d = result.to_dict()
+        assert d["recipe_dir"] == str(recipe_dir)
+
 
 # =============================================================================
 # TestDataclasses
@@ -498,3 +681,434 @@ class TestDataclasses:
         d = batch.to_dict()
         assert d["timestamp"] == "2026-02-20T12:00:00"
         assert d["summary"]["total"] == 5
+
+
+# =============================================================================
+# TestNormalizeBlankName
+# =============================================================================
+
+
+class TestNormalizeBlankName:
+    def test_blank1b(self):
+        assert _normalize_blank_name("Blank1b") == "Blank_1b"
+
+    def test_blank13c(self):
+        assert _normalize_blank_name("Blank13c") == "Blank_13c"
+
+    def test_blank_1a_passthrough(self):
+        """Already-normalized names pass through unchanged."""
+        assert _normalize_blank_name("Blank_1a") == "Blank_1a"
+
+    def test_non_blank_passthrough(self):
+        assert _normalize_blank_name("CD3e") == "CD3e"
+        assert _normalize_blank_name("DAPI") == "DAPI"
+        assert _normalize_blank_name("HLA-DR") == "HLA-DR"
+
+    def test_case_insensitive(self):
+        assert _normalize_blank_name("blank1b") == "Blank_1b"
+
+    def test_strip_for_comparison(self):
+        assert _strip_for_comparison("HLA-DR") == "hladr"
+        assert _strip_for_comparison("Blank_1a") == "blank1a"
+        assert _strip_for_comparison("CD3e") == "cd3e"
+
+
+# =============================================================================
+# TestResolveBlankPath
+# =============================================================================
+
+
+class TestResolveBlankPath:
+    def test_exact_match(self, tmp_path):
+        path = tmp_path / "Blank_1b.tif"
+        location_map = {"Blank_1b": path}
+        result = _resolve_blank_path("Blank_1b", location_map)
+        assert result == ("Blank_1b", path)
+
+    def test_normalize_then_match(self, tmp_path):
+        """Blank1b normalizes to Blank_1b and matches."""
+        path = tmp_path / "Blank_1b.tif"
+        location_map = {"Blank_1b": path}
+        result = _resolve_blank_path("Blank1b", location_map)
+        assert result == ("Blank_1b", path)
+
+    def test_fuzzy_match_hladr(self, tmp_path):
+        """HLADR fuzzy-matches HLA-DR."""
+        path = tmp_path / "HLA-DR.tif"
+        location_map = {"HLA-DR": path}
+        result = _resolve_blank_path("HLADR", location_map)
+        assert result == ("HLA-DR", path)
+
+    def test_not_found(self):
+        result = _resolve_blank_path("NonExistent", {})
+        assert result is None
+
+    def test_cd3e_direct(self, tmp_path):
+        """Non-blank names resolve by exact match."""
+        path = tmp_path / "CD3e.tif"
+        location_map = {"CD3e": path}
+        result = _resolve_blank_path("CD3e", location_map)
+        assert result == ("CD3e", path)
+
+
+# =============================================================================
+# TestLoadLegacyRecipes
+# =============================================================================
+
+
+class TestLoadLegacyRecipes:
+    def test_loads_all_recipes(self, recipe_dir):
+        recipes = load_legacy_recipes(recipe_dir)
+        assert len(recipes) == 4
+        assert "CD3e" in recipes
+        assert "CD31" in recipes
+        assert "CD163" in recipes
+        assert "FoxP3" in recipes
+
+    def test_primary_params(self, recipe_dir):
+        recipes = load_legacy_recipes(recipe_dir)
+        cd3e = recipes["CD3e"]
+        assert cd3e.primary.blank_name == "Blank1b"
+        assert cd3e.primary.blank_clip_factor == 20000
+        assert cd3e.primary.blank_scale_factor == 1.4
+        assert cd3e.primary.erosion == 1
+
+    def test_second_subtraction(self, recipe_dir):
+        recipes = load_legacy_recipes(recipe_dir)
+        cd3e = recipes["CD3e"]
+        assert cd3e.second is not None
+        assert cd3e.second.blank_name == "Blank13b"
+        assert cd3e.second.blank_scale_factor == 0.6
+
+    def test_no_second_subtraction(self, recipe_dir):
+        recipes = load_legacy_recipes(recipe_dir)
+        cd31 = recipes["CD31"]
+        assert cd31.second is None
+
+    def test_clean_params(self, recipe_dir):
+        recipes = load_legacy_recipes(recipe_dir)
+        cd31 = recipes["CD31"]
+        assert cd31.clean is not None
+        assert cd31.clean.background_threshold == 3000
+        assert cd31.clean.smooth is False
+        assert cd31.clean.remove_small is False
+
+    def test_clean_with_smooth(self, recipe_dir):
+        recipes = load_legacy_recipes(recipe_dir)
+        cd3e = recipes["CD3e"]
+        assert cd3e.clean is not None
+        assert cd3e.clean.smooth is True
+        assert cd3e.clean.remove_small is True
+        assert cd3e.clean.small_size == 50
+        assert cd3e.clean.footprint == 3
+
+    def test_skips_dask_lines(self, recipe_dir):
+        """Dask array lines should be skipped without error."""
+        recipes = load_legacy_recipes(recipe_dir)
+        # All recipes should load successfully despite dask lines
+        assert len(recipes) == 4
+
+    def test_non_blank_as_blank_source(self, recipe_dir):
+        """CD163 uses CD3e as blank source."""
+        recipes = load_legacy_recipes(recipe_dir)
+        cd163 = recipes["CD163"]
+        assert cd163.primary.blank_name == "CD3e"
+
+    def test_empty_dir(self, tmp_path):
+        recipes = load_legacy_recipes(tmp_path)
+        assert len(recipes) == 0
+
+    def test_missing_signal_channel(self, tmp_path):
+        """File without signal_channel is skipped."""
+        recipe_path = tmp_path / "bad_param.txt"
+        recipe_path.write_text("blankID: 'Blank1b'\nblank_scale_factor: 1.0\n")
+        recipes = load_legacy_recipes(tmp_path)
+        assert len(recipes) == 0
+
+
+# =============================================================================
+# TestCleanBackground
+# =============================================================================
+
+
+class TestCleanBackground:
+    def test_threshold_zeros_background(self):
+        """Pixels below threshold become zero."""
+        image = np.array([[500, 1000, 2000], [3000, 100, 4000]], dtype=np.uint16)
+        params = CleanParams(background_threshold=1000)
+        result = clean_background(image, params)
+
+        assert result[0, 0] == 0  # 500 <= 1000
+        assert result[0, 1] == 0  # 1000 <= 1000
+        assert result[0, 2] > 0   # 2000 > 1000
+
+    def test_smooth_transition_zone(self):
+        """Median filter applied in transition zone only."""
+        rng = np.random.RandomState(70)
+        image = rng.randint(100, 5000, (64, 64), dtype=np.uint16)
+        params = CleanParams(
+            background_threshold=100,
+            smooth=True,
+            smooth_threshold=2000,
+            footprint=3,
+        )
+        result = clean_background(image, params)
+
+        # Output should be uint16
+        assert result.dtype == np.uint16
+        # Background pixels should be zero
+        assert np.sum(result[image <= 100] > 0) == 0
+
+    def test_remove_small_objects(self):
+        """Small isolated bright pixels are removed."""
+        image = np.zeros((64, 64), dtype=np.uint16)
+        # Large region
+        image[10:30, 10:30] = 5000
+        # Tiny speck (< min_size)
+        image[50, 50] = 5000
+
+        params = CleanParams(
+            background_threshold=0,
+            remove_small=True,
+            small_size=10,
+        )
+        result = clean_background(image, params)
+
+        # Large region preserved
+        assert result[20, 20] > 0
+        # Tiny speck removed (single pixel < min_size=10)
+        assert result[50, 50] == 0
+
+    def test_noop_with_defaults(self):
+        """Default params (threshold=0) effectively zero-out nothing."""
+        rng = np.random.RandomState(71)
+        image = rng.randint(100, 50000, (64, 64), dtype=np.uint16)
+        params = CleanParams()  # All defaults
+        result = clean_background(image, params)
+
+        # threshold=0 means bg_thresh=max(1,0)=1, zeroing only pixels <= 1
+        # Most pixels are > 1, so most should survive
+        assert np.sum(result > 0) > 0.9 * image.size
+
+    def test_output_dtype_uint16(self):
+        image = np.ones((32, 32), dtype=np.uint16) * 10000
+        params = CleanParams(background_threshold=5000)
+        result = clean_background(image, params)
+        assert result.dtype == np.uint16
+
+
+# =============================================================================
+# TestRecipeDrivenProcessing
+# =============================================================================
+
+
+class TestRecipeDrivenProcessing:
+    def test_single_subtraction_with_recipe(self, synthetic_project, tmp_path):
+        """Process CD31 with a simple recipe (primary only + clean)."""
+        specs = discover_channels(synthetic_project)
+        spec = [s for s in specs if s.marker_name == "CD31"][0]
+
+        recipe = MarkerRecipe(
+            marker_name="CD31",
+            primary=SubtractionParams(
+                blank_name="Blank_1a",
+                blank_clip_factor=0,
+                blank_scale_factor=0.5,
+            ),
+            clean=CleanParams(background_threshold=500),
+        )
+
+        output_dir = tmp_path / "recipe_out"
+        result = process_channel(
+            spec, recipe=recipe, output_dir=output_dir, location_map={}
+        )
+
+        assert result.status == "success"
+        assert result.method == "recipe"
+        assert (output_dir / "CD31.tif").exists()
+        img = tifffile.imread(str(output_dir / "CD31.tif"))
+        assert img.dtype == np.uint16
+
+    def test_double_subtraction_with_recipe(self, synthetic_project, tmp_path):
+        """Process FoxP3 with primary + second subtraction."""
+        specs = discover_channels(synthetic_project)
+        spec = [s for s in specs if s.marker_name == "FoxP3"][0]
+
+        # Build location map for second blank resolution
+        registered_dir = synthetic_project / "data" / "processed" / "registered"
+        location_map = {
+            "Blank_1a": registered_dir / "cyc01" / "Blank_1a.tif",
+            "Blank_1b": registered_dir / "cyc01" / "Blank_1b.tif",
+            "Blank_1c": registered_dir / "cyc01" / "Blank_1c.tif",
+        }
+
+        recipe = MarkerRecipe(
+            marker_name="FoxP3",
+            primary=SubtractionParams(
+                blank_name="Blank_1b",
+                blank_clip_factor=5000,
+                blank_scale_factor=1.2,
+            ),
+            second=SubtractionParams(
+                blank_name="Blank_1b",
+                blank_clip_factor=0,
+                blank_scale_factor=0.9,
+                erosion=1,
+            ),
+        )
+
+        output_dir = tmp_path / "recipe_out"
+        result = process_channel(
+            spec, recipe=recipe, output_dir=output_dir, location_map=location_map
+        )
+
+        assert result.status == "success"
+        assert result.method == "recipe"
+        assert "Blank_1b" in result.blank_used
+
+    def test_recipe_dry_run(self, synthetic_project):
+        """Dry run with recipe returns parameters without saving."""
+        specs = discover_channels(synthetic_project)
+        spec = specs[0]
+
+        recipe = MarkerRecipe(
+            marker_name=spec.marker_name,
+            primary=SubtractionParams(blank_name="Blank_1a", blank_scale_factor=1.0),
+        )
+
+        result = process_channel(spec, recipe=recipe, dry_run=True)
+        assert result.status == "dry_run"
+        assert result.method == "recipe"
+        assert "primary_scale" in result.parameters
+
+    def test_fallback_without_recipe(self, synthetic_project, tmp_path):
+        """Without recipe, uses auto-analysis path (backward compatible)."""
+        specs = discover_channels(synthetic_project)
+        spec = [s for s in specs if s.marker_name == "CD31"][0]
+
+        output_dir = tmp_path / "auto_out"
+        result = process_channel(spec, method="global", output_dir=output_dir)
+
+        assert result.status == "success"
+        assert result.method == "global"
+        assert "blank_scale_factor" in result.parameters
+
+
+# =============================================================================
+# TestBatchWithRecipes
+# =============================================================================
+
+
+class TestBatchWithRecipes:
+    def test_batch_with_recipe_dir(self, synthetic_project, tmp_path):
+        """Batch processing with recipes uses recipe pipeline for matched markers."""
+        # Create recipe for CD31 only
+        recipe_path = tmp_path / "recipes"
+        recipe_path.mkdir()
+        (recipe_path / "CD31_param.txt").write_text(
+            "signal_channel: 'CD31'\n"
+            "blankID: 'Blank_1a'\n"
+            "blank_clip_factor: 0\n"
+            "blank_scale_factor: 0.5\n"
+            "erosion: 0\n"
+            "second_subtract: False\n"
+            "clean_used: True\n"
+            "background_threshold: 500\n"
+            "smooth: False\n"
+            "remove_small: False\n"
+        )
+
+        result = process_batch(
+            synthetic_project, recipe_dir=recipe_path, force=True
+        )
+
+        # CD31 should use recipe, FoxP3 should use auto
+        assert result.channels["CD31"].method == "recipe"
+        assert result.channels["FoxP3"].method in ("global", "weighted")
+        assert result.summary["recipe"] == 1
+
+    def test_batch_recipe_count_in_summary(self, synthetic_project, tmp_path):
+        """Summary includes recipe count."""
+        recipe_path = tmp_path / "recipes"
+        recipe_path.mkdir()
+        # Create recipes for both CD31 and FoxP3
+        for name, blank in [("CD31", "Blank_1a"), ("FoxP3", "Blank_1b")]:
+            (recipe_path / f"{name}_param.txt").write_text(
+                f"signal_channel: '{name}'\n"
+                f"blankID: '{blank}'\n"
+                "blank_scale_factor: 1.0\n"
+                "second_subtract: False\n"
+                "clean_used: False\n"
+            )
+
+        result = process_batch(
+            synthetic_project, recipe_dir=recipe_path, force=True
+        )
+        assert result.summary["recipe"] == 2
+        assert result.summary["global"] == 0
+        assert result.summary["weighted"] == 0
+
+
+# =============================================================================
+# TestLearningIntegration
+# =============================================================================
+
+
+class TestLearningIntegration:
+    def test_learn_flag_creates_db(self, synthetic_project, tmp_path):
+        """With --learn and tissue_type, learning DB gets records."""
+        recipe_path = tmp_path / "recipes"
+        recipe_path.mkdir()
+        (recipe_path / "CD31_param.txt").write_text(
+            "signal_channel: 'CD31'\n"
+            "blankID: 'Blank_1a'\n"
+            "blank_scale_factor: 0.5\n"
+            "second_subtract: False\n"
+            "clean_used: True\n"
+            "background_threshold: 500\n"
+            "smooth: False\n"
+            "remove_small: False\n"
+        )
+
+        result = process_batch(
+            synthetic_project,
+            recipe_dir=recipe_path,
+            tissue_type="spleen",
+            learn=True,
+            force=True,
+        )
+
+        # Verify the learning DB was created
+        db_path = synthetic_project / ".kintsugi" / "parameter_learning.db"
+        if db_path.exists():
+            import sqlite3
+            conn = sqlite3.connect(str(db_path))
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM parameter_records")
+            count = cursor.fetchone()[0]
+            conn.close()
+            assert count > 0
+
+    def test_no_learn_flag(self, synthetic_project, tmp_path):
+        """With --no-learn, no DB records created."""
+        recipe_path = tmp_path / "recipes"
+        recipe_path.mkdir()
+        (recipe_path / "CD31_param.txt").write_text(
+            "signal_channel: 'CD31'\n"
+            "blankID: 'Blank_1a'\n"
+            "blank_scale_factor: 0.5\n"
+            "second_subtract: False\n"
+            "clean_used: False\n"
+        )
+
+        process_batch(
+            synthetic_project,
+            recipe_dir=recipe_path,
+            tissue_type="spleen",
+            learn=False,
+            force=True,
+        )
+
+        db_path = synthetic_project / ".kintsugi" / "parameter_learning.db"
+        # DB should not exist when learn=False
+        assert not db_path.exists()

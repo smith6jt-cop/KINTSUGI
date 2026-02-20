@@ -2114,18 +2114,30 @@ def isolate_group():
 @click.option(
     "--tile-smooth-sigma",
     type=float,
-    default=500.0,
-    help="Gaussian sigma for blank smoothing (0 to disable, default: 500)",
+    default=0.0,
+    help="Gaussian sigma for blank smoothing (0 to disable, default: 0)",
 )
 @click.option("--channels", default=None, help="Comma-separated marker names to process")
+@click.option(
+    "--recipe-dir",
+    default=None,
+    type=click.Path(exists=True),
+    help="Directory with *_param.txt legacy recipe files",
+)
 def isolate_plan(
-    project_dir: str, method: str, tissue_type: str | None, tile_smooth_sigma: float, channels: str | None
+    project_dir: str,
+    method: str,
+    tissue_type: str | None,
+    tile_smooth_sigma: float,
+    channels: str | None,
+    recipe_dir: str | None,
 ):
     """
     Preview per-channel parameters without processing.
 
     Analyzes each signal/blank pair and shows the method that would be selected,
-    suggested parameters, and blank-to-signal ratio.
+    suggested parameters, and blank-to-signal ratio. With --recipe-dir, shows
+    legacy recipe parameters instead.
 
     PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
     """
@@ -2134,6 +2146,8 @@ def isolate_plan(
     channel_list = [c.strip() for c in channels.split(",")] if channels else None
 
     console.print("[bold]Signal Isolation Plan[/bold]  (dry-run)\n")
+    if recipe_dir:
+        console.print(f"[dim]Using recipes from: {recipe_dir}[/dim]\n")
     result = process_batch(
         project_dir,
         method=method,
@@ -2141,6 +2155,7 @@ def isolate_plan(
         tile_smooth_sigma=tile_smooth_sigma,
         dry_run=True,
         channels=channel_list,
+        recipe_dir=recipe_dir,
     )
 
     # Print per-channel summary
@@ -2178,12 +2193,17 @@ def isolate_plan(
         )
 
     console.print(table)
-    console.print(
-        f"\n[bold]Summary:[/bold] {result.summary.get('total', 0)} channels — "
-        f"global: {result.summary.get('global', 0)}, "
-        f"weighted: {result.summary.get('weighted', 0)}"
-    )
-    console.print(f"[dim]Tile smooth sigma: {tile_smooth_sigma}[/dim]")
+    recipe_count = result.summary.get("recipe", 0)
+    summary_parts = [
+        f"\n[bold]Summary:[/bold] {result.summary.get('total', 0)} channels —",
+        f"global: {result.summary.get('global', 0)},",
+        f"weighted: {result.summary.get('weighted', 0)}",
+    ]
+    if recipe_count:
+        summary_parts.append(f", recipe: {recipe_count}")
+    console.print(" ".join(summary_parts))
+    if tile_smooth_sigma > 0:
+        console.print(f"[dim]Tile smooth sigma: {tile_smooth_sigma}[/dim]")
 
 
 @isolate_group.command("run")
@@ -2198,12 +2218,23 @@ def isolate_plan(
 @click.option(
     "--tile-smooth-sigma",
     type=float,
-    default=500.0,
-    help="Gaussian sigma for blank smoothing (0 to disable, default: 500)",
+    default=0.0,
+    help="Gaussian sigma for blank smoothing (0 to disable, default: 0)",
 )
 @click.option("--channels", default=None, help="Comma-separated marker names to process")
 @click.option("--output-dir", default=None, type=click.Path(), help="Output directory")
 @click.option("--force", "-f", is_flag=True, help="Overwrite existing outputs")
+@click.option(
+    "--recipe-dir",
+    default=None,
+    type=click.Path(exists=True),
+    help="Directory with *_param.txt legacy recipe files",
+)
+@click.option(
+    "--learn/--no-learn",
+    default=True,
+    help="Record outcomes to parameter learning DB (default: --learn)",
+)
 def isolate_run(
     project_dir: str,
     method: str,
@@ -2212,12 +2243,15 @@ def isolate_run(
     channels: str | None,
     output_dir: str | None,
     force: bool,
+    recipe_dir: str | None,
+    learn: bool,
 ):
     """
     Process all channels with optimized parameters.
 
     For each signal channel, analyzes the signal/blank pair, selects
-    global or weighted subtraction, and saves the result.
+    global or weighted subtraction, and saves the result. With --recipe-dir,
+    uses legacy Notebook 3 parameter files for multi-step processing.
 
     PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
     """
@@ -2226,6 +2260,8 @@ def isolate_run(
     channel_list = [c.strip() for c in channels.split(",")] if channels else None
 
     console.print("[bold]Signal Isolation — Batch Processing[/bold]\n")
+    if recipe_dir:
+        console.print(f"[dim]Using recipes from: {recipe_dir}[/dim]")
     result = process_batch(
         project_dir,
         method=method,
@@ -2235,6 +2271,8 @@ def isolate_run(
         output_dir=output_dir,
         force=force,
         channels=channel_list,
+        recipe_dir=recipe_dir,
+        learn=learn,
     )
 
     # Print summary
@@ -2242,10 +2280,16 @@ def isolate_run(
     console.print(
         f"\n[bold]Done:[/bold] {s.get('total', 0)} channels processed"
     )
-    console.print(
-        f"  global: {s.get('global', 0)} | weighted: {s.get('weighted', 0)} | "
-        f"skipped: {s.get('skipped', 0)} | errors: {s.get('error', 0)}"
-    )
+    method_parts = []
+    if s.get("recipe", 0):
+        method_parts.append(f"recipe: {s['recipe']}")
+    if s.get("global", 0):
+        method_parts.append(f"global: {s['global']}")
+    if s.get("weighted", 0):
+        method_parts.append(f"weighted: {s['weighted']}")
+    method_parts.append(f"skipped: {s.get('skipped', 0)}")
+    method_parts.append(f"errors: {s.get('error', 0)}")
+    console.print(f"  {' | '.join(method_parts)}")
     if s.get("mean_quality"):
         console.print(f"  mean quality: {s['mean_quality']:.3f}")
 
