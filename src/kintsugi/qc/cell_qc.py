@@ -482,6 +482,261 @@ def detect_doublets(
     return doublets
 
 
+def detect_cycle_dropout(
+    dna_first_cycle: np.ndarray,
+    dna_last_cycle: np.ndarray,
+    ratio_threshold: float = 0.3,
+    min_intensity: float = 100.0,
+) -> np.ndarray:
+    """
+    Detect cells that dropped out across imaging cycles.
+
+    Inspired by CyLinter's cycleCorrelation module. Cells that are present
+    in early cycles but disappear in later cycles (due to tissue loss,
+    photobleaching, or detachment) corrupt spatial analysis.
+
+    Identifies dropout by comparing DNA counterstain intensity between the
+    first and last imaging cycles. Cells with a low last/first ratio are
+    flagged as dropouts.
+
+    Parameters
+    ----------
+    dna_first_cycle : np.ndarray
+        DNA (DAPI) mean intensity per cell in the first cycle.
+    dna_last_cycle : np.ndarray
+        DNA (DAPI) mean intensity per cell in the last cycle.
+    ratio_threshold : float
+        Minimum last/first ratio. Cells below this are flagged.
+        Default 0.3 catches cells that lost >70% of DNA signal.
+    min_intensity : float
+        Minimum intensity in the first cycle to consider a cell valid.
+        Cells below this in the first cycle are not flagged (they were
+        never reliably detected).
+
+    Returns
+    -------
+    np.ndarray
+        Boolean array where True indicates a dropout cell.
+    """
+    dna_first = np.asarray(dna_first_cycle, dtype=float)
+    dna_last = np.asarray(dna_last_cycle, dtype=float)
+
+    if dna_first.shape != dna_last.shape:
+        raise ValueError(
+            f"dna_first_cycle and dna_last_cycle must have the same length, "
+            f"got {len(dna_first)} and {len(dna_last)}"
+        )
+
+    # Only evaluate cells that had meaningful signal in the first cycle
+    valid = dna_first >= min_intensity
+
+    # Compute ratio (avoid division by zero)
+    ratio = np.ones(len(dna_first), dtype=float)
+    ratio[valid] = dna_last[valid] / (dna_first[valid] + 1e-10)
+
+    # Flag cells with low ratio (dropout)
+    dropout = valid & (ratio < ratio_threshold)
+
+    return dropout
+
+
+def prune_marker_outliers(
+    data: pd.DataFrame,
+    marker_columns: list[str],
+    method: str = "mad",
+    threshold: float = 5.0,
+    per_marker: bool = True,
+) -> tuple[np.ndarray, dict[str, int]]:
+    """
+    Remove per-marker intensity outliers before clustering.
+
+    Inspired by CyLinter's pruneOutliers module. For each marker channel,
+    identifies cells with extreme intensity values that would distort
+    clustering results.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Cell feature table with marker intensity columns.
+    marker_columns : list[str]
+        Column names for marker intensity measurements.
+    method : str
+        Outlier detection method: 'mad' (median absolute deviation),
+        'iqr' (interquartile range), or 'zscore'.
+    threshold : float
+        Number of MADs/IQRs/standard deviations for outlier cutoff.
+    per_marker : bool
+        If True, detect outliers independently for each marker.
+        If False, use multivariate outlier detection.
+
+    Returns
+    -------
+    passed : np.ndarray
+        Boolean array where True indicates cells that passed filtering.
+    outlier_counts : dict[str, int]
+        Number of outliers detected per marker.
+    """
+    n_cells = len(data)
+    passed = np.ones(n_cells, dtype=bool)
+    outlier_counts = {}
+
+    valid_cols = [col for col in marker_columns if col in data.columns]
+
+    if not per_marker and len(valid_cols) >= 2:
+        # Multivariate: flag cells outlying in *any* marker using combined z-scores
+        z_scores = np.zeros(n_cells, dtype=float)
+        for col in valid_cols:
+            values = data[col].values.astype(float)
+            median = np.median(values)
+            mad = np.median(np.abs(values - median)) * 1.4826
+            if mad < 1e-8:
+                outlier_counts[col] = 0
+                continue
+            z = np.abs(values - median) / mad
+            z_scores = np.maximum(z_scores, z)
+            outlier_counts[col] = int(np.sum(z > threshold))
+        outliers = z_scores > threshold
+        passed &= ~outliers
+    else:
+        for col in valid_cols:
+            values = data[col].values.astype(float)
+
+            if method == "mad":
+                median = np.median(values)
+                mad = np.median(np.abs(values - median)) * 1.4826
+                if mad < 1e-8:
+                    outlier_counts[col] = 0
+                    continue
+                z = np.abs(values - median) / mad
+                outliers = z > threshold
+            elif method == "iqr":
+                q1, q3 = np.percentile(values, [25, 75])
+                iqr = q3 - q1
+                lower = q1 - threshold * iqr
+                upper = q3 + threshold * iqr
+                outliers = (values < lower) | (values > upper)
+            elif method == "zscore":
+                mean = np.mean(values)
+                std = np.std(values)
+                if std < 1e-8:
+                    outlier_counts[col] = 0
+                    continue
+                z = np.abs(values - mean) / std
+                outliers = z > threshold
+            else:
+                raise ValueError(f"Unknown method: {method}")
+
+            outlier_counts[col] = int(np.sum(outliers))
+            passed &= ~outliers
+
+    return passed, outlier_counts
+
+
+def filter_cells_pipeline(
+    cell_data: pd.DataFrame,
+    dna_column: str = "DAPI_mean",
+    area_column: str = "number_of_pixels",
+    marker_columns: list[str] | None = None,
+    dna_first_cycle: np.ndarray | None = None,
+    dna_last_cycle: np.ndarray | None = None,
+    min_area: float = 50,
+    max_area: float = 5000,
+    intensity_mad_threshold: float = 5.0,
+    marker_outlier_threshold: float = 5.0,
+    dropout_ratio_threshold: float = 0.3,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """
+    Apply a complete CyLinter-inspired cell QC filtering pipeline.
+
+    Combines intensity filtering, area filtering, per-marker outlier
+    pruning, and cycle dropout detection into a single pass.
+
+    Parameters
+    ----------
+    cell_data : pd.DataFrame
+        Cell feature table.
+    dna_column : str
+        Column name for DNA (DAPI) mean intensity.
+    area_column : str
+        Column name for cell area (number of pixels).
+    marker_columns : list[str], optional
+        Marker columns for per-marker outlier pruning.
+    dna_first_cycle : np.ndarray, optional
+        DAPI intensity from first cycle (for dropout detection).
+    dna_last_cycle : np.ndarray, optional
+        DAPI intensity from last cycle (for dropout detection).
+    min_area : float
+        Minimum cell area in pixels.
+    max_area : float
+        Maximum cell area in pixels.
+    intensity_mad_threshold : float
+        MAD threshold for DNA intensity outlier detection.
+    marker_outlier_threshold : float
+        MAD threshold for per-marker outlier detection.
+    dropout_ratio_threshold : float
+        Minimum last/first DNA ratio for cycle dropout detection.
+
+    Returns
+    -------
+    filtered_data : pd.DataFrame
+        Cells that passed all QC filters.
+    filter_summary : dict[str, int]
+        Count of cells removed by each filter step.
+    """
+    n_start = len(cell_data)
+    passed = np.ones(n_start, dtype=bool)
+    summary = {"initial_cells": n_start}
+
+    # 1. DNA intensity filtering
+    if dna_column in cell_data.columns:
+        dna_values = cell_data[dna_column].values.astype(float)
+        dna_outliers = _detect_outliers_1d(dna_values, "mad", intensity_mad_threshold)
+        n_dna = int(np.sum(dna_outliers))
+        summary["dna_intensity_outliers"] = n_dna
+        passed &= ~dna_outliers
+
+    # 2. Area filtering
+    if area_column in cell_data.columns:
+        areas = cell_data[area_column].values.astype(float)
+        too_small = areas < min_area
+        too_large = areas > max_area
+        summary["area_too_small"] = int(np.sum(too_small))
+        summary["area_too_large"] = int(np.sum(too_large))
+        passed &= ~too_small & ~too_large
+
+    # 3. Per-marker outlier pruning
+    if marker_columns:
+        marker_passed, marker_counts = prune_marker_outliers(
+            cell_data,
+            marker_columns,
+            threshold=marker_outlier_threshold,
+        )
+        summary["marker_outliers"] = int(np.sum(~marker_passed))
+        summary["marker_outlier_detail"] = marker_counts
+        passed &= marker_passed
+
+    # 4. Cycle dropout detection
+    if dna_first_cycle is not None and dna_last_cycle is not None:
+        if len(dna_first_cycle) != n_start or len(dna_last_cycle) != n_start:
+            raise ValueError(
+                f"DNA cycle arrays must match cell_data length ({n_start}), "
+                f"got dna_first_cycle={len(dna_first_cycle)}, "
+                f"dna_last_cycle={len(dna_last_cycle)}"
+            )
+        dropouts = detect_cycle_dropout(
+            dna_first_cycle,
+            dna_last_cycle,
+            ratio_threshold=dropout_ratio_threshold,
+        )
+        summary["cycle_dropouts"] = int(np.sum(dropouts))
+        passed &= ~dropouts
+
+    summary["passed_cells"] = int(np.sum(passed))
+    summary["total_filtered"] = n_start - int(np.sum(passed))
+
+    return cell_data[passed].reset_index(drop=True), summary
+
+
 def detect_spatial_outliers(
     coordinates: np.ndarray,
     values: np.ndarray,
