@@ -3,7 +3,7 @@
 # KINTSUGI Universal Pipeline Submission (DEPRECATED)
 # Submit processing jobs for any KINTSUGI project
 #
-# DEPRECATION NOTICE (Feb 2026):
+# DEPRECATED: Will be removed in KINTSUGI v3.0.0.
 #   This script is deprecated in favor of the Snakemake-based workflow.
 #   The Snakemake workflow provides:
 #     - Declarative DAG-based dependency management
