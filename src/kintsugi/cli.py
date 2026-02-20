@@ -633,8 +633,16 @@ def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool
     """
     Submit SLURM jobs for a KINTSUGI project.
 
-    This is a convenience wrapper around the submit.sh script. It will use
-    the configuration from PROJECT_DIR/slurm/config.sh.
+    DEPRECATED: This command uses the legacy submit.sh script. For new
+    projects, use the Snakemake-based workflow instead:
+
+    \b
+        kintsugi workflow config .   # Generate Snakemake config
+        kintsugi workflow run .      # Submit via Snakemake
+
+    The Snakemake workflow provides automatic dependency management, failure
+    recovery, skip-existing, and aggregate QC reports. This command will be
+    removed in KINTSUGI v3.0.0.
 
     PROJECT_DIR is the path to your KINTSUGI project directory.
 
@@ -646,7 +654,22 @@ def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool
         kintsugi slurm submit . --dry-run         # Preview commands
         kintsugi slurm submit . --use-burst       # Also submit burst jobs
     """
+    import warnings
     from pathlib import Path
+
+    warnings.warn(
+        "kintsugi slurm submit is deprecated. Use 'kintsugi workflow run' instead. "
+        "See 'kintsugi workflow --help' for details. "
+        "This command will be removed in KINTSUGI v3.0.0.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    console.print(
+        "[yellow]WARNING: 'kintsugi slurm submit' is deprecated.[/yellow]\n"
+        "Use the Snakemake-based workflow instead:\n"
+        "  kintsugi workflow config .   # Generate config\n"
+        "  kintsugi workflow run .      # Submit jobs\n"
+    )
 
     project_dir = Path(project_dir).resolve()
 
@@ -2068,9 +2091,7 @@ def cleanup_purge(project_dir: str, days: int, purge_all: bool, force: bool):
 @click.option("--channel", type=int, default=2, help="Channel index (1-based, default: 2)")
 @click.option("--marker", default="CD31", help="Marker name (default: CD31)")
 @click.option("--dry-run", "-n", is_flag=True, help="Preview without executing")
-def workflow_vessel3d(
-    project_dir: str, cycle: int, channel: int, marker: str, dry_run: bool
-):
+def workflow_vessel3d(project_dir: str, cycle: int, channel: int, marker: str, dry_run: bool):
     """
     Run 3D vessel segmentation on a deconvolved z-stack.
 
@@ -2104,9 +2125,12 @@ def workflow_vessel3d(
 
     cmd = [
         "snakemake",
-        "--directory", str(wf_dir),
-        "--snakefile", str(wf_dir / "Snakefile"),
-        "--configfile", str(wf_dir / "config.yaml"),
+        "--directory",
+        str(wf_dir),
+        "--snakefile",
+        str(wf_dir / "Snakefile"),
+        "--configfile",
+        str(wf_dir / "config.yaml"),
         "--config",
         f"vessel3d={{channel: {channel}, marker: {marker}}}",
         target,
@@ -2150,9 +2174,7 @@ def workflow_vessel3d(
     help="Structuring element shape (default: star)",
 )
 @click.option("--dry-run", "-n", is_flag=True, help="Preview without executing")
-def workflow_spillover(
-    project_dir: str, sample: str | None, element_shape: str, dry_run: bool
-):
+def workflow_spillover(project_dir: str, sample: str | None, element_shape: str, dry_run: bool):
     """
     Run REDSEA spillover correction on segmented data.
 
@@ -2183,19 +2205,19 @@ def workflow_spillover(
 
     cmd = [
         "snakemake",
-        "--directory", str(wf_dir),
-        "--snakefile", str(wf_dir / "Snakefile"),
-        "--configfile", str(wf_dir / "config.yaml"),
+        "--directory",
+        str(wf_dir),
+        "--snakefile",
+        str(wf_dir / "Snakefile"),
+        "--configfile",
+        str(wf_dir / "config.yaml"),
         "--config",
         f"redsea={{element_shape: {element_shape}}}",
     ]
 
     # Target specific sample or all spillover targets
     if sample:
-        target = (
-            f"{project_dir}/data/processed/spillover_corrected/"
-            f".{sample}_spillover.complete"
-        )
+        target = f"{project_dir}/data/processed/spillover_corrected/.{sample}_spillover.complete"
         cmd.append(target)
     else:
         cmd.append("spillover_correction")
