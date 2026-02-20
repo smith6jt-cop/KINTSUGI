@@ -352,7 +352,7 @@ See `workflow/CLAUDE.md` for comprehensive registration documentation: tuned non
 
 ## Signal Isolation
 
-See `src/kintsugi/signal/CLAUDE.md` for weighted autofluorescence subtraction (per-intensity-range weights) and batch signal isolation (automated method selection, tile smoothing, QC reporting).
+See `src/kintsugi/signal/CLAUDE.md` for weighted autofluorescence subtraction (per-intensity-range weights) and batch signal isolation (recipe-driven multi-step processing, auto method selection, background cleaning, parameter learning, QC reporting).
 
 ## Batch Processing (Multi-Dataset)
 
@@ -429,6 +429,6 @@ See `notebooks/CLAUDE.md` for Notebook 4 capabilities (InstanSeg segmentation, f
 
 Feature-specific documentation lives in CLAUDE.md files near the code:
 - `src/kintsugi/CLAUDE.md` — KRONOS foundation model, 3D vessel segmentation, pipeline-aware cleanup
-- `src/kintsugi/signal/CLAUDE.md` — Weighted AF subtraction, batch signal isolation
+- `src/kintsugi/signal/CLAUDE.md` — Weighted AF subtraction, recipe-driven batch signal isolation
 - `workflow/CLAUDE.md` — Snakemake workflow, registration, batch processing, SLURM scheduling
 - `notebooks/CLAUDE.md` — Jupyter autoreload, Notebook 4 segmentation/analysis

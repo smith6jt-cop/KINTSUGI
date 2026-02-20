@@ -20,39 +20,81 @@ Replaces the single global `blank_scale_factor` with per-intensity-range weights
 
 ## Batch Signal Isolation (Feb 2026)
 
-Automated per-marker parameter optimization and batch autofluorescence subtraction. Replaces the naive `blank_scale_factor=1.0` script with intelligent method selection, blank smoothing, and QC reporting.
+Recipe-driven and auto-analyzed batch signal isolation with multi-step subtraction, background cleaning, parameter learning, and self-normalized QC.
+
+**Two processing paths:**
+1. **Recipe path** (`--recipe-dir`): Loads legacy Notebook 3 `*_param.txt` files → primary subtraction → optional second subtraction → optional background cleaning. ~30 sec/channel.
+2. **Auto-analysis path** (default): `analyze_for_subtraction()` suggests parameters, `select_method()` chooses global vs weighted. ~2 min/channel with sigma=0.
 
 **CLI usage:**
 ```bash
-kintsugi workflow isolate plan .                    # Dry-run: per-channel parameter preview
-kintsugi workflow isolate run .                     # Process all channels
-kintsugi workflow isolate run . --method weighted   # Force weighted method for all
-kintsugi workflow isolate run . --channels CD45,CD1c  # Process specific markers
-kintsugi workflow isolate run . --force             # Overwrite existing outputs
-kintsugi workflow isolate qc .                      # Generate QC pages
-kintsugi workflow isolate status .                  # Summary table from manifest
+kintsugi workflow isolate plan .                                          # Auto-analysis dry-run
+kintsugi workflow isolate plan . --recipe-dir .../Processing_parameters   # Recipe preview
+kintsugi workflow isolate run . --recipe-dir .../Processing_parameters --tissue-type spleen  # Recipe processing
+kintsugi workflow isolate run . --method weighted                         # Force weighted for all
+kintsugi workflow isolate run . --channels CD45,CD1c --force              # Specific markers
+kintsugi workflow isolate run . --no-learn                                # Skip learning DB recording
+kintsugi workflow isolate qc .                                            # Generate QC pages
+kintsugi workflow isolate status .                                        # Summary table from manifest
 ```
 
-CLI options: `--method {auto,global,weighted}`, `--tissue-type`, `--output-dir`, `--force`, `--channels`, `--tile-smooth-sigma` (default 500, 0 to disable).
+CLI options: `--method {auto,global,weighted}`, `--tissue-type`, `--output-dir`, `--force`, `--channels`, `--tile-smooth-sigma` (default 0), `--recipe-dir`, `--learn/--no-learn`.
 
 **Key files:**
-- `batch.py` — `ChannelSpec`, `ChannelResult`, `BatchResult` dataclasses; `discover_channels()`, `select_method()`, `process_channel()`, `process_batch()`, `smooth_blank_for_subtraction()`
-- `isolation_qc.py` — `generate_qc_pages()` (3-column self-normalized layout), `generate_summary_table()` (Rich-formatted)
+- `batch.py` — `SubtractionParams`, `CleanParams`, `MarkerRecipe` dataclasses; `load_legacy_recipes()`, `clean_background()`, blank resolution helpers; `discover_channels()`, `select_method()`, `process_channel()`, `process_batch()`
+- `isolation_qc.py` — `generate_qc_pages()` (3-column self-normalized layout), `generate_summary_table()`
 - `../../cli.py` — `@workflow.group("isolate")` with `plan`, `run`, `qc`, `status` subcommands
-- `../../../tests/test_batch_signal_isolation.py` — 29 tests
+- `../claude/parameter_learning.py` — `ParameterLearningEngine` for recording outcomes
+- `../../../tests/test_batch_signal_isolation.py` — 66 tests
 
-**Method selection algorithm** (`select_method()`):
+### Recipe System
+
+**`load_legacy_recipes(recipe_dir)`** parses Notebook 3 `*_param.txt` files into `MarkerRecipe` objects:
+- `SubtractionParams`: blank_name, blank_clip_factor, blank_scale_factor, smooth_low/high, erosion
+- `CleanParams`: background_threshold, smooth, smooth_threshold, footprint, remove_small, small_size
+- `MarkerRecipe`: marker_name, primary (required), second (optional), clean (optional)
+- Skips `dask.array<...>` and `datetime.datetime(...)` artifact lines via `_parse_param_value()`
+
+**Blank name resolution** (`_resolve_blank_path()`):
+1. Normalize: `Blank1b` → `Blank_1b`, `Blank13c` → `Blank_13c` (regex)
+2. Exact match in location map (all registered channel names → paths)
+3. Fuzzy match: strip hyphens/underscores, case-insensitive (`HLADR` → `HLA-DR`)
+
+**`clean_background(image, params)`** — pure numpy reimplementation of `Kutils.clean()`:
+1. Zero pixels below `background_threshold`
+2. Median filter in transition zone (between 0 and `smooth_threshold`)
+3. `remove_small_objects` + morphological closing
+
+### Method Selection (auto-analysis path)
+
+`select_method()` decision logic:
 - `blank_p99 / signal_p99 > 1.2` → weighted (blank dominates, protects dim signal)
 - `af_contribution > 0.3 AND correlation > 0.4` → weighted (structured AF)
 - `correlation > 0.5 AND dynamic_range > 5000` → weighted (correlated AF)
 - Otherwise → global
 
-**Tile compensation — blank smoothing**: Stitched images are mosaics of 63 tiles (7x9 grid, 30% overlap). Blank (cycle 1) and signal (cycle N) have different tile intensity patterns from BaSiC correction. Pixel-wise subtraction creates a visible grid artifact. `smooth_blank_for_subtraction(blank, sigma=500)` applies large-sigma Gaussian blur to the blank before subtraction, removing tile-to-tile variation while preserving the gradual AF spatial gradient. Signal is NOT smoothed.
+### Parameter Learning Integration
 
-**QC pages**: Three-column layout per channel — Before (self-normalized p1-p99, gray), After (self-normalized p1-p99, gray), Difference (inferno). Self-normalization ensures dim cellular signal is visible instead of appearing all-black. Pages of 6 channels, output to `qc_plots/signal_isolation_qc_p{N}.png`.
+When `--learn` (default) and `--tissue-type` are provided:
+- Records recipe outcomes to `ParameterLearningEngine` after successful processing
+- Two operations per channel: `blank_subtraction` and `clean_background`
+- `algorithm_version="recipe_v1"` distinguishes from auto-analyzed params
+- Cross-dataset transfer: tuned params from CX_19-001 spleen propagate to other spleen datasets
 
-**Manifest**: `data/processed/signal_isolated/signal_isolation_manifest.json` records per-channel method, parameters, quality metrics, blank/signal ratio, correlation, and warnings. Used by QC and status commands.
+### Tile Smoothing
 
-**Channel discovery**: Parses `workflow/config.yaml` channel_names dict. Maps channel position to blank: CH2→Blank_1a, CH3→Blank_1b, CH4→Blank_1c. Skips DAPI, Blank, Empty channels.
+`smooth_blank_for_subtraction(blank, sigma)` — large-sigma Gaussian blur on blank (not signal) before subtraction. Removes tile-to-tile intensity variation from BaSiC correction while preserving gradual AF spatial gradient. Default sigma changed from 500 to **0** (recipes don't need smoothing). Signal is NOT smoothed.
+
+### QC
+
+Three-column layout per channel — Before (self-normalized p1-p99, gray), After (self-normalized p1-p99, gray), Difference (inferno). Self-normalization ensures dim cellular signal is visible. Pages of 6 channels.
+
+**Manifest**: `signal_isolation_manifest.json` records per-channel method, parameters, quality metrics, analysis, and warnings. Includes `recipe_dir` when recipes are used.
+
+**Channel discovery**: `discover_channels()` parses `workflow/config.yaml` channel_names. With recipes, uses recipe blank names via resolution chain; without recipes, uses positional mapping (CH2→Blank_1a, CH3→Blank_1b, CH4→Blank_1c).
 
 **Key gotcha**: `compute_weighted_subtraction_quality()` returns `{"global": {...}, "per_range": [...]}` — must extract `["global"]` for flat quality_score access.
+
+### Validated Results
+
+CX_19-001_SP_CC2-A28: 28 channels (24 recipe + 4 auto-weighted), mean quality 0.803, 0 errors, ~30 sec/channel with recipes.
