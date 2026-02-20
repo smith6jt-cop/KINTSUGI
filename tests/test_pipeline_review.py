@@ -12,14 +12,15 @@ review and CyLinter/large_image analysis:
 - Parquet checkpointing
 """
 
-import os
-import tempfile
+import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
+# Add notebooks to path once for Kanalysis imports
+sys.path.insert(0, str(Path(__file__).parent.parent / "notebooks"))
 
 # =============================================================================
 # Cell QC Tests
@@ -137,9 +138,7 @@ class TestCycleDropout:
         dna_first = np.array([10, 20, 1000], dtype=float)
         dna_last = np.array([5, 10, 50], dtype=float)
 
-        dropouts = detect_cycle_dropout(
-            dna_first, dna_last, ratio_threshold=0.3, min_intensity=100
-        )
+        dropouts = detect_cycle_dropout(dna_first, dna_last, ratio_threshold=0.3, min_intensity=100)
 
         assert not dropouts[0]  # Too dim in first cycle to evaluate
         assert not dropouts[1]  # Too dim in first cycle to evaluate
@@ -175,9 +174,7 @@ class TestMarkerOutlierPruning:
         df.loc[0, "CD3_mean"] = 500  # Extreme
         df.loc[1, "CD20_mean"] = 400  # Extreme
 
-        passed, counts = prune_marker_outliers(
-            df, ["CD3_mean", "CD20_mean"], threshold=5.0
-        )
+        passed, counts = prune_marker_outliers(df, ["CD3_mean", "CD20_mean"], threshold=5.0)
 
         assert not passed[0]  # CD3 outlier removed
         assert not passed[1]  # CD20 outlier removed
@@ -275,9 +272,6 @@ class TestMarkerNameLoading:
 
     def test_load_simple_format(self, tmp_path):
         """Test loading simple list format."""
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "notebooks"))
         from Kanalysis import load_channel_names
 
         # Create CHANNELNAMES.txt
@@ -298,17 +292,12 @@ class TestMarkerNameLoading:
 
     def test_load_cycle_prefixed_format(self, tmp_path):
         """Test loading cycle-prefixed format."""
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "notebooks"))
         from Kanalysis import load_channel_names
 
         meta = tmp_path / "meta"
         meta.mkdir()
         (meta / "CHANNELNAMES.txt").write_text(
-            "1: DAPI, Blank, Blank, Blank\n"
-            "2: DAPI, CD31, CD8, CD45\n"
-            "3: DAPI, CD3, CD20, Ki67\n"
+            "1: DAPI, Blank, Blank, Blank\n2: DAPI, CD31, CD8, CD45\n3: DAPI, CD3, CD20, Ki67\n"
         )
 
         markers = load_channel_names(tmp_path)
@@ -320,9 +309,6 @@ class TestMarkerNameLoading:
 
     def test_load_missing_file(self, tmp_path):
         """Test error when CHANNELNAMES.txt doesn't exist."""
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "notebooks"))
         from Kanalysis import load_channel_names
 
         with pytest.raises(FileNotFoundError):
@@ -334,9 +320,6 @@ class TestMarkerSubsets:
 
     def test_cell_markers_exclude_nuclear(self):
         """Test that cell markers exclude nuclear-only markers."""
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "notebooks"))
         from Kanalysis import get_cell_markers
 
         all_markers = [
@@ -360,9 +343,6 @@ class TestMarkerSubsets:
 
     def test_nuclear_markers_include_dapi(self):
         """Test that nuclear markers include DAPI."""
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "notebooks"))
         from Kanalysis import get_nuclear_markers
 
         all_markers = ["CD3", "CD20", "DAPI", "FoxP3", "CollagenIV"]
@@ -373,9 +353,6 @@ class TestMarkerSubsets:
 
     def test_custom_exclusions(self):
         """Test custom exclusion sets."""
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "notebooks"))
         from Kanalysis import get_cell_markers
 
         all_markers = ["CD3", "CD20", "CD68", "DAPI"]
@@ -395,9 +372,6 @@ class TestCheckpointing:
 
     def test_save_and_load_parquet(self, tmp_path):
         """Test saving and loading a Parquet checkpoint."""
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "notebooks"))
         from Kanalysis import checkpoint_exists, load_checkpoint, save_checkpoint
 
         df = pd.DataFrame({"a": [1, 2, 3], "b": [4.0, 5.0, 6.0]})
@@ -412,9 +386,6 @@ class TestCheckpointing:
 
     def test_load_nonexistent_returns_none(self, tmp_path):
         """Test that loading a non-existent checkpoint returns None."""
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "notebooks"))
         from Kanalysis import load_checkpoint
 
         result = load_checkpoint(tmp_path, "nonexistent")
@@ -422,9 +393,6 @@ class TestCheckpointing:
 
     def test_save_csv_format(self, tmp_path):
         """Test saving in CSV format."""
-        import sys
-
-        sys.path.insert(0, str(Path(__file__).parent.parent / "notebooks"))
         from Kanalysis import load_checkpoint, save_checkpoint
 
         df = pd.DataFrame({"x": [1, 2], "y": ["a", "b"]})

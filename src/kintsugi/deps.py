@@ -701,7 +701,9 @@ class DependencyChecker:
             print("\n  To install optional features:")
             print("    kintsugi install gpu       # GPU acceleration (CuPy for CUDA)")
             print("    kintsugi install torch     # PyTorch for deep learning models")
-            print("    kintsugi install bio       # Spatial biology analysis (scanpy, scimap, squidpy)")
+            print(
+                "    kintsugi install bio       # Spatial biology analysis (scanpy, scimap, squidpy)"
+            )
             print("    kintsugi install viz       # Napari visualization")
             print("    kintsugi install all       # All optional features")
 

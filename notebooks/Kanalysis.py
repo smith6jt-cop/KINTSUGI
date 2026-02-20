@@ -27,15 +27,10 @@ Checkpointing:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-
-if TYPE_CHECKING:
-    from kintsugi.project import KintsugiProject
 
 # Lazy imports for optional heavy dependencies
 _pyFlowSOM = None

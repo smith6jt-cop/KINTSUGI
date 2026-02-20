@@ -655,7 +655,6 @@ def slurm_submit(project_dir: str, steps: str, cycles: str | None, dry_run: bool
         kintsugi slurm submit . --use-burst       # Also submit burst jobs
     """
     import warnings
-
     from pathlib import Path
 
     warnings.warn(
@@ -1666,9 +1665,7 @@ def export_status(project_dir: str):
 @click.option("--channel", type=int, default=2, help="Channel index (1-based, default: 2)")
 @click.option("--marker", default="CD31", help="Marker name (default: CD31)")
 @click.option("--dry-run", "-n", is_flag=True, help="Preview without executing")
-def workflow_vessel3d(
-    project_dir: str, cycle: int, channel: int, marker: str, dry_run: bool
-):
+def workflow_vessel3d(project_dir: str, cycle: int, channel: int, marker: str, dry_run: bool):
     """
     Run 3D vessel segmentation on a deconvolved z-stack.
 
@@ -1702,9 +1699,12 @@ def workflow_vessel3d(
 
     cmd = [
         "snakemake",
-        "--directory", str(wf_dir),
-        "--snakefile", str(wf_dir / "Snakefile"),
-        "--configfile", str(wf_dir / "config.yaml"),
+        "--directory",
+        str(wf_dir),
+        "--snakefile",
+        str(wf_dir / "Snakefile"),
+        "--configfile",
+        str(wf_dir / "config.yaml"),
         "--config",
         f"vessel3d={{channel: {channel}, marker: {marker}}}",
         target,
@@ -1748,9 +1748,7 @@ def workflow_vessel3d(
     help="Structuring element shape (default: star)",
 )
 @click.option("--dry-run", "-n", is_flag=True, help="Preview without executing")
-def workflow_spillover(
-    project_dir: str, sample: str | None, element_shape: str, dry_run: bool
-):
+def workflow_spillover(project_dir: str, sample: str | None, element_shape: str, dry_run: bool):
     """
     Run REDSEA spillover correction on segmented data.
 
@@ -1781,19 +1779,19 @@ def workflow_spillover(
 
     cmd = [
         "snakemake",
-        "--directory", str(wf_dir),
-        "--snakefile", str(wf_dir / "Snakefile"),
-        "--configfile", str(wf_dir / "config.yaml"),
+        "--directory",
+        str(wf_dir),
+        "--snakefile",
+        str(wf_dir / "Snakefile"),
+        "--configfile",
+        str(wf_dir / "config.yaml"),
         "--config",
         f"redsea={{element_shape: {element_shape}}}",
     ]
 
     # Target specific sample or all spillover targets
     if sample:
-        target = (
-            f"{project_dir}/data/processed/spillover_corrected/"
-            f".{sample}_spillover.complete"
-        )
+        target = f"{project_dir}/data/processed/spillover_corrected/.{sample}_spillover.complete"
         cmd.append(target)
     else:
         cmd.append("spillover_correction")

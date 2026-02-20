@@ -521,6 +521,12 @@ def detect_cycle_dropout(
     dna_first = np.asarray(dna_first_cycle, dtype=float)
     dna_last = np.asarray(dna_last_cycle, dtype=float)
 
+    if dna_first.shape != dna_last.shape:
+        raise ValueError(
+            f"dna_first_cycle and dna_last_cycle must have the same length, "
+            f"got {len(dna_first)} and {len(dna_last)}"
+        )
+
     # Only evaluate cells that had meaningful signal in the first cycle
     valid = dna_first >= min_intensity
 
@@ -535,7 +541,7 @@ def detect_cycle_dropout(
 
 
 def prune_marker_outliers(
-    data: "pd.DataFrame",
+    data: pd.DataFrame,
     marker_columns: list[str],
     method: str = "mad",
     threshold: float = 5.0,
@@ -570,51 +576,64 @@ def prune_marker_outliers(
     outlier_counts : dict[str, int]
         Number of outliers detected per marker.
     """
-    import pandas as pd
-
     n_cells = len(data)
     passed = np.ones(n_cells, dtype=bool)
     outlier_counts = {}
 
-    for col in marker_columns:
-        if col not in data.columns:
-            continue
+    valid_cols = [col for col in marker_columns if col in data.columns]
 
-        values = data[col].values.astype(float)
-
-        if method == "mad":
+    if not per_marker and len(valid_cols) >= 2:
+        # Multivariate: flag cells outlying in *any* marker using combined z-scores
+        z_scores = np.zeros(n_cells, dtype=float)
+        for col in valid_cols:
+            values = data[col].values.astype(float)
             median = np.median(values)
             mad = np.median(np.abs(values - median)) * 1.4826
             if mad < 1e-8:
                 outlier_counts[col] = 0
                 continue
             z = np.abs(values - median) / mad
-            outliers = z > threshold
-        elif method == "iqr":
-            q1, q3 = np.percentile(values, [25, 75])
-            iqr = q3 - q1
-            lower = q1 - threshold * iqr
-            upper = q3 + threshold * iqr
-            outliers = (values < lower) | (values > upper)
-        elif method == "zscore":
-            mean = np.mean(values)
-            std = np.std(values)
-            if std < 1e-8:
-                outlier_counts[col] = 0
-                continue
-            z = np.abs(values - mean) / std
-            outliers = z > threshold
-        else:
-            raise ValueError(f"Unknown method: {method}")
-
-        outlier_counts[col] = int(np.sum(outliers))
+            z_scores = np.maximum(z_scores, z)
+            outlier_counts[col] = int(np.sum(z > threshold))
+        outliers = z_scores > threshold
         passed &= ~outliers
+    else:
+        for col in valid_cols:
+            values = data[col].values.astype(float)
+
+            if method == "mad":
+                median = np.median(values)
+                mad = np.median(np.abs(values - median)) * 1.4826
+                if mad < 1e-8:
+                    outlier_counts[col] = 0
+                    continue
+                z = np.abs(values - median) / mad
+                outliers = z > threshold
+            elif method == "iqr":
+                q1, q3 = np.percentile(values, [25, 75])
+                iqr = q3 - q1
+                lower = q1 - threshold * iqr
+                upper = q3 + threshold * iqr
+                outliers = (values < lower) | (values > upper)
+            elif method == "zscore":
+                mean = np.mean(values)
+                std = np.std(values)
+                if std < 1e-8:
+                    outlier_counts[col] = 0
+                    continue
+                z = np.abs(values - mean) / std
+                outliers = z > threshold
+            else:
+                raise ValueError(f"Unknown method: {method}")
+
+            outlier_counts[col] = int(np.sum(outliers))
+            passed &= ~outliers
 
     return passed, outlier_counts
 
 
 def filter_cells_pipeline(
-    cell_data: "pd.DataFrame",
+    cell_data: pd.DataFrame,
     dna_column: str = "DAPI_mean",
     area_column: str = "number_of_pixels",
     marker_columns: list[str] | None = None,
@@ -625,7 +644,7 @@ def filter_cells_pipeline(
     intensity_mad_threshold: float = 5.0,
     marker_outlier_threshold: float = 5.0,
     dropout_ratio_threshold: float = 0.3,
-) -> tuple["pd.DataFrame", dict[str, int]]:
+) -> tuple[pd.DataFrame, dict[str, int]]:
     """
     Apply a complete CyLinter-inspired cell QC filtering pipeline.
 
@@ -664,8 +683,6 @@ def filter_cells_pipeline(
     filter_summary : dict[str, int]
         Count of cells removed by each filter step.
     """
-    import pandas as pd
-
     n_start = len(cell_data)
     passed = np.ones(n_start, dtype=bool)
     summary = {"initial_cells": n_start}
@@ -700,6 +717,12 @@ def filter_cells_pipeline(
 
     # 4. Cycle dropout detection
     if dna_first_cycle is not None and dna_last_cycle is not None:
+        if len(dna_first_cycle) != n_start or len(dna_last_cycle) != n_start:
+            raise ValueError(
+                f"DNA cycle arrays must match cell_data length ({n_start}), "
+                f"got dna_first_cycle={len(dna_first_cycle)}, "
+                f"dna_last_cycle={len(dna_last_cycle)}"
+            )
         dropouts = detect_cycle_dropout(
             dna_first_cycle,
             dna_last_cycle,
