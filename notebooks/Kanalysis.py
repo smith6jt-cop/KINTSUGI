@@ -244,7 +244,12 @@ def save_checkpoint(
 
     if format == "parquet":
         path = checkpoint_dir / f"{name}.parquet"
-        data.to_parquet(path, index=False)
+        try:
+            data.to_parquet(path, index=False)
+        except ImportError:
+            # pyarrow/fastparquet not installed; fall back to CSV
+            path = checkpoint_dir / f"{name}.csv"
+            data.to_csv(path, index=False)
     elif format == "csv":
         path = checkpoint_dir / f"{name}.csv"
         data.to_csv(path, index=False)
@@ -281,7 +286,14 @@ def load_checkpoint(
     if format == "parquet":
         path = checkpoint_dir / f"{name}.parquet"
         if path.exists():
-            return pd.read_parquet(path)
+            try:
+                return pd.read_parquet(path)
+            except ImportError:
+                pass
+        # Fall back: check for CSV version (written when parquet engine unavailable)
+        csv_path = checkpoint_dir / f"{name}.csv"
+        if csv_path.exists():
+            return pd.read_csv(csv_path)
     elif format == "csv":
         path = checkpoint_dir / f"{name}.csv"
         if path.exists():
@@ -313,8 +325,12 @@ def checkpoint_exists(
         True if checkpoint exists.
     """
     checkpoint_dir = Path(checkpoint_dir)
-    ext = "parquet" if format == "parquet" else "csv"
-    return (checkpoint_dir / f"{name}.{ext}").exists()
+    if format == "parquet":
+        # Check for parquet or CSV fallback
+        return (checkpoint_dir / f"{name}.parquet").exists() or (
+            checkpoint_dir / f"{name}.csv"
+        ).exists()
+    return (checkpoint_dir / f"{name}.csv").exists()
 
 
 # =============================================================================
