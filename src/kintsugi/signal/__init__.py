@@ -38,6 +38,17 @@ from .subtractor import (
     SubtractionResult,
     WeightedSubtractionParameters,
 )
+from .batch import (
+    BatchResult,
+    ChannelResult,
+    ChannelSpec,
+    discover_channels,
+    process_batch,
+    process_channel,
+    select_method,
+    smooth_blank_for_subtraction,
+)
+from .isolation_qc import generate_qc_pages, generate_summary_table
 from .utils import (
     apply_erosion_mask,
     apply_percentile_smoothing,
@@ -61,6 +72,18 @@ __all__ = [
     "SubtractionParameters",
     "IntensityRange",
     "WeightedSubtractionParameters",
+    # Batch processing
+    "ChannelSpec",
+    "ChannelResult",
+    "BatchResult",
+    "discover_channels",
+    "select_method",
+    "process_channel",
+    "process_batch",
+    "smooth_blank_for_subtraction",
+    # QC visualization
+    "generate_qc_pages",
+    "generate_summary_table",
     # Utilities
     "clip_and_scale_blank",
     "apply_percentile_smoothing",

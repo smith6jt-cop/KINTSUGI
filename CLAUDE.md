@@ -430,6 +430,45 @@ Replaces the single global `blank_scale_factor` with per-intensity-range weights
 
 **Backwards compatible**: `subtract_blank()` defaults to `method="global"` (original behavior). Uniform weights=1.0 produces identical output to global method.
 
+## Batch Signal Isolation (Feb 2026)
+
+Automated per-marker parameter optimization and batch autofluorescence subtraction. Replaces the naive `blank_scale_factor=1.0` script with intelligent method selection, blank smoothing, and QC reporting.
+
+**CLI usage:**
+```bash
+kintsugi workflow isolate plan .                    # Dry-run: per-channel parameter preview
+kintsugi workflow isolate run .                     # Process all channels
+kintsugi workflow isolate run . --method weighted   # Force weighted method for all
+kintsugi workflow isolate run . --channels CD45,CD1c  # Process specific markers
+kintsugi workflow isolate run . --force             # Overwrite existing outputs
+kintsugi workflow isolate qc .                      # Generate QC pages
+kintsugi workflow isolate status .                  # Summary table from manifest
+```
+
+CLI options: `--method {auto,global,weighted}`, `--tissue-type`, `--output-dir`, `--force`, `--channels`, `--tile-smooth-sigma` (default 500, 0 to disable).
+
+**Key files:**
+- `src/kintsugi/signal/batch.py` — `ChannelSpec`, `ChannelResult`, `BatchResult` dataclasses; `discover_channels()`, `select_method()`, `process_channel()`, `process_batch()`, `smooth_blank_for_subtraction()`
+- `src/kintsugi/signal/isolation_qc.py` — `generate_qc_pages()` (3-column self-normalized layout), `generate_summary_table()` (Rich-formatted)
+- `src/kintsugi/cli.py` — `@workflow.group("isolate")` with `plan`, `run`, `qc`, `status` subcommands
+- `tests/test_batch_signal_isolation.py` — 29 tests
+
+**Method selection algorithm** (`select_method()`):
+- `blank_p99 / signal_p99 > 1.2` → weighted (blank dominates, protects dim signal)
+- `af_contribution > 0.3 AND correlation > 0.4` → weighted (structured AF)
+- `correlation > 0.5 AND dynamic_range > 5000` → weighted (correlated AF)
+- Otherwise → global
+
+**Tile compensation — blank smoothing**: Stitched images are mosaics of 63 tiles (7x9 grid, 30% overlap). Blank (cycle 1) and signal (cycle N) have different tile intensity patterns from BaSiC correction. Pixel-wise subtraction creates a visible grid artifact. `smooth_blank_for_subtraction(blank, sigma=500)` applies large-sigma Gaussian blur to the blank before subtraction, removing tile-to-tile variation while preserving the gradual AF spatial gradient. Signal is NOT smoothed.
+
+**QC pages**: Three-column layout per channel — Before (self-normalized p1-p99, gray), After (self-normalized p1-p99, gray), Difference (inferno). Self-normalization ensures dim cellular signal is visible instead of appearing all-black. Pages of 6 channels, output to `qc_plots/signal_isolation_qc_p{N}.png`.
+
+**Manifest**: `data/processed/signal_isolated/signal_isolation_manifest.json` records per-channel method, parameters, quality metrics, blank/signal ratio, correlation, and warnings. Used by QC and status commands.
+
+**Channel discovery**: Parses `workflow/config.yaml` channel_names dict. Maps channel position to blank: CH2→Blank_1a, CH3→Blank_1b, CH4→Blank_1c. Skips DAPI, Blank, Empty channels.
+
+**Key gotcha**: `compute_weighted_subtraction_quality()` returns `{"global": {...}, "per_range": [...]}` — must extract `["global"]` for flat quality_score access.
+
 ## Batch Processing (Multi-Dataset)
 
 KINTSUGI supports automated batch processing of multiple CODEX datasets (47 in manifest: spleen, lymph node, thymus). See `workflow/CLAUDE.md` for batch processing details including data staging, storage architecture, and sentinel file reference.

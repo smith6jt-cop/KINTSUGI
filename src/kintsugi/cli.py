@@ -2081,6 +2081,321 @@ def cleanup_purge(project_dir: str, days: int, purge_all: bool, force: bool):
 
 
 # ============================================================================
+# Signal Isolation Commands
+# ============================================================================
+
+
+@workflow.group("isolate")
+def isolate_group():
+    """Batch signal isolation with per-marker optimization.
+
+    Automatically selects global vs weighted subtraction per channel,
+    smooths blanks to remove tile-grid artifacts, and generates QC reports.
+
+    \b
+    Commands:
+        plan     - Preview per-channel parameters (dry-run)
+        run      - Process all channels with optimized parameters
+        qc       - Generate QC visualization pages
+        status   - Show summary table from manifest
+    """
+    pass
+
+
+@isolate_group.command("plan")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option(
+    "--method",
+    type=click.Choice(["auto", "global", "weighted"]),
+    default="auto",
+    help="Subtraction method (default: auto per-marker selection)",
+)
+@click.option("--tissue-type", default=None, help="Tissue type for parameter tuning")
+@click.option(
+    "--tile-smooth-sigma",
+    type=float,
+    default=500.0,
+    help="Gaussian sigma for blank smoothing (0 to disable, default: 500)",
+)
+@click.option("--channels", default=None, help="Comma-separated marker names to process")
+def isolate_plan(
+    project_dir: str, method: str, tissue_type: str | None, tile_smooth_sigma: float, channels: str | None
+):
+    """
+    Preview per-channel parameters without processing.
+
+    Analyzes each signal/blank pair and shows the method that would be selected,
+    suggested parameters, and blank-to-signal ratio.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    """
+    from kintsugi.signal.batch import process_batch
+
+    channel_list = [c.strip() for c in channels.split(",")] if channels else None
+
+    console.print("[bold]Signal Isolation Plan[/bold]  (dry-run)\n")
+    result = process_batch(
+        project_dir,
+        method=method,
+        tissue_type=tissue_type,
+        tile_smooth_sigma=tile_smooth_sigma,
+        dry_run=True,
+        channels=channel_list,
+    )
+
+    # Print per-channel summary
+    table = Table(title="Per-Channel Parameter Preview")
+    table.add_column("Marker", style="cyan")
+    table.add_column("Cycle", justify="right")
+    table.add_column("Blank")
+    table.add_column("Method", style="bold")
+    table.add_column("Scale", justify="right")
+    table.add_column("B/S Ratio", justify="right", style="dim")
+    table.add_column("Correlation", justify="right")
+
+    for marker, ch in sorted(result.channels.items()):
+        analysis = ch.analysis or {}
+        signal_p99 = analysis.get("signal_p99", 0)
+        blank_p99 = analysis.get("blank_p99", 0)
+        ratio = f"{blank_p99/signal_p99:.2f}" if signal_p99 > 0 else "-"
+        scale = ch.parameters.get(
+            "blank_scale_factor", ch.parameters.get("base_scale_factor", "?")
+        )
+        corr = analysis.get("correlation", "?")
+        method_str = (
+            f"[magenta]{ch.method}[/magenta]"
+            if ch.method == "weighted"
+            else ch.method
+        )
+        table.add_row(
+            marker,
+            str(ch.cycle),
+            ch.blank_used,
+            method_str,
+            f"{scale:.2f}" if isinstance(scale, (int, float)) else str(scale),
+            ratio,
+            f"{corr:.3f}" if isinstance(corr, (int, float)) else str(corr),
+        )
+
+    console.print(table)
+    console.print(
+        f"\n[bold]Summary:[/bold] {result.summary.get('total', 0)} channels — "
+        f"global: {result.summary.get('global', 0)}, "
+        f"weighted: {result.summary.get('weighted', 0)}"
+    )
+    console.print(f"[dim]Tile smooth sigma: {tile_smooth_sigma}[/dim]")
+
+
+@isolate_group.command("run")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option(
+    "--method",
+    type=click.Choice(["auto", "global", "weighted"]),
+    default="auto",
+    help="Subtraction method (default: auto per-marker selection)",
+)
+@click.option("--tissue-type", default=None, help="Tissue type for parameter tuning")
+@click.option(
+    "--tile-smooth-sigma",
+    type=float,
+    default=500.0,
+    help="Gaussian sigma for blank smoothing (0 to disable, default: 500)",
+)
+@click.option("--channels", default=None, help="Comma-separated marker names to process")
+@click.option("--output-dir", default=None, type=click.Path(), help="Output directory")
+@click.option("--force", "-f", is_flag=True, help="Overwrite existing outputs")
+def isolate_run(
+    project_dir: str,
+    method: str,
+    tissue_type: str | None,
+    tile_smooth_sigma: float,
+    channels: str | None,
+    output_dir: str | None,
+    force: bool,
+):
+    """
+    Process all channels with optimized parameters.
+
+    For each signal channel, analyzes the signal/blank pair, selects
+    global or weighted subtraction, and saves the result.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    """
+    from kintsugi.signal.batch import process_batch
+
+    channel_list = [c.strip() for c in channels.split(",")] if channels else None
+
+    console.print("[bold]Signal Isolation — Batch Processing[/bold]\n")
+    result = process_batch(
+        project_dir,
+        method=method,
+        tissue_type=tissue_type,
+        tile_smooth_sigma=tile_smooth_sigma,
+        dry_run=False,
+        output_dir=output_dir,
+        force=force,
+        channels=channel_list,
+    )
+
+    # Print summary
+    s = result.summary
+    console.print(
+        f"\n[bold]Done:[/bold] {s.get('total', 0)} channels processed"
+    )
+    console.print(
+        f"  global: {s.get('global', 0)} | weighted: {s.get('weighted', 0)} | "
+        f"skipped: {s.get('skipped', 0)} | errors: {s.get('error', 0)}"
+    )
+    if s.get("mean_quality"):
+        console.print(f"  mean quality: {s['mean_quality']:.3f}")
+
+    # Show any warnings
+    warned = [
+        (m, ch.warning) for m, ch in result.channels.items() if ch.warning
+    ]
+    if warned:
+        console.print("\n[yellow]Warnings:[/yellow]")
+        for marker, warning in warned:
+            console.print(f"  {marker}: {warning}")
+
+
+@isolate_group.command("qc")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--page-size", type=int, default=6, help="Channels per page (default: 6)")
+@click.option("--dpi", type=int, default=120, help="Output DPI (default: 120)")
+@click.option("--downsample", type=int, default=16, help="Downsample factor (default: 16)")
+def isolate_qc(project_dir: str, page_size: int, dpi: int, downsample: int):
+    """
+    Generate QC visualization pages for signal isolation results.
+
+    Creates multi-page PNG reports with three columns per channel:
+    Before (self-normalized), After (self-normalized), Difference (inferno).
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    """
+    from kintsugi.signal.isolation_qc import generate_qc_pages
+
+    console.print("[bold]Signal Isolation QC[/bold]\n")
+    pages = generate_qc_pages(
+        project_dir,
+        page_size=page_size,
+        dpi=dpi,
+        downsample=downsample,
+    )
+
+    if pages:
+        console.print(f"[green]Generated {len(pages)} QC pages:[/green]")
+        for p in pages:
+            console.print(f"  {p}")
+    else:
+        console.print("[yellow]No signal-isolated images found.[/yellow]")
+
+
+@isolate_group.command("status")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+def isolate_status(project_dir: str):
+    """
+    Show summary table from signal isolation manifest.
+
+    Displays per-channel method, parameters, quality score, and warnings.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    """
+    from kintsugi.signal.isolation_qc import generate_summary_table
+
+    output = generate_summary_table(project_dir)
+    # generate_summary_table already prints via Rich console, but also returns text
+    # Print the text for non-Rich terminals
+    if "No manifest found" in output:
+        console.print(f"[yellow]{output}[/yellow]")
+    else:
+        # Re-render with our console for consistent formatting
+        from pathlib import Path
+
+        project_dir = Path(project_dir).resolve()
+        manifest_path = (
+            project_dir / "data" / "processed" / "signal_isolated"
+            / "signal_isolation_manifest.json"
+        )
+        if manifest_path.exists():
+            import json
+
+            from rich.table import Table as RichTable
+
+            with open(manifest_path) as f:
+                manifest = json.load(f)
+
+            table = RichTable(title="Signal Isolation Summary")
+            table.add_column("Marker", style="cyan")
+            table.add_column("Cycle", justify="right")
+            table.add_column("Blank", style="dim")
+            table.add_column("Method", style="bold")
+            table.add_column("Scale", justify="right")
+            table.add_column("B/S Ratio", justify="right", style="dim")
+            table.add_column("Q Score", justify="right")
+            table.add_column("Zero%", justify="right")
+            table.add_column("Flags", style="yellow", max_width=30)
+
+            for marker, info in sorted(manifest.get("channels", {}).items()):
+                if info.get("status") == "skipped":
+                    continue
+                params = info.get("parameters", {})
+                analysis = info.get("analysis", {})
+                quality = info.get("quality_metrics", {})
+                scale = params.get(
+                    "blank_scale_factor", params.get("base_scale_factor", "")
+                )
+                signal_p99 = analysis.get("signal_p99", 0)
+                blank_p99 = analysis.get("blank_p99", 0)
+                ratio = f"{blank_p99/signal_p99:.2f}" if signal_p99 > 0 else "-"
+                q_score = quality.get("quality_score", "")
+                if isinstance(q_score, (int, float)):
+                    if q_score >= 0.7:
+                        q_str = f"[green]{q_score:.3f}[/green]"
+                    elif q_score >= 0.5:
+                        q_str = f"[yellow]{q_score:.3f}[/yellow]"
+                    else:
+                        q_str = f"[red]{q_score:.3f}[/red]"
+                else:
+                    q_str = str(q_score)
+                method = info.get("method", "")
+                method_str = (
+                    f"[magenta]{method}[/magenta]"
+                    if method == "weighted" else method
+                )
+                table.add_row(
+                    marker,
+                    str(info.get("cycle", "")),
+                    info.get("blank_used", ""),
+                    method_str,
+                    f"{scale:.2f}" if isinstance(scale, (int, float)) else str(scale),
+                    ratio,
+                    q_str,
+                    f"{info.get('zero_percent', ''):.1f}"
+                    if isinstance(info.get("zero_percent"), (int, float))
+                    else "",
+                    info.get("warning", ""),
+                )
+
+            summary = manifest.get("summary", {})
+            if summary:
+                table.add_section()
+                table.add_row(
+                    f"[bold]Total: {summary.get('total', 0)}[/bold]",
+                    "",
+                    "",
+                    f"G:{summary.get('global', 0)} W:{summary.get('weighted', 0)}",
+                    "",
+                    "",
+                    f"avg={summary.get('mean_quality', 0):.3f}",
+                    "",
+                    f"skip={summary.get('skipped', 0)} err={summary.get('error', 0)}",
+                )
+
+            console.print(table)
+
+
+# ============================================================================
 # Vessel 3D Segmentation Command
 # ============================================================================
 
