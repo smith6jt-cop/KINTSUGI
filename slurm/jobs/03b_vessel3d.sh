@@ -93,8 +93,20 @@ else:
 spacing = VesselSpacing.from_experiment(experiment_config)
 print(f"  Spacing: XY={spacing.xy} um, Z={spacing.z} um, ratio={spacing.ratio:.2f}")
 
-# Device mode
+# Device mode — force CPU if GPU VRAM < 40 GB (L4 = 23 GB, too small for isotropic volumes)
 DEVICE_MODE = os.environ.get('KINTSUGI_DEVICE_MODE', 'gpu')
+try:
+    import subprocess
+    nvidia_out = subprocess.check_output(
+        ['nvidia-smi', '--query-gpu=memory.total', '--format=csv,noheader,nounits'],
+        text=True, timeout=10,
+    ).strip()
+    gpu_vram_mb = int(nvidia_out.split('\n')[0])
+    if gpu_vram_mb < 40000 and DEVICE_MODE != 'cpu':
+        print(f"  WARNING: GPU VRAM = {gpu_vram_mb} MB (< 40 GB). Forcing device='cpu'.")
+        DEVICE_MODE = 'cpu'
+except Exception as e:
+    print(f"  Could not query GPU VRAM ({e}), using {DEVICE_MODE}")
 print(f"  Device mode: {DEVICE_MODE}")
 
 # Vessel marker parameters from environment

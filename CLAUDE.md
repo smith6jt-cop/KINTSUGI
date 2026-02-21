@@ -320,7 +320,7 @@ See `notebooks/CLAUDE.md` for full details on autoreload behavior, troubleshooti
 - **Parameter learning**: Successful parameters are stored in SQLite databases, indexed by tissue type and marker name
 - **MCP integration**: Claude Code can access image processing tools via the MCP server
 
-## Critical Fixes & Enhancements (Jan 2026)
+## Critical Fixes & Enhancements (Jan–Feb 2026)
 
 These bugs have been fixed in the current codebase. Listed here for context when investigating image quality issues.
 
@@ -331,6 +331,8 @@ These bugs have been fixed in the current codebase. Listed here for context when
 | BaSiC Correction | Negative flatfield on sparse markers | Falls back to uniform flatfield | `flatfield_min=0.1` clamp in `transform()` (`kcorrect_gpu.py`) |
 | Stitching | Vertical stripe artifacts (~30px) | Reprocess with current code | Stripes from old pipeline code, NOT raw data. Script: `scripts/reprocess_striped_zplanes.py` |
 | EDF | Detail loss from sigma smoothing | Smooth variance map, not input image | CLIJ2-matching defaults: radius=2, sigma=10 (`edf.py`) |
+| Vessel3D | Frangi Ra formula wrong (Ra=\|λ₁\|/\|λ₂\|) | Ra=\|λ₂\|/\|λ₃\| per Frangi 1998 eq. 11 | Tube response was suppressed — small/faint vessels missed (`vessel3d.py`) |
+| Vessel3D | L4 GPU OOM on isotropic volumes | VRAM guard + CPU fallback when <40 GB | Queries `cp.cuda.Device().mem_info` before GPU path (`vessel3d.py`) |
 
 **GPU Processing:**
 - Multi-GPU with `device_id` parameter, queue-based allocation, automatic OOM retry
@@ -392,7 +394,7 @@ Tests are in `tests/` with fixtures in `conftest.py`. Key fixtures: `sample_imag
 
 CI runs on Windows/Linux/macOS with Python 3.10-3.12.
 
-**Suite status** (Feb 2026): 390 passed, 16 skipped (GPU hardware + dask_image optional dep).
+**Suite status** (Feb 2026): 584 passed, 10 skipped (GPU hardware + optional deps).
 
 **GPU skip pattern**: On HPC login nodes, CuPy is installed (`CUPY_AVAILABLE=True`) but no GPU hardware exists. Tests that need actual GPU hardware must use `check_gpu()` from `kcorrect_gpu.py`, not `CUPY_AVAILABLE`:
 ```python

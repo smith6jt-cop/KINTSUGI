@@ -344,6 +344,29 @@ def _hessian_eigenvalues_3d(
     """
     if use_gpu:
         import cupy as cp
+
+        # VRAM guard: Cardano eigenvalue path needs ~15 float32 arrays at peak
+        # (6 Hessian + input + ~8 working arrays during Cardano + sorting).
+        # Fall back to CPU if GPU has insufficient VRAM.
+        volume_bytes = volume.nbytes
+        estimated_vram = volume_bytes * 15
+        try:
+            cp.cuda.Device(device_id).use()
+            free_vram = cp.cuda.Device(device_id).mem_info[0]
+            if estimated_vram > free_vram:
+                logger.warning(
+                    f"GPU VRAM insufficient for Hessian eigenvalues: "
+                    f"need ~{estimated_vram / 1e9:.1f} GB, "
+                    f"available {free_vram / 1e9:.1f} GB. "
+                    f"Falling back to CPU."
+                )
+                use_gpu = False
+        except Exception as e:
+            logger.warning(f"Could not query GPU VRAM ({e}), falling back to CPU")
+            use_gpu = False
+
+    if use_gpu:
+        import cupy as cp
         from cupyx.scipy.ndimage import gaussian_filter as gf
 
         cp.cuda.Device(device_id).use()
@@ -541,15 +564,15 @@ def compute_vesselness_frangi(
             tube_mask = (l2 > 0) & (l3 > 0)
             l1, l2, l3 = -l1, -l2, -l3
 
-        # Ratios
-        # Ra = |l1| / |l2| — deviation from plate (small for tubes)
+        # Ratios (Frangi 1998, eq. 11-13; eigenvalues sorted |l1| <= |l2| <= |l3|)
+        # Ra = |l2| / |l3| — plate vs tube (near 1 for tubes, near 0 for plates)
         # Rb = |l1| / sqrt(|l2 * l3|) — deviation from blob (small for tubes)
         eps = 1e-10
         abs_l1 = np.abs(l1)
         abs_l2 = np.abs(l2)
         abs_l3 = np.abs(l3)
 
-        Ra = abs_l1 / (abs_l2 + eps)
+        Ra = abs_l2 / (abs_l3 + eps)
         Rb = abs_l1 / (np.sqrt(abs_l2 * abs_l3) + eps)
 
         # Frobenius norm (S) — structuredness
@@ -624,7 +647,7 @@ def binarize_vessel_mask(
         3D binary mask (bool).
     """
     from skimage.filters import threshold_otsu
-    from skimage.morphology import ball, binary_closing, remove_small_objects
+    from skimage.morphology import ball, closing, remove_small_objects
 
     if threshold is None:
         # Otsu on non-zero values for better threshold estimation
@@ -642,14 +665,15 @@ def binarize_vessel_mask(
     logger.info(f"After threshold: {mask.sum():,} voxels ({100.0 * mask.sum() / mask.size:.2f}%)")
 
     # Step 2: Remove small objects
+    # max_size removes objects with size <= threshold (replaces deprecated min_size)
     if min_size > 0:
-        mask = remove_small_objects(mask, min_size=min_size)
+        mask = remove_small_objects(mask, max_size=min_size - 1)
         logger.info(f"After small object removal (min={min_size}): {mask.sum():,} voxels")
 
     # Step 3: Morphological closing
     if closing_radius > 0:
         selem = ball(closing_radius)
-        mask = binary_closing(mask, footprint=selem)
+        mask = closing(mask, footprint=selem)
         logger.info(f"After closing (radius={closing_radius}): {mask.sum():,} voxels")
 
     # Step 4: Fill holes per 2D plane (handles tubular cross-sections)

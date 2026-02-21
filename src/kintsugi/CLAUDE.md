@@ -64,8 +64,8 @@ export_vessel_results(result, "data/processed/vessel_3d/")
 
 **Pipeline steps:**
 1. Preprocess: isotropic z-resampling (scipy/CuPy zoom) + light Gaussian denoising
-2. Frangi vesselness: multi-scale Hessian eigenvalue analysis (GPU-accelerated)
-3. Binarize: Otsu threshold + `remove_small_objects` + morphological closing + hole filling
+2. Frangi vesselness: multi-scale Hessian eigenvalue analysis (GPU-accelerated, Frangi 1998)
+3. Binarize: Otsu threshold + `remove_small_objects` + `closing` + hole filling
 4. Skeletonize: Lee (1994) 3D thinning via `skimage.morphology.skeletonize`
 5. Graph analysis: `skan.Skeleton` + `skan.summarize` + distance transform for radius
 
@@ -79,9 +79,20 @@ export_vessel_results(result, "data/processed/vessel_3d/")
 
 **Dependencies**: `skan>=0.11.0` and `networkx>=3.0` in the `analysis` optional group. GPU acceleration via CuPy (existing `gpu` group). Skeletonization is CPU-only.
 
-**GPU memory**: Hessian eigenvalues use Cardano's analytical formula for symmetric 3x3 matrices — operates element-wise on 6 Hessian arrays. The naive `(N, 3, 3)` + `eigvalsh` approach OOMs on stitched volumes (108 GB allocation for 3 billion voxels). Sorting uses a 3-element sorting network (compare-swap) to avoid index array allocation.
+**Bug fixes (Feb 2026):**
 
-**SLURM**: `03b_vessel3d.sh` runs between `03_deconvolution.sh` and `04_edf.sh`. Environment variables: `VESSEL_CYCLE`, `VESSEL_CHANNEL`, `VESSEL_MARKER`, `VESSEL_SIGMAS`, `VESSEL_MIN_SIZE`. Recommended: 256 GB RAM, 4 h wall time.
+| Bug | Impact | Fix |
+|-----|--------|-----|
+| Ra = \|λ₁\|/\|λ₂\| (wrong) | Tube response suppressed — small/faint vessels missed | Ra = \|λ₂\|/\|λ₃\| per Frangi 1998 eq. 11 |
+| `binary_closing` deprecated | FutureWarning in skimage 0.26, removed in 0.28 | Use `closing` from `skimage.morphology` |
+| `remove_small_objects(min_size=)` deprecated | FutureWarning in skimage 0.26 | Use `max_size=min_size-1` parameter |
+| L4 GPU OOM on isotropic volumes | `gaussian_filter` crashes on 23 GB VRAM GPUs | VRAM guard: estimate 15x volume size, CPU fallback |
+
+**GPU memory**: Hessian eigenvalues use Cardano's analytical formula for symmetric 3x3 matrices — operates element-wise on 6 Hessian arrays. The naive `(N, 3, 3)` + `eigvalsh` approach OOMs on stitched volumes (108 GB allocation for 3 billion voxels). Sorting uses a 3-element sorting network (compare-swap) to avoid index array allocation. VRAM guard queries `cp.cuda.Device().mem_info` before GPU path and falls back to CPU if insufficient.
+
+**SLURM**: `03b_vessel3d.sh` runs between `03_deconvolution.sh` and `04_edf.sh`. Environment variables: `VESSEL_CYCLE`, `VESSEL_CHANNEL`, `VESSEL_MARKER`, `VESSEL_SIGMAS`, `VESSEL_MIN_SIZE`. Recommended: 256 GB RAM, 4 h wall time. Auto-detects GPU VRAM < 40 GB and forces CPU mode (prevents L4 OOM).
+
+**Tests**: `tests/test_vessel3d.py` — 19 tests covering Ra formula correctness (tube vs plate eigenvalues), eigenvalue sorting invariants, scikit-image deprecation-free imports, GPU VRAM guard, binarization, end-to-end pipeline, and VesselSpacing.
 
 ## Pipeline-Aware Cleanup (Feb 2026)
 
