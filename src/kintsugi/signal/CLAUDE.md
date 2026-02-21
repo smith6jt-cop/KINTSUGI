@@ -1,5 +1,7 @@
 # Signal Processing — CLAUDE.md
 
+See also: Root `CLAUDE.md` for project overview, `../CLAUDE.md` for KRONOS/vessel3d/cleanup, `../../workflow/CLAUDE.md` for Snakemake/registration.
+
 ## Weighted Autofluorescence Subtraction (Feb 2026)
 
 Replaces the single global `blank_scale_factor` with per-intensity-range weights. Protects dim signal (FOXP3, CD163) while aggressively removing bright autofluorescence (collagen, lipofuscin).
