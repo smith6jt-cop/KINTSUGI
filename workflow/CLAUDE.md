@@ -281,6 +281,7 @@ KINTSUGI supports automated batch processing of multiple CODEX datasets. See `/b
 - `stage_datasets_globus.py` - Globus-based staging for thymus datasets from PATH lab SMB share
 - `thymus_manifest.csv` - Standalone manifest for 13 thymus datasets (subset of main manifest)
 - `run_all_workflows.sh` - Runs Snakemake for all staged datasets sequentially
+- `process_remaining.sh` - 5-phase master orchestration for 21 datasets (clean → config → stage → process → report). Supports `--phase N` resume, `--dataset NAME` single-project testing, `--dry-run`
 - `cleanup_datasets.sh` - Verifies EDF outputs + QC sentinels, prompts for QC review, deletes intermediates and raw data (`--force` skips prompt)
 - `pipeline_status.sh` - Shows current state of every dataset
 
@@ -301,9 +302,16 @@ tmux new -s batch
 bash run_all_workflows.sh               # all staged datasets, sequential
 bash run_all_workflows.sh --dry-run     # preview without executing
 bash run_all_workflows.sh --dataset CX_19-002_lymph-node_R1  # single dataset
+
+# Master orchestration for 21 remaining datasets (5 phases)
+bash process_remaining.sh               # full pipeline: clean → config → stage → process → report
+bash process_remaining.sh --phase 4     # resume from processing phase
+bash process_remaining.sh --dataset 1901CC2A --dry-run  # test single dataset
 ```
 
 **Why sequential**: All datasets share 5 GPU slots — parallel Snakemake instances cause contention. Run inside tmux. Re-runs auto-skip completed datasets via sentinel files + per-channel skip-existing.
+
+**Snakemake lock recovery**: If a coordinator dies (tmux disconnect, OOM kill), the lock file persists and blocks re-runs with `LockException`. Fix: `cd /path/to/project/workflow && snakemake --unlock --profile profiles/slurm`. Always kill stale coordinators (`ps aux | grep snakemake`) before unlocking.
 
 **Storage**: `/orange/maigan/` (long-term, ~9.7 TB spleen/LN), PATH lab SMB (thymus, ~2.4 TB via Globus), `/blue/maigan/` (processing workspace). Peak blue usage per dataset: ~3x raw size.
 

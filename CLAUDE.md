@@ -71,57 +71,23 @@ SLURM scripts and notebooks automatically load channel names from this file.
 
 ### SLURM Job Submission (HPC)
 
-For HPC clusters with SLURM, add job submission support during project creation:
+```bash
+kintsugi init /path/to/project --name "My Experiment" --slurm  # New project with SLURM
+kintsugi init /path/to/project --slurm    # Add SLURM to existing project
+kintsugi slurm init /path/to/project      # Equivalent SLURM-only command
+```
+
+Creates `slurm/` with auto-detected HPC settings (`config.sh`), job symlinks, and workflow README. SLURM scripts auto-load metadata from `experiment.json` and `CHANNELNAMES.txt`.
 
 ```bash
-kintsugi init /path/to/project --name "My Experiment" --slurm
-```
-
-This creates an additional `slurm/` directory:
-```
-my_project/
-└── slurm/
-    ├── config.sh      ← Pre-populated with auto-detected HPC settings
-    ├── jobs/          ← Symlink to KINTSUGI job scripts
-    └── README.md      ← Complete 10-step workflow guide
-```
-
-**Auto-detection**: The system automatically detects:
-- SLURM account from `SLURM_ACCOUNT` or `SBATCH_ACCOUNT` environment variables
-- GPU type from `nvidia-smi`
-- Conda environment from `CONDA_DEFAULT_ENV`
-
-**Metadata loading**: SLURM job scripts automatically load parameters from:
-1. `/meta/experiment.json` - Microscope parameters (tile grid, pixel sizes, wavelengths)
-2. `/meta/CHANNELNAMES.txt` - Channel/marker names (used for EDF output file naming)
-3. `slurm/config.sh` environment variables - Fallback if metadata files don't exist
-
-This eliminates the need to manually configure `config.sh` for most parameters.
-
-**SLURM output naming**: EDF uses marker names from `CHANNELNAMES.txt` (e.g., `CD3.tif`), falling back to `CH#`. Registration preserves those names with warped images. SLURM jobs need `KINTSUGI_DIR/notebooks` on `sys.path` for `Kio` imports.
-
-**Memory**: GPU jobs = 48 GB RAM (CuPy does FFT in GPU memory). CPU jobs = 128 GB (SciPy float64). Snakefile lambdas auto-route.
-
-**Add SLURM to existing project** (two equivalent methods):
-```bash
-kintsugi init /path/to/project --slurm    # Auto-detects existing project, adds SLURM
-kintsugi slurm init /path/to/project      # Explicit SLURM-only command
-```
-
-**Submit jobs**:
-```bash
-kintsugi slurm submit /path/to/project              # All steps
+kintsugi slurm submit .                             # All steps
 kintsugi slurm submit . --steps decon,edf           # Specific steps
 kintsugi slurm submit . --cycles 1-5                # Specific cycles
 kintsugi slurm submit . --dry-run                   # Preview commands
+kintsugi slurm status .                             # Check job status
 ```
 
-**Check status**:
-```bash
-kintsugi slurm status .
-```
-
-See `workflow/CLAUDE.md` for detailed documentation on processing modes (notebook vs SLURM), multi-account resource pool calculation, concurrent GPU/CPU architecture, Snakemake workflow design decisions, and registration rule configuration.
+See `workflow/CLAUDE.md` for processing modes, multi-account GPU scheduling, Snakemake workflow, registration, and batch processing.
 
 ## Development Workspace
 
@@ -358,7 +324,7 @@ See `src/kintsugi/signal/CLAUDE.md` for weighted autofluorescence subtraction (p
 
 ## Batch Processing (Multi-Dataset)
 
-See `workflow/CLAUDE.md` for batch processing documentation: data staging, `run_all_workflows.sh`, cleanup with QC guard, and full pipeline lifecycle.
+See `workflow/CLAUDE.md` for batch processing documentation: data staging, `run_all_workflows.sh`, `process_remaining.sh` (5-phase master orchestration for 21 datasets), cleanup with QC guard, and full pipeline lifecycle.
 
 ## Dependencies
 
