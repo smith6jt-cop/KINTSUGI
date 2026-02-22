@@ -358,7 +358,7 @@ Optional groups in pyproject.toml:
 
 Tests are in `tests/` with fixtures in `conftest.py`. Key fixtures: `sample_image`, `sample_multichannel_image`, `sample_stack`, `sample_tiff`, `sample_config`, `temp_dir`.
 
-CI runs on Windows/Linux/macOS with Python 3.10-3.12.
+CI runs on Linux (ubuntu-latest) with Python 3.10-3.12.
 
 **Suite status** (Feb 2026): 618 passed, 10 skipped (GPU hardware + optional deps).
 
