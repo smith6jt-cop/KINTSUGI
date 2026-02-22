@@ -11,13 +11,10 @@ Tests cover:
 import numpy as np
 import pytest
 
-from kintsugi.vessel3d import (
-    VESSEL_PRESETS,
-    VesselMarkerInfo,
+from kintsugi.vessel3d import (  # noqa: I001
     VesselSegmentationResult,
     VesselSpacing,
     _hessian_eigenvalues_3d,
-    analyze_vessel_graph,
     binarize_vessel_mask,
     combine_vessel_masks,
     compute_vesselness_frangi,
@@ -27,6 +24,13 @@ from kintsugi.vessel3d import (
     segment_vessels_multichannel,
     skeletonize_vessels,
 )
+
+try:
+    import skan  # noqa: F401
+
+    HAS_SKAN = True
+except ImportError:
+    HAS_SKAN = False
 
 
 # =============================================================================
@@ -132,12 +136,8 @@ class TestFrangiRaFormula:
         while tubes yield ≈ 0.86.
         """
         # Get eigenvalues and compute raw vesselness terms at center
-        l1_t, l2_t, l3_t = _hessian_eigenvalues_3d(
-            synthetic_tube.astype(np.float32), sigma=2.0
-        )
-        l1_p, l2_p, l3_p = _hessian_eigenvalues_3d(
-            synthetic_plate.astype(np.float32), sigma=2.0
-        )
+        l1_t, l2_t, l3_t = _hessian_eigenvalues_3d(synthetic_tube.astype(np.float32), sigma=2.0)
+        l1_p, l2_p, l3_p = _hessian_eigenvalues_3d(synthetic_plate.astype(np.float32), sigma=2.0)
 
         center = (16, 16, 16)
         eps = 1e-10
@@ -146,8 +146,8 @@ class TestFrangiRaFormula:
         ra_tube = np.abs(l2_t[center]) / (np.abs(l3_t[center]) + eps)
         ra_plate = np.abs(l2_p[center]) / (np.abs(l3_p[center]) + eps)
 
-        ra_term_tube = 1.0 - np.exp(-(ra_tube ** 2) / (2.0 * 0.5 ** 2))
-        ra_term_plate = 1.0 - np.exp(-(ra_plate ** 2) / (2.0 * 0.5 ** 2))
+        ra_term_tube = 1.0 - np.exp(-(ra_tube**2) / (2.0 * 0.5**2))
+        ra_term_plate = 1.0 - np.exp(-(ra_plate**2) / (2.0 * 0.5**2))
 
         assert ra_term_tube > ra_term_plate, (
             f"Tube Ra term ({ra_term_tube:.4f}) should exceed "
@@ -189,6 +189,7 @@ class TestSkimageDeprecation:
     def test_closing_import(self):
         """Verify we import 'closing' not 'binary_closing'."""
         import inspect
+
         from kintsugi import vessel3d
 
         source = inspect.getsource(vessel3d.binarize_vessel_mask)
@@ -201,9 +202,7 @@ class TestSkimageDeprecation:
         """Binarize should run without deprecation warnings."""
         import warnings
 
-        vesselness = compute_vesselness_frangi(
-            synthetic_tube, sigmas=[2.0], device="cpu"
-        )
+        vesselness = compute_vesselness_frangi(synthetic_tube, sigmas=[2.0], device="cpu")
         with warnings.catch_warnings():
             warnings.simplefilter("error", FutureWarning)
             binarize_vessel_mask(vesselness, min_size=10, closing_radius=1)
@@ -272,6 +271,7 @@ class TestBinarization:
 class TestPipeline:
     """Test segment_vessels_3d end-to-end."""
 
+    @pytest.mark.skipif(not HAS_SKAN, reason="skan not installed")
     def test_pipeline_synthetic_tube(self, synthetic_tube):
         """Full pipeline should complete on a synthetic tube."""
         spacing = VesselSpacing(xy=1.0, z=1.0)  # isotropic, skip resampling
@@ -409,6 +409,7 @@ def branching_structure():
 class TestExtendedMorphometry:
     """Test VesselExpress-inspired morphometry features."""
 
+    @pytest.mark.skipif(not HAS_SKAN, reason="skan not installed")
     def test_volume_column_present(self, synthetic_tube):
         """volume_um3 should be > 0 for a synthetic tube."""
         spacing = VesselSpacing(xy=1.0, z=1.0)
@@ -427,6 +428,7 @@ class TestExtendedMorphometry:
         assert (result.features["volume_um3"] >= 0).all()
         assert result.features["volume_um3"].sum() > 0
 
+    @pytest.mark.skipif(not HAS_SKAN, reason="skan not installed")
     def test_z_angle_for_z_aligned_tube(self, synthetic_tube):
         """A tube along the z-axis should have z_angle near 0 degrees."""
         spacing = VesselSpacing(xy=1.0, z=1.0)
@@ -448,6 +450,7 @@ class TestExtendedMorphometry:
             f"Z-aligned tube has z_angle={longest['z_angle_deg']:.1f}, expected < 30"
         )
 
+    @pytest.mark.skipif(not HAS_SKAN, reason="skan not installed")
     def test_branching_angle_column(self, synthetic_tube):
         """branching_angle_deg column should exist (NaN for unbranched tube is fine)."""
         spacing = VesselSpacing(xy=1.0, z=1.0)
@@ -464,6 +467,7 @@ class TestExtendedMorphometry:
         assert result.features is not None
         assert "branching_angle_deg" in result.features.columns
 
+    @pytest.mark.skipif(not HAS_SKAN, reason="skan not installed")
     def test_branching_angle_on_y_structure(self, branching_structure):
         """A Y-shaped structure should have non-NaN branching angles on branches."""
         spacing = VesselSpacing(xy=1.0, z=1.0)
@@ -478,12 +482,12 @@ class TestExtendedMorphometry:
             device="cpu",
         )
         assert result.features is not None
-        angles = result.features["branching_angle_deg"].dropna()
         # Y-structure should produce at least one non-NaN branching angle
         # (may not always produce depending on skeleton topology, so we just
         # check the column is computed without errors)
         assert "branching_angle_deg" in result.features.columns
 
+    @pytest.mark.skipif(not HAS_SKAN, reason="skan not installed")
     def test_diameter_ratio_pruning(self, synthetic_tube):
         """Diameter-ratio pruning should remove additional branches beyond length-only."""
         spacing = VesselSpacing(xy=1.0, z=1.0)
@@ -508,6 +512,7 @@ class TestExtendedMorphometry:
         # Diameter-ratio should remove at least as many voxels as length-only
         assert pruned_ratio.sum() <= pruned_length.sum()
 
+    @pytest.mark.skipif(not HAS_SKAN, reason="skan not installed")
     def test_summary_method(self, synthetic_tube):
         """summary() should return aggregate statistics."""
         spacing = VesselSpacing(xy=1.0, z=1.0)
@@ -533,9 +538,7 @@ class TestExtendedMorphometry:
 
     def test_summary_empty_when_no_features(self):
         """summary() should return empty dict when features are None."""
-        result = VesselSegmentationResult(
-            binary_mask=np.zeros((4, 4, 4), dtype=bool)
-        )
+        result = VesselSegmentationResult(binary_mask=np.zeros((4, 4, 4), dtype=bool))
         assert result.summary() == {}
 
 
@@ -664,6 +667,7 @@ class TestSensitivityAndMultiChannel:
         combined_inter = combine_vessel_masks([mask1, mask2], method="intersection")
         assert combined_inter.sum() == 0
 
+    @pytest.mark.skipif(not HAS_SKAN, reason="skan not installed")
     def test_multichannel_pipeline(self):
         """End-to-end multi-channel pipeline with two synthetic tubes."""
         # Tube 1 at (y=12, x=16)

@@ -24,6 +24,10 @@ import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .batch import BatchResult, MarkerRecipe
 
 logger = logging.getLogger("kintsugi.signal.batch_multi")
 
@@ -215,7 +219,10 @@ def discover_projects(
 
         # Check manifest
         manifest_path = (
-            project_path / "data" / "processed" / "signal_isolated"
+            project_path
+            / "data"
+            / "processed"
+            / "signal_isolated"
             / "signal_isolation_manifest.json"
         )
         has_manifest = manifest_path.exists()
@@ -278,7 +285,7 @@ def _get_marker_names_from_config(project_path: Path) -> list[str]:
     return markers
 
 
-def learned_params_to_recipe(params: dict, marker_name: str) -> "MarkerRecipe":
+def learned_params_to_recipe(params: dict, marker_name: str) -> MarkerRecipe:
     """Convert learned DB parameters back to a MarkerRecipe.
 
     Parameters
@@ -294,7 +301,7 @@ def learned_params_to_recipe(params: dict, marker_name: str) -> "MarkerRecipe":
     MarkerRecipe
         Recipe constructed from learned parameters.
     """
-    from .batch import CleanParams, MarkerRecipe, SubtractionParams
+    from .batch import MarkerRecipe, SubtractionParams
 
     rec = params.get("recommended_parameters", params)
     if rec is None:
@@ -433,8 +440,7 @@ def _resolve_template_dir(
     # Default: CX_19-001's recipes
     if projects_dir:
         default = (
-            projects_dir / DEFAULT_TEMPLATE_PROJECT
-            / "data" / "processed" / "Processing_parameters"
+            projects_dir / DEFAULT_TEMPLATE_PROJECT / "data" / "processed" / "Processing_parameters"
         )
         if default.exists() and list(default.glob("*_param.txt")):
             return default
@@ -491,8 +497,6 @@ def process_all_projects(
     MultiProjectResult
         Cross-project results summary.
     """
-    from .batch import process_batch
-
     projects_dir = Path(projects_dir).resolve()
     projects = discover_projects(projects_dir, force=force, dataset=dataset)
 
@@ -509,9 +513,9 @@ def process_all_projects(
 
     for i, project in enumerate(projects, 1):
         logger.info(
-            f"\n{'='*60}\n"
+            f"\n{'=' * 60}\n"
             f"[{i}/{len(projects)}] {project.name} ({project.tissue_type})\n"
-            f"{'='*60}"
+            f"{'=' * 60}"
         )
 
         try:
@@ -524,16 +528,7 @@ def process_all_projects(
             )
 
             source_summary = resolved.summary()
-            logger.info(
-                f"Recipe sources: {source_summary}"
-            )
-
-            # Determine recipe_dir and recipe-sourced markers
-            # If we have any tier 1/2/3 recipes, write them as the recipe input
-            # For markers without recipes (tier 4), process_batch handles auto-analysis
-            recipe_dir_for_batch = None
-            if project.has_own_recipes and project.own_recipe_dir:
-                recipe_dir_for_batch = project.own_recipe_dir
+            logger.info(f"Recipe sources: {source_summary}")
 
             # Build per-channel recipe source tracking
             recipe_source_map = resolved.sources
@@ -571,9 +566,7 @@ def process_all_projects(
                 "recipe_sources": source_summary,
                 "summary": batch_result.summary,
                 "warnings": [
-                    f"{m}: {ch.warning}"
-                    for m, ch in batch_result.channels.items()
-                    if ch.warning
+                    f"{m}: {ch.warning}" for m, ch in batch_result.channels.items() if ch.warning
                 ],
             }
 
@@ -607,31 +600,21 @@ def _process_project_with_resolved_recipes(
     dry_run: bool = False,
     force: bool = False,
     learn: bool = True,
-) -> "BatchResult":
+) -> BatchResult:
     """Process a single project using pre-resolved recipes.
 
     Markers with recipes (tiers 1-3) use recipe path; markers without (tier 4)
     use auto-analysis path. Both go through process_batch, but we split them
     into two calls to correctly route recipes vs auto.
     """
-    import yaml
-
     from .batch import (
         BatchResult,
-        ChannelResult,
-        _build_channel_location_map,
-        discover_channels,
-        load_legacy_recipes,
         process_batch,
     )
 
     # Markers with recipes vs auto
-    recipe_markers = {
-        m for m, s in resolved.sources.items() if s != "auto"
-    }
-    auto_markers = {
-        m for m, s in resolved.sources.items() if s == "auto"
-    }
+    recipe_markers = {m for m, s in resolved.sources.items() if s != "auto"}
+    auto_markers = {m for m, s in resolved.sources.items() if s == "auto"}
 
     # We need a temporary recipe dir if we have resolved recipes from mixed sources
     # Instead, call process_batch twice: once with recipes, once without
@@ -679,8 +662,12 @@ def _process_project_with_resolved_recipes(
 
     # Rebuild summary
     counts = {
-        "total": 0, "global": 0, "weighted": 0, "recipe": 0,
-        "skipped": 0, "error": 0,
+        "total": 0,
+        "global": 0,
+        "weighted": 0,
+        "recipe": 0,
+        "skipped": 0,
+        "error": 0,
     }
     quality_scores = []
     for ch in combined_result.channels.values():
@@ -716,9 +703,7 @@ def _process_project_with_resolved_recipes(
     return combined_result
 
 
-def _write_recipes_as_param_files(
-    recipes: dict, output_dir: Path
-) -> None:
+def _write_recipes_as_param_files(recipes: dict, output_dir: Path) -> None:
     """Write MarkerRecipe objects as legacy *_param.txt files.
 
     This allows passing resolved recipes (from learned DB or template)
@@ -740,30 +725,34 @@ def _write_recipes_as_param_files(
         ]
 
         if recipe.second:
-            lines.extend([
-                f"second_subtract: True",
-                f"blankID2: '{recipe.second.blank_name}'",
-                f"blank_clip_factor_2: {recipe.second.blank_clip_factor}",
-                f"blank_scale_factor_2: {recipe.second.blank_scale_factor}",
-                f"smooth_low_2: {recipe.second.smooth_low}",
-                f"low_size_2: {recipe.second.low_size}",
-                f"low_percentile_2: {recipe.second.low_percentile}",
-                f"smooth_high_2: {recipe.second.smooth_high}",
-                f"high_size_2: {recipe.second.high_size}",
-                f"high_percentile_2: {recipe.second.high_percentile}",
-                f"erosion_2: {recipe.second.erosion}",
-            ])
+            lines.extend(
+                [
+                    "second_subtract: True",
+                    f"blankID2: '{recipe.second.blank_name}'",
+                    f"blank_clip_factor_2: {recipe.second.blank_clip_factor}",
+                    f"blank_scale_factor_2: {recipe.second.blank_scale_factor}",
+                    f"smooth_low_2: {recipe.second.smooth_low}",
+                    f"low_size_2: {recipe.second.low_size}",
+                    f"low_percentile_2: {recipe.second.low_percentile}",
+                    f"smooth_high_2: {recipe.second.smooth_high}",
+                    f"high_size_2: {recipe.second.high_size}",
+                    f"high_percentile_2: {recipe.second.high_percentile}",
+                    f"erosion_2: {recipe.second.erosion}",
+                ]
+            )
 
         if recipe.clean:
-            lines.extend([
-                f"clean_used: True",
-                f"background_threshold: {recipe.clean.background_threshold}",
-                f"smooth: {recipe.clean.smooth}",
-                f"smooth_threshold: {recipe.clean.smooth_threshold}",
-                f"footprint: {recipe.clean.footprint}",
-                f"remove_small: {recipe.clean.remove_small}",
-                f"small_size: {recipe.clean.small_size}",
-            ])
+            lines.extend(
+                [
+                    "clean_used: True",
+                    f"background_threshold: {recipe.clean.background_threshold}",
+                    f"smooth: {recipe.clean.smooth}",
+                    f"smooth_threshold: {recipe.clean.smooth_threshold}",
+                    f"footprint: {recipe.clean.footprint}",
+                    f"remove_small: {recipe.clean.remove_small}",
+                    f"small_size: {recipe.clean.small_size}",
+                ]
+            )
 
         param_file = output_dir / f"{marker_name}_param.txt"
         param_file.write_text("\n".join(lines) + "\n")

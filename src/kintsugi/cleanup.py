@@ -249,8 +249,8 @@ def _check_stage_sentinels(
 
     if "{cycle}" in stage.sentinel_pattern:
         for cyc in check_cycles:
-            sentinel = proc_dir / stage.directory / stage.sentinel_pattern.format(
-                cycle=f"{cyc:02d}"
+            sentinel = (
+                proc_dir / stage.directory / stage.sentinel_pattern.format(cycle=f"{cyc:02d}")
             )
             if not sentinel.exists():
                 missing.append(str(sentinel.relative_to(project_dir)))
@@ -330,17 +330,14 @@ def assess_cleanup_safety(
     manifest = CleanupManifest(project_dir=project_dir)
 
     if not cycles:
-        manifest.warnings.append(
-            "Could not determine cycle list. Check workflow/config.yaml."
-        )
+        manifest.warnings.append("Could not determine cycle list. Check workflow/config.yaml.")
         return manifest
 
     # Check QC sentinels first
     qc_ok, qc_missing = _check_qc_sentinels(project_dir)
     if not qc_ok:
         manifest.warnings.append(
-            f"QC sentinels missing: {', '.join(qc_missing)}. "
-            "Run QC rules before cleanup."
+            f"QC sentinels missing: {', '.join(qc_missing)}. Run QC rules before cleanup."
         )
 
     # Assess each deletable directory
@@ -426,9 +423,7 @@ def assess_cleanup_safety(
                     )
             else:
                 # Required stage — just check sentinels
-                complete, missing = _check_stage_sentinels(
-                    project_dir, stage, cycles
-                )
+                complete, missing = _check_stage_sentinels(project_dir, stage, cycles)
                 if not complete:
                     blocking.append(consumer_name)
                     n_missing = len(missing)
@@ -563,9 +558,7 @@ def execute_cleanup(
         stitch_stage = _get_stage("stitch")
         cycles_list = _get_cycles(config or {}, project_dir)
         if stitch_stage and cycles_list:
-            raw_eligible, _ = _check_stage_sentinels(
-                project_dir, stitch_stage, cycles_list
-            )
+            raw_eligible, _ = _check_stage_sentinels(project_dir, stitch_stage, cycles_list)
             # Also require QC to be complete
             qc_ok, _ = _check_qc_sentinels(project_dir)
             raw_eligible = raw_eligible and qc_ok
@@ -580,9 +573,7 @@ def execute_cleanup(
                 pass  # Allow deletion
             elif skip_vessel3d and "vessel3d" in entry.blocking_consumers:
                 # vessel3d is one of multiple blockers — check if others resolved
-                other_blockers = [
-                    b for b in entry.blocking_consumers if b != "vessel3d"
-                ]
+                other_blockers = [b for b in entry.blocking_consumers if b != "vessel3d"]
                 if other_blockers:
                     result["skipped"].append(
                         {
@@ -644,9 +635,7 @@ def execute_cleanup(
                     {
                         "directory": "raw",
                         "trash_path": receipt.trash_path,
-                        "size_bytes": _dir_size(raw_dir)
-                        if raw_dir.exists()
-                        else 0,
+                        "size_bytes": _dir_size(raw_dir) if raw_dir.exists() else 0,
                     }
                 )
             else:
@@ -661,9 +650,7 @@ def execute_cleanup(
                     }
                 )
         except Exception as e:
-            result["errors"].append(
-                {"directory": "raw", "error": str(e)}
-            )
+            result["errors"].append({"directory": "raw", "error": str(e)})
 
     return result
 
@@ -807,9 +794,7 @@ def purge_trash(
                     ts = receipt.get("timestamp", "")
                     # Parse YYYYMMDD_HHMMSS
                     if ts and len(ts) >= 8:
-                        entry_time = datetime.strptime(
-                            ts[:15], "%Y%m%d_%H%M%S"
-                        ).timestamp()
+                        entry_time = datetime.strptime(ts[:15], "%Y%m%d_%H%M%S").timestamp()
                         if (now - entry_time) > cutoff_seconds:
                             should_purge = True
                 except (json.JSONDecodeError, ValueError):

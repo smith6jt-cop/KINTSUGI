@@ -6,7 +6,6 @@ recovery, and CLI commands.
 """
 
 import json
-import time
 from pathlib import Path
 
 import pytest
@@ -16,9 +15,6 @@ from kintsugi.cleanup import (
     PIPELINE_STAGES,
     CleanupEntry,
     CleanupManifest,
-    DataDependency,
-    PipelineStage,
-    TrashReceipt,
     _check_qc_sentinels,
     _check_stage_sentinels,
     _dir_size,
@@ -33,7 +29,6 @@ from kintsugi.cleanup import (
     recover_trash,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -46,8 +41,14 @@ def project_dir(tmp_path):
     proc = proj / "data" / "processed"
 
     # Create directories
-    for d in ["raw", "processed/stitched", "processed/deconvolved", "processed/edf",
-              "processed/registered", "processed/vessel_3d"]:
+    for d in [
+        "raw",
+        "processed/stitched",
+        "processed/deconvolved",
+        "processed/edf",
+        "processed/registered",
+        "processed/vessel_3d",
+    ]:
         (proj / "data" / d).mkdir(parents=True, exist_ok=True)
     (proj / "qc_plots").mkdir(parents=True, exist_ok=True)
     (proj / "workflow").mkdir(parents=True, exist_ok=True)
@@ -58,8 +59,8 @@ def project_dir(tmp_path):
             d = proc / stage_dir / f"cyc{cyc}"
             d.mkdir(parents=True, exist_ok=True)
             # Put some data files
-            (d / f"CH1.tif").write_bytes(b"x" * 1000)
-            (d / f"CH2.tif").write_bytes(b"x" * 2000)
+            (d / "CH1.tif").write_bytes(b"x" * 1000)
+            (d / "CH2.tif").write_bytes(b"x" * 2000)
 
     # Create raw data
     for cyc in ["01", "02", "03"]:
@@ -193,16 +194,16 @@ class TestDataModel:
         assert len(manifest.blocked_entries) == 1
         assert manifest.total_reclaimable_bytes == 400
 
-    def test_manifest_to_dict(self):
+    def test_manifest_to_dict(self, tmp_path):
         manifest = CleanupManifest(
-            project_dir=Path("/tmp"),
+            project_dir=tmp_path,
             entries=[
-                CleanupEntry(Path("a"), Path("/a"), "safe", "ok"),
+                CleanupEntry(Path("a"), tmp_path / "a", "safe", "ok"),
             ],
             warnings=["test warning"],
         )
         d = manifest.to_dict()
-        assert d["project_dir"] == "/tmp"
+        assert d["project_dir"] == str(tmp_path)
         assert len(d["entries"]) == 1
         assert d["entries"][0]["status"] == "safe"
         assert d["warnings"] == ["test warning"]
@@ -273,12 +274,11 @@ class TestAssessCleanupSafety:
         manifest = assess_cleanup_safety(
             complete_project, config=config_vessel3d_disabled, skip_size=True
         )
-        assert all(e.status in ("safe", "already_deleted") for e in manifest.entries), \
-            [f"{e.directory}: {e.status} — {e.reason}" for e in manifest.entries]
+        assert all(e.status in ("safe", "already_deleted") for e in manifest.entries), [
+            f"{e.directory}: {e.status} — {e.reason}" for e in manifest.entries
+        ]
 
-    def test_blocked_when_no_optional_stages_section(
-        self, complete_project, config_no_optional
-    ):
+    def test_blocked_when_no_optional_stages_section(self, complete_project, config_no_optional):
         """Deconvolved blocked when optional_stages section is absent."""
         manifest = assess_cleanup_safety(
             complete_project, config=config_no_optional, skip_size=True
@@ -357,6 +357,7 @@ class TestAssessCleanupSafety:
     def test_already_deleted_directory(self, complete_project, config_vessel3d_disabled):
         """Reports 'already_deleted' for missing directories."""
         import shutil
+
         shutil.rmtree(str(complete_project / "data" / "processed" / "stitched"))
 
         manifest = assess_cleanup_safety(
@@ -402,13 +403,9 @@ class TestStagedDeletion:
         test_dir.mkdir()
         (test_dir / "file.tif").write_bytes(b"x" * 100)
 
-        receipt = _move_to_trash(
-            test_dir, project_dir, manifest_snapshot={"test": True}
-        )
+        receipt = _move_to_trash(test_dir, project_dir, manifest_snapshot={"test": True})
 
-        receipt_data = json.loads(
-            (Path(receipt.trash_path) / "receipt.json").read_text()
-        )
+        receipt_data = json.loads((Path(receipt.trash_path) / "receipt.json").read_text())
         assert receipt_data["original_path"] == str(test_dir)
         assert receipt_data["manifest_snapshot"] == {"test": True}
         assert receipt_data["size_bytes"] == 100
@@ -627,9 +624,7 @@ class TestEdgeCases:
 
         manifest = assess_cleanup_safety(complete_project, skip_size=True)
         # Should load config from file and find vessel3d disabled
-        decon = next(
-            (e for e in manifest.entries if e.directory == "deconvolved"), None
-        )
+        decon = next((e for e in manifest.entries if e.directory == "deconvolved"), None)
         if decon:
             assert decon.status == "safe"
 

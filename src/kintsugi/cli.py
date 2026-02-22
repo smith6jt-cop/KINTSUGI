@@ -1435,6 +1435,149 @@ def workflow_run(
 
 
 # ============================================================================
+# Status Dashboard
+# ============================================================================
+
+
+@workflow.command("status")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--watch", "-w", is_flag=True, help="Auto-refresh dashboard")
+@click.option(
+    "--interval", "-i", default=30, type=int, help="Refresh interval in seconds (default: 30)"
+)
+@click.option("--no-hardware", is_flag=True, help="Hide hardware utilization section")
+@click.option("--no-estimates", is_flag=True, help="Hide completion time estimates")
+@click.option("--no-jobs", is_flag=True, help="Hide active SLURM job details")
+@click.option("--all-projects", is_flag=True, help="Scan all projects under parent directory")
+@click.option("--json", "json_output", is_flag=True, help="Output as JSON instead of table")
+def workflow_status(
+    project_dir: str,
+    watch: bool,
+    interval: int,
+    no_hardware: bool,
+    no_estimates: bool,
+    no_jobs: bool,
+    all_projects: bool,
+    json_output: bool,
+):
+    """
+    Show pipeline progress dashboard with real-time status.
+
+    Displays per-cycle, per-stage completion status with SLURM job details,
+    memory/GPU utilization, and estimated completion times.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+
+    \b
+    Examples:
+        kintsugi workflow status .                # One-shot status
+        kintsugi workflow status . --watch        # Auto-refresh dashboard
+        kintsugi workflow status . -w -i 15       # Refresh every 15s
+        kintsugi workflow status . --json         # JSON output for scripting
+        kintsugi workflow status /blue/maigan/smith6jt --all-projects
+    """
+    from pathlib import Path
+
+    from kintsugi.dashboard import (
+        render_dashboard,
+        scan_project_progress,
+        watch_dashboard,
+    )
+
+    project_dir = Path(project_dir).resolve()
+
+    if all_projects:
+        project_dirs = []
+        # Discover projects under this directory
+        for config_file in sorted(project_dir.rglob("workflow/config.yaml")):
+            project_dirs.append(config_file.parent.parent)
+        if not project_dirs:
+            console.print("[yellow]No projects with workflow/config.yaml found.[/yellow]")
+            raise SystemExit(1)
+        console.print(f"Found {len(project_dirs)} projects")
+    else:
+        if not (project_dir / "workflow" / "config.yaml").exists():
+            console.print("[red]No workflow/config.yaml found.[/red]")
+            console.print("Run 'kintsugi workflow config .' first.")
+            raise SystemExit(1)
+        project_dirs = [project_dir]
+
+    if json_output:
+        import json as json_mod
+
+        statuses = []
+        for pdir in project_dirs:
+            try:
+                statuses.append(scan_project_progress(pdir))
+            except Exception as e:
+                console.print(f"[red]Error scanning {pdir}: {e}[/red]")
+
+        # Serialize to JSON
+        output = []
+        for s in statuses:
+            from kintsugi.dashboard import estimate_completion
+
+            est = estimate_completion(s)
+            proj = {
+                "project_dir": str(s.project_dir),
+                "project_name": s.project_name,
+                "cycles": s.cycles,
+                "cycle_statuses": {
+                    cyc: {
+                        "stages": cs.stages,
+                        "timings": cs.timings,
+                    }
+                    for cyc, cs in s.cycle_statuses.items()
+                },
+                "registration_status": s.registration_status,
+                "registration_timing": s.registration_timing,
+                "qc_statuses": s.qc_statuses,
+                "estimate": {
+                    "wall_clock_seconds": est["wall_clock_seconds"],
+                    "eta": est["eta"].isoformat() if est["eta"] else None,
+                    "confidence": est["confidence"],
+                    "parallelism": est["parallelism"],
+                },
+                "scan_time": s.scan_time.isoformat(),
+            }
+            if s.hardware:
+                proj["hardware"] = {
+                    "accounts": s.hardware.accounts,
+                    "total_gpu_alloc": s.hardware.total_gpu_alloc,
+                    "total_gpu_used": s.hardware.total_gpu_used,
+                    "total_gpu_avail": s.hardware.total_gpu_avail,
+                }
+            output.append(proj)
+
+        click.echo(json_mod.dumps(output, indent=2, default=str))
+        return
+
+    if watch:
+        watch_dashboard(
+            project_dirs,
+            interval=interval,
+            show_hardware=not no_hardware,
+            show_estimates=not no_estimates,
+            show_jobs=not no_jobs,
+        )
+    else:
+        statuses = []
+        for pdir in project_dirs:
+            try:
+                statuses.append(scan_project_progress(pdir))
+            except Exception as e:
+                console.print(f"[red]Error scanning {pdir}: {e}[/red]")
+
+        if statuses:
+            render_dashboard(
+                statuses,
+                show_hardware=not no_hardware,
+                show_estimates=not no_estimates,
+                show_jobs=not no_jobs,
+            )
+
+
+# ============================================================================
 # Export Commands (TissUUmaps)
 # ============================================================================
 
@@ -1760,9 +1903,7 @@ def cleanup_status(project_dir: str):
     if manifest.safe_entries:
         total_gb = manifest.total_reclaimable_gb
         console.print(f"\n  [green]Reclaimable: {total_gb:.1f} GB[/green]")
-        console.print(
-            f"  Run: kintsugi workflow cleanup execute {project_dir}"
-        )
+        console.print(f"  Run: kintsugi workflow cleanup execute {project_dir}")
 
     if manifest.blocked_entries:
         console.print(
@@ -1825,12 +1966,18 @@ def cleanup_plan(project_dir: str):
             complete, _ = _check_stage_sentinels(project_dir, stitch_stage, cycles)
             if complete:
                 raw_size = _dir_size(raw_dir)
-                will_delete.append(type("Entry", (), {
-                    "directory": "raw",
-                    "size_bytes": raw_size,
-                    "size_gb": raw_size / (1024**3),
-                    "reason": "All stitch sentinels present",
-                })())
+                will_delete.append(
+                    type(
+                        "Entry",
+                        (),
+                        {
+                            "directory": "raw",
+                            "size_bytes": raw_size,
+                            "size_gb": raw_size / (1024**3),
+                            "reason": "All stitch sentinels present",
+                        },
+                    )()
+                )
 
     if will_delete:
         console.print("  [bold green]WILL DELETE:[/bold green]")
@@ -1858,7 +2005,9 @@ def cleanup_plan(project_dir: str):
 @cleanup_group.command("execute")
 @click.argument("project_dir", type=click.Path(exists=True), default=".")
 @click.option("--no-trash", is_flag=True, help="Permanent delete (skip trash staging)")
-@click.option("--force", is_flag=True, help="Skip interactive prompt (safety checks still enforced)")
+@click.option(
+    "--force", is_flag=True, help="Skip interactive prompt (safety checks still enforced)"
+)
 @click.option("--skip-vessel3d", is_flag=True, help="Override vessel3d block (escape hatch)")
 def cleanup_execute(project_dir: str, no_trash: bool, force: bool, skip_vessel3d: bool):
     """
@@ -2172,16 +2321,10 @@ def isolate_plan(
         analysis = ch.analysis or {}
         signal_p99 = analysis.get("signal_p99", 0)
         blank_p99 = analysis.get("blank_p99", 0)
-        ratio = f"{blank_p99/signal_p99:.2f}" if signal_p99 > 0 else "-"
-        scale = ch.parameters.get(
-            "blank_scale_factor", ch.parameters.get("base_scale_factor", "?")
-        )
+        ratio = f"{blank_p99 / signal_p99:.2f}" if signal_p99 > 0 else "-"
+        scale = ch.parameters.get("blank_scale_factor", ch.parameters.get("base_scale_factor", "?"))
         corr = analysis.get("correlation", "?")
-        method_str = (
-            f"[magenta]{ch.method}[/magenta]"
-            if ch.method == "weighted"
-            else ch.method
-        )
+        method_str = f"[magenta]{ch.method}[/magenta]" if ch.method == "weighted" else ch.method
         table.add_row(
             marker,
             str(ch.cycle),
@@ -2277,9 +2420,7 @@ def isolate_run(
 
     # Print summary
     s = result.summary
-    console.print(
-        f"\n[bold]Done:[/bold] {s.get('total', 0)} channels processed"
-    )
+    console.print(f"\n[bold]Done:[/bold] {s.get('total', 0)} channels processed")
     method_parts = []
     if s.get("recipe", 0):
         method_parts.append(f"recipe: {s['recipe']}")
@@ -2294,9 +2435,7 @@ def isolate_run(
         console.print(f"  mean quality: {s['mean_quality']:.3f}")
 
     # Show any warnings
-    warned = [
-        (m, ch.warning) for m, ch in result.channels.items() if ch.warning
-    ]
+    warned = [(m, ch.warning) for m, ch in result.channels.items() if ch.warning]
     if warned:
         console.print("\n[yellow]Warnings:[/yellow]")
         for marker, warning in warned:
@@ -2358,7 +2497,10 @@ def isolate_status(project_dir: str):
 
         project_dir = Path(project_dir).resolve()
         manifest_path = (
-            project_dir / "data" / "processed" / "signal_isolated"
+            project_dir
+            / "data"
+            / "processed"
+            / "signal_isolated"
             / "signal_isolation_manifest.json"
         )
         if manifest_path.exists():
@@ -2386,12 +2528,10 @@ def isolate_status(project_dir: str):
                 params = info.get("parameters", {})
                 analysis = info.get("analysis", {})
                 quality = info.get("quality_metrics", {})
-                scale = params.get(
-                    "blank_scale_factor", params.get("base_scale_factor", "")
-                )
+                scale = params.get("blank_scale_factor", params.get("base_scale_factor", ""))
                 signal_p99 = analysis.get("signal_p99", 0)
                 blank_p99 = analysis.get("blank_p99", 0)
-                ratio = f"{blank_p99/signal_p99:.2f}" if signal_p99 > 0 else "-"
+                ratio = f"{blank_p99 / signal_p99:.2f}" if signal_p99 > 0 else "-"
                 q_score = quality.get("quality_score", "")
                 if isinstance(q_score, (int, float)):
                     if q_score >= 0.7:
@@ -2403,10 +2543,7 @@ def isolate_status(project_dir: str):
                 else:
                     q_str = str(q_score)
                 method = info.get("method", "")
-                method_str = (
-                    f"[magenta]{method}[/magenta]"
-                    if method == "weighted" else method
-                )
+                method_str = f"[magenta]{method}[/magenta]" if method == "weighted" else method
                 table.add_row(
                     marker,
                     str(info.get("cycle", "")),
@@ -2556,9 +2693,7 @@ def isolate_batch(
     console.print(disc_table)
 
     if dry_run:
-        console.print(
-            f"\n[dim]Dry run — {len(projects)} projects would be processed.[/dim]"
-        )
+        console.print(f"\n[dim]Dry run — {len(projects)} projects would be processed.[/dim]")
         return
 
     # Process
@@ -2576,7 +2711,7 @@ def isolate_batch(
     )
 
     # Print summary
-    console.print(f"\n[bold]Batch Complete[/bold]")
+    console.print("\n[bold]Batch Complete[/bold]")
     console.print(
         f"  Total: {result.total_projects} | "
         f"Completed: {result.completed} | "
@@ -2597,8 +2732,10 @@ def isolate_batch(
         for name, info in result.project_results.items():
             status = info.get("status", "")
             status_str = (
-                f"[green]{status}[/green]" if status == "completed"
-                else f"[red]{status}[/red]" if status == "error"
+                f"[green]{status}[/green]"
+                if status == "completed"
+                else f"[red]{status}[/red]"
+                if status == "error"
                 else status
             )
             summary = info.get("summary", {})
@@ -2611,8 +2748,12 @@ def isolate_batch(
                 warn_str = info["error"][:40]
 
             res_table.add_row(
-                name, info.get("tissue_type", ""), status_str,
-                str(n_channels), q_str, warn_str,
+                name,
+                info.get("tissue_type", ""),
+                status_str,
+                str(n_channels),
+                q_str,
+                warn_str,
             )
 
         console.print(res_table)

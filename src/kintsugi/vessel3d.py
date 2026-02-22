@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Union
@@ -184,8 +185,6 @@ VESSEL_PRESETS: dict[str, dict] = {
 # Vessel marker vocabulary: (pattern, role, priority).
 # Lower priority number = preferred.  Patterns are matched case-insensitively
 # against channel names after stripping leading/trailing whitespace.
-import re
-
 _VESSEL_MARKER_PATTERNS: list[tuple[re.Pattern, str, int]] = [
     (re.compile(r"^CD34$", re.IGNORECASE), "endothelial", 1),
     (re.compile(r"^CD31$", re.IGNORECASE), "endothelial", 2),
@@ -201,9 +200,7 @@ _VESSEL_MARKER_PATTERNS: list[tuple[re.Pattern, str, int]] = [
 ]
 
 # Channels to always exclude from vessel marker discovery
-_EXCLUDED_CHANNEL_PATTERNS = re.compile(
-    r"^(?:DAPI|Blank|Empty|AF|Autofluorescence)", re.IGNORECASE
-)
+_EXCLUDED_CHANNEL_PATTERNS = re.compile(r"^(?:DAPI|Blank|Empty|AF|Autofluorescence)", re.IGNORECASE)
 
 
 @dataclass
@@ -303,9 +300,7 @@ def combine_vessel_masks(
     shape = masks[0].shape
     for i, m in enumerate(masks[1:], 1):
         if m.shape != shape:
-            raise ValueError(
-                f"Mask shape mismatch: mask[0]={shape}, mask[{i}]={m.shape}"
-            )
+            raise ValueError(f"Mask shape mismatch: mask[0]={shape}, mask[{i}]={m.shape}")
 
     if method == "union":
         combined = masks[0].astype(bool).copy()
@@ -593,7 +588,6 @@ def _hessian_eigenvalues_3d(
     # For symmetric 3x3 matrix [[a,b,c],[b,d,e],[c,e,f]]:
     #   a=Hzz, b=Hzy, c=Hzx, d=Hyy, e=Hyx, f=Hxx
 
-    shape = vol.shape
     del vol  # free GPU copy of input volume
 
     # Trace / 3
@@ -608,8 +602,7 @@ def _hessian_eigenvalues_3d(
     del Hxx
 
     # p² = ( (a-q)² + (d-q)² + (f-q)² + 2*(b² + c² + e²) ) / 6
-    p2 = (a_q * a_q + d_q * d_q + f_q * f_q
-          + 2.0 * (Hzy * Hzy + Hzx * Hzx + Hyx * Hyx)) / 6.0
+    p2 = (a_q * a_q + d_q * d_q + f_q * f_q + 2.0 * (Hzy * Hzy + Hzx * Hzx + Hyx * Hyx)) / 6.0
 
     p = xp.sqrt(xp.maximum(p2, xp.float32(1e-30)))
     del p2
@@ -635,9 +628,7 @@ def _hessian_eigenvalues_3d(
 
     del inv_p
 
-    det_B = (aq * (dq * fq - e_ * e_)
-             - b_ * (b_ * fq - e_ * c_)
-             + c_ * (b_ * e_ - dq * c_))
+    det_B = aq * (dq * fq - e_ * e_) - b_ * (b_ * fq - e_ * c_) + c_ * (b_ * e_ - dq * c_)
     del aq, dq, fq, b_, c_, e_
 
     # r = det_B / 2, clamp to [-1, 1] for numerical stability
@@ -865,9 +856,13 @@ def binarize_vessel_mask(
     logger.info(f"After threshold: {mask.sum():,} voxels ({100.0 * mask.sum() / mask.size:.2f}%)")
 
     # Step 2: Remove small objects
-    # max_size removes objects with size <= threshold (replaces deprecated min_size)
     if min_size > 0:
-        mask = remove_small_objects(mask, max_size=min_size - 1)
+        try:
+            # scikit-image >= 0.26: max_size replaces deprecated min_size
+            mask = remove_small_objects(mask, max_size=min_size - 1)
+        except TypeError:
+            # scikit-image < 0.26: use min_size parameter
+            mask = remove_small_objects(mask, min_size=min_size)
         logger.info(f"After small object removal (min={min_size}): {mask.sum():,} voxels")
 
     # Step 3: Morphological closing
@@ -1180,7 +1175,7 @@ def analyze_vessel_graph(
     # trunk direction at that junction.  Segments with no junction endpoint get NaN.
     branching_angles = [np.nan] * len(df)
 
-    for node_id, branches in node_directions.items():
+    for _node_id, branches in node_directions.items():
         if len(branches) < 2:
             continue
         # Find the trunk (longest incident branch at this junction)
@@ -1427,9 +1422,7 @@ def segment_vessels_3d(
     # Resolve parameters: explicit value > preset > hardcoded default
     if preset is not None:
         if preset not in VESSEL_PRESETS:
-            raise ValueError(
-                f"Unknown preset '{preset}'. Available: {list(VESSEL_PRESETS.keys())}"
-            )
+            raise ValueError(f"Unknown preset '{preset}'. Available: {list(VESSEL_PRESETS.keys())}")
         p = VESSEL_PRESETS[preset]
     else:
         p = {}
@@ -1607,16 +1600,16 @@ def segment_vessels_multichannel(
     make_isotropic = kwargs.get("make_isotropic", True)
     if make_isotropic:
         native_zoom = (1.0 / spacing.ratio, 1.0, 1.0)
-        native_mask = ndimage.zoom(
-            combined_mask.astype(np.float32), native_zoom, order=0
-        ) > 0.5
+        native_mask = ndimage.zoom(combined_mask.astype(np.float32), native_zoom, order=0) > 0.5
 
     # Skeletonize and analyze the combined mask
     skeleton = skeletonize_vessels(combined_mask)
     prune_min = kwargs.get("prune_min_length_um", 5.0)
     skeleton = prune_skeleton(
-        skeleton, min_branch_length_um=prune_min,
-        binary_mask=combined_mask, spacing=spacing,
+        skeleton,
+        min_branch_length_um=prune_min,
+        binary_mask=combined_mask,
+        spacing=spacing,
     )
     features = analyze_vessel_graph(skeleton, combined_mask, spacing=spacing)
 
@@ -1627,9 +1620,7 @@ def segment_vessels_multichannel(
         features=features,
         spacing=spacing,
         marker_name=combined_name,
-        per_channel_masks={
-            name: r.binary_mask for name, r in per_channel_results.items()
-        },
+        per_channel_masks={name: r.binary_mask for name, r in per_channel_results.items()},
     )
 
     logger.info(f"Multi-channel vessel segmentation complete: {combined_name}")

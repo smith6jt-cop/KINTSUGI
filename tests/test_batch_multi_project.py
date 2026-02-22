@@ -32,7 +32,6 @@ from kintsugi.signal.batch_multi import (
     resolve_recipes_for_project,
 )
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -169,9 +168,7 @@ class TestParseTissueType:
         """Falls back to experiment.json name field."""
         meta = tmp_path / "meta"
         meta.mkdir()
-        (meta / "experiment.json").write_text(
-            json.dumps({"name": "Spleen CC2 Sample A"})
-        )
+        (meta / "experiment.json").write_text(json.dumps({"name": "Spleen CC2 Sample A"}))
         assert parse_tissue_type("1901CC2A", tmp_path) == "spleen"
 
     def test_case_insensitive(self):
@@ -223,9 +220,7 @@ class TestDiscoverProjects:
         assert "setup.log" not in names
 
     def test_dataset_filter(self, projects_dir):
-        projects = discover_projects(
-            projects_dir, dataset="CX_19-002_lymph-node_R1"
-        )
+        projects = discover_projects(projects_dir, dataset="CX_19-002_lymph-node_R1")
         assert len(projects) == 1
         assert projects[0].name == "CX_19-002_lymph-node_R1"
 
@@ -316,9 +311,7 @@ class TestResolveRecipes:
         projects = discover_projects(projects_dir)
         p1 = next(p for p in projects if p.name == "CX_19-001_SP_CC2-A28")
 
-        resolved = resolve_recipes_for_project(
-            p1, projects_dir=projects_dir
-        )
+        resolved = resolve_recipes_for_project(p1, projects_dir=projects_dir)
 
         # Markers with own recipes should be tier 1
         for marker in ["CD3e", "CD20", "CD45"]:
@@ -366,7 +359,7 @@ class TestResolveRecipes:
         resolved = resolve_recipes_for_project(p2, projects_dir=projects_dir)
 
         # Without template or learned DB, markers should fall to auto
-        for marker, source in resolved.sources.items():
+        for _marker, source in resolved.sources.items():
             assert source in ("auto", "template", "learned")
 
     def test_tier2_learned_db(self, projects_dir):
@@ -391,9 +384,7 @@ class TestResolveRecipes:
                 p2, projects_dir=projects_dir, min_confidence=0.6
             )
 
-        learned_markers = [
-            m for m, s in resolved.sources.items() if s == "learned"
-        ]
+        learned_markers = [m for m, s in resolved.sources.items() if s == "learned"]
         assert len(learned_markers) > 0
 
     def test_summary_counts(self, projects_dir):
@@ -472,16 +463,17 @@ class TestWriteRecipesAsParamFiles:
 
 
 class TestProjectInfo:
-    def test_to_dict(self):
+    def test_to_dict(self, tmp_path):
+        test_path = tmp_path / "test"
         info = ProjectInfo(
             name="test",
-            path=Path("/tmp/test"),
+            path=test_path,
             tissue_type="spleen",
             n_registered_channels=10,
         )
         d = info.to_dict()
         assert d["name"] == "test"
-        assert d["path"] == "/tmp/test"
+        assert d["path"] == str(test_path)
         assert d["tissue_type"] == "spleen"
 
 

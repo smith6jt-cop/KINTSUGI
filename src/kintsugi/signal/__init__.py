@@ -31,13 +31,6 @@ from .autofluorescence import (
     subtract_autofluorescence_weighted,
     suggest_blank_channel,
 )
-from .subtractor import (
-    AutofluorescenceSubtractor,
-    IntensityRange,
-    SubtractionParameters,
-    SubtractionResult,
-    WeightedSubtractionParameters,
-)
 from .batch import (
     BatchResult,
     ChannelResult,
@@ -64,6 +57,13 @@ from .batch_multi import (
     resolve_recipes_for_project,
 )
 from .isolation_qc import generate_qc_pages, generate_summary_table
+from .subtractor import (
+    AutofluorescenceSubtractor,
+    IntensityRange,
+    SubtractionParameters,
+    SubtractionResult,
+    WeightedSubtractionParameters,
+)
 from .utils import (
     apply_erosion_mask,
     apply_percentile_smoothing,
