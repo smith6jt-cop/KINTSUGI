@@ -48,7 +48,8 @@ Segments blood and lymphatic vessels from deconvolved 3D z-stacks using Frangi v
 
 **Data classes:**
 - `VesselSpacing(xy, z)` — Physical voxel spacing; `from_experiment()` loads from experiment.json
-- `VesselSegmentationResult` — Container for mask, skeleton, features, vesselness map
+- `VesselSegmentationResult` — Container for mask, skeleton, features, vesselness map, `per_channel_masks`
+- `VesselMarkerInfo(name, cycle, channel, role, priority)` — Marker discovered from CHANNELNAMES.txt
 
 **Usage:**
 ```python
@@ -56,11 +57,27 @@ from kintsugi.vessel3d import segment_vessels_3d, VesselSpacing, export_vessel_r
 
 spacing = VesselSpacing(xy=0.377, z=1.5)  # or VesselSpacing.from_experiment(config)
 result = segment_vessels_3d(
-    volume, spacing=spacing, sigmas=[1, 2, 4, 8],
+    volume, spacing=spacing, preset='high_sensitivity',
     device='auto', marker_name='CD31',
 )
 export_vessel_results(result, "data/processed/vessel_3d/")
 ```
+
+**Presets** (`VESSEL_PRESETS` dict):
+
+| Preset | sigmas | alpha | beta | min_size | denoise_sigma |
+|--------|--------|-------|------|----------|---------------|
+| `default` | [1,2,4,8] | 0.5 | 0.5 | 500 | 0.5 |
+| `high_sensitivity` | [0.5,1,2,4,8] | 0.3 | 0.3 | 250 | 0.3 |
+| `CD34` | [0.5,1,2,4,8] | 0.3 | 0.3 | 250 | 0.3 |
+
+**Preset override pattern**: Preset-overridable params (`sigmas`, `alpha`, `beta`, `min_size`, `denoise_sigma`) default to `None`. Resolution: **explicit value > preset > hardcoded default**. In SLURM scripts, only set env vars for params you want to override — unset vars stay `None` and the preset controls them.
+
+**Marker discovery** (`discover_vessel_markers(channel_names)`): Finds vessel-relevant markers in a channel names dict. Priority: CD34 (best) > CD31 > SMA/aSMA/alpha-SMA (smooth muscle). Excludes DAPI, Blank, Empty, and generic "Actin" (too ambiguous).
+
+**Multi-channel** (`segment_vessels_multichannel(volumes, ...)`): Runs Frangi independently per channel (avoids inter-cycle misalignment), combines binary masks via union/intersection, then skeletonizes the combined result. Returns `per_channel_masks` in the result.
+
+**Thin-slab note**: These datasets are ~10 z-planes (~15 um depth), not true 3D volumes. The 3D pipeline adds value for cross-section radii and cleaner masks, but topology features (tortuosity, branching angle) are limited by shallow z-extent.
 
 **Pipeline steps:**
 1. Preprocess: isotropic z-resampling (scipy/CuPy zoom) + light Gaussian denoising
@@ -90,9 +107,9 @@ export_vessel_results(result, "data/processed/vessel_3d/")
 
 **GPU memory**: Hessian eigenvalues use Cardano's analytical formula for symmetric 3x3 matrices — operates element-wise on 6 Hessian arrays. The naive `(N, 3, 3)` + `eigvalsh` approach OOMs on stitched volumes (108 GB allocation for 3 billion voxels). Sorting uses a 3-element sorting network (compare-swap) to avoid index array allocation. VRAM guard queries `cp.cuda.Device().mem_info` before GPU path and falls back to CPU if insufficient.
 
-**SLURM**: `03b_vessel3d.sh` runs between `03_deconvolution.sh` and `04_edf.sh`. Environment variables: `VESSEL_CYCLE`, `VESSEL_CHANNEL`, `VESSEL_MARKER`, `VESSEL_SIGMAS`, `VESSEL_MIN_SIZE`. Recommended: 256 GB RAM, 4 h wall time. Auto-detects GPU VRAM < 40 GB and forces CPU mode (prevents L4 OOM).
+**SLURM**: `03b_vessel3d.sh` runs between `03_deconvolution.sh` and `04_edf.sh`. Uses `seg_kwargs` dict — only includes params whose env vars are set; unset vars let presets control. Key env vars: `VESSEL_CYCLE`, `VESSEL_CHANNEL`, `VESSEL_MARKER`, `VESSEL_PRESET`. Optional overrides: `VESSEL_SIGMAS`, `VESSEL_ALPHA`, `VESSEL_BETA`, `VESSEL_THRESHOLD`, `VESSEL_MIN_SIZE`. Multi-channel: `VESSEL_COMBINE`, `VESSEL_COMBINE_CYCLE/CHANNEL/MARKER`. Recommended: 256 GB RAM, 4 h wall time. Auto-detects GPU VRAM < 40 GB and forces CPU mode.
 
-**Tests**: `tests/test_vessel3d.py` — 19 tests covering Ra formula correctness (tube vs plate eigenvalues), eigenvalue sorting invariants, scikit-image deprecation-free imports, GPU VRAM guard, binarization, end-to-end pipeline, and VesselSpacing.
+**Tests**: `tests/test_vessel3d.py` — 34 tests covering Ra formula, eigenvalue sorting, scikit-image deprecations, VRAM guard, binarization, pipeline, VesselSpacing, presets, alpha/beta forwarding, marker discovery, mask combination, and multichannel pipeline.
 
 ## Pipeline-Aware Cleanup (Feb 2026)
 

@@ -128,6 +128,197 @@ class VesselSegmentationResult:
     vesselness: np.ndarray | None = None
     spacing: VesselSpacing = field(default_factory=VesselSpacing)
     marker_name: str = "vessel"
+    per_channel_masks: dict[str, np.ndarray] | None = None
+
+    def summary(self) -> dict:
+        """Aggregate network-level morphometric statistics.
+
+        Returns
+        -------
+        dict
+            Network statistics including segment counts, total length/volume,
+            mean diameter, tortuosity, and branching angle. Empty dict if
+            features have not been computed.
+        """
+        if self.features is None:
+            return {}
+        df = self.features
+        result = {
+            "n_segments": len(df),
+            "n_junctions": int((df["branch_type"] == 2).sum()),
+            "n_endpoints": int((df["branch_type"] == 0).sum()),
+            "total_length_um": float(df["branch_length_um"].sum()),
+            "mean_diameter_um": float(df["mean_diameter_um"].mean()),
+            "mean_tortuosity": float(df["tortuosity"].mean()),
+        }
+        if "volume_um3" in df.columns:
+            result["total_volume_um3"] = float(df["volume_um3"].sum())
+        if "branching_angle_deg" in df.columns:
+            valid = df["branching_angle_deg"].dropna()
+            result["mean_branching_angle_deg"] = float(valid.mean()) if len(valid) > 0 else None
+        return result
+
+
+# =============================================================================
+# Presets and Marker Discovery
+# =============================================================================
+
+VESSEL_PRESETS: dict[str, dict] = {
+    "default": {},
+    "high_sensitivity": {
+        "sigmas": [0.5, 1.0, 2.0, 4.0, 8.0],
+        "alpha": 0.3,
+        "beta": 0.3,
+        "min_size": 250,
+        "denoise_sigma": 0.3,
+    },
+    "CD34": {
+        "sigmas": [0.5, 1.0, 2.0, 4.0, 8.0],
+        "alpha": 0.3,
+        "beta": 0.3,
+        "min_size": 250,
+        "denoise_sigma": 0.3,
+    },
+}
+
+# Vessel marker vocabulary: (pattern, role, priority).
+# Lower priority number = preferred.  Patterns are matched case-insensitively
+# against channel names after stripping leading/trailing whitespace.
+import re
+
+_VESSEL_MARKER_PATTERNS: list[tuple[re.Pattern, str, int]] = [
+    (re.compile(r"^CD34$", re.IGNORECASE), "endothelial", 1),
+    (re.compile(r"^CD31$", re.IGNORECASE), "endothelial", 2),
+    # SMA variants: aSMA, a-SMA, alpha-SMA, αSMA, Smooth Muscle Actin
+    (
+        re.compile(
+            r"^(?:a-?SMA|alpha-?SMA|\u03b1-?SMA|Smooth[\s_-]*Muscle[\s_-]*Actin)$",
+            re.IGNORECASE,
+        ),
+        "smooth_muscle",
+        3,
+    ),
+]
+
+# Channels to always exclude from vessel marker discovery
+_EXCLUDED_CHANNEL_PATTERNS = re.compile(
+    r"^(?:DAPI|Blank|Empty|AF|Autofluorescence)", re.IGNORECASE
+)
+
+
+@dataclass
+class VesselMarkerInfo:
+    """Information about a vessel-relevant marker discovered in channel names.
+
+    Attributes
+    ----------
+    name : str
+        Marker name as it appears in CHANNELNAMES.txt (e.g., "CD34").
+    cycle : int
+        1-indexed cycle number.
+    channel : int
+        1-indexed channel number within the cycle.
+    role : str
+        Functional role: "endothelial", "smooth_muscle", or "generic".
+    priority : int
+        Selection priority (lower = preferred).
+    """
+
+    name: str
+    cycle: int
+    channel: int
+    role: str
+    priority: int = 99
+
+
+def discover_vessel_markers(
+    channel_names: dict[int, list[str]],
+) -> list[VesselMarkerInfo]:
+    """Find vessel-relevant markers in a channel names dictionary.
+
+    Parses the channel names (as returned by ``Kio.load_channel_names()``)
+    and returns markers matching known vessel vocabulary, ranked by
+    preference (CD34 > CD31 > SMA variants).
+
+    Parameters
+    ----------
+    channel_names : dict[int, list[str]]
+        Mapping of cycle number (1-indexed) to list of channel names.
+
+    Returns
+    -------
+    list of VesselMarkerInfo
+        Vessel markers sorted by priority (best first). Empty if none found.
+    """
+    markers: list[VesselMarkerInfo] = []
+
+    for cycle_num, names in channel_names.items():
+        for ch_idx, name in enumerate(names):
+            name_stripped = name.strip()
+            if _EXCLUDED_CHANNEL_PATTERNS.match(name_stripped):
+                continue
+            for pattern, role, priority in _VESSEL_MARKER_PATTERNS:
+                if pattern.match(name_stripped):
+                    markers.append(
+                        VesselMarkerInfo(
+                            name=name_stripped,
+                            cycle=cycle_num,
+                            channel=ch_idx + 1,  # 1-indexed
+                            role=role,
+                            priority=priority,
+                        )
+                    )
+                    break  # first matching pattern wins
+
+    markers.sort(key=lambda m: (m.priority, m.cycle))
+    return markers
+
+
+def combine_vessel_masks(
+    masks: list[np.ndarray],
+    method: str = "union",
+) -> np.ndarray:
+    """Combine multiple binary vessel masks.
+
+    Parameters
+    ----------
+    masks : list of np.ndarray
+        Binary masks (bool), all same shape.
+    method : str
+        "union" (logical OR) or "intersection" (logical AND).
+
+    Returns
+    -------
+    np.ndarray
+        Combined binary mask (bool).
+
+    Raises
+    ------
+    ValueError
+        If masks list is empty or shapes don't match.
+    """
+    if not masks:
+        raise ValueError("At least one mask is required")
+
+    shape = masks[0].shape
+    for i, m in enumerate(masks[1:], 1):
+        if m.shape != shape:
+            raise ValueError(
+                f"Mask shape mismatch: mask[0]={shape}, mask[{i}]={m.shape}"
+            )
+
+    if method == "union":
+        combined = masks[0].astype(bool).copy()
+        for m in masks[1:]:
+            combined |= m.astype(bool)
+    elif method == "intersection":
+        combined = masks[0].astype(bool).copy()
+        for m in masks[1:]:
+            combined &= m.astype(bool)
+    else:
+        raise ValueError(f"Unknown method '{method}', expected 'union' or 'intersection'")
+
+    return combined
 
 
 # =============================================================================
@@ -345,11 +536,12 @@ def _hessian_eigenvalues_3d(
     if use_gpu:
         import cupy as cp
 
-        # VRAM guard: Cardano eigenvalue path needs ~15 float32 arrays at peak
-        # (6 Hessian + input + ~8 working arrays during Cardano + sorting).
+        # VRAM guard: Cardano eigenvalue path peaks at ~10 float32 arrays
+        # (6 Hessian + q + p + p2 + inv_p, with interleaved deletions).
+        # 12x multiplier adds 20% safety margin for gaussian_filter temporaries.
         # Fall back to CPU if GPU has insufficient VRAM.
         volume_bytes = volume.nbytes
-        estimated_vram = volume_bytes * 15
+        estimated_vram = volume_bytes * 12
         try:
             cp.cuda.Device(device_id).use()
             free_vram = cp.cuda.Device(device_id).mem_info[0]
@@ -426,13 +618,22 @@ def _hessian_eigenvalues_3d(
     # det(B) = (1/p³) * det(A - q*I)
     # det([[a-q, b, c],[b, d-q, e],[c, e, f-q]])
     inv_p = 1.0 / p
+
     b_ = Hzy * inv_p
+    del Hzy
     c_ = Hzx * inv_p
+    del Hzx
     e_ = Hyx * inv_p
+    del Hyx
+
     aq = a_q * inv_p
+    del a_q
     dq = d_q * inv_p
+    del d_q
     fq = f_q * inv_p
-    del a_q, d_q, f_q, inv_p
+    del f_q
+
+    del inv_p
 
     det_B = (aq * (dq * fq - e_ * e_)
              - b_ * (b_ * fq - e_ * c_)
@@ -457,8 +658,7 @@ def _hessian_eigenvalues_3d(
     eig2 = 3.0 * q - eig1 - eig3  # trace identity
     del phi, two_p, q
 
-    # Free off-diagonal Hessian components (diagonals already freed above)
-    del Hzy, Hzx, Hyx
+    # Off-diagonal Hessian components already freed during Cardano scaling above
 
     # Sort by absolute value using a 3-element sorting network (Knuth).
     # Three compare-and-swap steps guarantee |l1| <= |l2| <= |l3|.
@@ -719,12 +919,17 @@ def skeletonize_vessels(
 def prune_skeleton(
     skeleton: np.ndarray,
     min_branch_length_um: float = 5.0,
+    diameter_length_ratio: float = 0.0,
+    binary_mask: np.ndarray | None = None,
     spacing: VesselSpacing | None = None,
 ) -> np.ndarray:
     """Remove short terminal branches (spurs) from a skeleton.
 
     Uses skan to identify endpoint-to-junction branches shorter than
-    a threshold and removes them.
+    a threshold and removes them. Optionally also removes terminal
+    branches where length < ratio * diameter (Montero & Lang 2012),
+    which is more biologically meaningful for distinguishing real
+    capillaries from segmentation artifacts.
 
     Parameters
     ----------
@@ -733,6 +938,13 @@ def prune_skeleton(
     min_branch_length_um : float
         Minimum branch length in micrometers. Branches shorter than
         this are pruned. Default 5.0 um.
+    diameter_length_ratio : float
+        Remove terminal branches where length < ratio * diameter.
+        Default 0.0 (disabled). Typical value: 2.0.
+        Requires ``binary_mask`` to estimate diameters.
+    binary_mask : np.ndarray or None
+        3D binary vessel mask (same shape as skeleton). Required for
+        diameter-based pruning; ignored if ``diameter_length_ratio`` <= 0.
     spacing : VesselSpacing, optional
         Physical spacing. If None, assumes isotropic 1 um voxels.
 
@@ -756,13 +968,38 @@ def prune_skeleton(
     summary = skan.summarize(skel_obj, find_main_branch=False)
 
     # Identify short terminal branches (endpoint-to-junction or endpoint-to-endpoint)
-    short_mask = summary["branch-distance"] < min_branch_length_um
     terminal_mask = summary["branch-type"] != 2  # type 2 = junction-to-junction
+    short_mask = summary["branch-distance"] < min_branch_length_um
     to_remove = short_mask & terminal_mask
+
+    # Diameter-ratio pruning: remove terminal branches where length < ratio * diameter
+    if diameter_length_ratio > 0 and binary_mask is not None:
+        dt = distance_transform_edt(binary_mask, sampling=pixel_spacing)
+        for idx in summary.index:
+            if to_remove[idx]:
+                continue  # already marked for removal
+            if not terminal_mask[idx]:
+                continue  # skip junction-to-junction
+            coords = skel_obj.path_coordinates(idx)
+            if len(coords) == 0:
+                continue
+            radii = []
+            for c in coords:
+                ci = tuple(int(round(x)) for x in c)
+                if all(0 <= ci[d] < binary_mask.shape[d] for d in range(3)):
+                    radii.append(dt[ci])
+            if radii:
+                mean_diameter = 2.0 * float(np.mean(radii))
+                branch_length = float(summary.loc[idx, "branch-distance"])
+                if branch_length < diameter_length_ratio * mean_diameter:
+                    to_remove[idx] = True
 
     n_remove = to_remove.sum()
     logger.info(
-        f"Pruning {n_remove}/{len(summary)} branches (< {min_branch_length_um} um, terminal)"
+        f"Pruning {n_remove}/{len(summary)} branches "
+        f"(length < {min_branch_length_um} um"
+        + (f" or length < {diameter_length_ratio}x diameter" if diameter_length_ratio > 0 else "")
+        + ", terminal)"
     )
 
     if n_remove == 0:
@@ -815,6 +1052,10 @@ def analyze_vessel_graph(
         - median_radius_um: Median vessel radius
         - min_radius_um: Minimum vessel radius
         - max_radius_um: Maximum vessel radius
+        - mean_diameter_um: 2 * mean_radius_um
+        - volume_um3: Cylindrical volume (pi * mean_radius^2 * length)
+        - z_angle_deg: Angle between segment direction and z-axis (0=vertical, 90=horizontal)
+        - branching_angle_deg: Angle between branch and trunk at junction (NaN if no junction)
         - endpoint_0_z/y/x: Coordinates of first endpoint
         - endpoint_1_z/y/x: Coordinates of second endpoint
     """
@@ -852,19 +1093,25 @@ def analyze_vessel_graph(
     logger.info("Computing distance transform for radius estimation...")
     dt = distance_transform_edt(binary_mask, sampling=pixel_spacing)
 
-    # Sample radius along each branch
+    # Sample radius and direction along each branch in a single pass
     radii_stats = []
+    z_angles = []
+    # Store direction vectors at each endpoint for branching angle computation
+    # Key: node_id -> list of (branch_idx, direction_vector_at_node)
+    node_directions: dict[int, list[tuple[int, np.ndarray]]] = {}
+    z_axis = np.array([1.0, 0.0, 0.0])  # z is first dimension in ZYX
+
     for idx in range(len(df)):
         coords = skel_obj.path_coordinates(idx)
         if len(coords) == 0:
             radii_stats.append((0, 0, 0, 0))
+            z_angles.append(np.nan)
             continue
 
         # Sample distance transform at skeleton coordinates
         radii = []
         for c in coords:
             ci = tuple(int(round(x)) for x in c)
-            # Bounds check
             if all(0 <= ci[d] < binary_mask.shape[d] for d in range(3)):
                 radii.append(dt[ci])
 
@@ -881,6 +1128,41 @@ def analyze_vessel_graph(
         else:
             radii_stats.append((0, 0, 0, 0))
 
+        # Z-angle: angle between segment direction and z-axis
+        # Use first and last path coordinates as direction vector
+        start = coords[0]
+        end = coords[-1]
+        direction = end - start
+        dir_norm = np.linalg.norm(direction)
+        if dir_norm > 1e-10:
+            direction = direction / dir_norm
+            cos_angle = np.clip(np.abs(np.dot(direction, z_axis)), 0.0, 1.0)
+            z_angles.append(float(np.degrees(np.arccos(cos_angle))))
+        else:
+            z_angles.append(np.nan)
+
+        # Store direction vectors at endpoints for branching angle computation.
+        # Use up to 5 voxels from each end for a stable direction estimate.
+        n_dir = min(5, len(coords))
+        src_id = int(df.iloc[idx].get("node-id-src", -1))
+        dst_id = int(df.iloc[idx].get("node-id-dst", -1))
+
+        if src_id >= 0:
+            # Direction vector pointing away from src node (into the branch)
+            src_dir = coords[min(n_dir, len(coords) - 1)] - coords[0]
+            src_norm = np.linalg.norm(src_dir)
+            if src_norm > 1e-10:
+                src_dir = src_dir / src_norm
+            node_directions.setdefault(src_id, []).append((idx, src_dir))
+
+        if dst_id >= 0:
+            # Direction vector pointing away from dst node (into the branch)
+            dst_dir = coords[max(0, len(coords) - 1 - n_dir)] - coords[-1]
+            dst_norm = np.linalg.norm(dst_dir)
+            if dst_norm > 1e-10:
+                dst_dir = dst_dir / dst_norm
+            node_directions.setdefault(dst_id, []).append((idx, dst_dir))
+
     radii_df = pd.DataFrame(
         radii_stats,
         columns=["mean_radius_um", "median_radius_um", "min_radius_um", "max_radius_um"],
@@ -888,8 +1170,38 @@ def analyze_vessel_graph(
     )
     df = pd.concat([df, radii_df], axis=1)
 
-    # Add diameter columns
+    # Add diameter and volume columns
     df["mean_diameter_um"] = 2.0 * df["mean_radius_um"]
+    df["volume_um3"] = np.pi * df["mean_radius_um"] ** 2 * df["branch_length_um"]
+    df["z_angle_deg"] = z_angles
+
+    # Branching angle: at each junction node, the longest incident branch is the
+    # "trunk". Each other branch gets the angle between its direction and the
+    # trunk direction at that junction.  Segments with no junction endpoint get NaN.
+    branching_angles = [np.nan] * len(df)
+
+    for node_id, branches in node_directions.items():
+        if len(branches) < 2:
+            continue
+        # Find the trunk (longest incident branch at this junction)
+        trunk_idx = max(branches, key=lambda b: df.iloc[b[0]]["branch_length_um"])[0]
+        trunk_dir = None
+        for bidx, bdir in branches:
+            if bidx == trunk_idx:
+                trunk_dir = bdir
+                break
+        if trunk_dir is None:
+            continue
+        for bidx, bdir in branches:
+            if bidx == trunk_idx:
+                continue
+            cos_angle = np.clip(np.dot(bdir, trunk_dir), -1.0, 1.0)
+            angle = float(np.degrees(np.arccos(np.abs(cos_angle))))
+            # Keep the smallest (most acute) branching angle if already set
+            if np.isnan(branching_angles[bidx]) or angle < branching_angles[bidx]:
+                branching_angles[bidx] = angle
+
+    df["branching_angle_deg"] = branching_angles
 
     logger.info(
         f"Graph analysis complete: {len(df)} segments, "
@@ -1044,16 +1356,20 @@ def segment_vessels_3d(
     volume: np.ndarray,
     spacing: VesselSpacing | None = None,
     sigmas: list[float] | None = None,
+    alpha: float | None = None,
+    beta: float | None = None,
+    gamma: float | None = None,
     threshold: float | None = None,
-    min_size: int = 500,
+    min_size: int | None = None,
     closing_radius: int = 1,
-    denoise_sigma: float = 0.5,
+    denoise_sigma: float | None = None,
     make_isotropic: bool = True,
     prune_min_length_um: float = 5.0,
     skip_skeleton: bool = False,
     skip_graph: bool = False,
     device: str = "auto",
     marker_name: str = "vessel",
+    preset: str | None = None,
 ) -> VesselSegmentationResult:
     """Run the complete 3D vessel segmentation pipeline.
 
@@ -1072,13 +1388,19 @@ def segment_vessels_3d(
         Physical voxel spacing. Default 377 nm XY, 1500 nm Z.
     sigmas : list of float, optional
         Frangi filter scales. Default [1, 2, 4, 8].
+    alpha : float, optional
+        Sensitivity to plate-like structures (Ra). Default 0.5.
+    beta : float, optional
+        Sensitivity to blob-like structures (Rb). Default 0.5.
+    gamma : float, optional
+        Sensitivity to background noise. None for auto.
     threshold : float, optional
         Binarization threshold. None for Otsu auto-detection.
-    min_size : int
+    min_size : int, optional
         Minimum vessel volume in voxels. Default 500.
     closing_radius : int
         Morphological closing radius. Default 1.
-    denoise_sigma : float
+    denoise_sigma : float, optional
         Gaussian denoising sigma. Default 0.5. Set 0 to skip.
     make_isotropic : bool
         Resample z to match xy spacing. Default True.
@@ -1092,12 +1414,45 @@ def segment_vessels_3d(
         'gpu', 'cpu', or 'auto'.
     marker_name : str
         Vessel marker name (e.g., "CD31"). Default "vessel".
+    preset : str, optional
+        Name of a preset from ``VESSEL_PRESETS``. Preset values are used
+        for any parameter left as None. Explicit values always win.
+        Available: "default", "high_sensitivity", "CD34".
 
     Returns
     -------
     VesselSegmentationResult
         Complete results including mask, skeleton, features.
     """
+    # Resolve parameters: explicit value > preset > hardcoded default
+    if preset is not None:
+        if preset not in VESSEL_PRESETS:
+            raise ValueError(
+                f"Unknown preset '{preset}'. Available: {list(VESSEL_PRESETS.keys())}"
+            )
+        p = VESSEL_PRESETS[preset]
+    else:
+        p = {}
+
+    if sigmas is None:
+        sigmas = p.get("sigmas", [1.0, 2.0, 4.0, 8.0])
+    if alpha is None:
+        alpha = p.get("alpha", 0.5)
+    if beta is None:
+        beta = p.get("beta", 0.5)
+    if gamma is None:
+        gamma = p.get("gamma")  # None means auto in compute_vesselness_frangi
+    if min_size is None:
+        min_size = p.get("min_size", 500)
+    if denoise_sigma is None:
+        denoise_sigma = p.get("denoise_sigma", 0.5)
+
+    if preset is not None:
+        logger.info(
+            f"Preset '{preset}' resolved: sigmas={sigmas}, alpha={alpha}, "
+            f"beta={beta}, min_size={min_size}, denoise_sigma={denoise_sigma}"
+        )
+
     if spacing is None:
         spacing = VesselSpacing()
 
@@ -1122,6 +1477,9 @@ def segment_vessels_3d(
     vesselness = compute_vesselness_frangi(
         preprocessed,
         sigmas=sigmas,
+        alpha=alpha,
+        beta=beta,
+        gamma=gamma,
         spacing=spacing,
         device=device,
     )
@@ -1156,7 +1514,9 @@ def segment_vessels_3d(
     # Step 4: Skeletonize
     logger.info("Step 4/5: Skeletonization...")
     skeleton = skeletonize_vessels(mask)
-    skeleton = prune_skeleton(skeleton, min_branch_length_um=prune_min_length_um, spacing=spacing)
+    skeleton = prune_skeleton(
+        skeleton, min_branch_length_um=prune_min_length_um, binary_mask=mask, spacing=spacing
+    )
     result.skeleton = skeleton
 
     if skip_graph:
@@ -1169,4 +1529,108 @@ def segment_vessels_3d(
     result.features = features
 
     logger.info("3D vessel segmentation complete.")
+    return result
+
+
+def segment_vessels_multichannel(
+    volumes: dict[str, np.ndarray],
+    spacing: VesselSpacing | None = None,
+    preset: str | None = "high_sensitivity",
+    combine_method: str = "union",
+    device: str = "auto",
+    **kwargs,
+) -> VesselSegmentationResult:
+    """Run vessel segmentation on multiple channels and combine.
+
+    Runs Frangi + binarization independently per channel (avoids
+    inter-cycle misalignment), then combines masks, skeletonizes,
+    and analyzes the combined network.
+
+    Parameters
+    ----------
+    volumes : dict[str, np.ndarray]
+        Mapping of marker name to 3D volume (e.g., {"CD31": vol1, "SMA": vol2}).
+        All volumes must have the same shape.
+    spacing : VesselSpacing, optional
+        Physical voxel spacing. Default 377 nm XY, 1500 nm Z.
+    preset : str, optional
+        Preset name for Frangi parameters. Default "high_sensitivity".
+    combine_method : str
+        Mask combination method: "union" or "intersection". Default "union".
+    device : str
+        'gpu', 'cpu', or 'auto'.
+    **kwargs
+        Additional keyword arguments forwarded to ``segment_vessels_3d()``
+        (e.g., threshold, min_size, closing_radius).
+
+    Returns
+    -------
+    VesselSegmentationResult
+        Combined result with ``marker_name`` set to joined channel names
+        (e.g., "CD31+SMA") and ``per_channel_masks`` storing individual masks.
+    """
+    if not volumes:
+        raise ValueError("At least one volume is required")
+
+    if spacing is None:
+        spacing = VesselSpacing()
+
+    marker_names = list(volumes.keys())
+    combined_name = "+".join(marker_names)
+    logger.info(f"Multi-channel vessel segmentation: {marker_names}")
+
+    # Run pipeline independently per channel (skip_skeleton=True for speed)
+    per_channel_results: dict[str, VesselSegmentationResult] = {}
+    for name, vol in volumes.items():
+        logger.info(f"Processing channel: {name}")
+        result = segment_vessels_3d(
+            vol,
+            spacing=spacing,
+            preset=preset,
+            skip_skeleton=True,
+            device=device,
+            marker_name=name,
+            **kwargs,
+        )
+        per_channel_results[name] = result
+
+    # Combine binary masks
+    masks = [r.binary_mask for r in per_channel_results.values()]
+    combined_mask = combine_vessel_masks(masks, method=combine_method)
+    logger.info(
+        f"Combined mask ({combine_method}): {combined_mask.sum():,} voxels "
+        f"({100.0 * combined_mask.sum() / combined_mask.size:.2f}%)"
+    )
+
+    # Create native-resolution combined mask
+    native_mask = None
+    make_isotropic = kwargs.get("make_isotropic", True)
+    if make_isotropic:
+        native_zoom = (1.0 / spacing.ratio, 1.0, 1.0)
+        native_mask = ndimage.zoom(
+            combined_mask.astype(np.float32), native_zoom, order=0
+        ) > 0.5
+
+    # Skeletonize and analyze the combined mask
+    skeleton = skeletonize_vessels(combined_mask)
+    prune_min = kwargs.get("prune_min_length_um", 5.0)
+    skeleton = prune_skeleton(
+        skeleton, min_branch_length_um=prune_min,
+        binary_mask=combined_mask, spacing=spacing,
+    )
+    features = analyze_vessel_graph(skeleton, combined_mask, spacing=spacing)
+
+    result = VesselSegmentationResult(
+        binary_mask=combined_mask,
+        binary_mask_native=native_mask,
+        skeleton=skeleton,
+        features=features,
+        spacing=spacing,
+        marker_name=combined_name,
+        per_channel_masks={
+            name: r.binary_mask for name, r in per_channel_results.items()
+        },
+    )
+
+    logger.info(f"Multi-channel vessel segmentation complete: {combined_name}")
     return result
