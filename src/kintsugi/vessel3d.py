@@ -856,9 +856,13 @@ def binarize_vessel_mask(
     logger.info(f"After threshold: {mask.sum():,} voxels ({100.0 * mask.sum() / mask.size:.2f}%)")
 
     # Step 2: Remove small objects
-    # max_size removes objects with size <= threshold (replaces deprecated min_size)
     if min_size > 0:
-        mask = remove_small_objects(mask, max_size=min_size - 1)
+        try:
+            # scikit-image >= 0.26: max_size replaces deprecated min_size
+            mask = remove_small_objects(mask, max_size=min_size - 1)
+        except TypeError:
+            # scikit-image < 0.26: use min_size parameter
+            mask = remove_small_objects(mask, min_size=min_size)
         logger.info(f"After small object removal (min={min_size}): {mask.sum():,} voxels")
 
     # Step 3: Morphological closing
