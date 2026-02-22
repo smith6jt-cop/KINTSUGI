@@ -965,11 +965,11 @@ def prune_skeleton(
         pixel_spacing = spacing.isotropic_zyx
 
     skel_obj = skan.Skeleton(skeleton, spacing=pixel_spacing)
-    summary = skan.summarize(skel_obj, find_main_branch=False)
+    summary = skan.summarize(skel_obj, find_main_branch=False, separator="_")
 
     # Identify short terminal branches (endpoint-to-junction or endpoint-to-endpoint)
-    terminal_mask = summary["branch-type"] != 2  # type 2 = junction-to-junction
-    short_mask = summary["branch-distance"] < min_branch_length_um
+    terminal_mask = summary["branch_type"] != 2  # type 2 = junction-to-junction
+    short_mask = summary["branch_distance"] < min_branch_length_um
     to_remove = short_mask & terminal_mask
 
     # Diameter-ratio pruning: remove terminal branches where length < ratio * diameter
@@ -990,7 +990,7 @@ def prune_skeleton(
                     radii.append(dt[ci])
             if radii:
                 mean_diameter = 2.0 * float(np.mean(radii))
-                branch_length = float(summary.loc[idx, "branch-distance"])
+                branch_length = float(summary.loc[idx, "branch_distance"])
                 if branch_length < diameter_length_ratio * mean_diameter:
                     to_remove[idx] = True
 
@@ -1075,14 +1075,14 @@ def analyze_vessel_graph(
 
     logger.info("Building vessel graph with skan...")
     skel_obj = skan.Skeleton(skeleton, spacing=pixel_spacing)
-    summary = skan.summarize(skel_obj, find_main_branch=False)
+    summary = skan.summarize(skel_obj, find_main_branch=False, separator="_")
 
     # Rename columns for clarity
     df = summary.rename(
         columns={
-            "branch-distance": "branch_length_um",
-            "branch-type": "branch_type",
-            "euclidean-distance": "euclidean_distance_um",
+            "branch_distance": "branch_length_um",
+            "branch_type": "branch_type",
+            "euclidean_distance": "euclidean_distance_um",
         }
     )
 
