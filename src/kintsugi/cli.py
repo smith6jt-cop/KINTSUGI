@@ -1435,6 +1435,148 @@ def workflow_run(
 
 
 # ============================================================================
+# Status Dashboard
+# ============================================================================
+
+
+@workflow.command("status")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--watch", "-w", is_flag=True, help="Auto-refresh dashboard")
+@click.option("--interval", "-i", default=30, type=int, help="Refresh interval in seconds (default: 30)")
+@click.option("--no-hardware", is_flag=True, help="Hide hardware utilization section")
+@click.option("--no-estimates", is_flag=True, help="Hide completion time estimates")
+@click.option("--no-jobs", is_flag=True, help="Hide active SLURM job details")
+@click.option("--all-projects", is_flag=True, help="Scan all projects under parent directory")
+@click.option("--json", "json_output", is_flag=True, help="Output as JSON instead of table")
+def workflow_status(
+    project_dir: str,
+    watch: bool,
+    interval: int,
+    no_hardware: bool,
+    no_estimates: bool,
+    no_jobs: bool,
+    all_projects: bool,
+    json_output: bool,
+):
+    """
+    Show pipeline progress dashboard with real-time status.
+
+    Displays per-cycle, per-stage completion status with SLURM job details,
+    memory/GPU utilization, and estimated completion times.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+
+    \b
+    Examples:
+        kintsugi workflow status .                # One-shot status
+        kintsugi workflow status . --watch        # Auto-refresh dashboard
+        kintsugi workflow status . -w -i 15       # Refresh every 15s
+        kintsugi workflow status . --json         # JSON output for scripting
+        kintsugi workflow status /blue/maigan/smith6jt --all-projects
+    """
+    from pathlib import Path
+
+    from kintsugi.dashboard import (
+        render_dashboard,
+        scan_all_projects,
+        scan_project_progress,
+        watch_dashboard,
+    )
+
+    project_dir = Path(project_dir).resolve()
+
+    if all_projects:
+        project_dirs = []
+        # Discover projects under this directory
+        for config_file in sorted(project_dir.rglob("workflow/config.yaml")):
+            project_dirs.append(config_file.parent.parent)
+        if not project_dirs:
+            console.print("[yellow]No projects with workflow/config.yaml found.[/yellow]")
+            raise SystemExit(1)
+        console.print(f"Found {len(project_dirs)} projects")
+    else:
+        if not (project_dir / "workflow" / "config.yaml").exists():
+            console.print("[red]No workflow/config.yaml found.[/red]")
+            console.print("Run 'kintsugi workflow config .' first.")
+            raise SystemExit(1)
+        project_dirs = [project_dir]
+
+    if json_output:
+        import json as json_mod
+
+        statuses = []
+        for pdir in project_dirs:
+            try:
+                statuses.append(scan_project_progress(pdir))
+            except Exception as e:
+                console.print(f"[red]Error scanning {pdir}: {e}[/red]")
+
+        # Serialize to JSON
+        output = []
+        for s in statuses:
+            from kintsugi.dashboard import estimate_completion
+
+            est = estimate_completion(s)
+            proj = {
+                "project_dir": str(s.project_dir),
+                "project_name": s.project_name,
+                "cycles": s.cycles,
+                "cycle_statuses": {
+                    cyc: {
+                        "stages": cs.stages,
+                        "timings": cs.timings,
+                    }
+                    for cyc, cs in s.cycle_statuses.items()
+                },
+                "registration_status": s.registration_status,
+                "registration_timing": s.registration_timing,
+                "qc_statuses": s.qc_statuses,
+                "estimate": {
+                    "wall_clock_seconds": est["wall_clock_seconds"],
+                    "eta": est["eta"].isoformat() if est["eta"] else None,
+                    "confidence": est["confidence"],
+                    "parallelism": est["parallelism"],
+                },
+                "scan_time": s.scan_time.isoformat(),
+            }
+            if s.hardware:
+                proj["hardware"] = {
+                    "accounts": s.hardware.accounts,
+                    "total_gpu_alloc": s.hardware.total_gpu_alloc,
+                    "total_gpu_used": s.hardware.total_gpu_used,
+                    "total_gpu_avail": s.hardware.total_gpu_avail,
+                }
+            output.append(proj)
+
+        click.echo(json_mod.dumps(output, indent=2, default=str))
+        return
+
+    if watch:
+        watch_dashboard(
+            project_dirs,
+            interval=interval,
+            show_hardware=not no_hardware,
+            show_estimates=not no_estimates,
+            show_jobs=not no_jobs,
+        )
+    else:
+        statuses = []
+        for pdir in project_dirs:
+            try:
+                statuses.append(scan_project_progress(pdir))
+            except Exception as e:
+                console.print(f"[red]Error scanning {pdir}: {e}[/red]")
+
+        if statuses:
+            render_dashboard(
+                statuses,
+                show_hardware=not no_hardware,
+                show_estimates=not no_estimates,
+                show_jobs=not no_jobs,
+            )
+
+
+# ============================================================================
 # Export Commands (TissUUmaps)
 # ============================================================================
 
