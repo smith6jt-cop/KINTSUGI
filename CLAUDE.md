@@ -245,7 +245,7 @@ python -m build
 - `tools/learning.py` - Parameter learning with SQLite storage
 
 **Pure Python Modules** (`src/kintsugi/`):
-- `signal/` - Autofluorescence subtraction (global + weighted multi-range), bootstrap learning (`bootstrap.py`)
+- `signal/` - Autofluorescence subtraction (global + weighted multi-range), bootstrap learning (`bootstrap.py`), multi-project batch orchestration (`batch_multi.py`)
 - `denoise/` - Denoising algorithms (median, Gaussian, bilateral, NLM, N2V, CARE, BM3D-lite)
 - `qc/` - Quality control:
   - `artifact_scanner.py` - Unified `ArtifactScanner` with project/Zarr integration
@@ -320,7 +320,7 @@ See `workflow/CLAUDE.md` for comprehensive registration documentation: tuned non
 
 ## Signal Isolation
 
-See `src/kintsugi/signal/CLAUDE.md` for weighted autofluorescence subtraction (per-intensity-range weights) and batch signal isolation (recipe-driven multi-step processing, auto method selection, background cleaning, parameter learning, QC reporting).
+See `src/kintsugi/signal/CLAUDE.md` for weighted autofluorescence subtraction (per-intensity-range weights), single-project batch signal isolation (recipe-driven multi-step processing, auto method selection, background cleaning, parameter learning, QC reporting), and multi-project batch orchestration (cascading recipe resolution, cross-project reports).
 
 ## Batch Processing (Multi-Dataset)
 
@@ -360,7 +360,7 @@ Tests are in `tests/` with fixtures in `conftest.py`. Key fixtures: `sample_imag
 
 CI runs on Windows/Linux/macOS with Python 3.10-3.12.
 
-**Suite status** (Feb 2026): 592 passed, 10 skipped (GPU hardware + optional deps).
+**Suite status** (Feb 2026): 618 passed, 10 skipped (GPU hardware + optional deps).
 
 **GPU skip pattern**: On HPC login nodes, CuPy is installed (`CUPY_AVAILABLE=True`) but no GPU hardware exists. Tests that need actual GPU hardware must use `check_gpu()` from `kcorrect_gpu.py`, not `CUPY_AVAILABLE`:
 ```python
@@ -397,6 +397,6 @@ See `notebooks/CLAUDE.md` for Notebook 4 capabilities (InstanSeg segmentation, f
 
 Feature-specific documentation lives in CLAUDE.md files near the code:
 - `src/kintsugi/CLAUDE.md` — KRONOS foundation model, 3D vessel segmentation, pipeline-aware cleanup
-- `src/kintsugi/signal/CLAUDE.md` — Weighted AF subtraction, recipe-driven batch signal isolation
+- `src/kintsugi/signal/CLAUDE.md` — Weighted AF subtraction, single-project batch isolation, multi-project batch orchestration
 - `workflow/CLAUDE.md` — Snakemake workflow, registration, batch processing, SLURM scheduling
 - `notebooks/CLAUDE.md` — Jupyter autoreload, Notebook 4 segmentation/analysis
