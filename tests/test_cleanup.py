@@ -194,16 +194,16 @@ class TestDataModel:
         assert len(manifest.blocked_entries) == 1
         assert manifest.total_reclaimable_bytes == 400
 
-    def test_manifest_to_dict(self):
+    def test_manifest_to_dict(self, tmp_path):
         manifest = CleanupManifest(
-            project_dir=Path("/tmp"),
+            project_dir=tmp_path,
             entries=[
-                CleanupEntry(Path("a"), Path("/a"), "safe", "ok"),
+                CleanupEntry(Path("a"), tmp_path / "a", "safe", "ok"),
             ],
             warnings=["test warning"],
         )
         d = manifest.to_dict()
-        assert d["project_dir"] == "/tmp"
+        assert d["project_dir"] == str(tmp_path)
         assert len(d["entries"]) == 1
         assert d["entries"][0]["status"] == "safe"
         assert d["warnings"] == ["test warning"]

@@ -463,16 +463,17 @@ class TestWriteRecipesAsParamFiles:
 
 
 class TestProjectInfo:
-    def test_to_dict(self):
+    def test_to_dict(self, tmp_path):
+        test_path = tmp_path / "test"
         info = ProjectInfo(
             name="test",
-            path=Path("/tmp/test"),
+            path=test_path,
             tissue_type="spleen",
             n_registered_channels=10,
         )
         d = info.to_dict()
         assert d["name"] == "test"
-        assert d["path"] == "/tmp/test"
+        assert d["path"] == str(test_path)
         assert d["tissue_type"] == "spleen"
 
 
