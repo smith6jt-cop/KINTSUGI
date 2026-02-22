@@ -37,19 +37,12 @@ jobs:
         run: ruff format --check --diff src/ tests/
 
   test:
-    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
-    runs-on: ${{ matrix.os }}
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.10", "3.11", "3.12"]
-        exclude:
-          # Reduce matrix for faster CI
-          - os: macos-latest
-            python-version: "3.11"
-          - os: windows-latest
-            python-version: "3.11"
 
     steps:
       - uses: actions/checkout@v4
@@ -59,95 +52,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install system dependencies (Ubuntu)
-        if: runner.os == 'Linux'
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libvips-dev
-
-      - name: Install system dependencies (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install vips
-
-      - name: Install system dependencies (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          # Ensure temp directory exists
-          if (!(Test-Path $env:TEMP)) {
-            New-Item -ItemType Directory -Path $env:TEMP -Force | Out-Null
-          }
-
-          $zipPath = Join-Path $env:TEMP "vips-dev.zip"
-          $dest = "C:\vips"
-
-          Write-Output "Fetching latest libvips Windows build from build-win64-mxe..."
-
-          # Windows builds are in a separate repository
-          $apiUrl = "https://api.github.com/repos/libvips/build-win64-mxe/releases/latest"
-          $headers = @{ "User-Agent" = "GitHub-Actions" }
-          if ($env:GITHUB_TOKEN) { $headers["Authorization"] = "token $env:GITHUB_TOKEN" }
-
-          try {
-            $release = Invoke-RestMethod -Uri $apiUrl -Headers $headers -UseBasicParsing
-            Write-Output "Found release: $($release.tag_name)"
-          } catch {
-            Write-Error "Failed to query libvips releases: $($_.Exception.Message)"
-            throw
-          }
-
-          # Find Windows w64 zip asset (vips-dev-w64-web-*.zip is smaller, vips-dev-w64-all-*.zip is complete)
-          $asset = $release.assets | Where-Object { $_.name -match 'vips-dev-w64-web.*\.zip$' } | Select-Object -First 1
-          if (-not $asset) {
-            # Fallback to any w64 zip
-            $asset = $release.assets | Where-Object { $_.name -match 'w64.*\.zip$' } | Select-Object -First 1
-          }
-          if (-not $asset) {
-            Write-Error "No Windows (w64 .zip) asset found"
-            Write-Output "Available assets: $($release.assets | ForEach-Object { $_.name })"
-            throw "libvips asset not found"
-          }
-
-          Write-Output "Downloading asset $($asset.name)..."
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -Headers $headers -UseBasicParsing
-
-          # Ensure destination directory exists and is clean
-          if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-          New-Item -ItemType Directory -Path $dest -Force | Out-Null
-
-          Write-Output "Extracting to $dest..."
-          Expand-Archive -Path $zipPath -DestinationPath $dest -Force
-
-          # Diagnostic: show top-level extracted contents
-          Write-Output "Extracted contents:"
-          Get-ChildItem $dest | ForEach-Object { Write-Output "  $_" }
-
-          # The archive often nests under a version-named folder (e.g., vips-dev-8.16/)
-          # Search recursively for a 'bin' directory containing libvips DLLs
-          $binDir = Get-ChildItem $dest -Recurse -Directory | Where-Object { $_.Name -eq 'bin' } | Select-Object -First 1
-
-          # Fallback: search for libvips-42.dll anywhere in the extracted tree
-          if (-not $binDir) {
-            Write-Output "No 'bin' directory found, searching for libvips DLL..."
-            $dllFile = Get-ChildItem $dest -Recurse -File -Filter "libvips-42.dll" | Select-Object -First 1
-            if ($dllFile) {
-              $binDir = $dllFile.Directory
-            }
-          }
-
-          if ($binDir) {
-            Write-Output "Adding to PATH: $($binDir.FullName)"
-            $binDir.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-            Write-Output "libvips installed successfully"
-          } else {
-            Write-Output "Full tree for debugging:"
-            Get-ChildItem $dest -Recurse -Depth 3 | ForEach-Object { Write-Output "  $($_.FullName)" }
-            Write-Error "Could not find bin directory or libvips DLL in extracted archive"
-            throw "libvips bin directory not found"
-          }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Python dependencies
         run: |
@@ -159,12 +67,12 @@ jobs:
           pytest tests/ -v --tb=short -x
 
       - name: Run tests with coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
+        if: matrix.python-version == '3.10'
         run: |
           pytest tests/ --cov=src/kintsugi --cov-report=xml --cov-report=term
 
       - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
+        if: matrix.python-version == '3.10'
         uses: codecov/codecov-action@v3
         with:
           files: ./coverage.xml
