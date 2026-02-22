@@ -36,7 +36,7 @@ echo ""
 log_info "Starting 3D Vessel Segmentation..."
 
 module load conda
-conda activate ${CONDA_ENV:-kintsugi}
+conda activate ${CONDA_ENV:-KINTSUGI}
 
 export PYTHONPATH="${KINTSUGI_DIR}:${KINTSUGI_DIR}/notebooks:${PROJECT_DIR}/notebooks:${PYTHONPATH}"
 
@@ -61,6 +61,7 @@ sys.path.insert(0, str(KINTSUGI_DIR))
 from kintsugi.vessel3d import (
     VesselSpacing,
     segment_vessels_3d,
+    segment_vessels_multichannel,
     export_vessel_results,
 )
 
@@ -114,17 +115,48 @@ VESSEL_CYCLE = int(os.environ.get('VESSEL_CYCLE', 2))
 VESSEL_CHANNEL = int(os.environ.get('VESSEL_CHANNEL', 2))
 VESSEL_MARKER = os.environ.get('VESSEL_MARKER', 'CD31')
 
-# Frangi parameters
-SIGMAS = os.environ.get('VESSEL_SIGMAS', '1,2,4,8')
-sigmas = [float(s) for s in SIGMAS.split(',')]
-MIN_SIZE = int(os.environ.get('VESSEL_MIN_SIZE', 500))
-CLOSING_RADIUS = int(os.environ.get('VESSEL_CLOSING_RADIUS', 1))
-DENOISE_SIGMA = float(os.environ.get('VESSEL_DENOISE_SIGMA', 0.5))
-PRUNE_MIN_UM = float(os.environ.get('VESSEL_PRUNE_MIN_UM', 5.0))
+# Sensitivity tuning
+VESSEL_PRESET = os.environ.get('VESSEL_PRESET', '') or None
+
+# Multi-channel combination (e.g., "CD31+SMA")
+VESSEL_COMBINE = os.environ.get('VESSEL_COMBINE', '') or None
+VESSEL_COMBINE_CYCLE = os.environ.get('VESSEL_COMBINE_CYCLE', '')
+VESSEL_COMBINE_CHANNEL = os.environ.get('VESSEL_COMBINE_CHANNEL', '')
+VESSEL_COMBINE_MARKER = os.environ.get('VESSEL_COMBINE_MARKER', '')
+
+# Build kwargs — only include params that were explicitly set via env vars.
+# Params left out stay None in segment_vessels_3d() so presets can fill them.
+seg_kwargs = dict(
+    spacing=spacing,
+    make_isotropic=True,
+    device=DEVICE_MODE,
+    marker_name=VESSEL_MARKER,
+    preset=VESSEL_PRESET,
+)
+if 'VESSEL_SIGMAS' in os.environ:
+    seg_kwargs['sigmas'] = [float(s) for s in os.environ['VESSEL_SIGMAS'].split(',')]
+if 'VESSEL_ALPHA' in os.environ:
+    seg_kwargs['alpha'] = float(os.environ['VESSEL_ALPHA'])
+if 'VESSEL_BETA' in os.environ:
+    seg_kwargs['beta'] = float(os.environ['VESSEL_BETA'])
+if 'VESSEL_THRESHOLD' in os.environ and os.environ['VESSEL_THRESHOLD']:
+    seg_kwargs['threshold'] = float(os.environ['VESSEL_THRESHOLD'])
+if 'VESSEL_MIN_SIZE' in os.environ:
+    seg_kwargs['min_size'] = int(os.environ['VESSEL_MIN_SIZE'])
+if 'VESSEL_CLOSING_RADIUS' in os.environ:
+    seg_kwargs['closing_radius'] = int(os.environ['VESSEL_CLOSING_RADIUS'])
+if 'VESSEL_DENOISE_SIGMA' in os.environ:
+    seg_kwargs['denoise_sigma'] = float(os.environ['VESSEL_DENOISE_SIGMA'])
+if 'VESSEL_PRUNE_MIN_UM' in os.environ:
+    seg_kwargs['prune_min_length_um'] = float(os.environ['VESSEL_PRUNE_MIN_UM'])
 
 print(f"  Vessel marker: Cycle {VESSEL_CYCLE}, CH{VESSEL_CHANNEL} ({VESSEL_MARKER})")
-print(f"  Frangi sigmas: {sigmas}")
-print(f"  Min size: {MIN_SIZE}, Closing radius: {CLOSING_RADIUS}")
+if VESSEL_PRESET:
+    print(f"  Preset: {VESSEL_PRESET}")
+print(f"  Explicit overrides: {[k for k in seg_kwargs if k not in ('spacing', 'make_isotropic', 'device', 'marker_name', 'preset')]}")
+if VESSEL_COMBINE:
+    print(f"  Multi-channel: {VESSEL_COMBINE} (cycle {VESSEL_COMBINE_CYCLE}, "
+          f"CH{VESSEL_COMBINE_CHANNEL}, {VESSEL_COMBINE_MARKER})")
 
 # =============================================================================
 # INPUT VALIDATION
@@ -182,25 +214,42 @@ print(f"Volume: {volume.shape}, {volume.dtype}, {volume.nbytes / 1e9:.2f} GB")
 
 start_time = time.time()
 
-result = segment_vessels_3d(
-    volume,
-    spacing=spacing,
-    sigmas=sigmas,
-    threshold=None,  # Otsu auto-detection
-    min_size=MIN_SIZE,
-    closing_radius=CLOSING_RADIUS,
-    denoise_sigma=DENOISE_SIGMA,
-    make_isotropic=True,
-    prune_min_length_um=PRUNE_MIN_UM,
-    skip_skeleton=False,
-    skip_graph=False,
-    device=DEVICE_MODE,
-    marker_name=VESSEL_MARKER,
-)
+if VESSEL_COMBINE:
+    # Multi-channel mode: load second volume and run combined pipeline
+    combine_cycle = int(VESSEL_COMBINE_CYCLE)
+    combine_channel = int(VESSEL_COMBINE_CHANNEL)
+    combine_marker = VESSEL_COMBINE_MARKER
 
-# Free input volume
-del volume
-gc.collect()
+    input_dir2 = DECON_DIR / f"cyc{combine_cycle:02d}" / f"CH{combine_channel}"
+    if not input_dir2.exists():
+        print(f"ERROR: Second channel not found: {input_dir2}")
+        sys.exit(1)
+
+    tiff_files2 = natsorted(list(input_dir2.glob('*.tif')))
+    print(f"Loading {len(tiff_files2)} z-planes for {combine_marker} from {input_dir2}...")
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        slices2 = list(executor.map(load_single, tiff_files2))
+    volume2 = np.stack(slices2, axis=0)
+    del slices2
+    gc.collect()
+    print(f"Volume 2: {volume2.shape}, {volume2.dtype}, {volume2.nbytes / 1e9:.2f} GB")
+
+    volumes = {VESSEL_MARKER: volume, combine_marker: volume2}
+    result = segment_vessels_multichannel(
+        volumes,
+        combine_method='union',
+        **seg_kwargs,
+    )
+    del volume, volume2
+    gc.collect()
+
+    # Update marker name for output files
+    VESSEL_MARKER = result.marker_name
+else:
+    # Single-channel mode
+    result = segment_vessels_3d(volume, **seg_kwargs)
+    del volume
+    gc.collect()
 
 # =============================================================================
 # EXPORT
@@ -245,10 +294,19 @@ print(f"Vessel Segmentation Complete")
 print(f"{'='*60}")
 print(f"Marker: {VESSEL_MARKER}")
 print(f"Time: {elapsed:.1f} minutes")
-if result.features is not None:
+s = result.summary()
+if s:
+    print(f"Total segments: {s['n_segments']}")
+    print(f"  Junction-junction: {s.get('n_junctions', 'N/A')}")
+    print(f"  Endpoint-endpoint: {s.get('n_endpoints', 'N/A')}")
+    print(f"Total network length: {s['total_length_um']:.0f} um")
+    print(f"Total network volume: {s.get('total_volume_um3', 0):.0f} um^3")
+    print(f"Mean diameter: {s['mean_diameter_um']:.1f} um")
+    print(f"Mean tortuosity: {s['mean_tortuosity']:.2f}")
+    ba = s.get('mean_branching_angle_deg')
+    print(f"Mean branching angle: {ba:.1f} deg" if ba is not None else "Mean branching angle: N/A")
+elif result.features is not None:
     print(f"Total segments: {len(result.features)}")
-    print(f"Total network length: {result.features['branch_length_um'].sum():.0f} um")
-    print(f"Mean diameter: {result.features['mean_diameter_um'].mean():.1f} um")
 print(f"Output: {OUTPUT_DIR}")
 
 # Write completion marker

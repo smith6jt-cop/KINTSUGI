@@ -233,7 +233,7 @@ python -m build
 - `parallel_io.py` - Parallel image loading/saving utilities
 - `dl_refinement.py` - Deep learning channel refinement
 - `export.py` - TissUUmaps export: DZI tile conversion, .tmap generation, rsync deploy
-- `vessel3d.py` - 3D vessel segmentation: Frangi vesselness, skeletonization, graph morphometry
+- `vessel3d.py` - 3D vessel segmentation: Frangi vesselness, presets, marker discovery, multichannel combination, skeletonization, graph morphometry
 - `vessel3d_viz.py` - Vessel visualization: ortho views, mask overlays, feature plots
 
 **MCP Server** (`src/kintsugi/mcp/`):
@@ -360,7 +360,7 @@ Tests are in `tests/` with fixtures in `conftest.py`. Key fixtures: `sample_imag
 
 CI runs on Windows/Linux/macOS with Python 3.10-3.12.
 
-**Suite status** (Feb 2026): 584 passed, 10 skipped (GPU hardware + optional deps).
+**Suite status** (Feb 2026): 592 passed, 10 skipped (GPU hardware + optional deps).
 
 **GPU skip pattern**: On HPC login nodes, CuPy is installed (`CUPY_AVAILABLE=True`) but no GPU hardware exists. Tests that need actual GPU hardware must use `check_gpu()` from `kcorrect_gpu.py`, not `CUPY_AVAILABLE`:
 ```python
