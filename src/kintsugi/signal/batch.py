@@ -79,6 +79,7 @@ class ChannelResult:
     zero_percent: float = 0.0
     status: str = "success"  # "success", "skipped", "error"
     warning: str = ""
+    recipe_source: str = "auto"  # "own_recipe", "learned", "template", "auto"
 
     def to_dict(self) -> dict:
         return asdict(self)

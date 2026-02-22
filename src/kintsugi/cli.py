@@ -2439,6 +2439,185 @@ def isolate_status(project_dir: str):
             console.print(table)
 
 
+@isolate_group.command("batch")
+@click.argument("projects_dir", type=click.Path(exists=True), default=".")
+@click.option("--dry-run", "-n", is_flag=True, help="Preview without processing")
+@click.option("--dataset", "-d", default=None, help="Process single project by name")
+@click.option("--force", "-f", is_flag=True, help="Reprocess completed projects")
+@click.option(
+    "--template-recipe-dir",
+    default=None,
+    type=click.Path(exists=True),
+    help="Override template recipe directory (default: CX_19-001 recipes)",
+)
+@click.option("--skip-qc", is_flag=True, help="Skip QC page generation")
+@click.option(
+    "--learn/--no-learn",
+    default=True,
+    help="Record outcomes to parameter learning DB (default: --learn)",
+)
+@click.option(
+    "--method",
+    type=click.Choice(["auto", "global", "weighted"]),
+    default="auto",
+    help="Override method for auto-analysis channels (default: auto)",
+)
+@click.option(
+    "--min-confidence",
+    type=float,
+    default=0.6,
+    help="Min confidence for learned DB params (default: 0.6)",
+)
+@click.option(
+    "--tile-smooth-sigma",
+    type=float,
+    default=0.0,
+    help="Gaussian sigma for blank smoothing (0 to disable, default: 0)",
+)
+def isolate_batch(
+    projects_dir: str,
+    dry_run: bool,
+    dataset: str | None,
+    force: bool,
+    template_recipe_dir: str | None,
+    skip_qc: bool,
+    learn: bool,
+    method: str,
+    min_confidence: float,
+    tile_smooth_sigma: float,
+):
+    """
+    Run signal isolation across multiple projects.
+
+    Discovers all projects with registered images and processes them
+    sequentially. Uses cascading recipe resolution per marker:
+
+    \b
+      1. Project's own recipes (Processing_parameters/)
+      2. Learned DB params (from previous successful runs)
+      3. Template recipes (default: CX_19-001)
+      4. Auto-analysis (global vs weighted selection)
+
+    PROJECTS_DIR is the parent directory containing project subdirectories
+    (default: current directory).
+    """
+    from kintsugi.signal.batch_multi import (
+        discover_projects,
+        process_all_projects,
+        resolve_recipes_for_project,
+    )
+
+    if dry_run:
+        console.print("[bold]Multi-Project Signal Isolation — Preview[/bold]\n")
+    else:
+        console.print("[bold]Multi-Project Signal Isolation — Batch[/bold]\n")
+
+    # Discovery phase
+    from pathlib import Path
+
+    projects = discover_projects(projects_dir, force=force, dataset=dataset)
+
+    if not projects:
+        console.print("[yellow]No projects found ready for signal isolation.[/yellow]")
+        console.print("[dim]Projects need workflow/config.yaml with channel_names")
+        console.print("and data/processed/registered/ with .tif files.[/dim]")
+        return
+
+    # Show discovery table
+    disc_table = Table(title=f"Discovered Projects ({len(projects)})")
+    disc_table.add_column("#", justify="right", style="dim")
+    disc_table.add_column("Project", style="cyan")
+    disc_table.add_column("Tissue", style="bold")
+    disc_table.add_column("Channels", justify="right")
+    disc_table.add_column("Own Recipes", justify="center")
+    disc_table.add_column("Recipe Sources", style="dim")
+
+    for i, proj in enumerate(projects, 1):
+        # Resolve recipes for preview
+        resolved = resolve_recipes_for_project(
+            proj,
+            template_recipe_dir=template_recipe_dir,
+            min_confidence=min_confidence,
+            projects_dir=Path(projects_dir).resolve(),
+        )
+        source_summary = resolved.summary()
+        source_parts = []
+        for src, count in sorted(source_summary.items()):
+            source_parts.append(f"{src}:{count}")
+        disc_table.add_row(
+            str(i),
+            proj.name,
+            proj.tissue_type,
+            str(proj.n_registered_channels),
+            "[green]Yes[/green]" if proj.has_own_recipes else "-",
+            " ".join(source_parts),
+        )
+
+    console.print(disc_table)
+
+    if dry_run:
+        console.print(
+            f"\n[dim]Dry run — {len(projects)} projects would be processed.[/dim]"
+        )
+        return
+
+    # Process
+    result = process_all_projects(
+        projects_dir,
+        dry_run=False,
+        dataset=dataset,
+        force=force,
+        template_recipe_dir=template_recipe_dir,
+        skip_qc=skip_qc,
+        learn=learn,
+        method=method,
+        min_confidence=min_confidence,
+        tile_smooth_sigma=tile_smooth_sigma,
+    )
+
+    # Print summary
+    console.print(f"\n[bold]Batch Complete[/bold]")
+    console.print(
+        f"  Total: {result.total_projects} | "
+        f"Completed: {result.completed} | "
+        f"Errors: {result.errors} | "
+        f"Skipped: {result.skipped}"
+    )
+
+    # Per-project results
+    if result.project_results:
+        res_table = Table(title="Per-Project Results")
+        res_table.add_column("Project", style="cyan")
+        res_table.add_column("Tissue")
+        res_table.add_column("Status", style="bold")
+        res_table.add_column("Channels", justify="right")
+        res_table.add_column("Quality", justify="right")
+        res_table.add_column("Warnings", style="yellow", max_width=40)
+
+        for name, info in result.project_results.items():
+            status = info.get("status", "")
+            status_str = (
+                f"[green]{status}[/green]" if status == "completed"
+                else f"[red]{status}[/red]" if status == "error"
+                else status
+            )
+            summary = info.get("summary", {})
+            n_channels = summary.get("total", 0)
+            mean_q = summary.get("mean_quality", 0)
+            q_str = f"{mean_q:.3f}" if mean_q else "-"
+            warns = info.get("warnings", [])
+            warn_str = f"{len(warns)} warnings" if warns else ""
+            if info.get("error"):
+                warn_str = info["error"][:40]
+
+            res_table.add_row(
+                name, info.get("tissue_type", ""), status_str,
+                str(n_channels), q_str, warn_str,
+            )
+
+        console.print(res_table)
+
+
 # ============================================================================
 # Vessel 3D Segmentation Command
 # ============================================================================

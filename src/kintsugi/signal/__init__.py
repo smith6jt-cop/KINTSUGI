@@ -53,6 +53,16 @@ from .batch import (
     select_method,
     smooth_blank_for_subtraction,
 )
+from .batch_multi import (
+    MultiProjectResult,
+    ProjectInfo,
+    ResolvedRecipes,
+    discover_projects,
+    learned_params_to_recipe,
+    parse_tissue_type,
+    process_all_projects,
+    resolve_recipes_for_project,
+)
 from .isolation_qc import generate_qc_pages, generate_summary_table
 from .utils import (
     apply_erosion_mask,
@@ -92,6 +102,15 @@ __all__ = [
     "MarkerRecipe",
     "load_legacy_recipes",
     "clean_background",
+    # Multi-project batch processing
+    "ProjectInfo",
+    "ResolvedRecipes",
+    "MultiProjectResult",
+    "discover_projects",
+    "parse_tissue_type",
+    "resolve_recipes_for_project",
+    "learned_params_to_recipe",
+    "process_all_projects",
     # QC visualization
     "generate_qc_pages",
     "generate_summary_table",

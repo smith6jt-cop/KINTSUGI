@@ -100,3 +100,35 @@ Three-column layout per channel — Before (self-normalized p1-p99, gray), After
 ### Validated Results
 
 CX_19-001_SP_CC2-A28: 28 channels (24 recipe + 4 auto-weighted), mean quality 0.803, 0 errors, ~30 sec/channel with recipes.
+
+## Multi-Project Batch Signal Isolation (Feb 2026)
+
+Orchestrates autofluorescence subtraction across multiple KINTSUGI projects with cascading recipe resolution.
+
+**CLI:**
+```bash
+kintsugi workflow isolate batch /path/to/KINTSUGI_Projects --dry-run          # Preview all projects
+kintsugi workflow isolate batch . -d CX_19-003_spleen_CC1-A                   # Single project
+kintsugi workflow isolate batch . --learn --method auto                        # Full batch
+kintsugi workflow isolate batch . -f --template-recipe-dir /path/to/recipes   # Force + custom template
+```
+
+**Cascading recipe resolution** (per marker, in priority order):
+
+| Tier | Source | How |
+|------|--------|-----|
+| 1 | Own recipes | `{project}/data/processed/Processing_parameters/` etc. |
+| 2 | Learned DB | `ParameterLearningEngine.recommend_parameters()` with confidence >= 0.6 |
+| 3 | Template | Default: CX_19-001's 26 validated recipes (match by marker name) |
+| 4 | Auto | `select_method()` picks global vs weighted per marker |
+
+**Key files:**
+- `batch_multi.py` — `discover_projects()`, `parse_tissue_type()`, `resolve_recipes_for_project()`, `learned_params_to_recipe()`, `process_all_projects()`
+- `../../cli.py` — `@isolate_group.command("batch")` with `--dry-run`, `--dataset`, `--force`, `--template-recipe-dir`, `--min-confidence`
+- `../../../tests/test_batch_multi_project.py` — 34 tests
+
+**Tissue type parsing** from project name (regex, case-insensitive):
+- `_SP_` or `spleen` → `"spleen"`, `_LN_` or `lymph-node` → `"lymph_node"`, `_TH_` or `thymus` → `"thymus"`
+- Falls back to `experiment.json` name field, then `"unknown"`
+
+**Output:** Per-project `signal_isolation_manifest.json` + cross-project `batch_isolation_report_{timestamp}.json` in projects dir. Sequential processing with error isolation per project.
