@@ -401,7 +401,6 @@ def _hessian_eigenvalues_3d(
     # For symmetric 3x3 matrix [[a,b,c],[b,d,e],[c,e,f]]:
     #   a=Hzz, b=Hzy, c=Hzx, d=Hyy, e=Hyx, f=Hxx
 
-    shape = vol.shape
     del vol  # free GPU copy of input volume
 
     # Trace / 3
@@ -416,8 +415,7 @@ def _hessian_eigenvalues_3d(
     del Hxx
 
     # p² = ( (a-q)² + (d-q)² + (f-q)² + 2*(b² + c² + e²) ) / 6
-    p2 = (a_q * a_q + d_q * d_q + f_q * f_q
-          + 2.0 * (Hzy * Hzy + Hzx * Hzx + Hyx * Hyx)) / 6.0
+    p2 = (a_q * a_q + d_q * d_q + f_q * f_q + 2.0 * (Hzy * Hzy + Hzx * Hzx + Hyx * Hyx)) / 6.0
 
     p = xp.sqrt(xp.maximum(p2, xp.float32(1e-30)))
     del p2
@@ -434,9 +432,7 @@ def _hessian_eigenvalues_3d(
     fq = f_q * inv_p
     del a_q, d_q, f_q, inv_p
 
-    det_B = (aq * (dq * fq - e_ * e_)
-             - b_ * (b_ * fq - e_ * c_)
-             + c_ * (b_ * e_ - dq * c_))
+    det_B = aq * (dq * fq - e_ * e_) - b_ * (b_ * fq - e_ * c_) + c_ * (b_ * e_ - dq * c_)
     del aq, dq, fq, b_, c_, e_
 
     # r = det_B / 2, clamp to [-1, 1] for numerical stability

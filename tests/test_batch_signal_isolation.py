@@ -22,7 +22,6 @@ from kintsugi.signal.batch import (
     MarkerRecipe,
     SubtractionParams,
     _normalize_blank_name,
-    _parse_param_file,
     _resolve_blank_path,
     _strip_for_comparison,
     clean_background,
@@ -34,7 +33,6 @@ from kintsugi.signal.batch import (
     smooth_blank_for_subtraction,
 )
 from kintsugi.signal.isolation_qc import _self_normalize, generate_qc_pages
-
 
 # =============================================================================
 # Fixtures
@@ -250,21 +248,27 @@ def multi_cycle_project(tmp_path):
     cyc01.mkdir(parents=True)
     channel_names[1] = ["DAPI-01", "Blank_1a", "Blank_1b", "Blank_1c"]
     for name in channel_names[1]:
-        tifffile.imwrite(str(cyc01 / f"{name}.tif"), rng.randint(1000, 10000, shape, dtype=np.uint16))
+        tifffile.imwrite(
+            str(cyc01 / f"{name}.tif"), rng.randint(1000, 10000, shape, dtype=np.uint16)
+        )
 
     # Cycle 2: signal channels
     cyc02 = registered / "cyc02"
     cyc02.mkdir(parents=True)
     channel_names[2] = ["DAPI-02", "CD31", "CD3e", "CD45"]
     for name in channel_names[2]:
-        tifffile.imwrite(str(cyc02 / f"{name}.tif"), rng.randint(1000, 20000, shape, dtype=np.uint16))
+        tifffile.imwrite(
+            str(cyc02 / f"{name}.tif"), rng.randint(1000, 20000, shape, dtype=np.uint16)
+        )
 
     # Cycle 13: more blanks (e.g., Blank_13b, Blank_13c)
     cyc13 = registered / "cyc13"
     cyc13.mkdir(parents=True)
     channel_names[13] = ["DAPI-13", "Blank_13a", "Blank_13b", "Blank_13c"]
     for name in channel_names[13]:
-        tifffile.imwrite(str(cyc13 / f"{name}.tif"), rng.randint(1000, 10000, shape, dtype=np.uint16))
+        tifffile.imwrite(
+            str(cyc13 / f"{name}.tif"), rng.randint(1000, 10000, shape, dtype=np.uint16)
+        )
 
     # Config
     workflow_dir = project / "workflow"
@@ -435,11 +439,13 @@ class TestTileSmoothing:
         for r in range(5):
             for c in range(5):
                 y0, x0 = r * tile_h, c * tile_w
-                grid[y0:y0 + tile_h, x0:x0 + tile_w] = offsets[r, c]
+                grid[y0 : y0 + tile_h, x0 : x0 + tile_w] = offsets[r, c]
 
         # Add noise
-        grid = (grid.astype(np.float64) + rng.normal(0, 500, grid.shape)).clip(0, 65535).astype(
-            np.uint16
+        grid = (
+            (grid.astype(np.float64) + rng.normal(0, 500, grid.shape))
+            .clip(0, 65535)
+            .astype(np.uint16)
         )
 
         # sigma ~ tile_pitch / 2 = 100
@@ -451,8 +457,9 @@ class TestTileSmoothing:
             for c in range(1, 4):
                 y0, x0 = r * tile_h, c * tile_w
                 margin = 40
-                tile_center = smoothed[y0 + margin:y0 + tile_h - margin,
-                                       x0 + margin:x0 + tile_w - margin]
+                tile_center = smoothed[
+                    y0 + margin : y0 + tile_h - margin, x0 + margin : x0 + tile_w - margin
+                ]
                 tile_means.append(np.mean(tile_center))
 
         tile_means = np.array(tile_means)
@@ -472,7 +479,7 @@ class TestTileSmoothing:
         for r in range(3):
             for c in range(3):
                 offset = rng.randint(-2000, 2000)
-                tile_noise[r * 100:(r + 1) * 100, c * 100:(c + 1) * 100] = offset
+                tile_noise[r * 100 : (r + 1) * 100, c * 100 : (c + 1) * 100] = offset
 
         image = np.clip(image + tile_noise, 0, 65535).astype(np.uint16)
 
@@ -527,7 +534,10 @@ class TestProcessBatch:
     def test_manifest_written(self, synthetic_project):
         result = process_batch(synthetic_project, force=True)
         manifest_path = (
-            synthetic_project / "data" / "processed" / "signal_isolated"
+            synthetic_project
+            / "data"
+            / "processed"
+            / "signal_isolated"
             / "signal_isolation_manifest.json"
         )
         assert manifest_path.exists()
@@ -546,9 +556,7 @@ class TestProcessBatch:
         assert result.summary["skipped"] > 0
 
     def test_channel_filter(self, synthetic_project):
-        result = process_batch(
-            synthetic_project, channels=["CD31"], force=True
-        )
+        result = process_batch(synthetic_project, channels=["CD31"], force=True)
         assert result.summary["total"] == 1
         assert "CD31" in result.channels
 
@@ -595,7 +603,10 @@ class TestManifest:
     def test_manifest_valid_json(self, synthetic_project):
         process_batch(synthetic_project, force=True)
         manifest_path = (
-            synthetic_project / "data" / "processed" / "signal_isolated"
+            synthetic_project
+            / "data"
+            / "processed"
+            / "signal_isolated"
             / "signal_isolation_manifest.json"
         )
         with open(manifest_path) as f:
@@ -611,13 +622,16 @@ class TestManifest:
     def test_quality_metrics_present(self, synthetic_project):
         process_batch(synthetic_project, force=True)
         manifest_path = (
-            synthetic_project / "data" / "processed" / "signal_isolated"
+            synthetic_project
+            / "data"
+            / "processed"
+            / "signal_isolated"
             / "signal_isolation_manifest.json"
         )
         with open(manifest_path) as f:
             data = json.load(f)
 
-        for marker, info in data["channels"].items():
+        for _marker, info in data["channels"].items():
             assert "quality_metrics" in info
             assert "quality_score" in info["quality_metrics"]
             assert "parameters" in info
@@ -632,9 +646,7 @@ class TestManifest:
         assert loaded["summary"]["total"] == result.summary["total"]
 
     def test_manifest_includes_recipe_dir(self, synthetic_project, recipe_dir):
-        result = process_batch(
-            synthetic_project, recipe_dir=recipe_dir, force=True
-        )
+        result = process_batch(synthetic_project, recipe_dir=recipe_dir, force=True)
         d = result.to_dict()
         assert d["recipe_dir"] == str(recipe_dir)
 
@@ -840,7 +852,7 @@ class TestCleanBackground:
 
         assert result[0, 0] == 0  # 500 <= 1000
         assert result[0, 1] == 0  # 1000 <= 1000
-        assert result[0, 2] > 0   # 2000 > 1000
+        assert result[0, 2] > 0  # 2000 > 1000
 
     def test_smooth_transition_zone(self):
         """Median filter applied in transition zone only."""
@@ -919,9 +931,7 @@ class TestRecipeDrivenProcessing:
         )
 
         output_dir = tmp_path / "recipe_out"
-        result = process_channel(
-            spec, recipe=recipe, output_dir=output_dir, location_map={}
-        )
+        result = process_channel(spec, recipe=recipe, output_dir=output_dir, location_map={})
 
         assert result.status == "success"
         assert result.method == "recipe"
@@ -1018,9 +1028,7 @@ class TestBatchWithRecipes:
             "remove_small: False\n"
         )
 
-        result = process_batch(
-            synthetic_project, recipe_dir=recipe_path, force=True
-        )
+        result = process_batch(synthetic_project, recipe_dir=recipe_path, force=True)
 
         # CD31 should use recipe, FoxP3 should use auto
         assert result.channels["CD31"].method == "recipe"
@@ -1041,9 +1049,7 @@ class TestBatchWithRecipes:
                 "clean_used: False\n"
             )
 
-        result = process_batch(
-            synthetic_project, recipe_dir=recipe_path, force=True
-        )
+        result = process_batch(synthetic_project, recipe_dir=recipe_path, force=True)
         assert result.summary["recipe"] == 2
         assert result.summary["global"] == 0
         assert result.summary["weighted"] == 0
@@ -1070,7 +1076,7 @@ class TestLearningIntegration:
             "remove_small: False\n"
         )
 
-        result = process_batch(
+        process_batch(
             synthetic_project,
             recipe_dir=recipe_path,
             tissue_type="spleen",
@@ -1082,6 +1088,7 @@ class TestLearningIntegration:
         db_path = synthetic_project / ".kintsugi" / "parameter_learning.db"
         if db_path.exists():
             import sqlite3
+
             conn = sqlite3.connect(str(db_path))
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM parameter_records")

@@ -11,13 +11,20 @@ Tests cover:
 import numpy as np
 import pytest
 
-from kintsugi.vessel3d import (
+from kintsugi.vessel3d import (  # noqa: I001
     VesselSpacing,
     _hessian_eigenvalues_3d,
     binarize_vessel_mask,
     compute_vesselness_frangi,
     segment_vessels_3d,
 )
+
+try:
+    import skan  # noqa: F401
+
+    HAS_SKAN = True
+except ImportError:
+    HAS_SKAN = False
 
 
 # =============================================================================
@@ -123,12 +130,8 @@ class TestFrangiRaFormula:
         while tubes yield ≈ 0.86.
         """
         # Get eigenvalues and compute raw vesselness terms at center
-        l1_t, l2_t, l3_t = _hessian_eigenvalues_3d(
-            synthetic_tube.astype(np.float32), sigma=2.0
-        )
-        l1_p, l2_p, l3_p = _hessian_eigenvalues_3d(
-            synthetic_plate.astype(np.float32), sigma=2.0
-        )
+        l1_t, l2_t, l3_t = _hessian_eigenvalues_3d(synthetic_tube.astype(np.float32), sigma=2.0)
+        l1_p, l2_p, l3_p = _hessian_eigenvalues_3d(synthetic_plate.astype(np.float32), sigma=2.0)
 
         center = (16, 16, 16)
         eps = 1e-10
@@ -137,8 +140,8 @@ class TestFrangiRaFormula:
         ra_tube = np.abs(l2_t[center]) / (np.abs(l3_t[center]) + eps)
         ra_plate = np.abs(l2_p[center]) / (np.abs(l3_p[center]) + eps)
 
-        ra_term_tube = 1.0 - np.exp(-(ra_tube ** 2) / (2.0 * 0.5 ** 2))
-        ra_term_plate = 1.0 - np.exp(-(ra_plate ** 2) / (2.0 * 0.5 ** 2))
+        ra_term_tube = 1.0 - np.exp(-(ra_tube**2) / (2.0 * 0.5**2))
+        ra_term_plate = 1.0 - np.exp(-(ra_plate**2) / (2.0 * 0.5**2))
 
         assert ra_term_tube > ra_term_plate, (
             f"Tube Ra term ({ra_term_tube:.4f}) should exceed "
@@ -180,6 +183,7 @@ class TestSkimageDeprecation:
     def test_closing_import(self):
         """Verify we import 'closing' not 'binary_closing'."""
         import inspect
+
         from kintsugi import vessel3d
 
         source = inspect.getsource(vessel3d.binarize_vessel_mask)
@@ -192,9 +196,7 @@ class TestSkimageDeprecation:
         """Binarize should run without deprecation warnings."""
         import warnings
 
-        vesselness = compute_vesselness_frangi(
-            synthetic_tube, sigmas=[2.0], device="cpu"
-        )
+        vesselness = compute_vesselness_frangi(synthetic_tube, sigmas=[2.0], device="cpu")
         with warnings.catch_warnings():
             warnings.simplefilter("error", FutureWarning)
             binarize_vessel_mask(vesselness, min_size=10, closing_radius=1)
@@ -263,6 +265,7 @@ class TestBinarization:
 class TestPipeline:
     """Test segment_vessels_3d end-to-end."""
 
+    @pytest.mark.skipif(not HAS_SKAN, reason="skan not installed")
     def test_pipeline_synthetic_tube(self, synthetic_tube):
         """Full pipeline should complete on a synthetic tube."""
         spacing = VesselSpacing(xy=1.0, z=1.0)  # isotropic, skip resampling

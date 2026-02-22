@@ -22,8 +22,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
-
+from typing import Any  # noqa: I001
 
 # ---------------------------------------------------------------------------
 # Data models
@@ -129,7 +128,10 @@ def scan_project_progress(
     if config is None:
         config = _load_config(project_dir)
 
-    cycles = [f"{int(c):02d}" for c in config.get("cycles", [])]
+    try:
+        cycles = [f"{int(c):02d}" for c in config.get("cycles", [])]
+    except (ValueError, TypeError):
+        cycles = []
     project_name = config.get("project_name", project_dir.name)
 
     status = ProjectStatus(
@@ -462,9 +464,7 @@ def _parse_log_duration(log_path: Path) -> float:
         return int(m.group(1)) * 60 + int(m.group(2))
 
     # Pattern 2: Parse timestamps from header and footer
-    timestamps = re.findall(
-        r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", content
-    )
+    timestamps = re.findall(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", content)
     if len(timestamps) >= 2:
         try:
             fmt = "%Y-%m-%d %H:%M:%S"
@@ -631,7 +631,7 @@ def estimate_completion(status: ProjectStatus) -> dict[str, Any]:
     remaining_per_stage: dict[str, float] = {}
     total_remaining = 0.0
 
-    for cyc, cs in status.cycle_statuses.items():
+    for _cyc, cs in status.cycle_statuses.items():
         for stage in ("stitch", "deconvolve", "edf"):
             if cs.stages.get(stage) in ("done",):
                 continue
@@ -660,12 +660,6 @@ def estimate_completion(status: ProjectStatus) -> dict[str, Any]:
 
     # Account for parallelism: GPU-only scheduling means jobs run N at a time
     # where N is total GPU slots. This is a rough estimate.
-    n_pending = sum(
-        1
-        for cs in status.cycle_statuses.values()
-        for stage in ("stitch", "deconvolve", "edf")
-        if cs.stages.get(stage) in ("pending", "queued")
-    )
     n_running = sum(
         1
         for cs in status.cycle_statuses.values()
@@ -698,13 +692,13 @@ def _parse_elapsed(elapsed_str: str) -> float:
     if not elapsed_str:
         return 0.0
 
-    days = 0
-    if "-" in elapsed_str:
-        day_part, elapsed_str = elapsed_str.split("-", 1)
-        days = int(day_part)
-
-    parts = elapsed_str.split(":")
     try:
+        days = 0
+        if "-" in elapsed_str:
+            day_part, elapsed_str = elapsed_str.split("-", 1)
+            days = int(day_part)
+
+        parts = elapsed_str.split(":")
         if len(parts) == 3:
             h, m, s = int(parts[0]), int(parts[1]), int(parts[2])
             return days * 86400 + h * 3600 + m * 60 + s
@@ -800,8 +794,6 @@ def render_dashboard(
     """
     from rich.console import Console
     from rich.panel import Panel
-    from rich.table import Table
-    from rich.text import Text
 
     console = Console()
 
@@ -913,12 +905,8 @@ def _render_project(
         table.add_row(*row)
 
     # Registration row
-    reg_style, reg_symbol = _STATUS_STYLE.get(
-        status.registration_status, ("[dim]", "??")
-    )
-    reg_timing = (
-        f"{status.registration_timing / 60:.0f}m" if status.registration_timing > 0 else ""
-    )
+    reg_style, reg_symbol = _STATUS_STYLE.get(status.registration_status, ("[dim]", "??"))
+    reg_timing = f"{status.registration_timing / 60:.0f}m" if status.registration_timing > 0 else ""
     reg_job_str = ""
     if show_jobs and status.registration_job:
         rj = status.registration_job
@@ -927,9 +915,7 @@ def _render_project(
             if rj.mem_used:
                 mem_info = f" [{_format_mem(rj.mem_used)}]"
             reg_job_str = (
-                f"{rj.job_id} {rj.state[:3]} "
-                f"{rj.node or '(queued)'}"
-                f" {rj.elapsed}{mem_info}"
+                f"{rj.job_id} {rj.state[:3]} {rj.node or '(queued)'} {rj.elapsed}{mem_info}"
             )
 
     reg_cell = Text(f" {reg_symbol} ", style=reg_style.strip("[]"))
@@ -1123,19 +1109,20 @@ def watch_dashboard(
     """
     import sys
 
+    from rich.console import Console
+
+    console = Console()
+
     try:
         while True:
-            # Clear terminal
-            os.system("clear" if os.name != "nt" else "cls")
+            console.clear()
 
             statuses = []
             for pdir in project_dirs:
                 try:
                     statuses.append(scan_project_progress(pdir))
                 except Exception as e:
-                    from rich.console import Console
-
-                    Console().print(f"[red]Error scanning {pdir}: {e}[/red]")
+                    console.print(f"[red]Error scanning {pdir}: {e}[/red]")
 
             if statuses:
                 render_dashboard(
@@ -1145,11 +1132,7 @@ def watch_dashboard(
                     show_jobs=show_jobs,
                 )
 
-            from rich.console import Console
-
-            Console().print(
-                f"\n[dim]Refreshing every {interval}s. Press Ctrl+C to exit.[/dim]"
-            )
+            console.print(f"\n[dim]Refreshing every {interval}s. Press Ctrl+C to exit.[/dim]")
 
             time.sleep(interval)
     except KeyboardInterrupt:

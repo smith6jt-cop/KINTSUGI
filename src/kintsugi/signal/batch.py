@@ -305,9 +305,7 @@ def _strip_for_comparison(name: str) -> str:
     return re.sub(r"[-_\s]", "", name).lower()
 
 
-def _build_channel_location_map(
-    channel_names: dict, registered_dir: Path
-) -> dict[str, Path]:
+def _build_channel_location_map(channel_names: dict, registered_dir: Path) -> dict[str, Path]:
     """Build a mapping from channel name to its registered TIFF path.
 
     Scans all cycles and all channel names in config to create a
@@ -324,9 +322,7 @@ def _build_channel_location_map(
     return location_map
 
 
-def _resolve_blank_path(
-    blank_name: str, location_map: dict[str, Path]
-) -> tuple[str, Path] | None:
+def _resolve_blank_path(blank_name: str, location_map: dict[str, Path]) -> tuple[str, Path] | None:
     """Resolve a blank name from a recipe to an actual file path.
 
     Resolution chain:
@@ -549,9 +545,7 @@ def discover_channels(
             blank_path = None
 
             if recipes and name in recipes:
-                resolved = _resolve_blank_path(
-                    recipes[name].primary.blank_name, location_map
-                )
+                resolved = _resolve_blank_path(recipes[name].primary.blank_name, location_map)
                 if resolved:
                     blank_name, blank_path = resolved
                 else:
@@ -630,7 +624,7 @@ def select_method(
 
     # Blank dominates signal
     if signal_p99 > 0 and blank_p99 / signal_p99 > 1.2:
-        logger.debug(f"Blank dominates (ratio={blank_p99/signal_p99:.2f}), selecting weighted")
+        logger.debug(f"Blank dominates (ratio={blank_p99 / signal_p99:.2f}), selecting weighted")
         return "weighted"
 
     # Structured AF
@@ -770,7 +764,7 @@ def _process_channel_recipe(
         p99 = float(np.percentile(subtracted, 99))
         p1 = float(np.percentile(subtracted, 1))
         if p99 - p1 < 100:
-            warnings.append(f"low_range={p99-p1:.0f}")
+            warnings.append(f"low_range={p99 - p1:.0f}")
         result.warning = "; ".join(warnings)
 
         # Save output
@@ -833,9 +827,7 @@ def process_channel(
     """
     # Recipe path: use legacy multi-step pipeline
     if recipe is not None:
-        return _process_channel_recipe(
-            spec, recipe, location_map or {}, output_dir, dry_run
-        )
+        return _process_channel_recipe(spec, recipe, location_map or {}, output_dir, dry_run)
 
     # Auto-analysis path (original behavior)
     logger.info(f"Processing {spec.marker_name} (cycle {spec.cycle}, {spec.blank_name})")
@@ -897,8 +889,7 @@ def process_channel(
                 blank_clip_factor=weighted_analysis["blank_clip_factor"],
                 base_scale_factor=weighted_analysis["base_scale_factor"],
                 ranges=[
-                    r if isinstance(r, dict) else r
-                    for r in weighted_analysis.get("ranges", [])
+                    r if isinstance(r, dict) else r for r in weighted_analysis.get("ranges", [])
                 ],
                 transition_width=weighted_analysis.get("transition_width", 0.1),
                 smooth_low=weighted_analysis.get("smooth_low", False),
@@ -915,7 +906,9 @@ def process_channel(
             }
             # Quality metrics — extract global dict for flat structure
             weighted_quality = compute_weighted_subtraction_quality(
-                signal, subtracted, blank_processed,
+                signal,
+                subtracted,
+                blank_processed,
                 ranges=weighted_analysis.get("ranges", []),
             )
             quality = weighted_quality.get("global", weighted_quality)
@@ -955,7 +948,7 @@ def process_channel(
         p99 = float(np.percentile(subtracted, 99))
         p1 = float(np.percentile(subtracted, 1))
         if p99 - p1 < 100:
-            warnings.append(f"low_range={p99-p1:.0f}")
+            warnings.append(f"low_range={p99 - p1:.0f}")
         result.warning = "; ".join(warnings)
 
         # Save output
@@ -1130,13 +1123,18 @@ def process_batch(
     if learn and not dry_run and tissue_type:
         try:
             from kintsugi.claude.parameter_learning import ParameterLearningEngine
+
             engine = ParameterLearningEngine(project_path=project_dir)
         except Exception as e:
             logger.warning(f"Could not initialize learning engine: {e}")
 
     counts = {
-        "total": 0, "global": 0, "weighted": 0, "recipe": 0,
-        "skipped": 0, "error": 0,
+        "total": 0,
+        "global": 0,
+        "weighted": 0,
+        "recipe": 0,
+        "skipped": 0,
+        "error": 0,
     }
     quality_scores = []
 
@@ -1190,9 +1188,7 @@ def process_batch(
         # Record to learning DB
         if engine and marker_recipe and result.status == "success" and qs is not None:
             try:
-                _record_to_learning_db(
-                    engine, tissue_type, spec.marker_name, marker_recipe, qs
-                )
+                _record_to_learning_db(engine, tissue_type, spec.marker_name, marker_recipe, qs)
             except Exception as e:
                 logger.warning(f"Failed to record {spec.marker_name} to learning DB: {e}")
 

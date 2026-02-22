@@ -147,12 +147,14 @@ def generate_qc_pages(
             logger.warning(f"Before image not found for {marker}, skipping QC")
             continue
 
-        channels.append({
-            "marker": marker,
-            "before_path": before_path,
-            "after_path": iso_path,
-            "info": info,
-        })
+        channels.append(
+            {
+                "marker": marker,
+                "before_path": before_path,
+                "after_path": iso_path,
+                "info": info,
+            }
+        )
 
     if not channels:
         return []
@@ -279,12 +281,10 @@ def generate_summary_table(
         analysis = info.get("analysis", {})
         quality = info.get("quality_metrics", {})
 
-        scale = params.get(
-            "blank_scale_factor", params.get("base_scale_factor", "")
-        )
+        scale = params.get("blank_scale_factor", params.get("base_scale_factor", ""))
         signal_p99 = analysis.get("signal_p99", 0)
         blank_p99 = analysis.get("blank_p99", 0)
-        ratio = f"{blank_p99/signal_p99:.2f}" if signal_p99 > 0 else "-"
+        ratio = f"{blank_p99 / signal_p99:.2f}" if signal_p99 > 0 else "-"
 
         corr = analysis.get("correlation", "")
         q_score = quality.get("quality_score", "")

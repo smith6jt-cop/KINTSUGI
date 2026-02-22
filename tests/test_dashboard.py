@@ -14,10 +14,8 @@ Covers:
 
 from __future__ import annotations
 
-import textwrap
-from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -38,7 +36,6 @@ from kintsugi.dashboard import (
     render_dashboard,
     scan_project_progress,
 )
-
 
 # ============================================================================
 # Fixtures
@@ -219,6 +216,17 @@ class TestParseElapsed:
     def test_invalid(self):
         assert _parse_elapsed("invalid") == 0.0
 
+    def test_non_numeric_days(self):
+        """Non-numeric day part should return 0.0 instead of raising."""
+        assert _parse_elapsed("abc-01:00:00") == 0.0
+
+    def test_non_numeric_hours(self):
+        assert _parse_elapsed("xx:30:00") == 0.0
+
+    def test_non_numeric_in_day_section(self):
+        """Day section like '1.5-02:00:00' should handle gracefully."""
+        assert _parse_elapsed("1.5-02:00:00") == 0.0
+
 
 # ============================================================================
 # Log timing extraction
@@ -239,9 +247,7 @@ class TestLogDuration:
     def test_timestamp_fallback(self, tmp_path):
         log = tmp_path / "test.log"
         log.write_text(
-            "KINTSUGI stitch - 2026-02-22 10:00:00\n"
-            "Processing...\n"
-            "Completed: 2026-02-22 10:08:30\n"
+            "KINTSUGI stitch - 2026-02-22 10:00:00\nProcessing...\nCompleted: 2026-02-22 10:08:30\n"
         )
         assert _parse_log_duration(log) == 510.0
 
@@ -358,6 +364,21 @@ class TestScanProject:
             for stage in ("stitch", "deconvolve", "edf"):
                 assert status.cycle_statuses[cyc].stages[stage] == "pending"
         assert status.registration_status == "pending"
+
+    @patch("kintsugi.dashboard._attach_slurm_jobs")
+    @patch("kintsugi.dashboard._attach_log_timings")
+    def test_scan_non_numeric_cycles(self, mock_timings, mock_jobs, tmp_path):
+        """Non-numeric cycle values in config should not crash scanner."""
+        proj = tmp_path / "bad_cycles"
+        (proj / "workflow").mkdir(parents=True)
+        (proj / "data" / "processed").mkdir(parents=True)
+        config = {
+            "project_name": "BadCycles",
+            "cycles": ["abc", "def"],
+        }
+        (proj / "workflow" / "config.yaml").write_text(yaml.dump(config))
+        status = scan_project_progress(proj)
+        assert len(status.cycles) == 0
 
 
 # ============================================================================
@@ -503,7 +524,12 @@ def _make_completed_status(project_dir: Path) -> ProjectStatus:
 
     status.registration_status = "done"
     status.registration_timing = 1200.0
-    status.qc_statuses = {"stitch": "done", "decon": "done", "edf": "pending", "registration": "pending"}
+    status.qc_statuses = {
+        "stitch": "done",
+        "decon": "done",
+        "edf": "pending",
+        "registration": "pending",
+    }
 
     return status
 
@@ -523,6 +549,11 @@ def _make_empty_status(project_dir: Path) -> ProjectStatus:
         status.cycle_statuses[cyc] = cs
 
     status.registration_status = "pending"
-    status.qc_statuses = {"stitch": "pending", "decon": "pending", "edf": "pending", "registration": "pending"}
+    status.qc_statuses = {
+        "stitch": "pending",
+        "decon": "pending",
+        "edf": "pending",
+        "registration": "pending",
+    }
 
     return status
