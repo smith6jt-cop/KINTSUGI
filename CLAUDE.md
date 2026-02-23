@@ -89,6 +89,24 @@ kintsugi slurm status .                             # Check job status
 
 See `workflow/CLAUDE.md` for processing modes, multi-account GPU scheduling, Snakemake workflow, registration, and batch processing.
 
+### Snakemake Workflow (Preferred)
+
+```bash
+kintsugi workflow config .                         # Generate config from experiment.json
+kintsugi workflow check .                          # Verify SLURM resources
+kintsugi workflow run .                            # Full pipeline (auto-generates config if missing)
+kintsugi workflow run . --dry-run                  # Preview
+kintsugi workflow run . --dashboard                # Run with live progress dashboard
+kintsugi workflow run . --dashboard -i 15          # Custom refresh interval
+kintsugi workflow run . --cycles 1-5               # Specific cycles
+kintsugi workflow run . --local --cores 8          # Local (no SLURM)
+kintsugi workflow status . --watch                 # Standalone dashboard
+```
+
+`workflow run` auto-generates `workflow/config.yaml` from `meta/experiment.json` if the config is missing. The `--dashboard` flag launches snakemake in the background and displays a live progress dashboard; Ctrl+C detaches without killing SLURM jobs.
+
+**Key function**: `generate_workflow_config(project_dir: Path) -> Path` in `cli.py` — standalone, reusable by both `workflow config` and `workflow run`.
+
 ## Development Workspace
 
 Use the VS Code multi-root workspace (`kintsugi-dev.code-workspace`) which combines:
@@ -360,7 +378,7 @@ Tests are in `tests/` with fixtures in `conftest.py`. Key fixtures: `sample_imag
 
 CI runs on Linux (ubuntu-latest) with Python 3.10-3.12.
 
-**Suite status** (Feb 2026): 618 passed, 10 skipped (GPU hardware + optional deps).
+**Suite status** (Feb 2026): 664 passed, 10 skipped (GPU hardware + optional deps).
 
 **GPU skip pattern**: On HPC login nodes, CuPy is installed (`CUPY_AVAILABLE=True`) but no GPU hardware exists. Tests that need actual GPU hardware must use `check_gpu()` from `kcorrect_gpu.py`, not `CUPY_AVAILABLE`:
 ```python

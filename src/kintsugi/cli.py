@@ -888,30 +888,35 @@ def workflow():
     pass
 
 
-@workflow.command("config")
-@click.argument("project_dir", type=click.Path(exists=True), default=".")
-@click.option("--print-only", is_flag=True, help="Print config to stdout without writing")
-def workflow_config(project_dir: str, print_only: bool):
-    """
-    Generate workflow/config.yaml for a project.
+def generate_workflow_config(project_dir: Path, print_only: bool = False) -> Path | None:
+    """Generate workflow/config.yaml for a project.
 
     Reads meta/experiment.json (auto-translating CODEX field names) and
-    slurm/config.sh to create a unified Snakemake configuration file.
+    detects SLURM resources to create a unified Snakemake configuration.
 
-    All microscope and acquisition parameters are written to config.yaml so
-    that workflow scripts never need to read experiment.json directly.
+    Parameters
+    ----------
+    project_dir : Path
+        Resolved path to the KINTSUGI project directory.
+    print_only : bool
+        If True, print config to stdout without writing files.
 
-    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    Returns
+    -------
+    Path or None
+        Path to the created config file, or None if ``print_only``.
+
+    Raises
+    ------
+    SystemExit
+        If experiment.json is missing or invalid.
     """
     import json
     import shutil
-    from pathlib import Path
 
     import yaml
 
     from kintsugi.project import ExperimentConfig
-
-    project_dir = Path(project_dir).resolve()
 
     # Load experiment config via ExperimentConfig.from_dict() for CODEX translation
     exp_path = project_dir / "meta" / "experiment.json"
@@ -1145,7 +1150,7 @@ def workflow_config(project_dir: str, print_only: bool):
 
     if print_only:
         console.print(config_content)
-        return
+        return None
 
     # Write config
     wf_dir = project_dir / "workflow"
@@ -1208,12 +1213,34 @@ def workflow_config(project_dir: str, print_only: bool):
             else:
                 console.print("  Scripts up to date")
 
-    console.print()
-    console.print("[bold]Next steps:[/bold]")
-    console.print(f"  cd {wf_dir}")
-    console.print("  kintsugi workflow check .                  # Verify resources")
-    console.print("  snakemake -n                               # Dry run")
-    console.print("  kintsugi workflow run .                    # Submit via SLURM")
+    return config_file
+
+
+@workflow.command("config")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--print-only", is_flag=True, help="Print config to stdout without writing")
+def workflow_config(project_dir: str, print_only: bool):
+    """
+    Generate workflow/config.yaml for a project.
+
+    Reads meta/experiment.json (auto-translating CODEX field names) and
+    slurm/config.sh to create a unified Snakemake configuration file.
+
+    All microscope and acquisition parameters are written to config.yaml so
+    that workflow scripts never need to read experiment.json directly.
+
+    PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
+    """
+    config_file = generate_workflow_config(Path(project_dir).resolve(), print_only=print_only)
+
+    if config_file is not None:
+        wf_dir = config_file.parent
+        console.print()
+        console.print("[bold]Next steps:[/bold]")
+        console.print(f"  cd {wf_dir}")
+        console.print("  kintsugi workflow check .                  # Verify resources")
+        console.print("  snakemake -n                               # Dry run")
+        console.print("  kintsugi workflow run .                    # Submit via SLURM")
 
 
 @workflow.command("check")
@@ -1299,6 +1326,60 @@ def workflow_check(project_dir: str):
         console.print(f"  Max allocation would give {gpu_total} GPU slots when free.")
 
 
+def _run_with_dashboard(cmd: list[str], project_dir: Path, interval: int = 30) -> None:
+    """Launch snakemake in background and display a live progress dashboard.
+
+    Parameters
+    ----------
+    cmd : list[str]
+        Full snakemake command to execute.
+    project_dir : Path
+        Resolved project directory for dashboard scanning.
+    interval : int
+        Dashboard refresh interval in seconds.
+    """
+    import time
+
+    from kintsugi.dashboard import render_dashboard, scan_project_progress
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    console.print(f"  Snakemake launched (PID {proc.pid})")
+    console.print(f"  Dashboard refreshing every {interval}s. Press Ctrl+C to detach.\n")
+
+    try:
+        while True:
+            console.clear()
+            try:
+                status = scan_project_progress(project_dir)
+                render_dashboard([status])
+            except Exception as e:
+                console.print(f"[yellow]Dashboard error: {e}[/yellow]")
+
+            rc = proc.poll()
+            if rc is not None:
+                # Snakemake finished — render one final dashboard
+                console.clear()
+                try:
+                    status = scan_project_progress(project_dir)
+                    render_dashboard([status])
+                except Exception:
+                    pass
+                if rc == 0:
+                    console.print("[green]Snakemake completed successfully.[/green]")
+                else:
+                    stderr_out = proc.stderr.read().decode() if proc.stderr else ""
+                    console.print(f"[red]Snakemake exited with code {rc}.[/red]")
+                    if stderr_out:
+                        console.print(stderr_out[-500:])
+                raise SystemExit(rc)
+
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        console.print(f"\n  Detached from dashboard. Snakemake still running (PID {proc.pid}).")
+        console.print("  SLURM jobs continue independently.")
+        console.print(f"  Check progress: kintsugi workflow status {project_dir} --watch")
+
+
 @workflow.command("run")
 @click.argument("project_dir", type=click.Path(exists=True), default=".")
 @click.option("--jobs", "-j", default=8, type=int, help="Max concurrent SLURM jobs (default: 8)")
@@ -1311,6 +1392,15 @@ def workflow_check(project_dir: str):
     help="Force re-run a specific rule (stitch/deconvolve/edf/registration)",
 )
 @click.option("--cycles", "-c", default=None, help="Override cycles: '1-3' or '1,2,5'")
+@click.option(
+    "--dashboard", "-d", is_flag=True, help="Show live progress dashboard while running"
+)
+@click.option(
+    "--dashboard-interval",
+    default=30,
+    type=int,
+    help="Dashboard refresh interval in seconds (default: 30)",
+)
 def workflow_run(
     project_dir: str,
     jobs: int,
@@ -1319,12 +1409,13 @@ def workflow_run(
     cores: int,
     forcerun: str | None,
     cycles: str | None,
+    dashboard: bool,
+    dashboard_interval: int,
 ):
     """
     Run the Snakemake processing pipeline.
 
-    Requires workflow/config.yaml to exist. Create it with:
-      kintsugi workflow config .
+    Auto-generates workflow/config.yaml from meta/experiment.json if missing.
 
     PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
 
@@ -1334,16 +1425,30 @@ def workflow_run(
         kintsugi workflow run . --dry-run          # Preview
         kintsugi workflow run . --local --cores 4  # Local execution
         kintsugi workflow run . --forcerun stitch  # Force re-stitch
+        kintsugi workflow run . --dashboard        # Run with live dashboard
     """
     from pathlib import Path
 
     project_dir = Path(project_dir).resolve()
     wf_dir = project_dir / "workflow"
 
+    # Auto-generate config if missing but experiment.json exists
     if not (wf_dir / "config.yaml").exists():
-        console.print("[red]No workflow/config.yaml found.[/red]")
-        console.print("Run 'kintsugi workflow config .' first.")
-        raise SystemExit(1)
+        exp_path = project_dir / "meta" / "experiment.json"
+        if exp_path.exists():
+            console.print("[yellow]No workflow/config.yaml found. Auto-generating...[/yellow]")
+            try:
+                generate_workflow_config(project_dir)
+            except SystemExit:
+                console.print(
+                    "[red]Auto-generation failed. "
+                    "Run 'kintsugi workflow config .' manually.[/red]"
+                )
+                raise SystemExit(1)
+        else:
+            console.print("[red]No workflow/config.yaml and no meta/experiment.json.[/red]")
+            console.print("Run 'kintsugi workflow config .' first.")
+            raise SystemExit(1)
 
     if not (wf_dir / "Snakefile").exists():
         console.print("[red]No workflow/Snakefile found.[/red]")
@@ -1424,14 +1529,17 @@ def workflow_run(
     console.print(f"[bold]Running:[/bold] {' '.join(cmd)}")
     console.print()
 
-    try:
-        result = subprocess.run(cmd, check=False)
-        if result.returncode != 0:
-            raise SystemExit(result.returncode)
-    except FileNotFoundError:
-        console.print("[red]snakemake not found. Install with:[/red]")
-        console.print("  pip install snakemake snakemake-executor-plugin-slurm")
-        raise SystemExit(1)
+    if dashboard and not dry_run:
+        _run_with_dashboard(cmd, project_dir, interval=dashboard_interval)
+    else:
+        try:
+            result = subprocess.run(cmd, check=False)
+            if result.returncode != 0:
+                raise SystemExit(result.returncode)
+        except FileNotFoundError:
+            console.print("[red]snakemake not found. Install with:[/red]")
+            console.print("  pip install snakemake snakemake-executor-plugin-slurm")
+            raise SystemExit(1)
 
 
 # ============================================================================

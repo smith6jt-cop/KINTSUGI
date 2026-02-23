@@ -257,11 +257,14 @@ class TestWorkflowConfig:
 class TestWorkflowRun:
     """Test ``kintsugi workflow run`` command."""
 
-    def test_run_fails_without_config(self, runner, project_dir):
-        """Run exits with error when workflow/config.yaml is missing."""
-        result = runner.invoke(main, ["workflow", "run", str(project_dir)])
+    def test_run_fails_without_config_and_experiment(self, runner, tmp_path):
+        """Run exits with error when both config.yaml and experiment.json are missing."""
+        bare_proj = tmp_path / "bare"
+        bare_proj.mkdir()
+        result = runner.invoke(main, ["workflow", "run", str(bare_proj)])
         assert result.exit_code != 0
         assert "No workflow/config.yaml" in result.output
+        assert "experiment.json" in result.output
 
     def test_run_fails_without_snakefile(self, runner, project_dir):
         """Run exits with error when Snakefile is missing."""
@@ -388,6 +391,84 @@ class TestWorkflowRun:
         idx = cmd.index("-j")
         assert cmd[idx + 1] == "16"
 
+    @patch("subprocess.run")
+    @patch("kintsugi.cli.generate_workflow_config")
+    def test_run_auto_generates_config(self, mock_gen, mock_run, runner, project_dir):
+        """Run auto-generates config when experiment.json exists but config.yaml is missing."""
+        wf_dir = project_dir / "workflow"
+
+        # generate_workflow_config should create config + Snakefile
+        def _fake_gen(proj_dir, print_only=False):
+            wf_dir.mkdir(parents=True, exist_ok=True)
+            (wf_dir / "config.yaml").write_text(
+                yaml.dump({"project_dir": str(proj_dir), "cycles": [1, 2]})
+            )
+            (wf_dir / "Snakefile").write_text("rule all:\n    input: []\n")
+            return wf_dir / "config.yaml"
+
+        mock_gen.side_effect = _fake_gen
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = runner.invoke(main, ["workflow", "run", str(project_dir), "--local"])
+        assert result.exit_code == 0, result.output
+        assert "Auto-generating" in result.output
+        mock_gen.assert_called_once()
+        mock_run.assert_called_once()
+
+    def test_run_auto_config_fails_without_experiment(self, runner, tmp_path):
+        """No config and no experiment.json gives a clear error."""
+        bare_proj = tmp_path / "bare"
+        bare_proj.mkdir()
+        result = runner.invoke(main, ["workflow", "run", str(bare_proj)])
+        assert result.exit_code != 0
+        assert "experiment.json" in result.output
+
+    @patch("subprocess.Popen")
+    @patch("kintsugi.dashboard.scan_project_progress")
+    @patch("kintsugi.dashboard.render_dashboard")
+    def test_run_dashboard_uses_popen(
+        self, mock_render, mock_scan, mock_popen, runner, project_with_workflow
+    ):
+        """--dashboard flag launches snakemake via Popen, not subprocess.run."""
+        # Simulate snakemake finishing immediately
+        mock_proc = MagicMock()
+        mock_proc.pid = 12345
+        mock_proc.poll.return_value = 0  # finished immediately
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.read.return_value = b""
+        mock_popen.return_value = mock_proc
+        mock_scan.return_value = MagicMock()
+
+        result = runner.invoke(
+            main, ["workflow", "run", str(project_with_workflow), "--dashboard", "--local"]
+        )
+        # Popen should have been called (not subprocess.run)
+        mock_popen.assert_called_once()
+        # scan_project_progress should have been called at least once (final render)
+        assert mock_scan.called
+
+    @patch("subprocess.run")
+    def test_run_dashboard_dry_run_falls_through(self, mock_run, runner, project_with_workflow):
+        """--dashboard with --dry-run falls through to blocking subprocess.run."""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = runner.invoke(
+            main,
+            [
+                "workflow",
+                "run",
+                str(project_with_workflow),
+                "--dashboard",
+                "--dry-run",
+                "--local",
+            ],
+        )
+        assert result.exit_code == 0
+        # Should use subprocess.run (blocking), not Popen
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert "-n" in cmd
+
 
 # ============================================================================
 # CLI: workflow help
@@ -416,6 +497,7 @@ class TestWorkflowHelp:
         assert result.exit_code == 0
         assert "--dry-run" in result.output
         assert "--local" in result.output
+        assert "--dashboard" in result.output
 
 
 # ============================================================================
