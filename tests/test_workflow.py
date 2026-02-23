@@ -439,7 +439,7 @@ class TestWorkflowRun:
         mock_popen.return_value = mock_proc
         mock_scan.return_value = MagicMock()
 
-        result = runner.invoke(
+        runner.invoke(
             main, ["workflow", "run", str(project_with_workflow), "--dashboard", "--local"]
         )
         # Popen should have been called (not subprocess.run)
