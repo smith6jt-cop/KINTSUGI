@@ -394,6 +394,22 @@ def _registration_assignment():
 _REG_ASSIGN = _registration_assignment()
 
 
+def _qc_cpu_assignment():
+    """Pick CPU partition for QC and signal isolation rules (no GPU needed).
+
+    QC rules and signal isolation use pyvips + matplotlib + numpy/scipy,
+    not GPU compute. Running them on CPU frees GPU slots for processing.
+    """
+    for acct in ACCOUNTS:
+        if acct.get("partition_cpu"):
+            return {"account": acct["name"], "partition": acct["partition_cpu"]}
+    # Fallback to registration assignment account with hpg-default
+    return {"account": _REG_ASSIGN["account"], "partition": "hpg-default"}
+
+
+_QC_CPU_ASSIGN = _qc_cpu_assignment()
+
+
 rule registration:
     input:
         edf_done=all_edf_sentinels(),
@@ -592,22 +608,6 @@ def _all_decon_sentinels():
         project=PROJECT,
         cycle=[cyc_fmt(c) for c in CYCLES],
     )
-
-
-def _qc_cpu_assignment():
-    """Pick CPU partition for QC rules (no GPU needed).
-
-    QC rules (stitch, decon, edf, registration) use pyvips + matplotlib,
-    not GPU compute. Running them on CPU frees GPU slots for processing.
-    """
-    for acct in ACCOUNTS:
-        if acct.get("partition_cpu"):
-            return {"account": acct["name"], "partition": acct["partition_cpu"]}
-    # Fallback to registration assignment account with hpg-default
-    return {"account": _REG_ASSIGN["account"], "partition": "hpg-default"}
-
-
-_QC_CPU_ASSIGN = _qc_cpu_assignment()
 
 
 rule qc_stitch:
