@@ -34,11 +34,17 @@ logger = logging.getLogger("kintsugi.signal.batch_multi")
 # Default template recipe project (has 26 validated recipes)
 DEFAULT_TEMPLATE_PROJECT = "CX_19-001_SP_CC2-A28"
 
-# Directories to search for legacy recipe files, in priority order
+# Directories to search for legacy recipe files, in priority order (relative to project)
 _RECIPE_SEARCH_DIRS = [
     "data/processed/Processing_parameters",
     "Processing_parameters",
     "notebooks/Processing_parameters",
+]
+
+# External base directories containing per-project recipe folders
+# Structure: {base}/{dataset_name}/Processing_parameters/*_param.txt
+_EXTERNAL_RECIPE_BASES = [
+    "/mnt/ahc_share/PERSONAL/smith6jt/Processed_CODEX",
 ]
 
 
@@ -153,6 +159,51 @@ def parse_tissue_type(project_name: str, project_path: Path | None = None) -> st
 
 
 # =============================================================================
+# External Recipe Lookup
+# =============================================================================
+
+
+def _find_external_recipes(project_name: str) -> str:
+    """Search external recipe bases for matching recipes.
+
+    Tries exact match first, then fuzzy substring matching (min 5 chars)
+    to handle mixed naming conventions (e.g. KINTSUGI '..._CC2-A28' vs
+    Processed_CODEX '1904CC2-A28').
+
+    Returns recipe directory path or empty string.
+    """
+    for base in _EXTERNAL_RECIPE_BASES:
+        base_path = Path(base)
+        if not base_path.is_dir():
+            continue
+
+        # Exact match
+        candidate = base_path / project_name / "Processing_parameters"
+        if candidate.is_dir() and list(candidate.glob("*_param.txt")):
+            return str(candidate)
+
+        # Fuzzy: check if any external subdir name overlaps with project name
+        # Use bidirectional substring match with min length 5 to avoid false positives
+        project_lower = project_name.lower()
+        for entry in sorted(base_path.iterdir()):
+            if not entry.is_dir() or entry.name == project_name:
+                continue
+            entry_lower = entry.name.lower()
+            if len(entry_lower) >= 5 and (
+                entry_lower in project_lower or project_lower in entry_lower
+            ):
+                candidate = entry / "Processing_parameters"
+                if candidate.is_dir() and list(candidate.glob("*_param.txt")):
+                    logger.info(
+                        f"Fuzzy recipe match: '{project_name}' -> "
+                        f"'{entry.name}' in {base}"
+                    )
+                    return str(candidate)
+
+    return ""
+
+
+# =============================================================================
 # Project Discovery
 # =============================================================================
 
@@ -230,7 +281,7 @@ def discover_projects(
         if has_manifest and not force:
             continue
 
-        # Check for own recipes
+        # Check for own recipes (local first, then external)
         own_recipe_dir = ""
         has_own_recipes = False
         for rel_dir in _RECIPE_SEARCH_DIRS:
@@ -239,6 +290,12 @@ def discover_projects(
                 has_own_recipes = True
                 own_recipe_dir = str(candidate)
                 break
+
+        if not has_own_recipes:
+            ext_dir = _find_external_recipes(name)
+            if ext_dir:
+                has_own_recipes = True
+                own_recipe_dir = ext_dir
 
         tissue_type = parse_tissue_type(name, project_path)
 

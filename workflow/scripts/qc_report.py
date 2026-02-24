@@ -200,6 +200,18 @@ elif STAGE == "registration":
         channel_name_dict=channel_name_dict,
     )
 
+elif STAGE == "signal_isolation":
+    from kintsugi.signal.isolation_qc import generate_qc_pages
+
+    log_info("Running signal isolation QC")
+    pages = generate_qc_pages(
+        project_dir=str(PROJECT_DIR),
+        page_size=6,
+        dpi=120,
+        downsample=16,
+    )
+    print(f"Generated {len(pages)} QC pages")
+
 else:
     print(f"ERROR: Unknown QC stage '{STAGE}'")
     log_footer(1)

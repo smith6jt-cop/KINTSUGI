@@ -37,6 +37,26 @@ from typing import Any, ClassVar, Literal
 PROJECT_CONFIG_FILE = "kintsugi_project.json"
 PROJECT_VERSION = "1.0.0"
 
+def _resolve_kintsugi_executable() -> str:
+    """Resolve absolute path to the kintsugi CLI executable.
+
+    Tries shutil.which first (works if env is activated), then falls back
+    to the sibling of the current Python interpreter (works from the same
+    conda env even when PATH doesn't include the env's bin/).
+    """
+    path = shutil.which("kintsugi")
+    if path:
+        return str(Path(path).resolve())
+
+    # Fall back to sibling of current Python interpreter
+    candidate = Path(sys.executable).parent / "kintsugi"
+    if candidate.exists():
+        return str(candidate.resolve())
+
+    # Last resort: bare command name
+    return "kintsugi"
+
+
 # Common image file extensions
 IMAGE_EXTENSIONS = {
     ".tif",
@@ -1705,10 +1725,17 @@ class KintsugiProject:
 
             for line in lines:
                 dapi_match = re.match(r"DAPI[-_]?(\d+)", line, re.IGNORECASE)
+                dapi_bare = re.match(r"DAPI\s*$", line, re.IGNORECASE)
                 if dapi_match:
                     if cycle_channels and current_cycle > 0:
                         channel_dict[current_cycle] = cycle_channels
                     current_cycle = int(dapi_match.group(1))
+                    cycle_channels = [line]
+                elif dapi_bare:
+                    # Bare "DAPI" without cycle suffix — auto-increment cycle
+                    if cycle_channels and current_cycle > 0:
+                        channel_dict[current_cycle] = cycle_channels
+                    current_cycle += 1
                     cycle_channels = [line]
                 elif current_cycle > 0:
                     cycle_channels.append(line)
@@ -1871,23 +1898,40 @@ class KintsugiProject:
         self._create_vscode_config()
 
     def _create_claude_config(self) -> None:
-        """Create Claude Code MCP configuration."""
-        claude_dir = self.paths.root / ".claude"
-        claude_dir.mkdir(exist_ok=True)
+        """Create Claude Code MCP configuration.
 
-        settings_file = claude_dir / "settings.local.json"
-        if not settings_file.exists():
-            claude_config = {
+        Creates .mcp.json at project root (MCP server definition) and
+        .claude/settings.local.json (enables the server).
+        """
+        # Create .mcp.json with the MCP server definition
+        mcp_file = self.paths.root / ".mcp.json"
+        if not mcp_file.exists():
+            mcp_config = {
                 "mcpServers": {
                     "kintsugi": {
-                        "command": "kintsugi",
+                        "command": _resolve_kintsugi_executable(),
                         "args": ["mcp", "start"],
                         "cwd": str(self.paths.root),
                     }
                 }
             }
+            with open(mcp_file, "w") as f:
+                json.dump(mcp_config, f, indent=2)
+                f.write("\n")
+            print("  Created .mcp.json")
+
+        # Create .claude/settings.local.json to enable the MCP server
+        claude_dir = self.paths.root / ".claude"
+        claude_dir.mkdir(exist_ok=True)
+        settings_file = claude_dir / "settings.local.json"
+        if not settings_file.exists():
+            settings_config = {
+                "enableAllProjectMcpServers": True,
+                "enabledMcpjsonServers": ["kintsugi"],
+            }
             with open(settings_file, "w") as f:
-                json.dump(claude_config, f, indent=2)
+                json.dump(settings_config, f, indent=2)
+                f.write("\n")
             print("  Created .claude/settings.local.json")
 
     def _create_vscode_config(self) -> None:

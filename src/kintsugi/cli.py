@@ -323,17 +323,8 @@ def start():
     The MCP server exposes image processing tools that Claude can use
     for signal isolation and quality assessment.
 
-    Configure in Claude Code settings:
-
-    \b
-    {
-        "mcpServers": {
-            "kintsugi": {
-                "command": "kintsugi",
-                "args": ["mcp", "start"]
-            }
-        }
-    }
+    Run 'kintsugi mcp config <project_path>' to generate the .mcp.json
+    configuration file, or use 'kintsugi init' which creates it automatically.
     """
     try:
         import asyncio
@@ -401,18 +392,21 @@ def config(project_path: str, print_only: bool):
 
     PROJECT_PATH is the path to your KINTSUGI project directory.
 
-    By default, creates .claude/settings.local.json in the project directory.
-    Use --print-only to just display the configuration without creating files.
+    Creates .mcp.json (MCP server definition) at the project root and
+    .claude/settings.local.json (enables the server). Use --print-only
+    to just display the configuration without creating files.
     """
     import json as json_mod
     from pathlib import Path
 
     project_path = Path(project_path).resolve()
 
-    config_json = {
+    from kintsugi.project import _resolve_kintsugi_executable
+
+    mcp_config = {
         "mcpServers": {
             "kintsugi": {
-                "command": "kintsugi",
+                "command": _resolve_kintsugi_executable(),
                 "args": ["mcp", "start"],
                 "cwd": str(project_path),
             }
@@ -422,46 +416,68 @@ def config(project_path: str, print_only: bool):
     if print_only:
         console.print(
             Panel.fit(
-                json_mod.dumps(config_json, indent=2),
-                title="Claude Code MCP Configuration",
+                json_mod.dumps(mcp_config, indent=2),
+                title="Claude Code MCP Configuration (.mcp.json)",
             )
         )
         return
 
-    # Create .claude directory and settings file
-    claude_dir = project_path / ".claude"
-    claude_dir.mkdir(exist_ok=True)
+    # Create .mcp.json at project root
+    mcp_file = project_path / ".mcp.json"
 
-    settings_file = claude_dir / "settings.local.json"
-
-    if settings_file.exists():
-        # Check if we need to update existing config
-        with open(settings_file) as f:
+    if mcp_file.exists():
+        with open(mcp_file) as f:
             existing = json_mod.load(f)
 
-        if "mcpServers" not in existing:
-            existing["mcpServers"] = {}
-
         if "kintsugi" in existing.get("mcpServers", {}):
-            console.print(f"[yellow]KINTSUGI MCP config already exists in {settings_file}[/yellow]")
+            console.print(f"[yellow]KINTSUGI MCP config already exists in {mcp_file}[/yellow]")
             console.print("Use --print-only to see the configuration.")
             return
 
-        # Add kintsugi to existing config
-        existing["mcpServers"]["kintsugi"] = config_json["mcpServers"]["kintsugi"]
-        with open(settings_file, "w") as f:
+        # Add kintsugi to existing .mcp.json
+        if "mcpServers" not in existing:
+            existing["mcpServers"] = {}
+        existing["mcpServers"]["kintsugi"] = mcp_config["mcpServers"]["kintsugi"]
+        with open(mcp_file, "w") as f:
             json_mod.dump(existing, f, indent=2)
-        console.print(f"[green]Added KINTSUGI MCP config to existing {settings_file}[/green]")
+            f.write("\n")
+        console.print(f"[green]Added KINTSUGI MCP config to existing {mcp_file}[/green]")
     else:
-        # Create new config file
+        with open(mcp_file, "w") as f:
+            json_mod.dump(mcp_config, f, indent=2)
+            f.write("\n")
+        console.print(f"[green]Created {mcp_file}[/green]")
+
+    # Ensure .claude/settings.local.json enables the MCP server
+    claude_dir = project_path / ".claude"
+    claude_dir.mkdir(exist_ok=True)
+    settings_file = claude_dir / "settings.local.json"
+
+    if settings_file.exists():
+        with open(settings_file) as f:
+            settings = json_mod.load(f)
+        enabled = settings.get("enabledMcpjsonServers", [])
+        if "kintsugi" not in enabled:
+            enabled.append("kintsugi")
+            settings["enabledMcpjsonServers"] = enabled
+            with open(settings_file, "w") as f:
+                json_mod.dump(settings, f, indent=2)
+                f.write("\n")
+            console.print(f"[green]Added kintsugi to enabledMcpjsonServers in {settings_file}[/green]")
+    else:
+        settings = {
+            "enableAllProjectMcpServers": True,
+            "enabledMcpjsonServers": ["kintsugi"],
+        }
         with open(settings_file, "w") as f:
-            json_mod.dump(config_json, f, indent=2)
+            json_mod.dump(settings, f, indent=2)
+            f.write("\n")
         console.print(f"[green]Created {settings_file}[/green]")
 
     console.print(
         Panel.fit(
-            json_mod.dumps(config_json, indent=2),
-            title="Claude Code MCP Configuration",
+            json_mod.dumps(mcp_config, indent=2),
+            title="Claude Code MCP Configuration (.mcp.json)",
         )
     )
     console.print("\n[bold]Next steps:[/bold]")
@@ -1001,6 +1017,14 @@ def generate_workflow_config(project_dir: Path, print_only: bool = False) -> Pat
         },
     )
 
+    # Auto-detect tissue type from project name
+    try:
+        from kintsugi.signal.batch_multi import parse_tissue_type
+
+        tissue_type = parse_tissue_type(project_dir.name, project_dir)
+    except Exception:
+        tissue_type = "unknown"
+
     # Build config dict and dump via PyYAML for correct types
     # Convert channel_names_dict keys to int for YAML (Snakemake reads as int)
     channel_names_yaml = (
@@ -1043,6 +1067,15 @@ def generate_workflow_config(project_dir: Path, print_only: bool = False) -> Pat
             "tiles": [3, 3],
             "blend_depth": 0,
             "z_smooth_sigma": 1.0,
+        },
+        # Signal isolation parameters
+        "signal_isolation": {
+            "method": "auto",
+            "tissue_type": tissue_type,
+            "tile_smooth_sigma": 0.0,
+            "recipe_dir": "",
+            "learn": True,
+            "force": False,
         },
         # Registration parameters
         "registration": {
@@ -1125,6 +1158,11 @@ def generate_workflow_config(project_dir: Path, print_only: bool = False) -> Pat
             "time_registration": 120,
             "mem_qc_registration": 16000,
             "time_qc_registration": 30,
+            # Signal isolation resources (CPU-only)
+            "mem_signal_isolation": 32000,
+            "time_signal_isolation": 120,
+            "cpus_signal_isolation": 4,
+            "time_qc_signal_isolation": 60,
             # CPU job resources (float64 in system memory, needs more)
             "cpu_cpus_per_task": 8,
             "cpu_time_multiplier": 5,
@@ -1486,14 +1524,34 @@ def workflow_run(
             # Full cycle ~22 min GPU vs ~282 min CPU — queuing always wins.
             total = pool["total_gpu_avail"] or pool["total_gpu_slots"] or jobs
 
+            if pool["total_gpu_slots"] == 0:
+                console.print("[red bold]ERROR: No GPU slots detected.[/red bold]")
+                console.print("  Config has no accounts with gpu_slots > 0")
+                console.print("  Run: kintsugi workflow config .")
+                raise SystemExit(1)
+
+            if total < 2:
+                console.print(
+                    f"[yellow]WARNING: Only {total} GPU slot — "
+                    f"pipeline stages cannot overlap[/yellow]"
+                )
+
+            # Allow QC rules (CPU partition, no GPU) to run alongside GPU jobs.
+            # Cap CPU overhead at 4 to avoid overwhelming the scheduler.
+            total_with_cpu = total + min(4, pool.get("total_cpu_slots", 0))
+
             console.print(
                 f"  Resources: {pool['total_gpu_avail']} GPU available "
                 f"(of {pool['total_gpu_slots']} total GPU slots)"
             )
 
-            cmd.extend(["--profile", str(profile_dir), "-j", str(total)])
+            cmd.extend(["--profile", str(profile_dir), "-j", str(total_with_cpu)])
         else:
-            console.print("[yellow]No SLURM profile found, running locally.[/yellow]")
+            if not local:
+                console.print("[red bold]ERROR: No SLURM profile found.[/red bold]")
+                console.print("  Expected: workflow/profiles/slurm/config.yaml")
+                console.print("  Run: kintsugi workflow config .")
+                raise SystemExit(1)
             cmd.extend(["--cores", str(cores)])
 
     if dry_run:
@@ -1683,6 +1741,351 @@ def workflow_status(
                 show_estimates=not no_estimates,
                 show_jobs=not no_jobs,
             )
+
+
+# ============================================================================
+# Batch Processing (Multi-Dataset)
+# ============================================================================
+
+
+def _discover_batch_projects(
+    projects_dir: Path, force: bool = False, dataset: str | None = None
+) -> list[Path]:
+    """Find projects eligible for batch processing.
+
+    Eligible = has workflow/config.yaml + data/raw/.staged,
+    and missing signal_isolated/.snakemake_complete (unless force).
+    """
+    eligible = []
+    for p in sorted(projects_dir.iterdir()):
+        if not p.is_dir():
+            continue
+        if dataset and dataset.lower() not in p.name.lower():
+            continue
+        if not (p / "workflow" / "config.yaml").exists():
+            continue
+        if not (p / "data" / "raw" / ".staged").exists():
+            continue
+        if not force and (
+            p / "data" / "processed" / "signal_isolated" / ".snakemake_complete"
+        ).exists():
+            continue
+        eligible.append(p)
+    return eligible
+
+
+def _detect_project_stage(project_dir: Path) -> str:
+    """Detect the furthest completed stage for a project."""
+    if (
+        project_dir / "data" / "processed" / "signal_isolated" / ".snakemake_complete"
+    ).exists():
+        return "[green]signal_isolated[/green]"
+
+    if (
+        project_dir / "data" / "processed" / "registered" / ".snakemake_complete"
+    ).exists():
+        return "[cyan]registered[/cyan]"
+
+    # Check EDF - are all cycles done?
+    edf_dir = project_dir / "data" / "processed" / "edf"
+    if edf_dir.exists() and list(edf_dir.glob("cyc*/.snakemake_complete")):
+        return "edf (partial)"
+
+    decon_dir = project_dir / "data" / "processed" / "deconvolved"
+    if decon_dir.exists() and list(decon_dir.glob("cyc*/.snakemake_complete")):
+        return "deconvolved (partial)"
+
+    stitch_dir = project_dir / "data" / "processed" / "stitched"
+    if stitch_dir.exists() and list(stitch_dir.glob("cyc*/.snakemake_complete")):
+        return "stitched (partial)"
+
+    if (project_dir / "data" / "raw" / ".staged").exists():
+        return "[yellow]staged (not started)[/yellow]"
+
+    return "[dim]not staged[/dim]"
+
+
+def _run_single_project(
+    project_dir: Path, gpu_budget: int, force: bool, phases: list[str] | None = None
+) -> tuple[str, int, float, str]:
+    """Run kintsugi workflow run for a single project."""
+    import time
+
+    cmd = ["kintsugi", "workflow", "run", str(project_dir), "-j", str(gpu_budget)]
+    if force:
+        cmd.extend(["--forcerun", "all"])
+
+    start = time.time()
+    try:
+        result = subprocess.run(
+            cmd, check=False, capture_output=True, text=True, timeout=86400  # 24h max
+        )
+        duration = time.time() - start
+        return (
+            project_dir.name,
+            result.returncode,
+            duration,
+            result.stderr[-1000:] if result.stderr else "",
+        )
+    except subprocess.TimeoutExpired:
+        duration = time.time() - start
+        return (project_dir.name, -1, duration, "Timeout after 24h")
+    except Exception as e:
+        duration = time.time() - start
+        return (project_dir.name, -1, duration, str(e))
+
+
+@workflow.command("batch")
+@click.argument("projects_dir", type=click.Path(exists=True))
+@click.option("--parallel", "-p", default=1, type=int, help="Concurrent datasets (default: 1)")
+@click.option("--dataset", "-d", default=None, help="Process single dataset by name substring")
+@click.option("--dry-run", "-n", is_flag=True, help="Preview eligible datasets")
+@click.option("--detach", is_flag=True, help="Run in background (survives SSH disconnect)")
+@click.option("--force", "-f", is_flag=True, help="Reprocess even if completed")
+@click.option("--phases", default=None, help="Comma-separated stages (e.g., stitch,decon,edf)")
+def workflow_batch(
+    projects_dir: str,
+    parallel: int,
+    dataset: str | None,
+    dry_run: bool,
+    detach: bool,
+    force: bool,
+    phases: str | None,
+):
+    """Run processing pipeline across multiple datasets.
+
+    Discovers eligible projects (with config + staged data), validates GPU
+    resources, and runs kintsugi workflow run for each dataset. This is a
+    thin orchestrator -- each dataset runs through the full existing pipeline
+    with all GPU routing, SLURM profile, and sentinel tracking intact.
+
+    PROJECTS_DIR is the parent directory containing project subdirectories.
+
+    \b
+    Examples:
+        kintsugi workflow batch /path/to/projects           # All eligible
+        kintsugi workflow batch /path/to/projects --dry-run  # Preview
+        kintsugi workflow batch . -d CX_19-004               # Single dataset
+        kintsugi workflow batch . -p 2 --detach              # Background, 2 concurrent
+        kintsugi workflow batch . --force                    # Reprocess completed
+    """
+    import time
+
+    import yaml
+    from kintsugi.hpc import detect_live_multi_account
+
+    projects_dir_path = Path(projects_dir).resolve()
+
+    # Discover eligible projects
+    eligible = _discover_batch_projects(projects_dir_path, force=force, dataset=dataset)
+
+    if not eligible:
+        console.print("[yellow]No eligible projects found.[/yellow]")
+        console.print("[dim]Projects need workflow/config.yaml + data/raw/.staged")
+        if not force:
+            console.print("and must not have data/processed/registered/.snakemake_complete")
+            console.print("Use --force to reprocess completed projects.[/dim]")
+        return
+
+    # Validate GPU resources from first project's config
+    config_path = eligible[0] / "workflow" / "config.yaml"
+    with open(config_path) as f:
+        wf_config = yaml.safe_load(f)
+
+    res = wf_config.get("resources", {})
+    account_list = [a["name"] for a in res.get("accounts", [])]
+
+    if not account_list:
+        console.print("[red bold]ERROR: No SLURM accounts in config.yaml[/red bold]")
+        console.print("  Run: kintsugi workflow config <project_dir>")
+        raise SystemExit(1)
+
+    pool = detect_live_multi_account(
+        account_list,
+        resources_config={
+            "cpus_per_cpu_job": res.get("cpu_cpus_per_task", 8),
+            "mem_per_cpu_job": res.get("cpu_mem_decon", 48000) // 1000,
+            "cpu_utilization_cap": res.get("cpu_utilization_cap", 0.85),
+        },
+    )
+
+    if pool["total_gpu_slots"] == 0:
+        console.print("[red bold]ERROR: No GPU slots detected.[/red bold]")
+        console.print("  Config has no accounts with gpu_slots > 0")
+        console.print("  Run: kintsugi workflow config <project_dir>")
+        raise SystemExit(1)
+
+    gpu_per_proc = max(
+        1, (pool.get("total_gpu_avail") or pool["total_gpu_slots"]) // max(1, parallel)
+    )
+
+    # Parse phases
+    phase_list = [p.strip() for p in phases.split(",")] if phases else None
+
+    # Show discovery summary
+    console.print(f"\n[bold]Batch Processing[/bold]  ({len(eligible)} datasets)\n")
+    console.print(
+        f"  GPU slots: {pool.get('total_gpu_avail', '?')} available "
+        f"(of {pool['total_gpu_slots']} total)"
+    )
+    console.print(f"  Parallel: {parallel}  |  GPU budget per process: {gpu_per_proc}")
+    if phase_list:
+        console.print(f"  Phases: {', '.join(phase_list)}")
+    console.print()
+
+    # Project table
+    table = Table(title="Eligible Datasets")
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("Project", style="cyan")
+    table.add_column("Cycles", justify="right")
+    table.add_column("Current Stage", style="bold")
+
+    for i, proj in enumerate(eligible, 1):
+        # Read cycle count from config
+        try:
+            with open(proj / "workflow" / "config.yaml") as f:
+                pcfg = yaml.safe_load(f)
+            n_cycles = str(len(pcfg.get("cycles", [])))
+        except Exception:
+            n_cycles = "?"
+
+        stage = _detect_project_stage(proj)
+        table.add_row(str(i), proj.name, n_cycles, stage)
+
+    console.print(table)
+    console.print()
+
+    if dry_run:
+        console.print("[dim]Dry run -- no processing started.[/dim]")
+        return
+
+    # Detach mode: relaunch in background
+    if detach:
+        log_path = projects_dir_path / ".kintsugi_batch.log"
+        pid_path = projects_dir_path / ".kintsugi_batch.pid"
+
+        # Build command to re-invoke ourselves without --detach
+        cmd = [
+            sys.executable,
+            "-m",
+            "kintsugi.cli",
+            "workflow",
+            "batch",
+            str(projects_dir_path),
+        ]
+        cmd.extend(["-p", str(parallel)])
+        if dataset:
+            cmd.extend(["-d", dataset])
+        if force:
+            cmd.append("-f")
+        if phases:
+            cmd.extend(["--phases", phases])
+
+        with open(log_path, "w") as log_file:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
+        pid_path.write_text(str(proc.pid))
+        console.print(f"  Batch launched in background (PID {proc.pid})")
+        console.print(f"  Log: {log_path}")
+        console.print(f"  PID: {pid_path}")
+        console.print(f"\n  Monitor: tail -f {log_path}")
+        console.print(f"  Stop:    kintsugi workflow stop {projects_dir_path}")
+        return
+
+    # Execute
+    results: list[tuple[str, int, float]] = []
+    start_total = time.time()
+
+    if parallel <= 1:
+        # Sequential execution
+        for i, proj in enumerate(eligible, 1):
+            console.print(
+                f"[bold][{i}/{len(eligible)}] Processing {proj.name}...[/bold]"
+            )
+            name, rc, dur, stderr = _run_single_project(
+                proj, gpu_per_proc, force, phase_list
+            )
+            status = "[green]OK[/green]" if rc == 0 else f"[red]FAILED (rc={rc})[/red]"
+            console.print(f"  {status}  ({dur / 60:.1f} min)")
+            if rc != 0 and stderr:
+                console.print(f"  [dim]{stderr[-200:]}[/dim]")
+            results.append((name, rc, dur))
+    else:
+        # Parallel execution
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        console.print(
+            f"[bold]Running {len(eligible)} datasets with {parallel} workers[/bold]"
+        )
+        with ThreadPoolExecutor(max_workers=parallel) as executor:
+            futures = {
+                executor.submit(
+                    _run_single_project, p, gpu_per_proc, force, phase_list
+                ): p
+                for p in eligible
+            }
+            for future in as_completed(futures):
+                name, rc, dur, stderr = future.result()
+                status = (
+                    "[green]OK[/green]" if rc == 0 else f"[red]FAILED (rc={rc})[/red]"
+                )
+                console.print(f"  {name}: {status}  ({dur / 60:.1f} min)")
+                if rc != 0 and stderr:
+                    console.print(f"    [dim]{stderr[-200:]}[/dim]")
+                results.append((name, rc, dur))
+
+    # Summary
+    total_time = time.time() - start_total
+    succeeded = sum(1 for _, rc, _ in results if rc == 0)
+    failed = sum(1 for _, rc, _ in results if rc != 0)
+
+    console.print()
+    summary = Table(title="Batch Summary")
+    summary.add_column("Project", style="cyan")
+    summary.add_column("Status")
+    summary.add_column("Duration", justify="right")
+    for name, rc, dur in results:
+        status = "[green]OK[/green]" if rc == 0 else "[red]FAILED[/red]"
+        summary.add_row(name, status, f"{dur / 60:.1f} min")
+    console.print(summary)
+    console.print(
+        f"\n  {succeeded} succeeded, {failed} failed, "
+        f"total {total_time / 60:.1f} min"
+    )
+
+
+@workflow.command("stop")
+@click.argument("projects_dir", type=click.Path(exists=True))
+def workflow_stop(projects_dir: str):
+    """Stop a running batch process.
+
+    Sends SIGTERM to the batch orchestrator. SLURM jobs already submitted
+    continue running -- use scancel to cancel them.
+    """
+    import signal
+
+    pid_path = Path(projects_dir).resolve() / ".kintsugi_batch.pid"
+    if not pid_path.exists():
+        console.print("[yellow]No batch PID file found.[/yellow]")
+        return
+
+    try:
+        pid = int(pid_path.read_text().strip())
+        os.kill(pid, signal.SIGTERM)
+        console.print(f"  Sent SIGTERM to batch process (PID {pid})")
+        console.print("  SLURM jobs already submitted continue running.")
+        console.print("  Use scancel to cancel individual SLURM jobs.")
+        pid_path.unlink()
+    except ProcessLookupError:
+        console.print(f"  Process {pid} not running. Cleaning up PID file.")
+        pid_path.unlink()
+    except ValueError:
+        console.print(f"[red]Invalid PID in {pid_path}[/red]")
 
 
 # ============================================================================
@@ -2764,8 +3167,10 @@ def isolate_batch(
 
     if not projects:
         console.print("[yellow]No projects found ready for signal isolation.[/yellow]")
-        console.print("[dim]Projects need workflow/config.yaml with channel_names")
-        console.print("and data/processed/registered/ with .tif files.[/dim]")
+        console.print(
+            "[dim]Projects need workflow/config.yaml with channel_names\n"
+            "and data/processed/registered/ with .tif files.[/dim]"
+        )
         return
 
     # Show discovery table

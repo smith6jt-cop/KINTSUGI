@@ -156,6 +156,7 @@ def load_channel_names(
         for line in lines:
             # Check if this line indicates a new cycle (e.g., DAPI-01, DAPI-02)
             dapi_match = re.match(r'DAPI[-_]?(\d+)', line, re.IGNORECASE)
+            dapi_bare = re.match(r'DAPI\s*$', line, re.IGNORECASE)
 
             if dapi_match:
                 # Save previous cycle if we have channels
@@ -165,6 +166,12 @@ def load_channel_names(
                 # Start new cycle
                 current_cycle = int(dapi_match.group(1))
                 cycle_channels = [line]  # DAPI is first channel
+            elif dapi_bare:
+                # Bare "DAPI" without cycle suffix — auto-increment cycle
+                if cycle_channels and current_cycle > 0:
+                    channel_dict[current_cycle] = cycle_channels
+                current_cycle += 1
+                cycle_channels = [line]
             elif current_cycle > 0:
                 # Add channel to current cycle
                 cycle_channels.append(line)

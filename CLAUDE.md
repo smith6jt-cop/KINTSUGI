@@ -29,11 +29,12 @@ my_project/
 │   └── CHANNELNAMES.txt   ← Channel/marker names (user-provided)
 ├── notebooks/         ← Working copies of processing notebooks
 ├── configs/           ← Processing configuration files
-├── .claude/           ← Claude Code MCP config (auto-generated)
+├── .mcp.json          ← MCP server config (auto-generated, absolute path)
+├── .claude/           ← Claude Code settings (auto-generated)
 └── .vscode/           ← VS Code settings (auto-generated)
 ```
 
-The `.claude/settings.local.json` file is **automatically created** with the MCP server configuration.
+The `.mcp.json` file is **automatically created** with the MCP server definition (using an absolute path to the `kintsugi` executable). The `.claude/settings.local.json` enables the server via `enabledMcpjsonServers`.
 
 ### Experiment Metadata
 
@@ -107,6 +108,33 @@ kintsugi workflow status . --watch                 # Standalone dashboard
 
 **Key function**: `generate_workflow_config(project_dir: Path) -> Path` in `cli.py` — standalone, reusable by both `workflow config` and `workflow run`.
 
+### Batch Processing (Multiple Datasets)
+
+**ALWAYS use the CLI command — NEVER write custom batch scripts:**
+
+```bash
+kintsugi workflow batch /path/to/projects_dir           # All eligible datasets
+kintsugi workflow batch /path/to/projects_dir --dry-run  # Preview what will run
+kintsugi workflow batch . -d CX_19-004                   # Single dataset by name
+kintsugi workflow batch . -p 2 --detach                  # Background, 2 concurrent
+kintsugi workflow batch . --force                        # Reprocess completed datasets
+kintsugi workflow stop /path/to/projects_dir             # Stop background batch
+```
+
+Eligibility: project has `workflow/config.yaml` + `data/raw/.staged`, and is missing `data/processed/registered/.snakemake_complete` (unless `--force`). The command validates GPU resources before starting and divides GPU slots across parallel processes.
+
+**NEVER do this:**
+- Do NOT write bash scripts that invoke `snakemake` directly
+- Do NOT use `subprocess.run(["snakemake", ...])` — use `kintsugi workflow run`
+- Do NOT omit `--profile profiles/slurm` — this causes CPU-only execution
+- Do NOT use `-j 1` — GPU pipelining requires `-j` >= total GPU slots (5)
+
+### GPU-Only Scheduling
+
+All processing (stitch, decon, EDF, registration) runs on GPU. CPU is 5-25x slower per step. QC rules (stitch/decon/edf/registration QC) run on CPU partition — they use pyvips + matplotlib, not GPU compute. The `-j` flag accounts for both GPU processing slots and CPU QC slots.
+
+`workflow run` will **hard-fail** if no GPU slots are detected or if no SLURM profile exists (unless `--local` is explicitly passed). There is no silent CPU fallback.
+
 ## Development Workspace
 
 Use the VS Code multi-root workspace (`kintsugi-dev.code-workspace`) which combines:
@@ -133,7 +161,7 @@ If you're not using `kintsugi init`, or need to add MCP support to an existing p
 kintsugi mcp config /path/to/project
 ```
 
-This automatically creates `.claude/settings.local.json` with the proper configuration. If the file already exists, it will add the KINTSUGI MCP server to your existing configuration.
+This creates `.mcp.json` at the project root with the MCP server definition (using an absolute path to the `kintsugi` executable) and `.claude/settings.local.json` to enable it. If `.mcp.json` already exists, it will add the KINTSUGI server to your existing configuration.
 
 Use `--print-only` to display the configuration without creating files:
 ```bash
@@ -244,7 +272,7 @@ python -m build
 - `kreg.py`, `kstitch.py`, `kview2.py` - Bridge modules to notebook implementations
 - `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA)
 - `edf.py` - Extended depth of focus processing (CuPy GPU or NumPy CPU)
-- `project.py` - Project structure management (`KintsugiProject` class)
+- `project.py` - Project structure management (`KintsugiProject` class), `_resolve_kintsugi_executable()` for absolute-path MCP config
 - `deprecation.py` - Deprecation warnings and migration guidance
 - `kcorrect_gpu.py` - GPU-accelerated BaSiC illumination correction (CuPy/SciPy)
 - `zarr_io.py` - OME-Zarr format I/O with Dask lazy loading

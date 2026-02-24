@@ -75,7 +75,8 @@ kintsugi workflow run .       # Submit via Snakemake (auto-sets -j)
 | No `--resources gpus=N` needed | GPU budget is baked into cycle pre-assignment |
 | Registration as aggregate rule (no `{cycle}` wildcard) | Registration aligns ALL cycles at once — needs all EDF outputs before starting |
 | Static account assignment for registration & QC | `_registration_assignment()` picks first GPU account; reused by QC rules |
-| Aggregate QC rules (4 stages) | QC runs once across ALL cycles for cross-cycle comparison heatmaps + registration overlays |
+| Signal isolation as aggregate rule (CPU-only) | Autofluorescence subtraction runs after registration, CPU-only (numpy/scipy, no GPU) |
+| Aggregate QC rules (5 stages) | QC runs once across ALL cycles for cross-cycle comparison heatmaps + registration overlays + signal isolation |
 | Dynamic worker counts | Wrapper scripts read `cpus_per_task` from Snakemake resources instead of hardcoded 4 |
 
 **Config format** (`workflow/config.yaml`):
@@ -165,7 +166,7 @@ resources:
 
 Registration (multi-cycle alignment via VALIS) is Rule 4 in the pipeline. Unlike stitch/decon/edf which process one cycle each, registration processes ALL cycles in a single SLURM job.
 
-**Full pipeline**: `stitch → deconvolve → edf` (per-cycle, pipelined) → `registration` (all cycles) + `qc_stitch/qc_decon/qc_edf` (aggregate after each stage) + `qc_registration` (after registration)
+**Full pipeline**: `stitch → deconvolve → edf` (per-cycle, pipelined) → `registration` (all cycles) → `signal_isolation` (all channels) + `qc_stitch/qc_decon/qc_edf` (aggregate after each stage) + `qc_registration` + `qc_signal_isolation`
 
 | Aspect | Details |
 |--------|---------|
@@ -271,45 +272,41 @@ Wave-based parallel execution across multi-account GPU pool:
 
 ## Batch Processing (Multi-Dataset)
 
-KINTSUGI supports automated batch processing of multiple CODEX datasets. See `/blue/maigan/smith6jt/README.md` for the complete pipeline reference and `KINTSUGI_Batch_Processing_Guide.docx` for the 8-phase workflow.
+KINTSUGI supports automated batch processing of multiple CODEX datasets via the `kintsugi workflow batch` CLI command. This replaces the old bash scripts (`run_all_workflows.sh`, `process_remaining.sh`) with a proper Python CLI that validates GPU resources, prevents silent CPU fallback, and tracks progress.
 
-**Key scripts** (in `/blue/maigan/smith6jt/`):
+**CLI command (preferred):**
+```bash
+kintsugi workflow batch /path/to/KINTSUGI_Projects           # All eligible datasets
+kintsugi workflow batch /path/to/KINTSUGI_Projects --dry-run  # Preview eligible
+kintsugi workflow batch . -d CX_19-004                        # Single dataset
+kintsugi workflow batch . -p 2 --detach                       # Background, 2 concurrent
+kintsugi workflow batch . --force                             # Reprocess completed
+kintsugi workflow stop /path/to/KINTSUGI_Projects             # Stop background batch
+```
+
+**Eligibility**: project has `workflow/config.yaml` + `data/raw/.staged`, and is missing `data/processed/registered/.snakemake_complete` (unless `--force`). Projects are processed sequentially by default (all share 5 GPU slots). Use `--parallel 2` to split GPU budget across concurrent datasets.
+
+**NEVER write custom batch scripts** — always use `kintsugi workflow batch` or `kintsugi workflow run`. Custom scripts bypass GPU validation, SLURM profile detection, and sentinel tracking.
+
+**Legacy scripts** (in `/blue/maigan/smith6jt/`, historical reference only):
 - `dataset_manifest.csv` - Central registry of all 47 datasets (34 spleen/LN + 13 thymus; source paths, parameters, sizes)
 - `setup_all_projects.sh` - Creates KINTSUGI projects for all datasets in manifest
 - `configure_all_workflows.sh` - Generates Snakemake configs for each project
 - `stage_datasets.sh` - Submits SLURM rsync jobs to copy raw data from orange to blue (wave-based)
 - `stage_datasets_globus.py` - Globus-based staging for thymus datasets from PATH lab SMB share
-- `thymus_manifest.csv` - Standalone manifest for 13 thymus datasets (subset of main manifest)
-- `run_all_workflows.sh` - Runs Snakemake for all staged datasets sequentially
-- `process_remaining.sh` - 5-phase master orchestration for 21 datasets (clean → config → stage → process → report). Supports `--phase N` resume, `--dataset NAME` single-project testing, `--dry-run`
 - `cleanup_datasets.sh` - Verifies EDF outputs + QC sentinels, prompts for QC review, deletes intermediates and raw data (`--force` skips prompt)
-- `pipeline_status.sh` - Shows current state of every dataset
 
 **Pipeline lifecycle:**
 ```
 1. setup_all_projects.sh      Create project dirs + copy metadata from orange
 2. configure_all_workflows.sh Generate Snakemake configs for all projects
 3. stage_datasets.sh 5        Stage next wave of raw data (orange → blue)
-4. run_all_workflows.sh       Process all staged datasets (stitch → decon → EDF → registration + QC)
+4. kintsugi workflow batch .   Process all staged datasets (GPU-validated)
 5. cleanup_datasets.sh        Verify outputs + QC, prompt review, delete intermediates + raw
 6. Repeat 3-5 for next wave
 ```
 
-**Running batch workflows:**
-```bash
-# Process all staged datasets (run inside tmux/screen!)
-tmux new -s batch
-bash run_all_workflows.sh               # all staged datasets, sequential
-bash run_all_workflows.sh --dry-run     # preview without executing
-bash run_all_workflows.sh --dataset CX_19-002_lymph-node_R1  # single dataset
-
-# Master orchestration for 21 remaining datasets (5 phases)
-bash process_remaining.sh               # full pipeline: clean → config → stage → process → report
-bash process_remaining.sh --phase 4     # resume from processing phase
-bash process_remaining.sh --dataset 1901CC2A --dry-run  # test single dataset
-```
-
-**Why sequential**: All datasets share 5 GPU slots — parallel Snakemake instances cause contention. Run inside tmux. Re-runs auto-skip completed datasets via sentinel files + per-channel skip-existing.
+**Why sequential by default**: All datasets share 5 GPU slots — parallel Snakemake instances cause contention. The `--detach` flag survives SSH disconnects. Re-runs auto-skip completed datasets via sentinel files + per-channel skip-existing.
 
 **Snakemake lock recovery**: If a coordinator dies (tmux disconnect, OOM kill), the lock file persists and blocks re-runs with `LockException`. Fix: `cd /path/to/project/workflow && snakemake --unlock --profile profiles/slurm`. Always kill stale coordinators (`ps aux | grep snakemake`) before unlocking.
 
@@ -327,10 +324,12 @@ bash process_remaining.sh --dataset 1901CC2A --dry-run  # test single dataset
 | `data/processed/deconvolved/cyc{NN}/.snakemake_complete` | Snakemake decon rule | Deconvolution done for cycle |
 | `data/processed/edf/cyc{NN}/.snakemake_complete` | Snakemake edf rule | EDF done for cycle |
 | `data/processed/registered/.snakemake_complete` | Snakemake registration rule | All cycles registered |
+| `data/processed/signal_isolated/.snakemake_complete` | Snakemake signal_isolation rule | All channels AF-subtracted |
 | `qc_plots/.snakemake_complete_stitch` | Snakemake qc_stitch rule | Stitch QC report done |
 | `qc_plots/.snakemake_complete_decon` | Snakemake qc_decon rule | Decon QC report done |
 | `qc_plots/.snakemake_complete_edf` | Snakemake qc_edf rule | EDF QC report done |
 | `qc_plots/.snakemake_complete_registration` | Snakemake qc_registration rule | Registration QC overlays done |
+| `qc_plots/.snakemake_complete_signal_isolation` | Snakemake qc_signal_isolation rule | Signal isolation QC pages done |
 | `data/processed/edf/.complete` | `cleanup_datasets.sh` | Dataset fully processed and cleaned |
 
 **Cleanup QC Guard** (added 2026-02-16): `cleanup_datasets.sh` checks all 4 QC sentinels (`qc_plots/.snakemake_complete_{stitch,decon,edf,registration}`) before proceeding. If any are missing, the dataset is skipped with "QC not complete". If all are present, the user is prompted to confirm QC review before deletion. Use `--force` to skip the interactive prompt (for re-runs after initial review). In `--dry-run` mode, shows what would be prompted without blocking.
@@ -341,4 +340,4 @@ bash process_remaining.sh --dataset 1901CC2A --dry-run  # test single dataset
 ./cleanup_datasets.sh --dry-run    # Preview without deleting
 ```
 
-**Phases**: Discovery → Setup/Staging → Validation → SLURM batch → **QC Review** → Cleanup → Signal isolation → Segmentation
+**Phases**: Discovery → Setup/Staging → Validation → SLURM batch (incl. signal isolation) → **QC Review** → Cleanup → Segmentation

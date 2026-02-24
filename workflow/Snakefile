@@ -7,14 +7,15 @@ Replaces the custom submit.sh orchestration with Snakemake's native
 dependency management, skip-existing, and failure recovery.
 
 Processing stages:
-  1. stitch        - Illumination correction (BaSiC) + tile stitching
-  2. deconvolve    - Richardson-Lucy deconvolution
-  3. edf           - Extended depth of focus (variance-based z-projection)
-  4. registration  - Multi-cycle alignment via VALIS (all cycles at once)
+  1. stitch              - Illumination correction (BaSiC) + tile stitching
+  2. deconvolve          - Richardson-Lucy deconvolution
+  3. edf                 - Extended depth of focus (variance-based z-projection)
+  4. registration        - Multi-cycle alignment via VALIS (all cycles at once)
+  5. signal_isolation    - Autofluorescence subtraction (batch, all channels)
 
 Stages 1-3 process one cycle each (all channels, all z-planes).
-Stage 4 processes ALL cycles at once (requires all EDF outputs first).
-Snakemake's DAG ensures: stitch -> deconvolve -> edf (per-cycle) -> registration.
+Stages 4-5 process ALL cycles at once (aggregate rules).
+Snakemake's DAG ensures: stitch -> deconvolve -> edf (per-cycle) -> registration -> signal_isolation.
 
 Multi-account scheduling:
   Cycles are pre-assigned to accounts and modes (GPU/CPU) at DAG creation.
@@ -182,6 +183,11 @@ _CYCLE_ASSIGN = _build_cycle_assignment() if ACCOUNTS else {}
 if not _CYCLE_ASSIGN:
     _default_acct = RES.get("account_gpu", RES.get("account", ""))
     _default_part = RES.get("partition_gpu", "hpg-b200")
+    if not _default_acct:
+        raise ValueError(
+            "No SLURM accounts configured in config.yaml.\n"
+            "Run 'kintsugi workflow config .' to auto-detect accounts."
+        )
     for cyc in CYCLES:
         _CYCLE_ASSIGN[cyc_fmt(cyc)] = {
             "account": _default_acct,
@@ -232,12 +238,13 @@ def all_qc_sentinels():
         f"{PROJECT}/qc_plots/.snakemake_complete_decon",
         f"{PROJECT}/qc_plots/.snakemake_complete_edf",
         f"{PROJECT}/qc_plots/.snakemake_complete_registration",
+        f"{PROJECT}/qc_plots/.snakemake_complete_signal_isolation",
     ]
 
 
 rule all:
     input:
-        f"{PROJECT}/data/processed/registered/.snakemake_complete",
+        f"{PROJECT}/data/processed/signal_isolated/.snakemake_complete",
         *all_qc_sentinels(),
 
 
@@ -413,7 +420,66 @@ rule registration:
 
 
 # ===========================================================================
-# Rule 5: Spillover Correction (REDSEA) — optional post-segmentation
+# Rule 5: Signal Isolation (autofluorescence subtraction)
+# ===========================================================================
+# Single aggregate job processing ALL registered channels at once.
+# CPU-only — uses numpy/scipy, no GPU needed. Reuses QC CPU partition routing.
+# Supports recipe-driven (legacy param files) or auto-analyzed subtraction.
+
+SI_CFG = config.get("signal_isolation", {})
+
+rule signal_isolation:
+    input:
+        reg_done=f"{PROJECT}/data/processed/registered/.snakemake_complete",
+    output:
+        sentinel=f"{PROJECT}/data/processed/signal_isolated/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+        cycles=CYCLES,
+        channel_names=CHANNEL_NAMES,
+    resources:
+        mem_mb=RES.get("mem_signal_isolation", 32000),
+        runtime=RES.get("time_signal_isolation", 120),
+        slurm_partition=_QC_CPU_ASSIGN["partition"],
+        slurm_account=_QC_CPU_ASSIGN["account"],
+        gres="",
+        cpus_per_task=RES.get("cpus_signal_isolation", 4),
+    log:
+        f"{PROJECT}/slurm/logs/snakemake/signal_isolation.log",
+    script:
+        "scripts/signal_isolation.py"
+
+
+rule qc_signal_isolation:
+    input:
+        si_done=f"{PROJECT}/data/processed/signal_isolated/.snakemake_complete",
+    output:
+        sentinel=f"{PROJECT}/qc_plots/.snakemake_complete_signal_isolation",
+    params:
+        stage="signal_isolation",
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        cycles=CYCLES,
+        channels=CHANNELS,
+        n_zplanes=N_ZPLANES,
+        channel_names=CHANNEL_NAMES,
+    resources:
+        mem_mb=RES.get("mem_qc", 64000),
+        runtime=RES.get("time_qc_signal_isolation", 60),
+        slurm_partition=_QC_CPU_ASSIGN["partition"],
+        slurm_account=_QC_CPU_ASSIGN["account"],
+        gres="",
+        cpus_per_task=2,
+    log:
+        f"{PROJECT}/slurm/logs/snakemake/qc_signal_isolation.log",
+    script:
+        "scripts/qc_report.py"
+
+
+# ===========================================================================
+# Rule 7: Spillover Correction (REDSEA) — optional post-segmentation
 # ===========================================================================
 # CPU-only job. Requires a multichannel image and cell segmentation mask.
 # Produces corrected/uncorrected per-cell quantification CSVs.
@@ -450,7 +516,7 @@ rule spillover_correction:
 
 
 # ===========================================================================
-# Rule 6: 3D Vessel Segmentation (Frangi + skeleton)
+# Rule 8: 3D Vessel Segmentation (Frangi + skeleton)
 # ===========================================================================
 # Standalone — NOT in default 'all' target. Invoke explicitly:
 #   snakemake vessel3d --profile profiles/slurm --config vessel_cycle=3 vessel_channel=2
@@ -528,6 +594,22 @@ def _all_decon_sentinels():
     )
 
 
+def _qc_cpu_assignment():
+    """Pick CPU partition for QC rules (no GPU needed).
+
+    QC rules (stitch, decon, edf, registration) use pyvips + matplotlib,
+    not GPU compute. Running them on CPU frees GPU slots for processing.
+    """
+    for acct in ACCOUNTS:
+        if acct.get("partition_cpu"):
+            return {"account": acct["name"], "partition": acct["partition_cpu"]}
+    # Fallback to registration assignment account with hpg-default
+    return {"account": _REG_ASSIGN["account"], "partition": "hpg-default"}
+
+
+_QC_CPU_ASSIGN = _qc_cpu_assignment()
+
+
 rule qc_stitch:
     input:
         stitch_done=_all_stitch_sentinels(),
@@ -544,9 +626,9 @@ rule qc_stitch:
     resources:
         mem_mb=RES.get("mem_qc", 64000),
         runtime=RES.get("time_qc", 120),
-        slurm_partition=_REG_ASSIGN["partition"],
-        slurm_account=_REG_ASSIGN["account"],
-        gres="gpu:1" if _REG_ASSIGN["mode"] == "gpu" else "",
+        slurm_partition=_QC_CPU_ASSIGN["partition"],
+        slurm_account=_QC_CPU_ASSIGN["account"],
+        gres="",
         cpus_per_task=4,
     log:
         f"{PROJECT}/slurm/logs/snakemake/qc_stitch.log",
@@ -570,9 +652,9 @@ rule qc_decon:
     resources:
         mem_mb=RES.get("mem_qc", 64000),
         runtime=RES.get("time_qc", 120),
-        slurm_partition=_REG_ASSIGN["partition"],
-        slurm_account=_REG_ASSIGN["account"],
-        gres="gpu:1" if _REG_ASSIGN["mode"] == "gpu" else "",
+        slurm_partition=_QC_CPU_ASSIGN["partition"],
+        slurm_account=_QC_CPU_ASSIGN["account"],
+        gres="",
         cpus_per_task=4,
     log:
         f"{PROJECT}/slurm/logs/snakemake/qc_decon.log",
@@ -596,26 +678,14 @@ rule qc_edf:
     resources:
         mem_mb=RES.get("mem_qc", 64000),
         runtime=RES.get("time_qc", 120),
-        slurm_partition=_REG_ASSIGN["partition"],
-        slurm_account=_REG_ASSIGN["account"],
-        gres="gpu:1" if _REG_ASSIGN["mode"] == "gpu" else "",
+        slurm_partition=_QC_CPU_ASSIGN["partition"],
+        slurm_account=_QC_CPU_ASSIGN["account"],
+        gres="",
         cpus_per_task=4,
     log:
         f"{PROJECT}/slurm/logs/snakemake/qc_edf.log",
     script:
         "scripts/qc_report.py"
-
-
-def _qc_registration_assignment():
-    """Pick CPU partition for registration QC (no GPU needed)."""
-    for acct in ACCOUNTS:
-        if acct.get("partition_cpu"):
-            return {"account": acct["name"], "partition": acct["partition_cpu"]}
-    # Fallback to registration assignment account with hpg-default
-    return {"account": _REG_ASSIGN["account"], "partition": "hpg-default"}
-
-
-_QC_REG_ASSIGN = _qc_registration_assignment()
 
 
 rule qc_registration:
@@ -634,8 +704,8 @@ rule qc_registration:
     resources:
         mem_mb=RES.get("mem_qc_registration", 16000),
         runtime=RES.get("time_qc_registration", 30),
-        slurm_partition=_QC_REG_ASSIGN["partition"],
-        slurm_account=_QC_REG_ASSIGN["account"],
+        slurm_partition=_QC_CPU_ASSIGN["partition"],
+        slurm_account=_QC_CPU_ASSIGN["account"],
         gres="",
         cpus_per_task=2,
     log:
@@ -673,6 +743,11 @@ def _cleanup_safe_inputs():
         inputs[f"edf_cyc{cyc_fmt(c)}"] = (
             f"{PROJECT}/data/processed/edf/cyc{cyc_fmt(c)}/.snakemake_complete"
         )
+
+    # Signal isolation (consumer of registered data)
+    inputs["signal_isolation"] = (
+        f"{PROJECT}/data/processed/signal_isolated/.snakemake_complete"
+    )
 
     # Optional: vessel3d sentinels (second consumer of deconvolved data)
     v3d_cfg = OPTIONAL_CFG.get("vessel3d", {})
