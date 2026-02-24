@@ -121,7 +121,7 @@ kintsugi workflow batch . --force                        # Reprocess completed d
 kintsugi workflow stop /path/to/projects_dir             # Stop background batch
 ```
 
-Eligibility: project has `workflow/config.yaml` + `data/raw/.staged`, and is missing `data/processed/registered/.snakemake_complete` (unless `--force`). The command validates GPU resources before starting and divides GPU slots across parallel processes.
+Eligibility: project has `workflow/config.yaml` + `data/raw/.staged`, and is missing `data/processed/signal_isolated/.snakemake_complete` (unless `--force`). The command validates GPU resources before starting and divides GPU slots across parallel processes.
 
 **NEVER do this:**
 - Do NOT write bash scripts that invoke `snakemake` directly

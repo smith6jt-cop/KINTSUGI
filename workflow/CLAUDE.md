@@ -284,7 +284,7 @@ kintsugi workflow batch . --force                             # Reprocess comple
 kintsugi workflow stop /path/to/KINTSUGI_Projects             # Stop background batch
 ```
 
-**Eligibility**: project has `workflow/config.yaml` + `data/raw/.staged`, and is missing `data/processed/registered/.snakemake_complete` (unless `--force`). Projects are processed sequentially by default (all share 5 GPU slots). Use `--parallel 2` to split GPU budget across concurrent datasets.
+**Eligibility**: project has `workflow/config.yaml` + `data/raw/.staged`, and is missing `data/processed/signal_isolated/.snakemake_complete` (unless `--force`). Projects are processed sequentially by default (all share 5 GPU slots). Use `--parallel 2` to split GPU budget across concurrent datasets.
 
 **NEVER write custom batch scripts** — always use `kintsugi workflow batch` or `kintsugi workflow run`. Custom scripts bypass GPU validation, SLURM profile detection, and sentinel tracking.
 
