@@ -28,14 +28,15 @@ from typing import Any  # noqa: I001
 # Data models
 # ---------------------------------------------------------------------------
 
-STAGES = ("stitch", "deconvolve", "edf", "registration")
+STAGES = ("stitch", "deconvolve", "edf", "registration", "signal_isolation")
 STAGE_DIRS = {
     "stitch": "stitched",
     "deconvolve": "deconvolved",
     "edf": "edf",
     "registration": "registered",
+    "signal_isolation": "signal_isolated",
 }
-QC_STAGES = ("stitch", "decon", "edf", "registration")
+QC_STAGES = ("stitch", "decon", "edf", "registration", "signal_isolation")
 
 
 @dataclass
@@ -77,6 +78,9 @@ class ProjectStatus:
     registration_status: str = "pending"
     registration_job: JobInfo | None = None
     registration_timing: float = 0.0
+    signal_isolation_status: str = "pending"
+    signal_isolation_job: JobInfo | None = None
+    signal_isolation_timing: float = 0.0
     qc_statuses: dict[str, str] = field(default_factory=dict)  # qc_stage -> status
     hardware: HardwareStatus | None = None
     scan_time: datetime = field(default_factory=datetime.now)
@@ -150,6 +154,9 @@ def scan_project_progress(
     # Registration (single job, all cycles)
     status.registration_status = _check_registration_status(project_dir)
 
+    # Signal isolation (single job, after registration)
+    status.signal_isolation_status = _check_signal_isolation_status(project_dir)
+
     # QC reports
     for qc_stage in QC_STAGES:
         sentinel = project_dir / "qc_plots" / f".snakemake_complete_{qc_stage}"
@@ -222,6 +229,26 @@ def _check_registration_status(project_dir: Path) -> str:
     return "pending"
 
 
+def _check_signal_isolation_status(project_dir: Path) -> str:
+    """Check signal isolation completion status."""
+    si_dir = project_dir / "data" / "processed" / "signal_isolated"
+    sentinel = si_dir / ".snakemake_complete"
+
+    if sentinel.exists():
+        return "done"
+
+    if si_dir.exists():
+        # Check for any isolated output (manifest or TIF files)
+        manifest = si_dir / "signal_isolation_manifest.json"
+        if manifest.exists():
+            return "partial"
+        tifs = list(si_dir.glob("*.tif"))
+        if tifs:
+            return "partial"
+
+    return "pending"
+
+
 # ---------------------------------------------------------------------------
 # SLURM job queries
 # ---------------------------------------------------------------------------
@@ -229,12 +256,12 @@ def _check_registration_status(project_dir: Path) -> str:
 # Regex to parse Snakemake job names: smk-<rule>-<cycle> or smk-<rule>
 _SMK_JOB_RE = re.compile(
     r"(?:smk-|snakejob\.|group_)"
-    r"(stitch|deconvolve|decon|edf|registration|qc_\w+|vessel3d|spillover)"
+    r"(stitch|deconvolve|decon|edf|registration|signal_isolation|qc_\w+|vessel3d|spillover)"
     r"(?:[._-](?:cyc)?(\d+))?"
 )
 
 # Also match SLURM log file paths from --output/--error flags
-_LOG_CYCLE_RE = re.compile(r"(stitch|decon|edf|registration|qc_\w+)_cyc(\d+)")
+_LOG_CYCLE_RE = re.compile(r"(stitch|decon|edf|registration|signal_isolation|qc_\w+)_cyc(\d+)")
 
 
 def _attach_slurm_jobs(status: ProjectStatus) -> None:
@@ -299,6 +326,12 @@ def _attach_slurm_jobs(status: ProjectStatus) -> None:
                 status.registration_status = "running"
             elif state == "PENDING":
                 status.registration_status = "queued"
+        elif stage == "signal_isolation":
+            status.signal_isolation_job = job
+            if state == "RUNNING":
+                status.signal_isolation_status = "running"
+            elif state == "PENDING":
+                status.signal_isolation_status = "queued"
         elif cycle and cycle in status.cycle_statuses:
             cs = status.cycle_statuses[cycle]
             cs.jobs[stage] = job
@@ -332,6 +365,7 @@ def _normalize_rule(rule: str) -> str:
         "decon": "deconvolve",
         "edf": "edf",
         "registration": "registration",
+        "signal_isolation": "signal_isolation",
     }
     return mapping.get(rule, rule)
 
@@ -394,6 +428,9 @@ def _attach_recent_sacct(status: ProjectStatus) -> None:
             if stage == "registration":
                 if status.registration_status not in ("done", "running"):
                     status.registration_status = "failed"
+            elif stage == "signal_isolation":
+                if status.signal_isolation_status not in ("done", "running"):
+                    status.signal_isolation_status = "failed"
             elif cycle and cycle in status.cycle_statuses:
                 cs = status.cycle_statuses[cycle]
                 if cs.stages.get(stage) not in ("done", "running"):
@@ -405,6 +442,10 @@ def _update_job_mem(status: ProjectStatus, parent_id: str, max_rss: str) -> None
     # Search through all attached jobs
     if status.registration_job and status.registration_job.job_id == parent_id:
         status.registration_job.mem_used = max_rss
+        return
+
+    if status.signal_isolation_job and status.signal_isolation_job.job_id == parent_id:
+        status.signal_isolation_job.mem_used = max_rss
         return
 
     for cs in status.cycle_statuses.values():
@@ -428,8 +469,12 @@ def _attach_log_timings(status: ProjectStatus) -> None:
     for log_file in log_dir.glob("*.log"):
         m = _LOG_CYCLE_RE.search(log_file.stem)
         if not m:
-            # Check for registration (no cycle)
-            if "registration" in log_file.stem:
+            # Check for aggregate rules (no cycle)
+            if "signal_isolation" in log_file.stem:
+                elapsed = _parse_log_duration(log_file)
+                if elapsed > 0:
+                    status.signal_isolation_timing = elapsed
+            elif "registration" in log_file.stem:
                 elapsed = _parse_log_duration(log_file)
                 if elapsed > 0:
                     status.registration_timing = elapsed
@@ -623,6 +668,7 @@ def estimate_completion(status: ProjectStatus) -> dict[str, Any]:
         "deconvolve": 720,  # ~12 min
         "edf": 90,  # ~1.5 min
         "registration": 1800,  # ~30 min
+        "signal_isolation": 900,  # ~15 min (CPU, ~30s/channel * 28 channels)
     }
 
     confidence = "high" if len(avg_times) >= 2 else ("medium" if avg_times else "low")
@@ -658,6 +704,17 @@ def estimate_completion(status: ProjectStatus) -> dict[str, Any]:
         remaining_per_stage["registration"] = remaining
         total_remaining += remaining
 
+    # Signal isolation (sequential, happens once after registration)
+    if status.signal_isolation_status not in ("done",):
+        if status.signal_isolation_status == "running" and status.signal_isolation_job:
+            elapsed_sec = _parse_elapsed(status.signal_isolation_job.elapsed)
+            expected = avg_times.get("signal_isolation", defaults["signal_isolation"])
+            remaining = max(0, expected - elapsed_sec)
+        else:
+            remaining = avg_times.get("signal_isolation", defaults["signal_isolation"])
+        remaining_per_stage["signal_isolation"] = remaining
+        total_remaining += remaining
+
     # Account for parallelism: GPU-only scheduling means jobs run N at a time
     # where N is total GPU slots. This is a rough estimate.
     n_running = sum(
@@ -668,9 +725,13 @@ def estimate_completion(status: ProjectStatus) -> dict[str, Any]:
     )
     parallelism = max(1, n_running) if n_running > 0 else 1
 
-    # Rough wall-clock estimate: divide non-registration work by parallelism
-    non_reg_remaining = total_remaining - remaining_per_stage.get("registration", 0)
-    wall_clock = (non_reg_remaining / parallelism) + remaining_per_stage.get("registration", 0)
+    # Rough wall-clock estimate: divide per-cycle work by parallelism,
+    # add sequential aggregate stages (registration + signal isolation)
+    sequential = remaining_per_stage.get("registration", 0) + remaining_per_stage.get(
+        "signal_isolation", 0
+    )
+    parallel_remaining = total_remaining - sequential
+    wall_clock = (parallel_remaining / parallelism) + sequential
 
     eta = datetime.now() + timedelta(seconds=wall_clock) if wall_clock > 0 else None
 
@@ -923,6 +984,32 @@ def _render_project(
     if show_jobs:
         reg_row.append(reg_job_str)
     table.add_row(*reg_row)
+
+    # Signal isolation row
+    si_style, si_symbol = _STATUS_STYLE.get(
+        status.signal_isolation_status, ("[dim]", "??")
+    )
+    si_timing = (
+        f"{status.signal_isolation_timing / 60:.0f}m"
+        if status.signal_isolation_timing > 0
+        else ""
+    )
+    si_job_str = ""
+    if show_jobs and status.signal_isolation_job:
+        sj = status.signal_isolation_job
+        if sj.state in ("RUNNING", "PENDING"):
+            mem_info = ""
+            if sj.mem_used:
+                mem_info = f" [{_format_mem(sj.mem_used)}]"
+            si_job_str = (
+                f"{sj.job_id} {sj.state[:3]} {sj.node or '(queued)'} {sj.elapsed}{mem_info}"
+            )
+
+    si_cell = Text(f" {si_symbol} ", style=si_style.strip("[]"))
+    si_row = ["SI", si_cell, "", "", si_timing]
+    if show_jobs:
+        si_row.append(si_job_str)
+    table.add_row(*si_row)
 
     console.print(table)
 

@@ -26,6 +26,7 @@ from kintsugi.dashboard import (
     JobInfo,
     ProjectStatus,
     _check_registration_status,
+    _check_signal_isolation_status,
     _check_stage_status,
     _format_mem,
     _normalize_rule,
@@ -95,6 +96,11 @@ def completed_project(project_dir):
     reg_dir.mkdir(parents=True, exist_ok=True)
     (reg_dir / ".snakemake_complete").touch()
 
+    # Signal isolation done
+    si_dir = project_dir / "data" / "processed" / "signal_isolated"
+    si_dir.mkdir(parents=True, exist_ok=True)
+    (si_dir / ".snakemake_complete").touch()
+
     # QC done for stitch and decon
     (project_dir / "qc_plots" / ".snakemake_complete_stitch").touch()
     (project_dir / "qc_plots" / ".snakemake_complete_decon").touch()
@@ -145,6 +151,29 @@ class TestRegistrationStatus:
         assert _check_registration_status(project_dir) == "pending"
 
 
+class TestSignalIsolationStatus:
+    def test_done(self, project_dir):
+        d = project_dir / "data" / "processed" / "signal_isolated"
+        d.mkdir(parents=True)
+        (d / ".snakemake_complete").touch()
+        assert _check_signal_isolation_status(project_dir) == "done"
+
+    def test_partial_with_manifest(self, project_dir):
+        d = project_dir / "data" / "processed" / "signal_isolated"
+        d.mkdir(parents=True)
+        (d / "signal_isolation_manifest.json").write_text("{}")
+        assert _check_signal_isolation_status(project_dir) == "partial"
+
+    def test_partial_with_tifs(self, project_dir):
+        d = project_dir / "data" / "processed" / "signal_isolated"
+        d.mkdir(parents=True)
+        (d / "CD3e.tif").touch()
+        assert _check_signal_isolation_status(project_dir) == "partial"
+
+    def test_pending(self, project_dir):
+        assert _check_signal_isolation_status(project_dir) == "pending"
+
+
 # ============================================================================
 # Job name parsing
 # ============================================================================
@@ -171,6 +200,16 @@ class TestJobNameParsing:
         assert rule == "edf"
         assert cycle == "05"
 
+    def test_signal_isolation(self):
+        rule, cycle = _parse_job_name("smk-signal_isolation")
+        assert rule == "signal_isolation"
+        assert cycle == ""
+
+    def test_qc_signal_isolation(self):
+        rule, cycle = _parse_job_name("smk-qc_signal_isolation")
+        assert rule == "qc_signal_isolation"
+        assert cycle == ""
+
     def test_qc_rule(self):
         rule, cycle = _parse_job_name("smk-qc_stitch")
         assert rule == "qc_stitch"
@@ -190,6 +229,9 @@ class TestNormalizeRule:
         assert _normalize_rule("stitch") == "stitch"
         assert _normalize_rule("edf") == "edf"
         assert _normalize_rule("registration") == "registration"
+
+    def test_signal_isolation(self):
+        assert _normalize_rule("signal_isolation") == "signal_isolation"
 
     def test_unknown_passthrough(self):
         assert _normalize_rule("vessel3d") == "vessel3d"
@@ -349,10 +391,12 @@ class TestScanProject:
         assert status.cycle_statuses["03"].stages["deconvolve"] == "partial"
         assert status.cycle_statuses["03"].stages["edf"] == "pending"
         assert status.registration_status == "done"
+        assert status.signal_isolation_status == "done"
         assert status.qc_statuses["stitch"] == "done"
         assert status.qc_statuses["decon"] == "done"
         assert status.qc_statuses["edf"] == "pending"
         assert status.qc_statuses["registration"] == "pending"
+        assert status.qc_statuses["signal_isolation"] == "pending"
 
     @patch("kintsugi.dashboard._attach_slurm_jobs")
     @patch("kintsugi.dashboard._attach_log_timings")
@@ -479,7 +523,7 @@ class TestStatusCLI:
 
 
 def _make_fully_completed_status(project_dir: Path) -> ProjectStatus:
-    """Build a ProjectStatus where ALL cycles and registration are done."""
+    """Build a ProjectStatus where ALL cycles, registration, and signal isolation are done."""
     status = ProjectStatus(
         project_dir=project_dir,
         project_name="TestProject",
@@ -495,7 +539,15 @@ def _make_fully_completed_status(project_dir: Path) -> ProjectStatus:
 
     status.registration_status = "done"
     status.registration_timing = 1200.0
-    status.qc_statuses = {"stitch": "done", "decon": "done", "edf": "done", "registration": "done"}
+    status.signal_isolation_status = "done"
+    status.signal_isolation_timing = 600.0
+    status.qc_statuses = {
+        "stitch": "done",
+        "decon": "done",
+        "edf": "done",
+        "registration": "done",
+        "signal_isolation": "done",
+    }
 
     return status
 
@@ -524,11 +576,14 @@ def _make_completed_status(project_dir: Path) -> ProjectStatus:
 
     status.registration_status = "done"
     status.registration_timing = 1200.0
+    status.signal_isolation_status = "done"
+    status.signal_isolation_timing = 600.0
     status.qc_statuses = {
         "stitch": "done",
         "decon": "done",
         "edf": "pending",
         "registration": "pending",
+        "signal_isolation": "pending",
     }
 
     return status
@@ -549,11 +604,13 @@ def _make_empty_status(project_dir: Path) -> ProjectStatus:
         status.cycle_statuses[cyc] = cs
 
     status.registration_status = "pending"
+    status.signal_isolation_status = "pending"
     status.qc_statuses = {
         "stitch": "pending",
         "decon": "pending",
         "edf": "pending",
         "registration": "pending",
+        "signal_isolation": "pending",
     }
 
     return status
