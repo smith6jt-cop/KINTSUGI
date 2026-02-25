@@ -125,11 +125,11 @@ resources:
 
 **Cycle directory resolution**: `_resolve_raw_cycle_dir()` handles `cyc001_reg001_*`, `cyc001`, `cyc01`, and `Cyc01` naming conventions at DAG creation time. Accepts int or str (Snakemake CLI `--config` passes strings).
 
-**`workflow config` behavior**: Always overwrites the Snakefile and profiles (so pipeline logic and SLURM precommand updates propagate); only copies scripts if they don't already exist.
+**`workflow config` behavior**: Always overwrites the Snakefile and profiles (so pipeline logic and SLURM precommand updates propagate); only copies scripts if they don't already exist. **This means deployed scripts can become stale** — if you update a script in `workflow/scripts/` (e.g., `qc_report.py`), you must manually copy it to existing project workflows or delete the old copy and re-run `workflow config`.
 
 **QC Report Rules** (aggregate — added 2026-02-13):
 
-The workflow includes 4 aggregate QC rules that produce rich QC reports (summary heatmaps, z-plane profiles, cross-stage comparison PDFs, registration overlays) after each processing stage completes. These replicate the Notebook 2 QC outputs via `Kprocess.py` functions.
+The workflow includes 5 aggregate QC rules that produce rich QC reports (summary heatmaps, z-plane profiles, cross-stage comparison PDFs, registration overlays, signal isolation pages) after each processing stage completes.
 
 | Rule | Depends On | Kprocess Function | Output |
 |------|-----------|-------------------|--------|
@@ -137,10 +137,11 @@ The workflow includes 4 aggregate QC rules that produce rich QC reports (summary
 | `qc_decon` | All decon sentinels (all cycles) | `run_decon_qc()` | `qc_plots/deconvolved_summary_heatmaps.pdf` + z-profiles for ALL cycles |
 | `qc_edf` | All EDF sentinels (all cycles) | `run_edf_qc()` | `qc_plots/edf_summary_heatmaps.pdf` |
 | `qc_registration` | Registration sentinel | `run_registration_qc()` | `qc_plots/registration_qc_overlay_grid.pdf` + `registration_qc_metrics.pdf` |
+| `qc_signal_isolation` | SI sentinel | `generate_qc_pages()` | `qc_plots/signal_isolation_qc_*.pdf` 3-column before/after pages |
 
 Key design decisions:
 - **Aggregate (not per-cycle)**: QC runs once across ALL cycles for cross-cycle comparison heatmaps
-- **Single dispatch script**: `scripts/qc_report.py` dispatches to the correct Kprocess function based on `snakemake.params.stage`
+- **Single dispatch script**: `scripts/qc_report.py` dispatches to the correct function based on `snakemake.params.stage` (stitch/decon/edf/registration use Kprocess; signal_isolation uses `kintsugi.signal.isolation_qc.generate_qc_pages()`)
 - **Cross-stage comparison**: Each stage loads the previous stage's cached stats pickle (`cache/stitch_stats.pkl` → `decon_stats.pkl` → `edf_stats.pkl`)
 - **Headless matplotlib**: `matplotlib.use("Agg")` is set before any Kprocess import to prevent display issues on compute nodes
 - **GPU with CPU fallback**: Same pattern as processing scripts — tries CuPy, falls back to CPU
@@ -209,7 +210,7 @@ EDF images can have inconsistent dimensions across cycles (e.g., 7472x12662 vs 7
 | CX_19-002_lymph-node_R3 | 9 | 27.6 min | improved | — |
 | CX_19-003_lymph-node_R1 | 9 | 40.8 min | improved | — |
 
-Batch re-registration in progress: 4/16 datasets complete (as of Feb 2026).
+Batch re-registration complete: all 26 registered datasets processed with tuned non-rigid (Feb 2026).
 
 This confirms the params unpacking bug fix (`serial_non_rigid.py:438`, `params=init_kwargs` → `**init_kwargs`) was the root cause of previously poor non-rigid registration quality. The earlier "rigid-only is best" conclusion (11/12 datasets worse with non-rigid) was based on broken code where all smoothing parameters were silently ignored.
 
@@ -341,3 +342,25 @@ kintsugi workflow stop /path/to/KINTSUGI_Projects             # Stop background 
 ```
 
 **Phases**: Discovery → Setup/Staging → Validation → SLURM batch (incl. signal isolation) → **QC Review** → Cleanup → Segmentation
+
+**Sentinel validation for batch-processed projects** (Feb 2026): Projects processed by legacy batch scripts (outside Snakemake) have `signal_isolation_manifest.json` and TIF output but no `.snakemake_complete` sentinel — making them invisible to `kintsugi workflow batch`. Use `scripts/create_si_sentinels.py` to validate output (manifest JSON parse, TIF existence per channel, file size > 0) and create sentinels:
+```bash
+python scripts/create_si_sentinels.py ../KINTSUGI_Projects --dry-run  # Preview
+python scripts/create_si_sentinels.py ../KINTSUGI_Projects            # Create sentinels
+```
+25 projects validated and promoted this way (Feb 25, 2026). All had quality scores 0.70-0.86.
+
+**Stale script deployment hazard**: `workflow config` only copies scripts to projects if they don't already exist. When updating `workflow/scripts/*.py` (e.g., adding signal_isolation support to `qc_report.py`), existing project copies remain stale. Fix: bulk-copy updated scripts to all projects:
+```bash
+for proj in ../KINTSUGI_Projects/*/; do
+    target="$proj/workflow/scripts/qc_report.py"
+    [ -f "$target" ] && cp workflow/scripts/qc_report.py "$target"
+done
+```
+
+**Processing status (Feb 2026):**
+| Category | Count | Details |
+|----------|-------|---------|
+| Complete (signal_isolated sentinel) | 26 | 1 Snakemake + 25 sentinel-validated |
+| Batch processing in progress | 9 | 1 SI-only + 8 full pipeline (via `--detach`) |
+| Empty shells (awaiting data) | 12 | No raw data staged |

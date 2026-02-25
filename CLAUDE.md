@@ -370,7 +370,9 @@ See `src/kintsugi/signal/CLAUDE.md` for weighted autofluorescence subtraction (p
 
 ## Batch Processing (Multi-Dataset)
 
-See `workflow/CLAUDE.md` for batch processing documentation: data staging, `run_all_workflows.sh`, `process_remaining.sh` (5-phase master orchestration for 21 datasets), cleanup with QC guard, and full pipeline lifecycle.
+See `workflow/CLAUDE.md` for batch processing documentation: data staging, cleanup with QC guard, full pipeline lifecycle, and sentinel validation.
+
+**Sentinel validation** (`scripts/create_si_sentinels.py`): Validates signal isolation output (manifest JSON + TIF existence/size) and creates missing `.snakemake_complete` sentinels for projects processed outside Snakemake (e.g., by batch scripts). Supports `--dry-run`. Used to promote 25 batch-processed projects to "signal_isolated" status (Feb 2026).
 
 ## Dependencies
 
