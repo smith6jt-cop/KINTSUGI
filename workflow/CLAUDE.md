@@ -350,17 +350,31 @@ python scripts/create_si_sentinels.py ../KINTSUGI_Projects            # Create s
 ```
 25 projects validated and promoted this way (Feb 25, 2026). All had quality scores 0.70-0.86.
 
-**Stale script deployment hazard**: `workflow config` only copies scripts to projects if they don't already exist. When updating `workflow/scripts/*.py` (e.g., adding signal_isolation support to `qc_report.py`), existing project copies remain stale. Fix: bulk-copy updated scripts to all projects:
+**Stale script deployment hazard**: `workflow config` only copies scripts to projects if they don't already exist. When updating `workflow/scripts/*.py` (e.g., adding signal_isolation support to `qc_report.py`), existing project copies remain stale. Fix: bulk-copy ALL scripts to every project that has a `workflow/scripts/` directory:
 ```bash
-for proj in ../KINTSUGI_Projects/*/; do
-    target="$proj/workflow/scripts/qc_report.py"
-    [ -f "$target" ] && cp workflow/scripts/qc_report.py "$target"
+for proj_scripts in ../KINTSUGI_Projects/*/workflow/scripts/; do
+    [ -d "$proj_scripts" ] || continue
+    for script in deconvolve.py edf.py log_utils.py qc_report.py registration.py \
+                  signal_isolation.py spillover_correction.py stitch.py vessel3d.py; do
+        cp workflow/scripts/"$script" "$proj_scripts/$script"
+    done
 done
 ```
+Also update Snakefiles for projects with outdated workflow architecture:
+```bash
+cp workflow/Snakefile /path/to/project/workflow/Snakefile
+```
+Verify with MD5 comparison loop — should report 0 stale across all scripts. Last bulk remediation: Feb 27 2026 (35 projects had stale `log_utils.py`, 15 had stale `registration.py`, 6 had stale Snakefiles).
 
-**Processing status (Feb 2026):**
+**Stale Snakemake lock recovery**: If batch processing stalls, check for stale lock files across all projects:
+```bash
+find ../KINTSUGI_Projects -path '*/.snakemake/locks/*' -type f
+```
+Safe to remove locks when no `snakemake` processes are running (`ps aux | grep snakemake`) and no jobs are queued (`squeue -u $USER`). Remove both `workflow/.snakemake/locks/` and project-root `.snakemake/locks/`.
+
+**Processing status (Feb 27, 2026):**
 | Category | Count | Details |
 |----------|-------|---------|
-| Complete (signal_isolated sentinel) | 26 | 1 Snakemake + 25 sentinel-validated |
-| Batch processing in progress | 9 | 1 SI-only + 8 full pipeline (via `--detach`) |
+| Complete (signal_isolated sentinel) | 28 | 1 Snakemake + 25 sentinel-validated + 2 batch-completed |
+| Batch processing in progress | 8 | 2 active (1904CC1-1L SI, CX_20-005 registration) + 6 queued |
 | Empty shells (awaiting data) | 12 | No raw data staged |
