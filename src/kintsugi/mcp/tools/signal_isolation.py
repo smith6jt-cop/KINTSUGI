@@ -1216,3 +1216,159 @@ def clear_session():
     """Clear all loaded images and history."""
     _loaded_images.clear()
     _processing_history.clear()
+
+
+async def cluster_channels_tool(
+    project_path: str,
+    n_clusters: int | None = None,
+    wavelength_aware: bool = True,
+) -> dict[str, Any]:
+    """
+    Cluster project channels by image feature similarity.
+
+    Loads registered/EDF images, extracts features, clusters, and returns
+    cluster assignments with representative channels.
+    """
+    try:
+        from kintsugi.signal.clustering import cluster_channels, get_cluster_representatives
+        from kintsugi.signal.features import batch_extract_features
+    except ImportError as e:
+        return {"error": f"Missing module: {e}"}
+
+    project_path_obj = Path(project_path)
+
+    # Discover channel images
+    search_dirs = [
+        project_path_obj / "data" / "processed" / "registered",
+        project_path_obj / "data" / "processed" / "edf",
+        project_path_obj / "data" / "processed" / "stitched",
+    ]
+
+    marker_dict: dict[str, Any] = {}
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for tif in sorted(search_dir.rglob("*.tif")):
+            name = tif.stem
+            if name not in marker_dict:
+                try:
+                    import tifffile
+
+                    marker_dict[name] = tifffile.imread(str(tif))
+                except Exception as e:
+                    logger.warning(f"Failed to load {tif}: {e}")
+        if marker_dict:
+            break
+
+    if not marker_dict:
+        return {"error": "No channel images found in project"}
+
+    # Extract features
+    try:
+        features = batch_extract_features(marker_dict, progress=False)
+    except Exception as e:
+        return {"error": f"Feature extraction failed: {e}"}
+
+    # Cluster
+    try:
+        assignments = cluster_channels(
+            features,
+            n_clusters=n_clusters,
+            wavelength_aware=wavelength_aware,
+        )
+        representatives = get_cluster_representatives(features, assignments)
+    except Exception as e:
+        return {"error": f"Clustering failed: {e}"}
+
+    # Format result
+    cluster_info = {}
+    for cid, (rep_name, count) in representatives.items():
+        members = [name for name, c in assignments.items() if c == cid]
+        cluster_info[str(cid)] = {
+            "representative": rep_name,
+            "member_count": count,
+            "members": members,
+            "wavelength_group": features[rep_name]["wavelength_group"],
+        }
+
+    return {
+        "status": "success",
+        "n_channels": len(assignments),
+        "n_clusters": len(representatives),
+        "assignments": assignments,
+        "clusters": cluster_info,
+    }
+
+
+async def propagate_parameters_tool(
+    project_path: str,
+    cluster_id: int,
+    params: dict,
+    output_dir: str | None = None,
+) -> dict[str, Any]:
+    """
+    Propagate tuned parameters to all members of a cluster.
+    """
+    try:
+        from kintsugi.signal.clustering import propagate_cluster_parameters
+    except ImportError as e:
+        return {"error": f"Missing module: {e}"}
+
+    project_path_obj = Path(project_path)
+
+    if output_dir:
+        out = Path(output_dir)
+    else:
+        out = project_path_obj / "data" / "processed" / "signal_isolated"
+
+    # Get member channels from loaded images
+    loaded = get_loaded_images()
+    if not loaded:
+        return {"error": "No images loaded. Use cluster_channels first to load images."}
+
+    # Get member channels for this cluster
+    members = [
+        name
+        for name, info in loaded.items()
+        if info.get("metadata", {}).get("cluster_id") == cluster_id
+    ]
+
+    if not members:
+        return {
+            "error": f"No channels found for cluster {cluster_id}. "
+            "Load and cluster channels first."
+        }
+
+    marker_dict_local: dict[str, Any] = {
+        name: _loaded_images[name]["data"] for name in members
+    }
+    blank_map = {
+        name: info["metadata"].get("blank_name", "")
+        for name, info in _loaded_images.items()
+        if name in members
+    }
+
+    try:
+        results = propagate_cluster_parameters(
+            marker_dict_local, members, params, blank_map, out
+        )
+    except Exception as e:
+        return {"error": f"Propagation failed: {e}"}
+
+    summary = {
+        name: {
+            "status": r["status"],
+            "quality_score": r.get("quality_score", 0),
+            "output_path": str(r["output_path"]) if r.get("output_path") else None,
+        }
+        for name, r in results.items()
+    }
+
+    successes = sum(1 for r in results.values() if r["status"] == "success")
+    return {
+        "status": "success",
+        "cluster_id": cluster_id,
+        "processed": successes,
+        "total": len(members),
+        "results": summary,
+    }

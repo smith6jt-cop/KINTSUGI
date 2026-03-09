@@ -458,6 +458,56 @@ def _register_signal_isolation_tools(server: Server):
                     "required": ["operation", "channel"],
                 },
             ),
+            # Channel Clustering Tools
+            Tool(
+                name="cluster_channels",
+                description="Cluster channels by image feature similarity. Groups channels that share similar intensity profiles, SNR, and texture so parameters can be tuned once per cluster.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "project_path": {
+                            "type": "string",
+                            "description": "Path to KINTSUGI project directory",
+                        },
+                        "n_clusters": {
+                            "type": "integer",
+                            "description": "Number of clusters (auto-select if omitted)",
+                        },
+                        "wavelength_aware": {
+                            "type": "boolean",
+                            "description": "Enforce same-wavelength clustering (default: true)",
+                            "default": True,
+                        },
+                    },
+                    "required": ["project_path"],
+                },
+            ),
+            Tool(
+                name="propagate_parameters",
+                description="Apply tuned signal isolation parameters from a representative channel to all members of a cluster.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "project_path": {
+                            "type": "string",
+                            "description": "Path to KINTSUGI project directory",
+                        },
+                        "cluster_id": {
+                            "type": "integer",
+                            "description": "Cluster ID to propagate parameters to",
+                        },
+                        "params": {
+                            "type": "object",
+                            "description": "Processing parameters (blank_params and/or clean_params dicts)",
+                        },
+                        "output_dir": {
+                            "type": "string",
+                            "description": "Output directory (default: project signal_isolated dir)",
+                        },
+                    },
+                    "required": ["project_path", "cluster_id", "params"],
+                },
+            ),
             # Parameter Learning Tools
             Tool(
                 name="get_learned_parameters",
@@ -684,6 +734,11 @@ def _register_signal_isolation_tools(server: Server):
                 result = await workflow.suggest_parameters(**arguments)
             elif name == "generate_jupyter_cell":
                 result = await workflow.generate_jupyter_cell(**arguments)
+            # Clustering tools
+            elif name == "cluster_channels":
+                result = await signal_isolation.cluster_channels_tool(**arguments)
+            elif name == "propagate_parameters":
+                result = await signal_isolation.propagate_parameters_tool(**arguments)
             # Learning tools
             elif name == "get_learned_parameters":
                 result = await learning.get_learned_parameters(**arguments)

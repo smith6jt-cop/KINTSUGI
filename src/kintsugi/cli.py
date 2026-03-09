@@ -3273,6 +3273,258 @@ def isolate_batch(
 
 
 # ============================================================================
+# Channel Clustering Commands
+# ============================================================================
+
+
+@isolate_group.command("cluster")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--n-clusters", type=int, default=None, help="Number of clusters (auto if omitted)")
+@click.option(
+    "--no-wavelength-aware",
+    is_flag=True,
+    help="Disable wavelength-aware clustering (allow cross-wavelength clusters)",
+)
+@click.option("--output", "-o", type=click.Path(), default=None, help="Output JSON path")
+@click.option("--plot", "-p", is_flag=True, help="Save PCA cluster plot")
+def isolate_cluster(
+    project_dir: str,
+    n_clusters: int | None,
+    no_wavelength_aware: bool,
+    output: str | None,
+    plot: bool,
+):
+    """
+    Cluster channels by image feature similarity.
+
+    Extracts intensity, texture, and SNR features from registered/EDF images,
+    then groups similar channels using agglomerative clustering. Channels in
+    the same cluster can share signal isolation parameters.
+
+    \b
+    Output JSON includes:
+      - cluster assignments (channel → cluster_id)
+      - cluster representatives (closest to centroid)
+      - feature summary per cluster
+    """
+    import json
+    from pathlib import Path
+
+    from kintsugi.signal.clustering import cluster_channels, get_cluster_representatives, plot_cluster_summary
+    from kintsugi.signal.features import batch_extract_features
+
+    project_path = Path(project_dir).resolve()
+
+    # Discover channel images
+    search_dirs = [
+        project_path / "data" / "processed" / "registered",
+        project_path / "data" / "processed" / "edf",
+        project_path / "data" / "processed" / "stitched",
+    ]
+
+    import tifffile
+
+    marker_dict = {}
+    source_dir = None
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for tif in sorted(search_dir.rglob("*.tif")):
+            name = tif.stem
+            if name not in marker_dict:
+                try:
+                    marker_dict[name] = tifffile.imread(str(tif))
+                except Exception as e:
+                    console.print(f"[yellow]Warning: could not load {tif.name}: {e}[/yellow]")
+        if marker_dict:
+            source_dir = search_dir
+            break
+
+    if not marker_dict:
+        console.print("[red]No channel images found in project.[/red]")
+        return
+
+    console.print(f"Found [bold]{len(marker_dict)}[/bold] channels in {source_dir}")
+
+    # Extract features
+    console.print("Extracting channel features...")
+    features = batch_extract_features(marker_dict, progress=True)
+
+    # Cluster
+    console.print("Clustering channels...")
+    assignments = cluster_channels(
+        features,
+        n_clusters=n_clusters,
+        wavelength_aware=not no_wavelength_aware,
+    )
+    representatives = get_cluster_representatives(features, assignments)
+
+    # Display results
+    n_clusters_found = len(representatives)
+    console.print(f"\n[bold]{n_clusters_found} clusters[/bold] from {len(assignments)} channels:\n")
+
+    table = Table(title="Channel Clusters")
+    table.add_column("Cluster", justify="right", style="bold")
+    table.add_column("Representative", style="cyan")
+    table.add_column("Members", justify="right")
+    table.add_column("Wavelength", style="dim")
+    table.add_column("All Members")
+
+    for cid, (rep_name, count) in sorted(representatives.items()):
+        members = [n for n, c in assignments.items() if c == cid]
+        wl = features[rep_name]["wavelength_group"]
+        table.add_row(
+            str(cid),
+            rep_name,
+            str(count),
+            wl,
+            ", ".join(sorted(members)),
+        )
+
+    console.print(table)
+
+    # Save results
+    out_data = {
+        "n_channels": len(assignments),
+        "n_clusters": n_clusters_found,
+        "assignments": assignments,
+        "representatives": {
+            str(k): {"name": v[0], "member_count": v[1]}
+            for k, v in representatives.items()
+        },
+    }
+
+    if output:
+        out_path = Path(output)
+    else:
+        out_path = project_path / "configs" / "channel_clusters.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(out_path, "w") as f:
+        json.dump(out_data, f, indent=2)
+    console.print(f"\nCluster assignments saved to [bold]{out_path}[/bold]")
+
+    # Plot
+    if plot:
+        plot_path = out_path.with_suffix(".png")
+        plot_cluster_summary(features, assignments, save_path=plot_path)
+        console.print(f"Cluster plot saved to [bold]{plot_path}[/bold]")
+
+
+@isolate_group.command("propagate")
+@click.argument("project_dir", type=click.Path(exists=True), default=".")
+@click.option("--cluster-id", type=int, required=True, help="Cluster ID to process")
+@click.option(
+    "--params",
+    type=click.Path(exists=True),
+    required=True,
+    help="JSON file with processing parameters",
+)
+@click.option("--output-dir", type=click.Path(), default=None, help="Output directory")
+def isolate_propagate(
+    project_dir: str,
+    cluster_id: int,
+    params: str,
+    output_dir: str | None,
+):
+    """
+    Propagate tuned parameters to all members of a cluster.
+
+    Loads cluster assignments from configs/channel_clusters.json (or the
+    output of 'isolate cluster'), applies the given parameters to every
+    channel in the specified cluster, and saves processed TIFFs with
+    quality scores.
+    """
+    import json
+    from pathlib import Path
+
+    import tifffile
+
+    from kintsugi.signal.clustering import propagate_cluster_parameters
+
+    project_path = Path(project_dir).resolve()
+
+    # Load cluster assignments
+    clusters_path = project_path / "configs" / "channel_clusters.json"
+    if not clusters_path.exists():
+        console.print("[red]No channel_clusters.json found. Run 'isolate cluster' first.[/red]")
+        return
+
+    with open(clusters_path) as f:
+        cluster_data = json.load(f)
+
+    assignments = cluster_data["assignments"]
+    members = [name for name, cid in assignments.items() if cid == cluster_id]
+
+    if not members:
+        console.print(f"[red]No channels in cluster {cluster_id}.[/red]")
+        return
+
+    console.print(
+        f"Propagating to [bold]{len(members)}[/bold] channels in cluster {cluster_id}: "
+        f"{', '.join(sorted(members))}"
+    )
+
+    # Load parameters
+    with open(params) as f:
+        param_dict = json.load(f)
+
+    # Load channel images
+    search_dirs = [
+        project_path / "data" / "processed" / "registered",
+        project_path / "data" / "processed" / "edf",
+        project_path / "data" / "processed" / "stitched",
+    ]
+
+    marker_dict = {}
+    for search_dir in search_dirs:
+        if not search_dir.exists():
+            continue
+        for tif in sorted(search_dir.rglob("*.tif")):
+            name = tif.stem
+            if name in members or name in param_dict.get("blank_map", {}).values():
+                if name not in marker_dict:
+                    marker_dict[name] = tifffile.imread(str(tif))
+        if all(m in marker_dict for m in members):
+            break
+
+    # Output directory
+    if output_dir:
+        out = Path(output_dir)
+    else:
+        out = project_path / "data" / "processed" / "signal_isolated"
+
+    # Blank map from params or empty
+    blank_map = param_dict.get("blank_map", {})
+
+    # Propagate
+    results = propagate_cluster_parameters(
+        marker_dict, members, param_dict, blank_map, out
+    )
+
+    # Display results
+    table = Table(title=f"Cluster {cluster_id} — Propagation Results")
+    table.add_column("Channel", style="cyan")
+    table.add_column("Status", style="bold")
+    table.add_column("Quality", justify="right")
+
+    for ch, res in sorted(results.items()):
+        status = res["status"]
+        status_str = (
+            f"[green]{status}[/green]" if status == "success" else f"[red]{status}[/red]"
+        )
+        q = f"{res['quality_score']:.3f}" if res.get("quality_score") else "-"
+        table.add_row(ch, status_str, q)
+
+    console.print(table)
+
+    successes = sum(1 for r in results.values() if r["status"] == "success")
+    console.print(
+        f"\n{successes}/{len(members)} channels processed successfully → {out}"
+    )
+
+
+# ============================================================================
 # Vessel 3D Segmentation Command
 # ============================================================================
 

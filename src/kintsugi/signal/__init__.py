@@ -70,6 +70,19 @@ from .utils import (
     clip_and_scale_blank,
     estimate_autofluorescence_level,
 )
+from .features import (
+    batch_extract_features,
+    extract_channel_features,
+    features_to_vector,
+    infer_wavelength_group,
+)
+from .clustering import (
+    cluster_channels,
+    generate_cluster_qc,
+    get_cluster_representatives,
+    plot_cluster_summary,
+    propagate_cluster_parameters,
+)
 
 __all__ = [
     # Core functions
@@ -119,4 +132,15 @@ __all__ = [
     "apply_percentile_smoothing",
     "apply_erosion_mask",
     "estimate_autofluorescence_level",
+    # Channel feature extraction
+    "extract_channel_features",
+    "features_to_vector",
+    "batch_extract_features",
+    "infer_wavelength_group",
+    # Channel clustering
+    "cluster_channels",
+    "get_cluster_representatives",
+    "propagate_cluster_parameters",
+    "plot_cluster_summary",
+    "generate_cluster_qc",
 ]
