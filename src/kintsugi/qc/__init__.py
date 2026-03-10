@@ -92,6 +92,7 @@ from kintsugi.qc.stripe_artifact import (
     detect_stripe_artifact,
     scan_zstack,
 )
+from kintsugi.qc.signal_quality import compute_signal_isolation_quality
 from kintsugi.qc.stripe_mitigation import (
     MitigationResult,
     apply_directional_filter,
@@ -210,4 +211,6 @@ __all__ = [
     "BatchQC",
     "detect_batch_effects",
     "compute_batch_statistics",
+    # Signal isolation quality
+    "compute_signal_isolation_quality",
 ]

@@ -254,6 +254,29 @@ class TestWorkflowConfig:
 # ============================================================================
 
 
+def _mock_gpu_pool():
+    """Return a mock GPU resource pool for SLURM-mode tests.
+
+    The CLI computes -j as: total_gpu_avail + min(4, total_cpu_slots).
+    With 12 GPU + 4 CPU → 12 + 4 = 16, matching test_run_jobs_flag's -j 16.
+    """
+    return {
+        "accounts": [
+            {
+                "name": "test_acct",
+                "partition_gpu": "gpu",
+                "partition_cpu": "hpg-default",
+                "gpu_slots": 12,
+                "cpu_slots": 4,
+            }
+        ],
+        "total_gpu_slots": 12,
+        "total_gpu_avail": 12,
+        "total_cpu_slots": 4,
+        "total_slots": 16,
+    }
+
+
 class TestWorkflowRun:
     """Test ``kintsugi workflow run`` command."""
 
@@ -276,8 +299,9 @@ class TestWorkflowRun:
         assert result.exit_code != 0
         assert "No workflow/Snakefile" in result.output
 
+    @patch("kintsugi.hpc.detect_live_multi_account", return_value=_mock_gpu_pool())
     @patch("subprocess.run")
-    def test_run_invokes_snakemake(self, mock_run, runner, project_with_workflow):
+    def test_run_invokes_snakemake(self, mock_run, mock_gpu, runner, project_with_workflow):
         """Run calls snakemake with correct arguments."""
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -289,8 +313,9 @@ class TestWorkflowRun:
         assert cmd[0] == "snakemake"
         assert "--directory" in cmd
 
+    @patch("kintsugi.hpc.detect_live_multi_account", return_value=_mock_gpu_pool())
     @patch("subprocess.run")
-    def test_run_dry_run_flag(self, mock_run, runner, project_with_workflow):
+    def test_run_dry_run_flag(self, mock_run, mock_gpu, runner, project_with_workflow):
         """--dry-run passes -n to snakemake."""
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -316,8 +341,9 @@ class TestWorkflowRun:
         assert cmd[idx + 1] == "8"
         assert "--profile" not in cmd
 
+    @patch("kintsugi.hpc.detect_live_multi_account", return_value=_mock_gpu_pool())
     @patch("subprocess.run")
-    def test_run_uses_slurm_profile(self, mock_run, runner, project_with_workflow):
+    def test_run_uses_slurm_profile(self, mock_run, mock_gpu, runner, project_with_workflow):
         """Default run uses the SLURM profile."""
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -329,8 +355,9 @@ class TestWorkflowRun:
         profile_idx = cmd.index("--profile")
         assert "slurm" in cmd[profile_idx + 1]
 
+    @patch("kintsugi.hpc.detect_live_multi_account", return_value=_mock_gpu_pool())
     @patch("subprocess.run")
-    def test_run_forcerun(self, mock_run, runner, project_with_workflow):
+    def test_run_forcerun(self, mock_run, mock_gpu, runner, project_with_workflow):
         """--forcerun passes through to snakemake."""
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -343,8 +370,9 @@ class TestWorkflowRun:
         assert "--forcerun" in cmd
         assert "stitch" in cmd
 
+    @patch("kintsugi.hpc.detect_live_multi_account", return_value=_mock_gpu_pool())
     @patch("subprocess.run")
-    def test_run_cycle_range(self, mock_run, runner, project_with_workflow):
+    def test_run_cycle_range(self, mock_run, mock_gpu, runner, project_with_workflow):
         """--cycles '1-2' builds target paths for those cycles."""
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -358,8 +386,9 @@ class TestWorkflowRun:
         target_args = [a for a in cmd if "cyc01" in a or "cyc02" in a]
         assert len(target_args) == 2
 
+    @patch("kintsugi.hpc.detect_live_multi_account", return_value=_mock_gpu_pool())
     @patch("subprocess.run")
-    def test_run_cycle_list(self, mock_run, runner, project_with_workflow):
+    def test_run_cycle_list(self, mock_run, mock_gpu, runner, project_with_workflow):
         """--cycles '1,2' builds target paths for those cycles."""
         mock_run.return_value = MagicMock(returncode=0)
 
@@ -372,15 +401,17 @@ class TestWorkflowRun:
         target_args = [a for a in cmd if ".snakemake_complete" in a]
         assert len(target_args) == 2
 
+    @patch("kintsugi.hpc.detect_live_multi_account", return_value=_mock_gpu_pool())
     @patch("subprocess.run", side_effect=FileNotFoundError)
-    def test_run_snakemake_not_installed(self, mock_run, runner, project_with_workflow):
+    def test_run_snakemake_not_installed(self, mock_run, mock_gpu, runner, project_with_workflow):
         """Helpful error message when snakemake is not installed."""
         result = runner.invoke(main, ["workflow", "run", str(project_with_workflow)])
         assert result.exit_code != 0
         assert "snakemake not found" in result.output
 
+    @patch("kintsugi.hpc.detect_live_multi_account", return_value=_mock_gpu_pool())
     @patch("subprocess.run")
-    def test_run_jobs_flag(self, mock_run, runner, project_with_workflow):
+    def test_run_jobs_flag(self, mock_run, mock_gpu, runner, project_with_workflow):
         """-j flag sets max concurrent SLURM jobs."""
         mock_run.return_value = MagicMock(returncode=0)
 
