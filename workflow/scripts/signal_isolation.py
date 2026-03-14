@@ -52,6 +52,8 @@ TILE_SMOOTH_SIGMA = float(si_cfg.get("tile_smooth_sigma", 0.0))
 RECIPE_DIR = si_cfg.get("recipe_dir", "")
 LEARN = bool(si_cfg.get("learn", True))
 FORCE = bool(si_cfg.get("force", False))
+QUALITY_GATE = float(si_cfg.get("quality_gate", 0.6))
+CLIP_PERCENTILE = float(si_cfg.get("clip_percentile", 99.5))
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -176,6 +178,8 @@ try:
         force=FORCE,
         recipe_dir=str(recipe_dir_resolved) if recipe_dir_resolved else None,
         learn=LEARN,
+        quality_gate=QUALITY_GATE,
+        clip_percentile=CLIP_PERCENTILE,
     )
 
     # Print summary
@@ -186,6 +190,7 @@ try:
     n_recipe = summary.get("recipe", 0)
     n_skipped = summary.get("skipped", 0)
     n_errors = summary.get("errors", 0)
+    n_failed = summary.get("failed", 0)
     mean_quality = summary.get("mean_quality", 0.0)
 
     elapsed = (time.time() - start_time) / 60
@@ -199,6 +204,7 @@ try:
     print(f"  Recipe: {n_recipe}")
     print(f"  Skipped: {n_skipped}")
     print(f"  Errors: {n_errors}")
+    print(f"  Failed (over-subtracted): {n_failed}")
     print(f"Mean quality: {mean_quality:.3f}")
     print(f"Time: {elapsed:.1f} minutes")
 
@@ -221,6 +227,7 @@ try:
         f"recipe={n_recipe}\n"
         f"skipped={n_skipped}\n"
         f"errors={n_errors}\n"
+        f"failed={n_failed}\n"
         f"mean_quality={mean_quality:.3f}\n"
         f"files={n_files}\n"
         f"duration_minutes={elapsed:.1f}\n"

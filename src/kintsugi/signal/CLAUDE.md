@@ -47,7 +47,7 @@ CLI options: `--method {auto,global,weighted}`, `--tissue-type`, `--output-dir`,
 - `isolation_qc.py` — `generate_qc_pages()` (3-column self-normalized layout), `generate_summary_table()`
 - `../../cli.py` — `@workflow.group("isolate")` with `plan`, `run`, `qc`, `status` subcommands
 - `../claude/parameter_learning.py` — `ParameterLearningEngine` for recording outcomes
-- `../../../tests/test_batch_signal_isolation.py` — 66 tests
+- `../../../tests/test_batch_signal_isolation.py` — 94 tests
 
 ### Recipe System
 
@@ -61,6 +61,7 @@ CLI options: `--method {auto,global,weighted}`, `--tissue-type`, `--output-dir`,
 1. Normalize: `Blank1b` → `Blank_1b`, `Blank13c` → `Blank_13c` (regex)
 2. Exact match in location map (all registered channel names → paths)
 3. Fuzzy match: strip hyphens/underscores, case-insensitive (`HLADR` → `HLA-DR`)
+4. Positional fallback: extract suffix (a/b/c) from blank name, try `Blank_1{suffix}` — handles recipe blanks from higher cycles (e.g., `Blank_13b` → `Blank_1b`) when only cycle 1 blanks exist
 
 **`clean_background(image, params)`** — pure numpy reimplementation of `Kutils.clean()`:
 1. Zero pixels below `background_threshold`
@@ -96,6 +97,21 @@ Three-column layout per channel — Before (self-normalized p1-p99, gray), After
 **Channel discovery**: `discover_channels()` parses `workflow/config.yaml` channel_names. With recipes, uses recipe blank names via resolution chain; without recipes, uses positional mapping (CH2→Blank_1a, CH3→Blank_1b, CH4→Blank_1c).
 
 **Key gotcha**: `compute_weighted_subtraction_quality()` returns `{"global": {...}, "per_range": [...]}` — must extract `["global"]` for flat quality_score access.
+
+### Safety Mechanisms (Mar 2026)
+
+**Self-referential secondary blank validation** (`_validate_secondary_blank()`): Prevents a marker from using itself as its own secondary blank (e.g., CD20 recipe lists CD20 as `blankID2`). Case-insensitive comparison. Validation runs before AND after name resolution (resolved name may differ from recipe name).
+
+**Post-subtraction quality gate** (`_check_over_subtraction()`): Detects over-subtracted images:
+- `zero_percent >= 95%` → always fails (image essentially destroyed)
+- `quality_score < quality_gate AND zero_percent > 70%` → fails (poor quality + significant loss)
+- `quality_gate <= 0` disables the check entirely
+
+When a recipe produces over-subtracted results, `_auto_fallback()` attempts auto-analysis without the recipe. If the fallback improves both zero% AND quality score, it replaces the recipe result (`recipe_source="auto_fallback"`). Otherwise the result is saved with `status="failed"`.
+
+Config: `signal_isolation.quality_gate` (default 0.6) in `workflow/config.yaml`.
+
+**Outlier clipping** (`clip_outliers()`): Hot pixels survive subtraction unchanged (signal=55000, blank=5000 → result=50000). `clip_outliers(image, percentile=99.5)` clips values above the given percentile of the **non-zero** pixel distribution. Applied after all subtractions + background cleaning, before quality metrics. Config: `signal_isolation.clip_percentile` (default 99.5), set to 0 to disable.
 
 ### Validated Results
 

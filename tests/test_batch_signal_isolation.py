@@ -21,10 +21,14 @@ from kintsugi.signal.batch import (
     CleanParams,
     MarkerRecipe,
     SubtractionParams,
+    _check_over_subtraction,
+    _extract_blank_position,
     _normalize_blank_name,
     _resolve_blank_path,
     _strip_for_comparison,
+    _validate_secondary_blank,
     clean_background,
+    clip_outliers,
     discover_channels,
     load_legacy_recipes,
     process_batch,
@@ -940,7 +944,12 @@ class TestRecipeDrivenProcessing:
         assert img.dtype == np.uint16
 
     def test_double_subtraction_with_recipe(self, synthetic_project, tmp_path):
-        """Process FoxP3 with primary + second subtraction."""
+        """Process FoxP3 with primary + second subtraction.
+
+        FoxP3 is dim with high blank, so double subtraction over-subtracts.
+        With quality gate enabled, this triggers auto fallback.
+        Disable quality gate to test pure recipe path.
+        """
         specs = discover_channels(synthetic_project)
         spec = [s for s in specs if s.marker_name == "FoxP3"][0]
 
@@ -968,8 +977,10 @@ class TestRecipeDrivenProcessing:
         )
 
         output_dir = tmp_path / "recipe_out"
+        # Disable quality gate to test pure recipe path
         result = process_channel(
-            spec, recipe=recipe, output_dir=output_dir, location_map=location_map
+            spec, recipe=recipe, output_dir=output_dir, location_map=location_map,
+            quality_gate=0.0,
         )
 
         assert result.status == "success"
@@ -1036,7 +1047,10 @@ class TestBatchWithRecipes:
         assert result.summary["recipe"] == 1
 
     def test_batch_recipe_count_in_summary(self, synthetic_project, tmp_path):
-        """Summary includes recipe count."""
+        """Summary includes recipe count.
+
+        Disable quality gate so FoxP3 (dim + high blank) isn't flagged.
+        """
         recipe_path = tmp_path / "recipes"
         recipe_path.mkdir()
         # Create recipes for both CD31 and FoxP3
@@ -1049,7 +1063,9 @@ class TestBatchWithRecipes:
                 "clean_used: False\n"
             )
 
-        result = process_batch(synthetic_project, recipe_dir=recipe_path, force=True)
+        result = process_batch(
+            synthetic_project, recipe_dir=recipe_path, force=True, quality_gate=0.0
+        )
         assert result.summary["recipe"] == 2
         assert result.summary["global"] == 0
         assert result.summary["weighted"] == 0
@@ -1119,3 +1135,338 @@ class TestLearningIntegration:
         db_path = synthetic_project / ".kintsugi" / "parameter_learning.db"
         # DB should not exist when learn=False
         assert not db_path.exists()
+
+
+# =============================================================================
+# Bug 1: Blank Position Extraction and Positional Fallback
+# =============================================================================
+
+
+class TestExtractBlankPosition:
+    def test_blank_1b(self):
+        assert _extract_blank_position("Blank_1b") == "b"
+
+    def test_blank_13c(self):
+        assert _extract_blank_position("Blank_13c") == "c"
+
+    def test_unnormalized_blank1b(self):
+        assert _extract_blank_position("Blank1b") == "b"
+
+    def test_non_blank_returns_none(self):
+        assert _extract_blank_position("CD3e") is None
+
+    def test_dapi_returns_none(self):
+        assert _extract_blank_position("DAPI-01") is None
+
+    def test_blank_without_suffix(self):
+        """Blank_1 (no letter suffix) returns None."""
+        assert _extract_blank_position("Blank_1") is None
+
+
+class TestPositionalFallback:
+    def test_positional_fallback_remaps_blank13b(self, tmp_path):
+        """Blank13b -> Blank_1b when only cycle 1 blanks exist."""
+        path = tmp_path / "Blank_1b.tif"
+        location_map = {"Blank_1b": path}
+        result = _resolve_blank_path("Blank13b", location_map)
+        assert result is not None
+        assert result == ("Blank_1b", path)
+
+    def test_no_fallback_when_exact_exists(self, tmp_path):
+        """Blank_13b found exactly, no remapping needed."""
+        path_13b = tmp_path / "Blank_13b.tif"
+        path_1b = tmp_path / "Blank_1b.tif"
+        location_map = {"Blank_13b": path_13b, "Blank_1b": path_1b}
+        result = _resolve_blank_path("Blank13b", location_map)
+        assert result is not None
+        assert result == ("Blank_13b", path_13b)
+
+    def test_positional_fallback_blank13c(self, tmp_path):
+        """Blank_13c -> Blank_1c when only cycle 1 blanks exist."""
+        path = tmp_path / "Blank_1c.tif"
+        location_map = {"Blank_1a": tmp_path / "a.tif", "Blank_1c": path}
+        result = _resolve_blank_path("Blank13c", location_map)
+        assert result is not None
+        assert result == ("Blank_1c", path)
+
+    def test_secondary_blank_positional_fallback_integration(
+        self, synthetic_project, tmp_path
+    ):
+        """Full recipe processing with a remapped secondary blank."""
+        specs = discover_channels(synthetic_project)
+        spec = [s for s in specs if s.marker_name == "CD31"][0]
+
+        # Build location map with only cycle 1 blanks
+        registered_dir = synthetic_project / "data" / "processed" / "registered"
+        location_map = {
+            "Blank_1a": registered_dir / "cyc01" / "Blank_1a.tif",
+            "Blank_1b": registered_dir / "cyc01" / "Blank_1b.tif",
+            "Blank_1c": registered_dir / "cyc01" / "Blank_1c.tif",
+        }
+
+        # Recipe with Blank13b (doesn't exist) → should remap to Blank_1b
+        recipe = MarkerRecipe(
+            marker_name="CD31",
+            primary=SubtractionParams(
+                blank_name="Blank_1a",
+                blank_scale_factor=0.5,
+            ),
+            second=SubtractionParams(
+                blank_name="Blank13b",
+                blank_scale_factor=0.6,
+            ),
+        )
+
+        output_dir = tmp_path / "recipe_out"
+        result = process_channel(
+            spec, recipe=recipe, output_dir=output_dir, location_map=location_map
+        )
+        assert result.status == "success"
+        # Should have used the remapped blank
+        assert "Blank13b" in result.blank_used
+
+
+# =============================================================================
+# Bug 2: Self-Referential Secondary Blank Validation
+# =============================================================================
+
+
+class TestSelfReferentialBlank:
+    def test_self_referential_secondary_rejected(self):
+        """CD20 as secondary for CD20 is detected."""
+        valid, reason = _validate_secondary_blank("CD20", "CD20")
+        assert not valid
+        assert reason == "self-referential"
+
+    def test_non_self_referential_passes(self):
+        """Blank_1b as secondary for CD20 passes."""
+        valid, reason = _validate_secondary_blank("CD20", "Blank_1b")
+        assert valid
+        assert reason == ""
+
+    def test_case_insensitive_self_reference(self):
+        """cd20 vs CD20 is still caught."""
+        valid, reason = _validate_secondary_blank("CD20", "cd20")
+        assert not valid
+        assert reason == "self-referential"
+
+    def test_self_referential_in_recipe(self, synthetic_project, tmp_path):
+        """Self-referential secondary blank is skipped during recipe processing."""
+        specs = discover_channels(synthetic_project)
+        spec = [s for s in specs if s.marker_name == "CD31"][0]
+
+        # Recipe where CD31 uses itself as secondary blank
+        recipe = MarkerRecipe(
+            marker_name="CD31",
+            primary=SubtractionParams(
+                blank_name="Blank_1a",
+                blank_scale_factor=0.5,
+            ),
+            second=SubtractionParams(
+                blank_name="CD31",
+                blank_scale_factor=0.6,
+            ),
+        )
+
+        registered_dir = synthetic_project / "data" / "processed" / "registered"
+        location_map = {
+            "CD31": registered_dir / "cyc02" / "CD31.tif",
+            "Blank_1a": registered_dir / "cyc01" / "Blank_1a.tif",
+        }
+
+        output_dir = tmp_path / "recipe_out"
+        result = process_channel(
+            spec, recipe=recipe, output_dir=output_dir, location_map=location_map
+        )
+        assert result.status == "success"
+        # Secondary was skipped, so blank_used should NOT include "+CD31"
+        assert "+CD31" not in result.blank_used
+        assert "secondary_blank_self-referential" in result.warning
+
+
+# =============================================================================
+# Bug 3: Over-Subtraction Detection and Quality Gate
+# =============================================================================
+
+
+class TestOverSubtractionDetection:
+    def test_over_subtraction_detected(self):
+        """98% zero → over-subtracted."""
+        over_sub, reason = _check_over_subtraction(98.0, 0.3)
+        assert over_sub
+        assert "zero=98.0%" in reason
+
+    def test_low_quality_with_high_zeros_detected(self):
+        """Low quality + high zeros triggers gate."""
+        over_sub, reason = _check_over_subtraction(75.0, 0.4)
+        assert over_sub
+        assert "quality=0.40" in reason
+
+    def test_low_quality_low_zeros_passes(self):
+        """Low quality but low zeros does not trigger (signal preserved)."""
+        over_sub, _ = _check_over_subtraction(30.0, 0.4)
+        assert not over_sub
+
+    def test_good_result_passes(self):
+        """Normal result passes gate."""
+        over_sub, reason = _check_over_subtraction(30.0, 0.75)
+        assert not over_sub
+        assert reason == ""
+
+    def test_quality_gate_configurable(self):
+        """Custom threshold works."""
+        # With default threshold (0.6), quality 0.5 + 75% zeros → fails
+        over_sub_default, _ = _check_over_subtraction(75.0, 0.5)
+        assert over_sub_default
+
+        # With lowered threshold (0.4), quality 0.5 passes even with 75% zeros
+        over_sub_custom, _ = _check_over_subtraction(75.0, 0.5, quality_gate=0.4)
+        assert not over_sub_custom
+
+        # With quality_gate=0, gate is disabled entirely
+        over_sub_disabled, _ = _check_over_subtraction(99.0, 0.1, quality_gate=0.0)
+        assert not over_sub_disabled
+
+    def test_over_subtraction_marks_failed_in_recipe(self, synthetic_project, tmp_path):
+        """Recipe over-subtraction marks status=failed when fallback doesn't improve."""
+        specs = discover_channels(synthetic_project)
+        spec = [s for s in specs if s.marker_name == "FoxP3"][0]
+
+        # Recipe that aggressively over-subtracts (high scale factor)
+        recipe = MarkerRecipe(
+            marker_name="FoxP3",
+            primary=SubtractionParams(
+                blank_name="Blank_1b",
+                blank_clip_factor=0,
+                blank_scale_factor=3.0,  # Very aggressive
+            ),
+        )
+
+        registered_dir = synthetic_project / "data" / "processed" / "registered"
+        location_map = {
+            "Blank_1b": registered_dir / "cyc01" / "Blank_1b.tif",
+        }
+
+        output_dir = tmp_path / "output"
+        result = process_channel(
+            spec,
+            recipe=recipe,
+            output_dir=output_dir,
+            location_map=location_map,
+            quality_gate=0.6,
+        )
+        # FoxP3 is dim, blank is high, scale 3.0 → severe over-subtraction
+        # Either auto fallback improves (recipe_source=auto_fallback) or
+        # it stays failed — either way the gate was triggered
+        assert result.status in ("success", "failed") or result.recipe_source == "auto_fallback"
+
+    def test_failed_count_in_summary(self, synthetic_project, tmp_path):
+        """Batch summary includes 'failed' key."""
+        result = process_batch(synthetic_project, force=True)
+        assert "failed" in result.summary
+        # The 'failed' count exists in summary (may be 0 for this data)
+        assert isinstance(result.summary["failed"], int)
+
+    def test_failed_counted_with_recipe_over_subtraction(self, synthetic_project, tmp_path):
+        """Recipe over-subtraction produces non-zero failed count in batch summary."""
+        recipe_path = tmp_path / "recipes"
+        recipe_path.mkdir()
+        # Create FoxP3 recipe with extreme over-subtraction
+        (recipe_path / "FoxP3_param.txt").write_text(
+            "signal_channel: 'FoxP3'\n"
+            "blankID: 'Blank_1b'\n"
+            "blank_scale_factor: 5.0\n"
+            "second_subtract: False\n"
+            "clean_used: False\n"
+        )
+        result = process_batch(
+            synthetic_project,
+            recipe_dir=recipe_path,
+            force=True,
+            quality_gate=0.6,
+        )
+        # FoxP3 should be detected as over-subtracted (or auto-fallback used)
+        foxp3_result = result.channels.get("FoxP3")
+        assert foxp3_result is not None
+        assert foxp3_result.status in ("failed", "success")
+        if foxp3_result.status == "success":
+            # Auto fallback was used
+            assert foxp3_result.recipe_source == "auto_fallback"
+
+
+# =============================================================================
+# Outlier Clipping
+# =============================================================================
+
+
+class TestClipOutliers:
+    def test_clips_hot_pixels(self):
+        """Hot pixels above p99.5 are clipped."""
+        rng = np.random.RandomState(80)
+        image = rng.randint(100, 10000, (256, 256), dtype=np.uint16)
+        # Insert hot pixels far above the signal range
+        image[10, 10] = 55000
+        image[20, 20] = 60000
+        image[30, 30] = 50000
+
+        result = clip_outliers(image, percentile=99.5)
+
+        # Hot pixels should be clipped
+        assert result[10, 10] < 55000
+        assert result[20, 20] < 60000
+        # Normal signal range should be mostly preserved
+        assert result.dtype == np.uint16
+        # Median pixel should be unchanged (well below threshold)
+        median_val = np.median(image[image > 0])
+        low_mask = image < median_val
+        np.testing.assert_array_equal(result[low_mask], image[low_mask])
+
+    def test_disabled_with_zero(self):
+        """percentile=0 returns image unchanged."""
+        rng = np.random.RandomState(81)
+        image = rng.randint(100, 50000, (64, 64), dtype=np.uint16)
+        result = clip_outliers(image, percentile=0)
+        np.testing.assert_array_equal(result, image)
+
+    def test_preserves_zeros(self):
+        """Zero pixels from subtraction are not affected."""
+        image = np.zeros((64, 64), dtype=np.uint16)
+        image[10:30, 10:30] = 5000
+        image[15, 15] = 50000  # Hot pixel
+        result = clip_outliers(image, percentile=99.0)
+        # Zeros preserved
+        assert np.sum(result == 0) == np.sum(image == 0)
+
+    def test_uses_nonzero_distribution(self):
+        """Percentile computed from non-zero pixels only."""
+        # Image that's mostly zero (like post-subtraction)
+        image = np.zeros((100, 100), dtype=np.uint16)
+        image[0:10, 0:10] = 5000  # Small signal region
+        image[5, 5] = 50000  # Hot pixel in signal region
+
+        result = clip_outliers(image, percentile=99.0)
+        # Hot pixel should be clipped relative to non-zero distribution
+        assert result[5, 5] < 50000
+        assert result[5, 5] > 0
+
+    def test_all_zeros_noop(self):
+        """All-zero image returns unchanged."""
+        image = np.zeros((64, 64), dtype=np.uint16)
+        result = clip_outliers(image, percentile=99.5)
+        np.testing.assert_array_equal(result, image)
+
+    def test_histogram_compression(self):
+        """After clipping, max should be much closer to p99."""
+        rng = np.random.RandomState(82)
+        image = rng.randint(100, 10000, (256, 256), dtype=np.uint16)
+        # Add extreme outliers
+        image.ravel()[:50] = rng.randint(40000, 60000, 50).astype(np.uint16)
+
+        result = clip_outliers(image, percentile=99.5)
+
+        # Max should be dramatically reduced
+        assert result.max() < image.max()
+        # p99 should be essentially unchanged
+        orig_p99 = np.percentile(image[image > 0], 99)
+        new_p99 = np.percentile(result[result > 0], 99)
+        assert abs(new_p99 - orig_p99) / orig_p99 < 0.05

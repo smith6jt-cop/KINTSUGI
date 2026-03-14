@@ -41,6 +41,13 @@ logger = logging.getLogger("kintsugi.signal.batch")
 # Channel names that are not signal markers
 _SKIP_PREFIXES = ("DAPI", "Blank", "Empty")
 
+# Quality gate thresholds for over-subtraction detection
+_QUALITY_GATE_THRESHOLD = 0.6
+_OVER_SUBTRACTION_ZERO_PCT = 95.0
+
+# Default percentile for post-subtraction outlier clipping
+_DEFAULT_CLIP_PERCENTILE = 99.5
+
 
 # =============================================================================
 # Data Structures
@@ -306,6 +313,18 @@ def _strip_for_comparison(name: str) -> str:
     return re.sub(r"[-_\s]", "", name).lower()
 
 
+def _extract_blank_position(name: str) -> str | None:
+    """Extract the position suffix (a/b/c) from a blank channel name.
+
+    Works on both normalized and unnormalized forms:
+    Blank_1b -> b, Blank_13c -> c, Blank1b -> b
+
+    Returns None for non-blank names or blanks without a position suffix.
+    """
+    m = re.match(r"^Blank_?\d+([a-c])$", name, re.IGNORECASE)
+    return m.group(1).lower() if m else None
+
+
 def _build_channel_location_map(channel_names: dict, registered_dir: Path) -> dict[str, Path]:
     """Build a mapping from channel name to its registered TIFF path.
 
@@ -347,6 +366,26 @@ def _resolve_blank_path(blank_name: str, location_map: dict[str, Path]) -> tuple
     for name, path in location_map.items():
         if _strip_for_comparison(name) == stripped:
             return name, path
+
+    # Positional fallback: Blank_13b -> Blank_1b (same position, cycle 1)
+    position = _extract_blank_position(normalized)
+    if position:
+        fallback_name = f"Blank_1{position}"
+        if fallback_name in location_map:
+            logger.warning(
+                f"Positional remap: '{blank_name}' -> '{fallback_name}' "
+                f"(original not found, using cycle 1 blank with same position)"
+            )
+            return fallback_name, location_map[fallback_name]
+        # Try fuzzy match on fallback
+        fallback_stripped = _strip_for_comparison(fallback_name)
+        for name, path in location_map.items():
+            if _strip_for_comparison(name) == fallback_stripped:
+                logger.warning(
+                    f"Positional remap: '{blank_name}' -> '{name}' "
+                    f"(original not found, using cycle 1 blank with same position)"
+                )
+                return name, path
 
     return None
 
@@ -647,17 +686,157 @@ def select_method(
 # =============================================================================
 
 
+def clip_outliers(
+    image: np.ndarray,
+    percentile: float = _DEFAULT_CLIP_PERCENTILE,
+) -> np.ndarray:
+    """Clip outlier pixel values above a percentile threshold.
+
+    Hot pixels and detector artifacts survive subtraction because the blank
+    at those locations is typically normal. This clips values above the
+    given percentile (computed from non-zero pixels only) to compress the
+    dynamic range into the real signal distribution.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Subtracted image (uint16).
+    percentile : float
+        Percentile threshold for clipping (0-100). Values above this
+        percentile are clipped to the threshold value. 0 disables clipping.
+        Default: 99.5.
+
+    Returns
+    -------
+    np.ndarray
+        Clipped image (uint16).
+    """
+    if percentile <= 0 or percentile >= 100:
+        return image
+
+    # Compute percentile from non-zero pixels only to avoid
+    # the zero-floor from subtraction biasing the threshold
+    nonzero = image[image > 0]
+    if nonzero.size == 0:
+        return image
+
+    threshold = np.percentile(nonzero, percentile)
+    if threshold <= 0:
+        return image
+
+    clipped = np.minimum(image, np.uint16(min(threshold, 65535)))
+    return clipped.astype(np.uint16)
+
+
+def _check_over_subtraction(
+    zero_percent: float,
+    quality_score: float,
+    quality_gate: float = _QUALITY_GATE_THRESHOLD,
+    zero_threshold: float = _OVER_SUBTRACTION_ZERO_PCT,
+) -> tuple[bool, str]:
+    """Check if subtraction result is over-subtracted.
+
+    Over-subtraction is detected when EITHER:
+    - Zero percentage exceeds threshold (>= 95%) — image is essentially destroyed
+    - Quality score is below gate AND zero percentage is high (> 70%)
+
+    Set quality_gate <= 0 to disable the check entirely.
+
+    Returns
+    -------
+    tuple[bool, str]
+        (is_over_subtracted, reason)
+    """
+    if quality_gate <= 0:
+        return False, ""
+    if zero_percent >= zero_threshold:
+        return True, f"zero={zero_percent:.1f}%"
+    if quality_score < quality_gate and zero_percent > 70:
+        return True, f"quality={quality_score:.2f}; zero={zero_percent:.1f}%"
+    return False, ""
+
+
+def _validate_secondary_blank(marker_name: str, blank_name: str) -> tuple[bool, str]:
+    """Validate that a secondary blank is not the marker itself.
+
+    Returns
+    -------
+    tuple[bool, str]
+        (is_valid, reason) — False with reason if self-referential.
+    """
+    if _strip_for_comparison(blank_name) == _strip_for_comparison(marker_name):
+        return False, "self-referential"
+    return True, ""
+
+
+def _auto_fallback(
+    spec: ChannelSpec,
+    output_dir: Path | None = None,
+) -> ChannelResult:
+    """Run auto-analysis fallback for a channel (no recipe).
+
+    Used when recipe-based processing produces over-subtracted results.
+    """
+    signal = tifffile.imread(str(spec.signal_path))
+    blank = tifffile.imread(str(spec.blank_path))
+
+    analysis = analyze_for_subtraction(signal, blank)
+    chosen_method = select_method(signal, blank, analysis)
+
+    subtracted = subtract_autofluorescence(
+        signal,
+        blank,
+        blank_clip_factor=analysis["blank_clip_factor"],
+        blank_scale_factor=analysis["blank_scale_factor"],
+        smooth_low=analysis.get("smooth_low", False),
+        low_size=analysis.get("low_size", 2),
+        smooth_high=analysis.get("smooth_high", False),
+        high_size=analysis.get("high_size", 2),
+        erosion=analysis.get("erosion", 0),
+    )
+
+    quality = compute_subtraction_quality(signal, subtracted, blank)
+    total_pixels = subtracted.size
+    zero_pixels = np.sum(subtracted == 0)
+    zero_pct = round(100.0 * zero_pixels / total_pixels, 2)
+
+    result = ChannelResult(
+        marker_name=spec.marker_name,
+        cycle=spec.cycle,
+        blank_used=spec.blank_name,
+        method=chosen_method,
+        parameters={
+            "blank_clip_factor": analysis["blank_clip_factor"],
+            "blank_scale_factor": analysis["blank_scale_factor"],
+        },
+        quality_metrics=quality,
+        zero_percent=zero_pct,
+        recipe_source="auto_fallback",
+    )
+
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        out_path = output_dir / f"{spec.marker_name}.tif"
+        tifffile.imwrite(str(out_path), subtracted, compression="zlib")
+
+    return result
+
+
 def _process_channel_recipe(
     spec: ChannelSpec,
     recipe: MarkerRecipe,
     location_map: dict[str, Path],
     output_dir: Path | None = None,
     dry_run: bool = False,
+    quality_gate: float = _QUALITY_GATE_THRESHOLD,
+    clip_percentile: float = _DEFAULT_CLIP_PERCENTILE,
 ) -> ChannelResult:
     """Process a single channel using a legacy recipe.
 
-    Applies primary subtraction, optional second subtraction, and optional
-    background cleaning — matching the legacy Notebook 3 pipeline.
+    Applies primary subtraction, optional second subtraction, optional
+    background cleaning, and outlier clipping — matching the legacy
+    Notebook 3 pipeline with hot pixel correction.
     """
     logger.info(
         f"Processing {spec.marker_name} with recipe "
@@ -702,6 +881,8 @@ def _process_channel_recipe(
         # Load primary blank (already resolved in spec)
         blank = tifffile.imread(str(spec.blank_path))
 
+        warnings = []
+
         # 1. Primary subtraction — no blank smoothing with recipes
         subtracted = subtract_autofluorescence(
             signal,
@@ -719,33 +900,62 @@ def _process_channel_recipe(
 
         # 2. Second subtraction
         if recipe.second:
-            resolved = _resolve_blank_path(recipe.second.blank_name, location_map)
-            if resolved:
-                _, blank2_path = resolved
-                blank2 = tifffile.imread(str(blank2_path))
-                subtracted = subtract_autofluorescence(
-                    subtracted,
-                    blank2,
-                    blank_clip_factor=recipe.second.blank_clip_factor,
-                    blank_scale_factor=recipe.second.blank_scale_factor,
-                    smooth_low=recipe.second.smooth_low,
-                    low_size=recipe.second.low_size,
-                    low_percentile=recipe.second.low_percentile,
-                    smooth_high=recipe.second.smooth_high,
-                    high_size=recipe.second.high_size,
-                    high_percentile=recipe.second.high_percentile,
-                    erosion=recipe.second.erosion,
+            # Validate secondary blank is not the marker itself
+            valid, reason = _validate_secondary_blank(
+                spec.marker_name, recipe.second.blank_name
+            )
+            if not valid:
+                logger.error(
+                    f"Secondary blank '{recipe.second.blank_name}' for "
+                    f"{spec.marker_name} is {reason} — skipping second subtraction"
                 )
-                result.blank_used = f"{spec.blank_name}+{recipe.second.blank_name}"
+                warnings.append(f"secondary_blank_{reason}")
             else:
-                logger.warning(
-                    f"Second blank '{recipe.second.blank_name}' not found for "
-                    f"{spec.marker_name}, skipping second subtraction"
-                )
+                resolved = _resolve_blank_path(recipe.second.blank_name, location_map)
+                if resolved:
+                    resolved_name, blank2_path = resolved
+                    # Re-validate resolved name against marker
+                    valid2, reason2 = _validate_secondary_blank(
+                        spec.marker_name, resolved_name
+                    )
+                    if not valid2:
+                        logger.error(
+                            f"Secondary blank '{recipe.second.blank_name}' resolved "
+                            f"to '{resolved_name}' which is {reason2} for "
+                            f"{spec.marker_name} — skipping second subtraction"
+                        )
+                        warnings.append(f"secondary_blank_{reason2}")
+                    else:
+                        blank2 = tifffile.imread(str(blank2_path))
+                        subtracted = subtract_autofluorescence(
+                            subtracted,
+                            blank2,
+                            blank_clip_factor=recipe.second.blank_clip_factor,
+                            blank_scale_factor=recipe.second.blank_scale_factor,
+                            smooth_low=recipe.second.smooth_low,
+                            low_size=recipe.second.low_size,
+                            low_percentile=recipe.second.low_percentile,
+                            smooth_high=recipe.second.smooth_high,
+                            high_size=recipe.second.high_size,
+                            high_percentile=recipe.second.high_percentile,
+                            erosion=recipe.second.erosion,
+                        )
+                        result.blank_used = (
+                            f"{spec.blank_name}+{recipe.second.blank_name}"
+                        )
+                else:
+                    logger.error(
+                        f"Second blank '{recipe.second.blank_name}' not found for "
+                        f"{spec.marker_name}, skipping second subtraction"
+                    )
 
         # 3. Background cleaning
         if recipe.clean:
             subtracted = clean_background(subtracted, recipe.clean)
+
+        # 4. Outlier clipping — hot pixels survive subtraction unchanged
+        if clip_percentile > 0:
+            subtracted = clip_outliers(subtracted, percentile=clip_percentile)
 
         # Quality metrics
         quality = compute_subtraction_quality(signal, subtracted, blank)
@@ -757,7 +967,6 @@ def _process_channel_recipe(
         result.zero_percent = round(100.0 * zero_pixels / total_pixels, 2)
 
         # Flag warnings
-        warnings = []
         if result.zero_percent > 70:
             warnings.append(f"high_zero={result.zero_percent:.1f}%")
         if quality.get("quality_score", 1) < 0.5:
@@ -766,6 +975,65 @@ def _process_channel_recipe(
         p1 = float(np.percentile(subtracted, 1))
         if p99 - p1 < 100:
             warnings.append(f"low_range={p99 - p1:.0f}")
+
+        # Quality gate: detect over-subtraction and attempt auto fallback
+        qs = quality.get("quality_score", 1.0)
+        over_sub, over_reason = _check_over_subtraction(
+            result.zero_percent, qs, quality_gate=quality_gate
+        )
+        if over_sub:
+            logger.warning(
+                f"Over-subtraction detected for {spec.marker_name} "
+                f"(recipe): {over_reason}"
+            )
+            # Attempt auto-analysis fallback
+            try:
+                fallback_result = _auto_fallback(
+                    spec,
+                    output_dir=None,  # Don't save yet
+                )
+                if (
+                    fallback_result.status == "success"
+                    and fallback_result.zero_percent < result.zero_percent
+                    and fallback_result.quality_metrics.get("quality_score", 0)
+                    > qs
+                ):
+                    logger.info(
+                        f"Auto fallback improved {spec.marker_name}: "
+                        f"zero {result.zero_percent:.1f}% -> "
+                        f"{fallback_result.zero_percent:.1f}%, "
+                        f"quality {qs:.2f} -> "
+                        f"{fallback_result.quality_metrics['quality_score']:.2f}"
+                    )
+                    # Use fallback result — need to re-read subtracted for saving
+                    fallback_result.recipe_source = "auto_fallback"
+                    warnings.append(f"auto_fallback (recipe: {over_reason})")
+                    fallback_result.warning = "; ".join(warnings)
+
+                    # Save fallback output
+                    if output_dir is not None:
+                        output_dir = Path(output_dir)
+                        output_dir.mkdir(parents=True, exist_ok=True)
+                        out_path = output_dir / f"{spec.marker_name}.tif"
+                        # Re-process with output to save
+                        fallback_saved = _auto_fallback(spec, output_dir=output_dir)
+                        fallback_saved.recipe_source = "auto_fallback"
+                        fallback_saved.warning = fallback_result.warning
+                    return fallback_result
+                else:
+                    logger.warning(
+                        f"Auto fallback did not improve {spec.marker_name}, "
+                        f"keeping recipe result with status=failed"
+                    )
+                    result.status = "failed"
+                    warnings.append(f"over_subtracted ({over_reason})")
+            except Exception as fb_err:
+                logger.warning(
+                    f"Auto fallback failed for {spec.marker_name}: {fb_err}"
+                )
+                result.status = "failed"
+                warnings.append(f"over_subtracted ({over_reason})")
+
         result.warning = "; ".join(warnings)
 
         # Save output
@@ -799,6 +1067,8 @@ def process_channel(
     output_dir: Path | None = None,
     recipe: MarkerRecipe | None = None,
     location_map: dict[str, Path] | None = None,
+    quality_gate: float = _QUALITY_GATE_THRESHOLD,
+    clip_percentile: float = _DEFAULT_CLIP_PERCENTILE,
 ) -> ChannelResult:
     """Process a single channel with optimized parameters.
 
@@ -820,6 +1090,13 @@ def process_channel(
         Legacy recipe for this marker. When provided, uses recipe pipeline.
     location_map : dict[str, Path], optional
         Channel name to path map for resolving recipe blank names.
+    quality_gate : float
+        Minimum quality score threshold. Channels below this with >95%
+        zeros are marked as "failed". Default: 0.6.
+    clip_percentile : float
+        Percentile for post-subtraction outlier clipping. Hot pixels that
+        survive subtraction are clipped to this percentile of the non-zero
+        distribution. 0 disables clipping. Default: 99.5.
 
     Returns
     -------
@@ -828,7 +1105,11 @@ def process_channel(
     """
     # Recipe path: use legacy multi-step pipeline
     if recipe is not None:
-        return _process_channel_recipe(spec, recipe, location_map or {}, output_dir, dry_run)
+        return _process_channel_recipe(
+            spec, recipe, location_map or {}, output_dir, dry_run,
+            quality_gate=quality_gate,
+            clip_percentile=clip_percentile,
+        )
 
     # Auto-analysis path (original behavior)
     logger.info(f"Processing {spec.marker_name} (cycle {spec.cycle}, {spec.blank_name})")
@@ -933,6 +1214,10 @@ def process_channel(
             }
             quality = compute_subtraction_quality(signal, subtracted, blank_processed)
 
+        # Outlier clipping — hot pixels survive subtraction unchanged
+        if clip_percentile > 0:
+            subtracted = clip_outliers(subtracted, percentile=clip_percentile)
+
         result.quality_metrics = quality
 
         # Compute zero percentage
@@ -950,6 +1235,20 @@ def process_channel(
         p1 = float(np.percentile(subtracted, 1))
         if p99 - p1 < 100:
             warnings.append(f"low_range={p99 - p1:.0f}")
+
+        # Quality gate: detect over-subtraction (no fallback in auto path)
+        qs = quality.get("quality_score", 1.0)
+        over_sub, over_reason = _check_over_subtraction(
+            result.zero_percent, qs, quality_gate=quality_gate
+        )
+        if over_sub:
+            logger.warning(
+                f"Over-subtraction detected for {spec.marker_name} "
+                f"(auto/{chosen_method}): {over_reason}"
+            )
+            result.status = "failed"
+            warnings.append(f"over_subtracted ({over_reason})")
+
         result.warning = "; ".join(warnings)
 
         # Save output
@@ -1048,6 +1347,8 @@ def process_batch(
     channels: list[str] | None = None,
     recipe_dir: str | Path | None = None,
     learn: bool = True,
+    quality_gate: float = _QUALITY_GATE_THRESHOLD,
+    clip_percentile: float = _DEFAULT_CLIP_PERCENTILE,
 ) -> BatchResult:
     """Process all signal channels in a project.
 
@@ -1073,6 +1374,12 @@ def process_batch(
         Directory containing *_param.txt legacy recipe files.
     learn : bool
         If True, record outcomes to parameter learning DB. Default: True.
+    quality_gate : float
+        Minimum quality score threshold. Channels below this with >95%
+        zeros are marked as "failed". Default: 0.6.
+    clip_percentile : float
+        Percentile for post-subtraction outlier clipping. 0 to disable.
+        Default: 99.5.
 
     Returns
     -------
@@ -1136,6 +1443,7 @@ def process_batch(
         "recipe": 0,
         "skipped": 0,
         "error": 0,
+        "failed": 0,
     }
     quality_scores = []
 
@@ -1169,12 +1477,23 @@ def process_batch(
             output_dir=None if dry_run else output_dir,
             recipe=marker_recipe,
             location_map=location_map,
+            quality_gate=quality_gate,
+            clip_percentile=clip_percentile,
         )
 
         batch.channels[spec.marker_name] = result
 
         if result.status == "error":
             counts["error"] += 1
+        elif result.status == "failed":
+            counts["failed"] += 1
+            # Still count the method used
+            if result.method == "recipe":
+                counts["recipe"] += 1
+            elif result.method == "global":
+                counts["global"] += 1
+            elif result.method == "weighted":
+                counts["weighted"] += 1
         elif result.method == "recipe":
             counts["recipe"] += 1
         elif result.method == "global":
