@@ -202,15 +202,53 @@ class TestInstallCommand:
         assert "conda" in call_args[0][0] or "conda" in call_args.kwargs.get("args", [""])[0]
 
     @patch("subprocess.run")
-    def test_install_all_skips_full(self, mock_run, runner):
-        """'all' should install individual groups, not the 'full' composite."""
-        from kintsugi.deps import OPTIONAL_GROUPS
-
+    @patch("kintsugi.cli._find_project_root")
+    def test_install_all_uses_extras(self, mock_root, mock_run, runner, tmp_path):
+        """'all' with project root should use single pip extras invocation."""
+        mock_root.return_value = tmp_path
         mock_run.return_value = MagicMock(returncode=0)
         result = runner.invoke(main, ["install", "all"])
         assert result.exit_code == 0
-        # Should NOT have printed "Installing full:"
+        # Should NOT have printed "Installing full:" or sequential per-group lines
         assert "Installing full:" not in result.output
+        # Single pip call with extras string
+        assert mock_run.call_count == 1
+        cmd_arg = mock_run.call_args[0][0] if mock_run.call_args[0] else mock_run.call_args.kwargs.get("args", "")
+        assert "pip install -e" in cmd_arg
+        assert "gpu" in cmd_arg
+        assert "rapids" not in cmd_arg
+        assert "full" not in cmd_arg
+        # rapids exclusion note
+        assert "rapids" in result.output
+
+    @patch("subprocess.run")
+    @patch("kintsugi.cli._find_project_root")
+    def test_install_all_fallback_sequential(self, mock_root, mock_run, runner):
+        """'all' without project root should fall back to sequential + repair."""
+        mock_root.return_value = None
+        mock_run.return_value = MagicMock(returncode=0)
+        result = runner.invoke(main, ["install", "all"])
+        assert result.exit_code == 0
+        assert "pyproject.toml not found" in result.output
+        # Should have multiple subprocess calls (one per group + repair)
+        assert mock_run.call_count > 1
+        # Repair step runs 'pip install -e .'
+        repair_call = mock_run.call_args_list[-1]
+        assert "pip install -e ." in repair_call[0][0]
+
+    @patch("subprocess.run")
+    @patch("kintsugi.cli._find_project_root")
+    def test_install_all_skips_full_and_rapids(self, mock_root, mock_run, runner, tmp_path):
+        """'all' should skip both 'full' composite and 'rapids'."""
+        mock_root.return_value = tmp_path
+        mock_run.return_value = MagicMock(returncode=0)
+        result = runner.invoke(main, ["install", "all"])
+        assert result.exit_code == 0
+        cmd_arg = mock_run.call_args[0][0]
+        # Neither full nor rapids in the extras string
+        extras_part = cmd_arg.split("[")[1].split("]")[0]
+        assert "full" not in extras_part
+        assert "rapids" not in extras_part
 
     @patch("subprocess.run")
     def test_install_prints_note(self, mock_run, runner):

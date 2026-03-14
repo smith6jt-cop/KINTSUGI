@@ -16,6 +16,7 @@ The pipeline now uses pure Python implementations for all processing.
 import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Literal
 
 
@@ -134,6 +135,24 @@ NOTEBOOK_REQUIREMENTS = {
     "Vessel_Analysis": ["viz", "analysis"],
     "2.5_Vessel_3D_Segmentation": ["analysis"],
 }
+
+
+def _find_project_root() -> Path | None:
+    """Find KINTSUGI project root containing pyproject.toml.
+
+    Walks up from the kintsugi package directory to find the repo root.
+    Returns None if pyproject.toml cannot be found (e.g., pip-installed wheel).
+    """
+    try:
+        import kintsugi
+
+        pkg_dir = Path(kintsugi.__file__).parent  # src/kintsugi/
+        for parent in [pkg_dir.parent.parent, pkg_dir.parent]:
+            if (parent / "pyproject.toml").exists():
+                return parent
+    except Exception:
+        pass
+    return None
 
 
 class MissingDependencyError(Exception):

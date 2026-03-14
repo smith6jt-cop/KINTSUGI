@@ -20,7 +20,7 @@ from rich.table import Table
 
 console = Console()
 
-from kintsugi.deps import OPTIONAL_GROUPS
+from kintsugi.deps import OPTIONAL_GROUPS, _find_project_root
 
 
 def _resolve_project_dir(path: str | Path) -> Path:
@@ -260,44 +260,132 @@ def install(group: str | None, list_groups: bool, use_conda: bool):
         return
 
     if group == "all":
-        # Install all individual groups, skip the "full" composite
-        groups_to_install = [k for k in OPTIONAL_GROUPS if k != "full"]
-    elif group in OPTIONAL_GROUPS:
-        groups_to_install = [group]
-    else:
+        _install_all(use_conda)
+        return
+
+    if group not in OPTIONAL_GROUPS:
         console.print(f"[red]Unknown group: {group}[/red]")
         available = [k for k in OPTIONAL_GROUPS if k != "full"]
         console.print(f"Available groups: {', '.join(available)}, all")
         raise SystemExit(1)
 
-    for grp in groups_to_install:
-        info = OPTIONAL_GROUPS[grp]
-        console.print(f"\n[bold]Installing {grp}:[/bold] {info['description']}")
+    # Single-group install — unchanged behavior
+    info = OPTIONAL_GROUPS[group]
+    console.print(f"\n[bold]Installing {group}:[/bold] {info['description']}")
 
-        if use_conda and "conda_cmd" in info:
-            cmd = info["conda_cmd"]
-        else:
-            cmd = info["install_cmd"]
+    if use_conda and "conda_cmd" in info:
+        cmd = info["conda_cmd"]
+    else:
+        cmd = info["install_cmd"]
 
+    console.print(f"[dim]Running: {cmd}[/dim]")
+
+    try:
+        subprocess.run(cmd, shell=True, check=True, capture_output=False)
+        console.print(f"[green]✓ {group} installed successfully[/green]")
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]✗ Failed to install {group}: {e}[/red]")
+        raise SystemExit(1)
+
+    if "note" in info:
+        console.print(f"[yellow]Note: {info['note']}[/yellow]")
+
+    console.print("\n[bold green]Installation complete![/bold green]")
+
+
+def _install_all(use_conda: bool) -> None:
+    """Install all optional dependency groups with unified resolution.
+
+    Uses pyproject.toml extras in a single pip pass to avoid cascading
+    dependency conflicts from sequential per-group pip invocations.
+    Falls back to sequential install + constraint repair if pyproject.toml
+    is not found (e.g., wheel install without source checkout).
+    """
+    _SKIP_FROM_ALL = {"full", "rapids"}
+    extras = [k for k in OPTIONAL_GROUPS if k not in _SKIP_FROM_ALL]
+    project_root = _find_project_root()
+
+    if project_root and not use_conda:
+        # Single pip resolution pass using pyproject.toml extras
+        extras_str = ",".join(extras)
+        cmd = f'pip install -e "{project_root}[{extras_str}]"'
+        console.print(f"\n[bold]Installing all groups via extras:[/bold] {extras_str}")
         console.print(f"[dim]Running: {cmd}[/dim]")
-
         try:
-            subprocess.run(
-                cmd,
-                shell=True,
-                check=True,
-                capture_output=False,
-            )
-            console.print(f"[green]✓ {grp} installed successfully[/green]")
+            subprocess.run(cmd, shell=True, check=True, capture_output=False)
+            console.print("[green]✓ All groups installed successfully[/green]")
         except subprocess.CalledProcessError as e:
-            console.print(f"[red]✗ Failed to install {grp}: {e}[/red]")
-            if group != "all":
-                raise SystemExit(1)
+            console.print(f"[red]✗ Failed: {e}[/red]")
+            raise SystemExit(1)
+    elif use_conda:
+        # Conda mode: run conda_cmd groups first, then pip extras for the rest
+        conda_groups = [g for g in extras if "conda_cmd" in OPTIONAL_GROUPS[g]]
+        pip_extras = [g for g in extras if g not in conda_groups]
 
-        # Print any additional notes (e.g., kronos manual clone step)
-        if "note" in info:
-            console.print(f"[yellow]Note: {info['note']}[/yellow]")
+        for grp in conda_groups:
+            info = OPTIONAL_GROUPS[grp]
+            console.print(f"\n[bold]Installing {grp} (conda):[/bold] {info['description']}")
+            cmd = info["conda_cmd"]
+            console.print(f"[dim]Running: {cmd}[/dim]")
+            try:
+                subprocess.run(cmd, shell=True, check=True, capture_output=False)
+                console.print(f"[green]✓ {grp} installed[/green]")
+            except subprocess.CalledProcessError as e:
+                console.print(f"[red]✗ Failed to install {grp}: {e}[/red]")
 
+        if pip_extras and project_root:
+            extras_str = ",".join(pip_extras)
+            cmd = f'pip install -e "{project_root}[{extras_str}]"'
+            console.print(f"\n[bold]Installing remaining groups via pip:[/bold] {extras_str}")
+            console.print(f"[dim]Running: {cmd}[/dim]")
+            try:
+                subprocess.run(cmd, shell=True, check=True, capture_output=False)
+                console.print("[green]✓ Remaining groups installed[/green]")
+            except subprocess.CalledProcessError as e:
+                console.print(f"[red]✗ Failed: {e}[/red]")
+        elif pip_extras:
+            # No project root — sequential fallback for pip-only groups
+            for grp in pip_extras:
+                info = OPTIONAL_GROUPS[grp]
+                console.print(f"\n[bold]Installing {grp}:[/bold] {info['description']}")
+                cmd = info["install_cmd"]
+                console.print(f"[dim]Running: {cmd}[/dim]")
+                try:
+                    subprocess.run(cmd, shell=True, check=True, capture_output=False)
+                    console.print(f"[green]✓ {grp} installed[/green]")
+                except subprocess.CalledProcessError as e:
+                    console.print(f"[red]✗ Failed to install {grp}: {e}[/red]")
+    else:
+        # Fallback: sequential install + repair (no pyproject.toml found)
+        console.print(
+            "[yellow]Warning: pyproject.toml not found. "
+            "Installing sequentially (may cause conflicts).[/yellow]"
+        )
+        for grp in extras:
+            info = OPTIONAL_GROUPS[grp]
+            console.print(f"\n[bold]Installing {grp}:[/bold] {info['description']}")
+            cmd = info["install_cmd"]
+            console.print(f"[dim]Running: {cmd}[/dim]")
+            try:
+                subprocess.run(cmd, shell=True, check=True, capture_output=False)
+                console.print(f"[green]✓ {grp} installed[/green]")
+            except subprocess.CalledProcessError as e:
+                console.print(f"[red]✗ Failed to install {grp}: {e}[/red]")
+
+        # Repair core constraints
+        console.print("\n[bold]Repairing core constraints...[/bold]")
+        subprocess.run("pip install -e .", shell=True, check=False)
+
+    # Print notes for all groups
+    for grp in extras:
+        if "note" in OPTIONAL_GROUPS[grp]:
+            console.print(f"\n[yellow]Note ({grp}): {OPTIONAL_GROUPS[grp]['note']}[/yellow]")
+
+    # Remind about rapids (excluded from 'all')
+    console.print(
+        "\n[dim]Note: 'rapids' requires separate installation "
+        "(NVIDIA channel). Run: kintsugi install rapids[/dim]"
+    )
     console.print("\n[bold green]Installation complete![/bold green]")
 
 
