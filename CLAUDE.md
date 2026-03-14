@@ -106,6 +106,8 @@ kintsugi workflow status . --watch                 # Standalone dashboard
 
 `workflow run` auto-generates `workflow/config.yaml` from `meta/experiment.json` if the config is missing. The `--dashboard` flag launches snakemake in the background and displays a live progress dashboard; Ctrl+C detaches without killing SLURM jobs.
 
+**Path resolution**: All workflow subcommands use `_resolve_project_dir()` which auto-detects when you're inside a `workflow/` subdirectory and resolves to the parent project root. So `cd project/workflow && kintsugi workflow config .` works correctly.
+
 **Key function**: `generate_workflow_config(project_dir: Path) -> Path` in `cli.py` — standalone, reusable by both `workflow config` and `workflow run`.
 
 ### Batch Processing (Multiple Datasets)
@@ -243,8 +245,11 @@ Blank/autofluorescence channels are excluded by default (use `--include-blanks` 
 # Install in development mode
 pip install -e ".[dev]"
 
-# Install with Claude Code integration
-pip install -e ".[claude]"
+# Install optional dependency groups via CLI
+kintsugi install --list            # Show all 12 available groups
+kintsugi install gpu               # Install GPU acceleration
+kintsugi install gpu --conda       # Use conda instead of pip (where available)
+kintsugi install all               # Install all groups (skips 'full' composite)
 
 # Run tests
 pytest tests/ -v
@@ -268,9 +273,9 @@ python -m build
 ## Architecture
 
 **Core Package** (`src/kintsugi/`):
-- `cli.py` - Click-based CLI with subcommands: check, register, template, info, mcp (config/start/tools/pretrain), init, workflow (config/check/run/export)
+- `cli.py` - Click-based CLI with subcommands: check, register, template, info, mcp (config/start/tools/pretrain), init, install, workflow (config/check/run/export). `_resolve_project_dir()` auto-detects `workflow/` subdirectories for all workflow subcommands
 - `kreg.py`, `kstitch.py`, `kview2.py` - Bridge modules to notebook implementations
-- `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA)
+- `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA). `OPTIONAL_GROUPS` dict is the single source of truth for all 12 install groups (gpu, viz, dl, analysis, bio, claude, dev, docs, kronos, denoise, rapids, full)
 - `edf.py` - Extended depth of focus processing (CuPy GPU or NumPy CPU)
 - `project.py` - Project structure management (`KintsugiProject` class), `_resolve_kintsugi_executable()` for absolute-path MCP config
 - `deprecation.py` - Deprecation warnings and migration guidance
@@ -378,17 +383,19 @@ See `workflow/CLAUDE.md` for batch processing documentation: data staging, clean
 
 Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, pyvips, valis-wsi
 
-Optional groups in pyproject.toml:
-- `[gpu]` - PyTorch + CuPy for GPU acceleration
-- `[claude]` - MCP server for Claude Code integration
-- `[denoise]` - PyTorch for N2V/CARE denoising
-- `[viz]` - Napari visualization
-- `[analysis]` - scanpy, scimap for spatial analysis
-- `[kronos]` - KRONOS foundation model integration (PyTorch, h5py, umap-learn, scanpy)
-- `[bio]` - Bio formats I/O (OME-TIFF, LIF, etc.)
-- `[dl]` - Deep learning segmentation (InstanSeg)
-- `[full]` - All optional dependencies
-- `[java]` - (DEPRECATED) JPype + PyImageJ for BioFormats
+12 optional install groups defined in `deps.py` `OPTIONAL_GROUPS` (single source of truth, also used by `pyproject.toml` extras). Install via `kintsugi install <group>` (supports `--conda` for groups with conda recipes):
+- `gpu` - PyTorch + CuPy for GPU acceleration
+- `viz` - Napari visualization
+- `dl` - Deep learning segmentation (InstanSeg)
+- `analysis` - scanpy, scimap for spatial analysis
+- `bio` - Bio formats I/O (OME-TIFF, LIF, etc.)
+- `claude` - MCP server for Claude Code integration
+- `dev` - Development tools (pytest, ruff, black, mypy)
+- `docs` - Documentation (Sphinx)
+- `kronos` - KRONOS foundation model (prints post-install note about cloning KRONOS repo)
+- `denoise` - Advanced denoising (N2V, CARE)
+- `rapids` - RAPIDS GPU-accelerated data science
+- `full` - All optional features (composite, skipped by `kintsugi install all`)
 
 **External requirements**: libvips (native library). Java/Maven no longer required.
 

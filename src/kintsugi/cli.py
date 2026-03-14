@@ -13,8 +13,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
-
 import click
 from rich.console import Console
 from rich.panel import Panel
@@ -22,40 +20,23 @@ from rich.table import Table
 
 console = Console()
 
-# Optional dependency groups - use direct package names to avoid PyPI collision
-# (the 'kintsugi' package exists on PyPI as an unrelated project)
-OPTIONAL_GROUPS: dict[str, dict[str, Any]] = {
-    "gpu": {
-        "description": "GPU acceleration (CuPy for CUDA)",
-        "install_cmd": "pip install cupy-cuda12x",
-        "packages": ["cupy"],
-    },
-    "torch": {
-        "description": "PyTorch for deep learning models",
-        "install_cmd": "pip install torch torchvision",
-        "packages": ["torch", "torchvision"],
-    },
-    "bio": {
-        "description": "Spatial biology analysis (scanpy, scimap, squidpy)",
-        "install_cmd": "pip install scanpy scimap squidpy anndata",
-        "packages": ["scanpy", "scimap", "squidpy", "anndata"],
-    },
-    "viz": {
-        "description": "Napari visualization",
-        "install_cmd": "pip install napari[all]",
-        "packages": ["napari"],
-    },
-    "claude": {
-        "description": "Claude Code MCP integration",
-        "install_cmd": "pip install mcp anthropic",
-        "packages": ["mcp", "anthropic"],
-    },
-    "dev": {
-        "description": "Development tools (pytest, ruff, black, mypy)",
-        "install_cmd": "pip install pytest pytest-cov ruff black mypy",
-        "packages": ["pytest", "ruff", "black", "mypy"],
-    },
-}
+from kintsugi.deps import OPTIONAL_GROUPS
+
+
+def _resolve_project_dir(path: str | Path) -> Path:
+    """Resolve project directory, auto-detecting if inside a workflow/ subdirectory.
+
+    If the resolved path is named "workflow", has a config.yaml, and its parent
+    has a meta/ directory, return the parent (the actual project root).
+    """
+    resolved = Path(path).resolve()
+    if (
+        resolved.name == "workflow"
+        and (resolved / "config.yaml").exists()
+        and (resolved.parent / "meta").is_dir()
+    ):
+        return resolved.parent
+    return resolved
 
 
 @click.group()
@@ -246,19 +227,21 @@ def info():
 @main.command()
 @click.argument("group", required=False)
 @click.option("--list", "-l", "list_groups", is_flag=True, help="List available groups")
-def install(group: str | None, list_groups: bool):
+@click.option("--conda", "use_conda", is_flag=True, help="Use conda instead of pip where available")
+def install(group: str | None, list_groups: bool, use_conda: bool):
     """
     Install optional dependency groups.
 
-    GROUP is the name of the dependency group to install (gpu, torch, bio, viz, claude, dev).
+    GROUP is the name of the dependency group to install.
     Use 'all' to install all optional dependencies.
 
     \b
     Examples:
         kintsugi install --list     # Show available groups
         kintsugi install gpu        # Install GPU acceleration
-        kintsugi install bio        # Install spatial biology tools
+        kintsugi install analysis   # Install spatial analysis tools
         kintsugi install all        # Install everything
+        kintsugi install gpu --conda  # Use conda for GPU packages
     """
     if list_groups or group is None:
         table = Table(title="Optional Dependency Groups")
@@ -267,6 +250,8 @@ def install(group: str | None, list_groups: bool):
         table.add_column("Packages", style="dim")
 
         for name, info in OPTIONAL_GROUPS.items():
+            if name == "full":
+                continue  # Skip composite group in listing
             table.add_row(name, info["description"], ", ".join(info["packages"]))
 
         console.print(table)
@@ -275,22 +260,30 @@ def install(group: str | None, list_groups: bool):
         return
 
     if group == "all":
-        groups_to_install = list(OPTIONAL_GROUPS.keys())
+        # Install all individual groups, skip the "full" composite
+        groups_to_install = [k for k in OPTIONAL_GROUPS if k != "full"]
     elif group in OPTIONAL_GROUPS:
         groups_to_install = [group]
     else:
         console.print(f"[red]Unknown group: {group}[/red]")
-        console.print(f"Available groups: {', '.join(OPTIONAL_GROUPS.keys())}, all")
+        available = [k for k in OPTIONAL_GROUPS if k != "full"]
+        console.print(f"Available groups: {', '.join(available)}, all")
         raise SystemExit(1)
 
     for grp in groups_to_install:
         info = OPTIONAL_GROUPS[grp]
         console.print(f"\n[bold]Installing {grp}:[/bold] {info['description']}")
-        console.print(f"[dim]Running: {info['install_cmd']}[/dim]")
+
+        if use_conda and "conda_cmd" in info:
+            cmd = info["conda_cmd"]
+        else:
+            cmd = info["install_cmd"]
+
+        console.print(f"[dim]Running: {cmd}[/dim]")
 
         try:
             subprocess.run(
-                info["install_cmd"],
+                cmd,
                 shell=True,
                 check=True,
                 capture_output=False,
@@ -300,6 +293,10 @@ def install(group: str | None, list_groups: bool):
             console.print(f"[red]✗ Failed to install {grp}: {e}[/red]")
             if group != "all":
                 raise SystemExit(1)
+
+        # Print any additional notes (e.g., kronos manual clone step)
+        if "note" in info:
+            console.print(f"[yellow]Note: {info['note']}[/yellow]")
 
     console.print("\n[bold green]Installation complete![/bold green]")
 
@@ -1269,16 +1266,16 @@ def workflow_config(project_dir: str, print_only: bool):
 
     PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
     """
-    config_file = generate_workflow_config(Path(project_dir).resolve(), print_only=print_only)
+    config_file = generate_workflow_config(_resolve_project_dir(project_dir), print_only=print_only)
 
     if config_file is not None:
-        wf_dir = config_file.parent
+        project_path = config_file.parent.parent
+        display_path = "." if Path.cwd().resolve() == project_path else str(project_path)
         console.print()
         console.print("[bold]Next steps:[/bold]")
-        console.print(f"  cd {wf_dir}")
-        console.print("  kintsugi workflow check .                  # Verify resources")
-        console.print("  snakemake -n                               # Dry run")
-        console.print("  kintsugi workflow run .                    # Submit via SLURM")
+        console.print(f"  kintsugi workflow check {display_path}    # Verify resources")
+        console.print(f"  kintsugi workflow run {display_path} -n   # Dry run")
+        console.print(f"  kintsugi workflow run {display_path}      # Submit via SLURM")
 
 
 @workflow.command("check")
@@ -1298,7 +1295,7 @@ def workflow_check(project_dir: str):
 
     from kintsugi.hpc import detect_live_multi_account
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
     config_path = project_dir / "workflow" / "config.yaml"
 
     if not config_path.exists():
@@ -1467,7 +1464,7 @@ def workflow_run(
     """
     from pathlib import Path
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
     wf_dir = project_dir / "workflow"
 
     # Auto-generate config if missing but experiment.json exists
@@ -1650,7 +1647,7 @@ def workflow_status(
         watch_dashboard,
     )
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
 
     if all_projects:
         project_dirs = []
@@ -2137,7 +2134,7 @@ def export_prepare(project_dir: str, force: bool, dry_run: bool, include_blanks:
 
     from kintsugi.export import prepare_export
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
 
     if not (project_dir / "kintsugi_project.json").exists():
         # Also allow projects that have registered/ without kintsugi_project.json
@@ -2250,7 +2247,7 @@ def export_deploy(
 
     from kintsugi.export import deploy_export
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
     export_dir = project_dir / "data" / "exported"
 
     if not export_dir.exists():
@@ -2293,7 +2290,7 @@ def export_status(project_dir: str):
 
     from kintsugi.export import get_export_status
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
 
     console.print(f"[bold]Export Status[/bold]  ({project_dir.name})\n")
 
@@ -2361,7 +2358,7 @@ def cleanup_status(project_dir: str):
 
     from kintsugi.cleanup import assess_cleanup_safety
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
 
     console.print(f"[bold]Cleanup Status[/bold]  ({project_dir.name})\n")
 
@@ -2435,7 +2432,7 @@ def cleanup_plan(project_dir: str):
 
     from kintsugi.cleanup import _dir_size, assess_cleanup_safety
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
 
     console.print(f"[bold]Cleanup Plan[/bold]  ({project_dir.name})\n")
 
@@ -2541,7 +2538,7 @@ def cleanup_execute(project_dir: str, no_trash: bool, force: bool, skip_vessel3d
 
     from kintsugi.cleanup import assess_cleanup_safety, execute_cleanup
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
 
     console.print(f"[bold]Cleanup Execute[/bold]  ({project_dir.name})\n")
 
@@ -2643,7 +2640,7 @@ def cleanup_recover(project_dir: str, entry: str | None):
 
     from kintsugi.cleanup import list_trash, recover_trash
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
 
     if entry is None:
         # List trash contents
@@ -2705,7 +2702,7 @@ def cleanup_purge(project_dir: str, days: int, purge_all: bool, force: bool):
 
     from kintsugi.cleanup import list_trash, purge_trash
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
 
     entries = list_trash(project_dir)
     if not entries:
@@ -3016,7 +3013,7 @@ def isolate_status(project_dir: str):
         # Re-render with our console for consistent formatting
         from pathlib import Path
 
-        project_dir = Path(project_dir).resolve()
+        project_dir = _resolve_project_dir(project_dir)
         manifest_path = (
             project_dir
             / "data"
@@ -3323,7 +3320,7 @@ def isolate_cluster(
     from kintsugi.signal.clustering import cluster_channels, get_cluster_representatives, plot_cluster_summary
     from kintsugi.signal.features import batch_extract_features
 
-    project_path = Path(project_dir).resolve()
+    project_path = _resolve_project_dir(project_dir)
 
     # Discover channel images
     search_dirs = [
@@ -3452,7 +3449,7 @@ def isolate_propagate(
 
     from kintsugi.signal.clustering import propagate_cluster_parameters
 
-    project_path = Path(project_dir).resolve()
+    project_path = _resolve_project_dir(project_dir)
 
     # Load cluster assignments
     clusters_path = project_path / "configs" / "channel_clusters.json"
@@ -3565,7 +3562,7 @@ def workflow_vessel3d(project_dir: str, cycle: int, channel: int, marker: str, d
     """
     from pathlib import Path
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
     wf_dir = project_dir / "workflow"
 
     if not (wf_dir / "config.yaml").exists():
@@ -3649,7 +3646,7 @@ def workflow_spillover(project_dir: str, sample: str | None, element_shape: str,
     """
     from pathlib import Path
 
-    project_dir = Path(project_dir).resolve()
+    project_dir = _resolve_project_dir(project_dir)
     wf_dir = project_dir / "workflow"
 
     if not (wf_dir / "config.yaml").exists():

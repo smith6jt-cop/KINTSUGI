@@ -83,6 +83,38 @@ OPTIONAL_GROUPS = {
         "packages": ["aicsimageio", "bioio", "ome-zarr", "slideio"],
         "install_cmd": "pip install aicsimageio bioio bioio-ome-tiff ome-zarr slideio readlif",
     },
+    "claude": {
+        "description": "Claude Code MCP integration",
+        "packages": ["mcp", "httpx"],
+        "install_cmd": "pip install mcp httpx",
+    },
+    "dev": {
+        "description": "Development tools (pytest, ruff, black, mypy)",
+        "packages": ["pytest", "ruff", "black", "mypy", "pre_commit"],
+        "install_cmd": "pip install pytest pytest-asyncio pytest-cov pytest-xdist ruff black mypy pre-commit commitizen",
+    },
+    "docs": {
+        "description": "Documentation (Sphinx)",
+        "packages": ["sphinx", "sphinx_rtd_theme", "myst_parser"],
+        "install_cmd": "pip install sphinx sphinx-rtd-theme myst-parser",
+    },
+    "kronos": {
+        "description": "KRONOS foundation model for spatial proteomics",
+        "packages": ["torch", "h5py", "umap"],
+        "install_cmd": "pip install torch h5py umap-learn scikit-learn anndata scanpy tifffile",
+        "note": "Also requires: git clone https://github.com/mahmoodlab/KRONOS.git && pip install -e KRONOS",
+    },
+    "denoise": {
+        "description": "Advanced denoising (N2V, CARE)",
+        "packages": ["torch"],
+        "install_cmd": "pip install torch",
+    },
+    "rapids": {
+        "description": "RAPIDS GPU-accelerated data science",
+        "packages": ["cudf", "cuml"],
+        "install_cmd": "pip install cudf-cu12 cuml-cu12 --extra-index-url=https://pypi.nvidia.com",
+        "conda_cmd": "conda install cudf cuml cugraph rmm -c rapidsai -c conda-forge -c nvidia",
+    },
     "full": {
         "description": "All optional features",
         "packages": [],  # Composite group
@@ -250,7 +282,7 @@ def require(
 
 
 def install_optional(
-    group: Literal["gpu", "viz", "dl", "analysis", "bio", "full"],
+    group: Literal["gpu", "viz", "dl", "analysis", "bio", "claude", "dev", "docs", "kronos", "denoise", "rapids", "full"],
     use_conda: bool = False,
 ) -> bool:
     """
@@ -699,13 +731,11 @@ class DependencyChecker:
                 print("\n  ✓ All required dependencies satisfied!")
 
             print("\n  To install optional features:")
-            print("    kintsugi install gpu       # GPU acceleration (CuPy for CUDA)")
-            print("    kintsugi install torch     # PyTorch for deep learning models")
-            print(
-                "    kintsugi install bio       # Spatial biology analysis (scanpy, scimap, squidpy)"
-            )
-            print("    kintsugi install viz       # Napari visualization")
-            print("    kintsugi install all       # All optional features")
+            for name, info in OPTIONAL_GROUPS.items():
+                if name == "full":
+                    continue
+                print(f"    kintsugi install {name:14s} # {info['description']}")
+            print(f"    {'kintsugi install all':>30s}       # All optional features")
 
         return summary
 

@@ -102,6 +102,126 @@ def project_with_workflow(project_dir):
 
 
 # ============================================================================
+# _resolve_project_dir helper
+# ============================================================================
+
+
+class TestResolveProjectDir:
+    """Test the _resolve_project_dir helper function."""
+
+    def test_returns_same_path_for_project_root(self, project_dir):
+        """Normal project dir is returned as-is (resolved)."""
+        from kintsugi.cli import _resolve_project_dir
+
+        result = _resolve_project_dir(str(project_dir))
+        assert result == project_dir.resolve()
+
+    def test_detects_workflow_subdir(self, project_with_workflow):
+        """When given a workflow/ dir, returns the parent project dir."""
+        from kintsugi.cli import _resolve_project_dir
+
+        wf_dir = project_with_workflow / "workflow"
+        result = _resolve_project_dir(str(wf_dir))
+        assert result == project_with_workflow.resolve()
+
+    def test_requires_config_yaml(self, project_dir):
+        """A dir named 'workflow' without config.yaml is not auto-detected."""
+        from kintsugi.cli import _resolve_project_dir
+
+        wf_dir = project_dir / "workflow"
+        wf_dir.mkdir(exist_ok=True)
+        # No config.yaml inside
+        result = _resolve_project_dir(str(wf_dir))
+        assert result == wf_dir.resolve()
+
+    def test_requires_parent_meta_dir(self, tmp_path):
+        """A workflow/ dir without meta/ in parent is not auto-detected."""
+        from kintsugi.cli import _resolve_project_dir
+
+        # Create workflow dir with config.yaml but no meta/ in parent
+        wf_dir = tmp_path / "fake_project" / "workflow"
+        wf_dir.mkdir(parents=True)
+        (wf_dir / "config.yaml").write_text("cycles: [1]")
+        # No meta/ dir in parent
+        result = _resolve_project_dir(str(wf_dir))
+        assert result == wf_dir.resolve()
+
+    def test_non_workflow_dir_passthrough(self, tmp_path):
+        """Arbitrary directory named 'something' is returned unchanged."""
+        from kintsugi.cli import _resolve_project_dir
+
+        some_dir = tmp_path / "something"
+        some_dir.mkdir()
+        result = _resolve_project_dir(str(some_dir))
+        assert result == some_dir.resolve()
+
+
+# ============================================================================
+# CLI: install command
+# ============================================================================
+
+
+class TestInstallCommand:
+    """Test ``kintsugi install`` command."""
+
+    def test_install_list_shows_all_groups(self, runner):
+        """--list should show all groups from deps.py (excluding 'full')."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        result = runner.invoke(main, ["install", "--list"])
+        assert result.exit_code == 0
+        for name in OPTIONAL_GROUPS:
+            if name == "full":
+                assert name not in result.output
+            else:
+                assert name in result.output
+
+    def test_install_unknown_group_fails(self, runner):
+        """Unknown group should produce error."""
+        result = runner.invoke(main, ["install", "nonexistent_group_xyz"])
+        assert result.exit_code != 0
+        assert "Unknown group" in result.output
+
+    def test_install_no_arg_shows_list(self, runner):
+        """No argument should show the group listing."""
+        result = runner.invoke(main, ["install"])
+        assert result.exit_code == 0
+        assert "gpu" in result.output
+        assert "analysis" in result.output
+
+    @patch("subprocess.run")
+    def test_install_conda_flag(self, mock_run, runner):
+        """--conda flag should use conda_cmd when available."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        mock_run.return_value = MagicMock(returncode=0)
+        result = runner.invoke(main, ["install", "gpu", "--conda"])
+        assert result.exit_code == 0
+        # Should have called the conda command
+        call_args = mock_run.call_args
+        assert "conda" in call_args[0][0] or "conda" in call_args.kwargs.get("args", [""])[0]
+
+    @patch("subprocess.run")
+    def test_install_all_skips_full(self, mock_run, runner):
+        """'all' should install individual groups, not the 'full' composite."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        mock_run.return_value = MagicMock(returncode=0)
+        result = runner.invoke(main, ["install", "all"])
+        assert result.exit_code == 0
+        # Should NOT have printed "Installing full:"
+        assert "Installing full:" not in result.output
+
+    @patch("subprocess.run")
+    def test_install_prints_note(self, mock_run, runner):
+        """Groups with notes should print the note after install."""
+        mock_run.return_value = MagicMock(returncode=0)
+        result = runner.invoke(main, ["install", "kronos"])
+        assert result.exit_code == 0
+        assert "KRONOS" in result.output
+
+
+# ============================================================================
 # CLI: workflow config
 # ============================================================================
 
@@ -247,6 +367,19 @@ class TestWorkflowConfig:
         assert updated != original, "Snakefile should have been overwritten"
         # The overwritten Snakefile should contain real rule definitions
         assert "rule stitch:" in updated or "rule all:" in updated
+
+    def test_config_next_steps_no_cd(self, runner, project_dir):
+        """Next steps should NOT include 'cd workflow/' (path bug fix)."""
+        result = runner.invoke(main, ["workflow", "config", str(project_dir)])
+        assert result.exit_code == 0, result.output
+        assert "cd " not in result.output or "cd " + str(project_dir) not in result.output
+        # Should NOT tell user to cd into workflow dir
+        assert "cd " + str(project_dir / "workflow") not in result.output
+        # Should have proper kintsugi workflow commands
+        assert "kintsugi workflow check" in result.output
+        assert "kintsugi workflow run" in result.output
+        # Should NOT suggest raw snakemake -n (use kintsugi wrapper instead)
+        assert "snakemake -n" not in result.output
 
 
 # ============================================================================

@@ -5,9 +5,6 @@
 	// List of extensions which should be recommended for users of this workspace.
 	"recommendations": [
 		"github.vscode-github-actions",
-		"github.copilot",
-		"ms-toolsai.jupyter",
-		"ms-toolsai.jupyter-renderers",
 		"ms-python.vscode-pylance",
 		"ms-python.python",
 		"ms-python.debugpy",

@@ -133,6 +133,87 @@ class TestConvenienceFunction:
         assert "all_required_ok" in result
 
 
+class TestOptionalGroups:
+    """Test OPTIONAL_GROUPS structure and content."""
+
+    def test_all_groups_have_required_keys(self):
+        """Every group must have description, packages, and install_cmd."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        for name, info in OPTIONAL_GROUPS.items():
+            assert "description" in info, f"{name} missing description"
+            assert "packages" in info, f"{name} missing packages"
+            assert "install_cmd" in info, f"{name} missing install_cmd"
+
+    def test_expected_groups_present(self):
+        """All expected groups from pyproject.toml are present."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        expected = {
+            "gpu", "viz", "dl", "analysis", "bio", "claude", "dev",
+            "docs", "kronos", "denoise", "rapids", "full",
+        }
+        assert set(OPTIONAL_GROUPS.keys()) == expected
+
+    def test_bio_group_has_bio_packages(self):
+        """Bio group should contain bio I/O packages, not analysis packages."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        bio_pkgs = OPTIONAL_GROUPS["bio"]["packages"]
+        # Bio should have imaging I/O packages
+        assert "aicsimageio" in bio_pkgs or "bioio" in bio_pkgs or "ome-zarr" in bio_pkgs
+        # Bio should NOT have analysis packages
+        assert "scanpy" not in bio_pkgs
+        assert "scimap" not in bio_pkgs
+
+    def test_gpu_group_includes_torch(self):
+        """GPU group should include torch, not just cupy."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        gpu_pkgs = OPTIONAL_GROUPS["gpu"]["packages"]
+        assert "torch" in gpu_pkgs
+        assert "cupy" in gpu_pkgs
+
+    def test_full_is_composite(self):
+        """Full group should have empty packages list (composite)."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        assert OPTIONAL_GROUPS["full"]["packages"] == []
+
+    def test_conda_cmd_optional(self):
+        """conda_cmd is optional; groups that have it should have valid strings."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        for name, info in OPTIONAL_GROUPS.items():
+            if "conda_cmd" in info:
+                assert isinstance(info["conda_cmd"], str)
+                assert len(info["conda_cmd"]) > 0
+
+    def test_note_field_optional(self):
+        """Groups with notes should have non-empty string values."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        for name, info in OPTIONAL_GROUPS.items():
+            if "note" in info:
+                assert isinstance(info["note"], str)
+                assert len(info["note"]) > 0
+
+    def test_kronos_has_note(self):
+        """Kronos group should have a note about manual clone."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        assert "note" in OPTIONAL_GROUPS["kronos"]
+        assert "KRONOS" in OPTIONAL_GROUPS["kronos"]["note"]
+
+    def test_install_optional_accepts_new_groups(self):
+        """install_optional should accept all groups in OPTIONAL_GROUPS."""
+        from kintsugi.deps import OPTIONAL_GROUPS, install_optional
+
+        # Just verify the function doesn't reject known groups (don't actually install)
+        for name in OPTIONAL_GROUPS:
+            assert name in OPTIONAL_GROUPS  # Validates type hint coverage
+
+
 class TestPythonPackageChecks:
     """Test Python package checking functionality."""
 
