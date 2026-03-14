@@ -90,7 +90,9 @@ When `--learn` (default) and `--tissue-type` are provided:
 
 ### QC
 
-Three-column layout per channel — Before (self-normalized p1-p99, gray), After (self-normalized p1-p99, gray), Difference (inferno). Self-normalization ensures dim cellular signal is visible. Pages of 6 channels.
+Three-column layout per channel — Before (normalized p1-p99, gray), After (normalized p1-p99, gray), Difference (inferno). Two normalization modes:
+- `independent` (default): each image uses its own p1-p99 range — ensures dim signal is visible
+- `matched`: both Before and After use Before's p1-p99 range — prevents tile-boundary artifacts (1-5% BaSiC stitching residuals) from being amplified to full contrast. CLI: `--normalize-mode matched`
 
 **Manifest**: `signal_isolation_manifest.json` records per-channel method, parameters, quality metrics, analysis, and warnings. Includes `recipe_dir` when recipes are used.
 
@@ -102,12 +104,14 @@ Three-column layout per channel — Before (self-normalized p1-p99, gray), After
 
 **Self-referential secondary blank validation** (`_validate_secondary_blank()`): Prevents a marker from using itself as its own secondary blank (e.g., CD20 recipe lists CD20 as `blankID2`). Case-insensitive comparison. Validation runs before AND after name resolution (resolved name may differ from recipe name).
 
+**Duplicate blank validation** (`_validate_duplicate_blank()`): Prevents using the same blank for both primary and secondary subtraction, which doubles AF removal and destroys signal. Checks both raw recipe names (e.g., `Blank_1b` == `Blank_1b`) and resolved file names (e.g., `Blank_13b` resolves to `Blank_1b` via positional fallback). When duplicate detected, second subtraction is skipped with warning `"secondary_blank_duplicate_blank"` or `"secondary_blank_duplicate_blank_resolved"`.
+
 **Post-subtraction quality gate** (`_check_over_subtraction()`): Detects over-subtracted images:
 - `zero_percent >= 95%` → always fails (image essentially destroyed)
 - `quality_score < quality_gate AND zero_percent > 70%` → fails (poor quality + significant loss)
 - `quality_gate <= 0` disables the check entirely
 
-When a recipe produces over-subtracted results, `_auto_fallback()` attempts auto-analysis without the recipe. If the fallback improves both zero% AND quality score, it replaces the recipe result (`recipe_source="auto_fallback"`). Otherwise the result is saved with `status="failed"`.
+When a recipe produces over-subtracted results, `_auto_fallback()` attempts auto-analysis without the recipe. If the fallback improves both zero% AND quality score, it replaces the recipe result (`recipe_source="auto_fallback"`). **The fallback result is re-validated against the quality gate** — if still over-subtracted, `status="failed"` and warning includes `"auto_fallback_also_failed"`. Otherwise the result is saved with `status="failed"`.
 
 Config: `signal_isolation.quality_gate` (default 0.6) in `workflow/config.yaml`.
 

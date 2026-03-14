@@ -408,7 +408,7 @@ Tests are in `tests/` with fixtures in `conftest.py`. Key fixtures: `sample_imag
 
 CI runs on Linux (ubuntu-latest) with Python 3.10-3.12.
 
-**Suite status** (Mar 2026): 783 passed, 10 skipped (GPU hardware + optional deps).
+**Suite status** (Mar 2026): 814 collected, 10 skipped (GPU hardware + optional deps).
 
 **GPU skip pattern**: On HPC login nodes, CuPy is installed (`CUPY_AVAILABLE=True`) but no GPU hardware exists. Tests that need actual GPU hardware must use `check_gpu()` from `kcorrect_gpu.py`, not `CUPY_AVAILABLE`:
 ```python
