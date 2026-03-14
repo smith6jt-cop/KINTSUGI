@@ -769,6 +769,37 @@ def _validate_secondary_blank(marker_name: str, blank_name: str) -> tuple[bool, 
     return True, ""
 
 
+def _validate_duplicate_blank(
+    primary_blank: str,
+    secondary_blank: str,
+    primary_resolved: str | None = None,
+    secondary_resolved: str | None = None,
+) -> tuple[bool, str]:
+    """Validate that secondary blank is not the same as primary blank.
+
+    Checks both raw recipe names and resolved file names to catch cases
+    where different recipe names (e.g. Blank_1b vs Blank_13b) resolve to
+    the same underlying file.
+
+    Returns
+    -------
+    tuple[bool, str]
+        (is_valid, reason) — False with reason if duplicate.
+    """
+    if _strip_for_comparison(primary_blank) == _strip_for_comparison(
+        secondary_blank
+    ):
+        return False, "duplicate_blank"
+    if (
+        primary_resolved
+        and secondary_resolved
+        and _strip_for_comparison(primary_resolved)
+        == _strip_for_comparison(secondary_resolved)
+    ):
+        return False, "duplicate_blank_resolved"
+    return True, ""
+
+
 def _auto_fallback(
     spec: ChannelSpec,
     output_dir: Path | None = None,
@@ -911,43 +942,79 @@ def _process_channel_recipe(
                 )
                 warnings.append(f"secondary_blank_{reason}")
             else:
-                resolved = _resolve_blank_path(recipe.second.blank_name, location_map)
-                if resolved:
-                    resolved_name, blank2_path = resolved
-                    # Re-validate resolved name against marker
-                    valid2, reason2 = _validate_secondary_blank(
-                        spec.marker_name, resolved_name
+                # Check for duplicate blank (same as primary)
+                dup_valid, dup_reason = _validate_duplicate_blank(
+                    recipe.primary.blank_name, recipe.second.blank_name
+                )
+                if not dup_valid:
+                    logger.warning(
+                        f"Secondary blank '{recipe.second.blank_name}' for "
+                        f"{spec.marker_name} is same as primary blank "
+                        f"'{recipe.primary.blank_name}' — skipping second "
+                        f"subtraction"
                     )
-                    if not valid2:
-                        logger.error(
-                            f"Secondary blank '{recipe.second.blank_name}' resolved "
-                            f"to '{resolved_name}' which is {reason2} for "
-                            f"{spec.marker_name} — skipping second subtraction"
-                        )
-                        warnings.append(f"secondary_blank_{reason2}")
-                    else:
-                        blank2 = tifffile.imread(str(blank2_path))
-                        subtracted = subtract_autofluorescence(
-                            subtracted,
-                            blank2,
-                            blank_clip_factor=recipe.second.blank_clip_factor,
-                            blank_scale_factor=recipe.second.blank_scale_factor,
-                            smooth_low=recipe.second.smooth_low,
-                            low_size=recipe.second.low_size,
-                            low_percentile=recipe.second.low_percentile,
-                            smooth_high=recipe.second.smooth_high,
-                            high_size=recipe.second.high_size,
-                            high_percentile=recipe.second.high_percentile,
-                            erosion=recipe.second.erosion,
-                        )
-                        result.blank_used = (
-                            f"{spec.blank_name}+{recipe.second.blank_name}"
-                        )
+                    warnings.append(f"secondary_blank_{dup_reason}")
                 else:
-                    logger.error(
-                        f"Second blank '{recipe.second.blank_name}' not found for "
-                        f"{spec.marker_name}, skipping second subtraction"
+                    resolved = _resolve_blank_path(
+                        recipe.second.blank_name, location_map
                     )
+                    if resolved:
+                        resolved_name, blank2_path = resolved
+                        # Re-validate resolved name against marker
+                        valid2, reason2 = _validate_secondary_blank(
+                            spec.marker_name, resolved_name
+                        )
+                        if not valid2:
+                            logger.error(
+                                f"Secondary blank '{recipe.second.blank_name}' "
+                                f"resolved to '{resolved_name}' which is "
+                                f"{reason2} for {spec.marker_name} — skipping "
+                                f"second subtraction"
+                            )
+                            warnings.append(f"secondary_blank_{reason2}")
+                        else:
+                            # Check resolved names for duplicate
+                            dup2_valid, dup2_reason = _validate_duplicate_blank(
+                                recipe.primary.blank_name,
+                                recipe.second.blank_name,
+                                primary_resolved=spec.blank_name,
+                                secondary_resolved=resolved_name,
+                            )
+                            if not dup2_valid:
+                                logger.warning(
+                                    f"Secondary blank "
+                                    f"'{recipe.second.blank_name}' resolves "
+                                    f"to '{resolved_name}' which is same as "
+                                    f"primary blank '{spec.blank_name}' — "
+                                    f"skipping second subtraction"
+                                )
+                                warnings.append(
+                                    f"secondary_blank_{dup2_reason}"
+                                )
+                            else:
+                                blank2 = tifffile.imread(str(blank2_path))
+                                subtracted = subtract_autofluorescence(
+                                    subtracted,
+                                    blank2,
+                                    blank_clip_factor=recipe.second.blank_clip_factor,
+                                    blank_scale_factor=recipe.second.blank_scale_factor,
+                                    smooth_low=recipe.second.smooth_low,
+                                    low_size=recipe.second.low_size,
+                                    low_percentile=recipe.second.low_percentile,
+                                    smooth_high=recipe.second.smooth_high,
+                                    high_size=recipe.second.high_size,
+                                    high_percentile=recipe.second.high_percentile,
+                                    erosion=recipe.second.erosion,
+                                )
+                                result.blank_used = (
+                                    f"{spec.blank_name}+{recipe.second.blank_name}"
+                                )
+                    else:
+                        logger.error(
+                            f"Second blank '{recipe.second.blank_name}' not "
+                            f"found for {spec.marker_name}, skipping second "
+                            f"subtraction"
+                        )
 
         # 3. Background cleaning
         if recipe.clean:
@@ -993,30 +1060,50 @@ def _process_channel_recipe(
                     output_dir=None,  # Don't save yet
                 )
                 if (
-                    fallback_result.status == "success"
-                    and fallback_result.zero_percent < result.zero_percent
+                    fallback_result.zero_percent < result.zero_percent
                     and fallback_result.quality_metrics.get("quality_score", 0)
                     > qs
                 ):
-                    logger.info(
-                        f"Auto fallback improved {spec.marker_name}: "
-                        f"zero {result.zero_percent:.1f}% -> "
-                        f"{fallback_result.zero_percent:.1f}%, "
-                        f"quality {qs:.2f} -> "
-                        f"{fallback_result.quality_metrics['quality_score']:.2f}"
+                    # Re-check fallback against quality gate
+                    fb_qs = fallback_result.quality_metrics.get(
+                        "quality_score", 0
                     )
-                    # Use fallback result — need to re-read subtracted for saving
+                    fb_over, fb_reason = _check_over_subtraction(
+                        fallback_result.zero_percent,
+                        fb_qs,
+                        quality_gate=quality_gate,
+                    )
+                    if fb_over:
+                        logger.warning(
+                            f"Auto fallback for {spec.marker_name} also "
+                            f"over-subtracted: {fb_reason}"
+                        )
+                        fallback_result.status = "failed"
+                        warnings.append(
+                            f"auto_fallback_also_failed ({fb_reason})"
+                        )
+                    else:
+                        logger.info(
+                            f"Auto fallback improved {spec.marker_name}: "
+                            f"zero {result.zero_percent:.1f}% -> "
+                            f"{fallback_result.zero_percent:.1f}%, "
+                            f"quality {qs:.2f} -> {fb_qs:.2f}"
+                        )
+                        warnings.append(
+                            f"auto_fallback (recipe: {over_reason})"
+                        )
+
                     fallback_result.recipe_source = "auto_fallback"
-                    warnings.append(f"auto_fallback (recipe: {over_reason})")
                     fallback_result.warning = "; ".join(warnings)
 
                     # Save fallback output
                     if output_dir is not None:
                         output_dir = Path(output_dir)
                         output_dir.mkdir(parents=True, exist_ok=True)
-                        out_path = output_dir / f"{spec.marker_name}.tif"
                         # Re-process with output to save
-                        fallback_saved = _auto_fallback(spec, output_dir=output_dir)
+                        fallback_saved = _auto_fallback(
+                            spec, output_dir=output_dir
+                        )
                         fallback_saved.recipe_source = "auto_fallback"
                         fallback_saved.warning = fallback_result.warning
                     return fallback_result

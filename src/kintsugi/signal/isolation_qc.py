@@ -41,6 +41,43 @@ def _self_normalize(image: np.ndarray, p_low: float = 1.0, p_high: float = 99.0)
     return normalized
 
 
+def _matched_normalize(
+    before: np.ndarray,
+    after: np.ndarray,
+    p_low: float = 1.0,
+    p_high: float = 99.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Normalize both images to the Before image's percentile range.
+
+    Prevents artificial amplification of subtle tile artifacts in the After
+    image that occurs when self-normalization stretches 1-5% intensity
+    differences across the full contrast range.
+
+    Parameters
+    ----------
+    before, after : np.ndarray
+        Before and after images (any dtype).
+    p_low, p_high : float
+        Percentiles for clipping range, computed from ``before``.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        (before_norm, after_norm), both float64 in [0, 1].
+    """
+    before_f = before.astype(np.float64)
+    after_f = after.astype(np.float64)
+
+    vmin = np.percentile(before_f, p_low)
+    vmax = np.percentile(before_f, p_high)
+    if vmax <= vmin:
+        vmax = vmin + 1
+
+    before_norm = np.clip((before_f - vmin) / (vmax - vmin), 0, 1)
+    after_norm = np.clip((after_f - vmin) / (vmax - vmin), 0, 1)
+    return before_norm, after_norm
+
+
 def _downsample(image: np.ndarray, factor: int = 16) -> np.ndarray:
     """Downsample image by block averaging.
 
@@ -73,12 +110,13 @@ def generate_qc_pages(
     page_size: int = 6,
     dpi: int = 120,
     downsample: int = 16,
+    normalize_mode: str = "independent",
 ) -> list[Path]:
     """Generate QC pages for signal isolation results.
 
     Three-column layout per channel row:
-    - Before (registered): self-normalized to own p1-p99 (gray)
-    - After (signal_isolated): self-normalized to own p1-p99 (gray)
+    - Before (registered): normalized (gray)
+    - After (signal_isolated): normalized (gray)
     - Difference (before - after): self-normalized (inferno)
 
     Parameters
@@ -91,6 +129,10 @@ def generate_qc_pages(
         Output DPI. Default: 120.
     downsample : int
         Downsample factor for thumbnails. Default: 16.
+    normalize_mode : str
+        ``"independent"`` (default): each image uses its own p1-p99 range.
+        ``"matched"``: both Before and After use the Before image's range,
+        preventing artificial amplification of tile-boundary artifacts.
 
     Returns
     -------
@@ -181,9 +223,14 @@ def generate_qc_pages(
             before_ds = _downsample(before, downsample)
             after_ds = _downsample(after, downsample)
 
-            # Self-normalize
-            before_norm = _self_normalize(before_ds)
-            after_norm = _self_normalize(after_ds)
+            # Normalize
+            if normalize_mode == "matched":
+                before_norm, after_norm = _matched_normalize(
+                    before_ds, after_ds
+                )
+            else:
+                before_norm = _self_normalize(before_ds)
+                after_norm = _self_normalize(after_ds)
 
             # Difference (what was removed)
             diff = before_ds.astype(np.float64) - after_ds.astype(np.float64)

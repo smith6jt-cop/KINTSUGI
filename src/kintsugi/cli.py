@@ -2958,12 +2958,21 @@ def isolate_run(
 @click.option("--page-size", type=int, default=6, help="Channels per page (default: 6)")
 @click.option("--dpi", type=int, default=120, help="Output DPI (default: 120)")
 @click.option("--downsample", type=int, default=16, help="Downsample factor (default: 16)")
-def isolate_qc(project_dir: str, page_size: int, dpi: int, downsample: int):
+@click.option(
+    "--normalize-mode",
+    type=click.Choice(["independent", "matched"]),
+    default="independent",
+    help="Normalization mode: 'independent' (each image uses own range) or "
+    "'matched' (both use Before's range to reduce tile artifact visibility).",
+)
+def isolate_qc(
+    project_dir: str, page_size: int, dpi: int, downsample: int, normalize_mode: str
+):
     """
     Generate QC visualization pages for signal isolation results.
 
     Creates multi-page PNG reports with three columns per channel:
-    Before (self-normalized), After (self-normalized), Difference (inferno).
+    Before (normalized), After (normalized), Difference (inferno).
 
     PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
     """
@@ -2975,6 +2984,7 @@ def isolate_qc(project_dir: str, page_size: int, dpi: int, downsample: int):
         page_size=page_size,
         dpi=dpi,
         downsample=downsample,
+        normalize_mode=normalize_mode,
     )
 
     if pages:

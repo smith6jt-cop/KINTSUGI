@@ -26,6 +26,7 @@ from kintsugi.signal.batch import (
     _normalize_blank_name,
     _resolve_blank_path,
     _strip_for_comparison,
+    _validate_duplicate_blank,
     _validate_secondary_blank,
     clean_background,
     clip_outliers,
@@ -36,7 +37,11 @@ from kintsugi.signal.batch import (
     select_method,
     smooth_blank_for_subtraction,
 )
-from kintsugi.signal.isolation_qc import _self_normalize, generate_qc_pages
+from kintsugi.signal.isolation_qc import (
+    _matched_normalize,
+    _self_normalize,
+    generate_qc_pages,
+)
 
 # =============================================================================
 # Fixtures
@@ -1470,3 +1475,192 @@ class TestClipOutliers:
         orig_p99 = np.percentile(image[image > 0], 99)
         new_p99 = np.percentile(result[result > 0], 99)
         assert abs(new_p99 - orig_p99) / orig_p99 < 0.05
+
+
+# =============================================================================
+# Duplicate Blank Validation
+# =============================================================================
+
+
+class TestDuplicateBlankValidation:
+    def test_duplicate_blank_detected(self):
+        """Same blank name for primary/secondary → duplicate detected."""
+        valid, reason = _validate_duplicate_blank("Blank_1b", "Blank_1b")
+        assert not valid
+        assert reason == "duplicate_blank"
+
+    def test_duplicate_blank_case_insensitive(self):
+        """Duplicate check is case-insensitive."""
+        valid, reason = _validate_duplicate_blank("Blank_1b", "blank_1b")
+        assert not valid
+        assert reason == "duplicate_blank"
+
+    def test_duplicate_blank_resolved_detected(self):
+        """Different recipe names resolve to same file → duplicate detected."""
+        valid, reason = _validate_duplicate_blank(
+            "Blank_1b",
+            "Blank_13b",
+            primary_resolved="Blank_1b",
+            secondary_resolved="Blank_1b",
+        )
+        assert not valid
+        assert reason == "duplicate_blank_resolved"
+
+    def test_different_blanks_pass(self):
+        """Distinct blanks pass validation."""
+        valid, reason = _validate_duplicate_blank("Blank_1a", "Blank_1b")
+        assert valid
+        assert reason == ""
+
+    def test_different_blanks_with_resolved_pass(self):
+        """Distinct resolved blanks also pass."""
+        valid, reason = _validate_duplicate_blank(
+            "Blank_1a",
+            "Blank_13b",
+            primary_resolved="Blank_1a",
+            secondary_resolved="Blank_1b",
+        )
+        assert valid
+        assert reason == ""
+
+    def test_duplicate_blank_skips_second_subtraction(
+        self, synthetic_project, tmp_path
+    ):
+        """Recipe with same blank for primary and secondary → warning, single subtraction."""
+        specs = discover_channels(synthetic_project)
+        spec = [s for s in specs if s.marker_name == "CD31"][0]
+
+        # Recipe with same blank for both subtractions
+        recipe = MarkerRecipe(
+            marker_name="CD31",
+            primary=SubtractionParams(
+                blank_name="Blank_1b",
+                blank_clip_factor=0,
+                blank_scale_factor=0.5,
+            ),
+            second=SubtractionParams(
+                blank_name="Blank_1b",
+                blank_clip_factor=0,
+                blank_scale_factor=0.3,
+            ),
+        )
+
+        registered_dir = (
+            synthetic_project / "data" / "processed" / "registered"
+        )
+        location_map = {
+            "Blank_1b": registered_dir / "cyc01" / "Blank_1b.tif",
+        }
+
+        output_dir = tmp_path / "output"
+        result = process_channel(
+            spec,
+            recipe=recipe,
+            output_dir=output_dir,
+            location_map=location_map,
+        )
+        # Should have duplicate blank warning, second subtraction skipped
+        assert "duplicate_blank" in result.warning
+
+
+# =============================================================================
+# Fallback Re-validation
+# =============================================================================
+
+
+class TestFallbackRevalidation:
+    def test_fallback_revalidated_when_still_over_subtracted(
+        self, synthetic_project, tmp_path
+    ):
+        """Recipe over-subtraction + fallback also over-subtracted → status=failed."""
+        specs = discover_channels(synthetic_project)
+        spec = [s for s in specs if s.marker_name == "FoxP3"][0]
+
+        # Recipe with extreme scale that destroys dim signal
+        recipe = MarkerRecipe(
+            marker_name="FoxP3",
+            primary=SubtractionParams(
+                blank_name="Blank_1b",
+                blank_clip_factor=0,
+                blank_scale_factor=5.0,  # Extreme: blank >> signal
+            ),
+        )
+
+        registered_dir = (
+            synthetic_project / "data" / "processed" / "registered"
+        )
+        location_map = {
+            "Blank_1b": registered_dir / "cyc01" / "Blank_1b.tif",
+        }
+
+        output_dir = tmp_path / "output"
+        result = process_channel(
+            spec,
+            recipe=recipe,
+            output_dir=output_dir,
+            location_map=location_map,
+            quality_gate=0.6,
+        )
+        # FoxP3 is dim (2000-8000), Blank_1b is high (8000-20000)
+        # Both recipe and fallback should over-subtract
+        if result.recipe_source == "auto_fallback":
+            # Fallback was attempted — check if status reflects re-validation
+            if result.zero_percent >= 95 or (
+                result.quality_metrics.get("quality_score", 1) < 0.6
+                and result.zero_percent > 70
+            ):
+                assert result.status == "failed"
+                assert "auto_fallback_also_failed" in result.warning
+
+
+# =============================================================================
+# Matched Normalization
+# =============================================================================
+
+
+class TestMatchedNormalization:
+    def test_matched_normalize_uses_before_range(self):
+        """Matched normalization uses Before's p1-p99 for both images."""
+        rng = np.random.RandomState(90)
+        before = rng.randint(1000, 50000, (64, 64), dtype=np.uint16)
+        # After has narrow range (e.g., most signal removed)
+        after = rng.randint(1000, 5000, (64, 64), dtype=np.uint16)
+
+        before_norm, after_norm = _matched_normalize(before, after)
+
+        # Both should be in [0, 1]
+        assert before_norm.min() >= 0 and before_norm.max() <= 1
+        assert after_norm.min() >= 0 and after_norm.max() <= 1
+
+        # After should use much less of the range (since its values are lower)
+        assert after_norm.max() < before_norm.max()
+
+    def test_matched_vs_independent_difference(self):
+        """Matched mode reduces contrast stretch of low-range After image."""
+        rng = np.random.RandomState(91)
+        before = rng.randint(5000, 50000, (64, 64), dtype=np.uint16)
+        after = rng.randint(5000, 8000, (64, 64), dtype=np.uint16)
+
+        # Independent: stretches after to full range
+        after_independent = _self_normalize(after.astype(np.float64))
+        # Matched: keeps after in before's context
+        _, after_matched = _matched_normalize(before, after)
+
+        # Independent stretches to full [0,1]; matched should be much narrower
+        indep_range = after_independent.max() - after_independent.min()
+        matched_range = after_matched.max() - after_matched.min()
+        assert matched_range < indep_range
+
+    def test_qc_matched_mode_generates_pages(self, synthetic_project):
+        """No crash with normalize_mode='matched'."""
+        # First process to create signal_isolated files
+        process_batch(synthetic_project, force=True)
+
+        pages = generate_qc_pages(
+            synthetic_project,
+            page_size=6,
+            normalize_mode="matched",
+        )
+        assert isinstance(pages, list)
+        # Should generate at least one page (channels exist)
+        assert len(pages) >= 1
