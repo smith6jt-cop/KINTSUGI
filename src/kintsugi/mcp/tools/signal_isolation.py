@@ -1335,13 +1335,10 @@ async def propagate_parameters_tool(
 
     if not members:
         return {
-            "error": f"No channels found for cluster {cluster_id}. "
-            "Load and cluster channels first."
+            "error": f"No channels found for cluster {cluster_id}. Load and cluster channels first."
         }
 
-    marker_dict_local: dict[str, Any] = {
-        name: _loaded_images[name]["data"] for name in members
-    }
+    marker_dict_local: dict[str, Any] = {name: _loaded_images[name]["data"] for name in members}
     blank_map = {
         name: info["metadata"].get("blank_name", "")
         for name, info in _loaded_images.items()
@@ -1349,9 +1346,7 @@ async def propagate_parameters_tool(
     }
 
     try:
-        results = propagate_cluster_parameters(
-            marker_dict_local, members, params, blank_map, out
-        )
+        results = propagate_cluster_parameters(marker_dict_local, members, params, blank_map, out)
     except Exception as e:
         return {"error": f"Propagation failed: {e}"}
 

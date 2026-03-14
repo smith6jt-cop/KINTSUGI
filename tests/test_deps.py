@@ -150,8 +150,18 @@ class TestOptionalGroups:
         from kintsugi.deps import OPTIONAL_GROUPS
 
         expected = {
-            "gpu", "viz", "dl", "analysis", "bio", "claude", "dev",
-            "docs", "kronos", "denoise", "rapids", "full",
+            "gpu",
+            "viz",
+            "dl",
+            "analysis",
+            "bio",
+            "claude",
+            "dev",
+            "docs",
+            "kronos",
+            "denoise",
+            "rapids",
+            "full",
         }
         assert set(OPTIONAL_GROUPS.keys()) == expected
 
@@ -184,7 +194,7 @@ class TestOptionalGroups:
         """conda_cmd is optional; groups that have it should have valid strings."""
         from kintsugi.deps import OPTIONAL_GROUPS
 
-        for name, info in OPTIONAL_GROUPS.items():
+        for _name, info in OPTIONAL_GROUPS.items():
             if "conda_cmd" in info:
                 assert isinstance(info["conda_cmd"], str)
                 assert len(info["conda_cmd"]) > 0
@@ -193,7 +203,7 @@ class TestOptionalGroups:
         """Groups with notes should have non-empty string values."""
         from kintsugi.deps import OPTIONAL_GROUPS
 
-        for name, info in OPTIONAL_GROUPS.items():
+        for _name, info in OPTIONAL_GROUPS.items():
             if "note" in info:
                 assert isinstance(info["note"], str)
                 assert len(info["note"]) > 0
@@ -207,7 +217,7 @@ class TestOptionalGroups:
 
     def test_install_optional_accepts_new_groups(self):
         """install_optional should accept all groups in OPTIONAL_GROUPS."""
-        from kintsugi.deps import OPTIONAL_GROUPS, install_optional
+        from kintsugi.deps import OPTIONAL_GROUPS
 
         # Just verify the function doesn't reject known groups (don't actually install)
         for name in OPTIONAL_GROUPS:

@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import pytest
 import yaml
 
 
@@ -233,8 +232,12 @@ class TestDetectProjectStage:
         from kintsugi.cli import _detect_project_stage
 
         proj = _make_project(
-            tmp_path, "proj", registered=True, signal_isolated=True,
-            edf_cycles=[1], decon_cycles=[1],
+            tmp_path,
+            "proj",
+            registered=True,
+            signal_isolated=True,
+            edf_cycles=[1],
+            decon_cycles=[1],
         )
         assert "signal_isolated" in _detect_project_stage(proj)
 
@@ -242,9 +245,7 @@ class TestDetectProjectStage:
         """Registered takes priority over partial stages."""
         from kintsugi.cli import _detect_project_stage
 
-        proj = _make_project(
-            tmp_path, "proj", registered=True, edf_cycles=[1], decon_cycles=[1]
-        )
+        proj = _make_project(tmp_path, "proj", registered=True, edf_cycles=[1], decon_cycles=[1])
         assert "registered" in _detect_project_stage(proj)
 
 
@@ -300,9 +301,7 @@ class TestBatchCLI:
                 "accounts": [],
             }
 
-        monkeypatch.setattr(
-            "kintsugi.hpc.detect_live_multi_account", mock_detect
-        )
+        monkeypatch.setattr("kintsugi.hpc.detect_live_multi_account", mock_detect)
 
         runner = CliRunner()
         result = runner.invoke(main, ["workflow", "batch", str(tmp_path), "--dry-run"])
@@ -375,9 +374,7 @@ class TestGPUGuard:
                 "accounts": [],
             }
 
-        monkeypatch.setattr(
-            "kintsugi.hpc.detect_live_multi_account", mock_detect
-        )
+        monkeypatch.setattr("kintsugi.hpc.detect_live_multi_account", mock_detect)
 
         runner = CliRunner()
         result = runner.invoke(main, ["workflow", "run", str(proj)])

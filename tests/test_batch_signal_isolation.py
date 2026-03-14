@@ -984,7 +984,10 @@ class TestRecipeDrivenProcessing:
         output_dir = tmp_path / "recipe_out"
         # Disable quality gate to test pure recipe path
         result = process_channel(
-            spec, recipe=recipe, output_dir=output_dir, location_map=location_map,
+            spec,
+            recipe=recipe,
+            output_dir=output_dir,
+            location_map=location_map,
             quality_gate=0.0,
         )
 
@@ -1194,9 +1197,7 @@ class TestPositionalFallback:
         assert result is not None
         assert result == ("Blank_1c", path)
 
-    def test_secondary_blank_positional_fallback_integration(
-        self, synthetic_project, tmp_path
-    ):
+    def test_secondary_blank_positional_fallback_integration(self, synthetic_project, tmp_path):
         """Full recipe processing with a remapped secondary blank."""
         specs = discover_channels(synthetic_project)
         spec = [s for s in specs if s.marker_name == "CD31"][0]
@@ -1523,9 +1524,7 @@ class TestDuplicateBlankValidation:
         assert valid
         assert reason == ""
 
-    def test_duplicate_blank_skips_second_subtraction(
-        self, synthetic_project, tmp_path
-    ):
+    def test_duplicate_blank_skips_second_subtraction(self, synthetic_project, tmp_path):
         """Recipe with same blank for primary and secondary → warning, single subtraction."""
         specs = discover_channels(synthetic_project)
         spec = [s for s in specs if s.marker_name == "CD31"][0]
@@ -1545,9 +1544,7 @@ class TestDuplicateBlankValidation:
             ),
         )
 
-        registered_dir = (
-            synthetic_project / "data" / "processed" / "registered"
-        )
+        registered_dir = synthetic_project / "data" / "processed" / "registered"
         location_map = {
             "Blank_1b": registered_dir / "cyc01" / "Blank_1b.tif",
         }
@@ -1569,9 +1566,7 @@ class TestDuplicateBlankValidation:
 
 
 class TestFallbackRevalidation:
-    def test_fallback_revalidated_when_still_over_subtracted(
-        self, synthetic_project, tmp_path
-    ):
+    def test_fallback_revalidated_when_still_over_subtracted(self, synthetic_project, tmp_path):
         """Recipe over-subtraction + fallback also over-subtracted → status=failed."""
         specs = discover_channels(synthetic_project)
         spec = [s for s in specs if s.marker_name == "FoxP3"][0]
@@ -1586,9 +1581,7 @@ class TestFallbackRevalidation:
             ),
         )
 
-        registered_dir = (
-            synthetic_project / "data" / "processed" / "registered"
-        )
+        registered_dir = synthetic_project / "data" / "processed" / "registered"
         location_map = {
             "Blank_1b": registered_dir / "cyc01" / "Blank_1b.tif",
         }
@@ -1606,8 +1599,7 @@ class TestFallbackRevalidation:
         if result.recipe_source == "auto_fallback":
             # Fallback was attempted — check if status reflects re-validation
             if result.zero_percent >= 95 or (
-                result.quality_metrics.get("quality_score", 1) < 0.6
-                and result.zero_percent > 70
+                result.quality_metrics.get("quality_score", 1) < 0.6 and result.zero_percent > 70
             ):
                 assert result.status == "failed"
                 assert "auto_fallback_also_failed" in result.warning

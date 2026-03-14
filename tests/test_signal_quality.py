@@ -1,7 +1,6 @@
 """Tests for signal isolation quality scoring."""
 
 import numpy as np
-import pytest
 
 from kintsugi.qc.signal_quality import compute_signal_isolation_quality
 
@@ -37,9 +36,7 @@ class TestComputeSignalIsolationQuality:
         original = _make_signal_image(spot_intensity=30000, bg_level=2000)
         blank = _make_blank_image(level=2000)
         # Good processing: subtract blank, preserve signal structure
-        processed = np.clip(original.astype(np.float64) - blank * 0.8, 0, 65535).astype(
-            np.uint16
-        )
+        processed = np.clip(original.astype(np.float64) - blank * 0.8, 0, 65535).astype(np.uint16)
         result = compute_signal_isolation_quality(original, processed, blank=blank)
 
         assert result["quality_score"] > 0.0
@@ -127,9 +124,7 @@ class TestComputeSignalIsolationQuality:
         """Quality score should be between 0 and 1."""
         original = _make_signal_image(size=64)
         blank = _make_blank_image(size=64)
-        processed = np.clip(original.astype(np.float64) - blank * 0.5, 0, 65535).astype(
-            np.uint16
-        )
+        processed = np.clip(original.astype(np.float64) - blank * 0.5, 0, 65535).astype(np.uint16)
         result = compute_signal_isolation_quality(original, processed, blank=blank)
         assert 0.0 <= result["quality_score"] <= 1.0
 

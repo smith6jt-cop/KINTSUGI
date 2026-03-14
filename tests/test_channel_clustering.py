@@ -1,7 +1,6 @@
 """Tests for channel clustering and parameter propagation."""
 
 import numpy as np
-import pytest
 
 from kintsugi.signal.clustering import (
     cluster_channels,
@@ -84,7 +83,9 @@ class TestClusterChannels:
         """Channels with different wavelength groups should not cluster together."""
         features = {}
         # Create channels with specific wavelength groups
-        for i, name in enumerate(["DAPI-01", "DAPI-02", "DAPI-03", "AF488-CD3", "AF488-CD20", "AF488-CD45"]):
+        for i, name in enumerate(
+            ["DAPI-01", "DAPI-02", "DAPI-03", "AF488-CD3", "AF488-CD20", "AF488-CD45"]
+        ):
             img = _make_channel_image(3000, seed=i)
             features[name] = extract_channel_features(img, channel_name=name)
 
@@ -109,7 +110,7 @@ class TestGetClusterRepresentatives:
         reps = get_cluster_representatives(features, assignments)
 
         assert len(reps) == 3
-        for cid, (name, count) in reps.items():
+        for _cid, (name, count) in reps.items():
             assert name in features
             assert count > 0
 
@@ -151,7 +152,7 @@ class TestPropagateClusterParameters:
         )
 
         assert len(results) == 2
-        for ch, res in results.items():
+        for _ch, res in results.items():
             assert res["status"] == "success"
             assert res["output_path"].exists()
             assert 0.0 <= res["quality_score"] <= 1.0
@@ -165,9 +166,7 @@ class TestPropagateClusterParameters:
         params = {"blank_params": {"blank_clip_factor": 0, "blank_scale_factor": 1.0}}
         blank_map = {"CD3": "Blank1"}
 
-        results = propagate_cluster_parameters(
-            marker_dict, ["CD3"], params, blank_map, tmp_path
-        )
+        results = propagate_cluster_parameters(marker_dict, ["CD3"], params, blank_map, tmp_path)
         assert "quality_score" in results["CD3"]
         assert "quality_details" in results["CD3"]
 
@@ -175,9 +174,7 @@ class TestPropagateClusterParameters:
         """Missing channel should not crash, should report error."""
         marker_dict = {}
         params = {"blank_params": {"blank_clip_factor": 0}}
-        results = propagate_cluster_parameters(
-            marker_dict, ["missing_ch"], params, {}, tmp_path
-        )
+        results = propagate_cluster_parameters(marker_dict, ["missing_ch"], params, {}, tmp_path)
         assert results["missing_ch"]["status"] == "error"
 
     def test_custom_process_fn(self, tmp_path):
@@ -201,9 +198,7 @@ class TestPropagateClusterParameters:
             "CD3": rng.randint(100, 5000, (64, 64), dtype=np.uint16),
         }
         params = {"blank_params": {"blank_clip_factor": 0, "blank_scale_factor": 1.0}}
-        results = propagate_cluster_parameters(
-            marker_dict, ["CD3"], params, {}, tmp_path
-        )
+        results = propagate_cluster_parameters(marker_dict, ["CD3"], params, {}, tmp_path)
         assert results["CD3"]["status"] == "success"
 
     def test_with_clean_params(self, tmp_path):
@@ -214,12 +209,15 @@ class TestPropagateClusterParameters:
         }
         params = {
             "blank_params": {"blank_clip_factor": 200, "blank_scale_factor": 1.0},
-            "clean_params": {"background_threshold": 100, "smooth": False, "remove_small": True, "small_size": 30},
+            "clean_params": {
+                "background_threshold": 100,
+                "smooth": False,
+                "remove_small": True,
+                "small_size": 30,
+            },
         }
         blank_map = {"CD3": "Blank1"}
-        results = propagate_cluster_parameters(
-            marker_dict, ["CD3"], params, blank_map, tmp_path
-        )
+        results = propagate_cluster_parameters(marker_dict, ["CD3"], params, blank_map, tmp_path)
         assert results["CD3"]["status"] == "success"
 
 
@@ -259,9 +257,7 @@ class TestGenerateClusterQC:
             "CD3": {"output_path": None, "quality_score": 0.0, "status": "error"},
             "CD20": {"output_path": None, "quality_score": 0.0, "status": "error"},
         }
-        fig = generate_cluster_qc(
-            marker_dict, processing_results, ["CD3", "CD20"], cluster_id=0
-        )
+        fig = generate_cluster_qc(marker_dict, processing_results, ["CD3", "CD20"], cluster_id=0)
 
         import matplotlib.figure
 
@@ -286,9 +282,7 @@ class TestGenerateClusterQC:
                 "status": "success",
             }
         }
-        fig = generate_cluster_qc(
-            marker_dict, processing_results, ["CD3"], cluster_id=1
-        )
+        fig = generate_cluster_qc(marker_dict, processing_results, ["CD3"], cluster_id=1)
 
         import matplotlib.figure
 

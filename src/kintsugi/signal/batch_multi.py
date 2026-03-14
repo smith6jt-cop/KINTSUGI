@@ -194,10 +194,7 @@ def _find_external_recipes(project_name: str) -> str:
             ):
                 candidate = entry / "Processing_parameters"
                 if candidate.is_dir() and list(candidate.glob("*_param.txt")):
-                    logger.info(
-                        f"Fuzzy recipe match: '{project_name}' -> "
-                        f"'{entry.name}' in {base}"
-                    )
+                    logger.info(f"Fuzzy recipe match: '{project_name}' -> '{entry.name}' in {base}")
                     return str(candidate)
 
     return ""

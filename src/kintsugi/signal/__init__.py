@@ -56,6 +56,19 @@ from .batch_multi import (
     process_all_projects,
     resolve_recipes_for_project,
 )
+from .clustering import (
+    cluster_channels,
+    generate_cluster_qc,
+    get_cluster_representatives,
+    plot_cluster_summary,
+    propagate_cluster_parameters,
+)
+from .features import (
+    batch_extract_features,
+    extract_channel_features,
+    features_to_vector,
+    infer_wavelength_group,
+)
 from .isolation_qc import generate_qc_pages, generate_summary_table
 from .subtractor import (
     AutofluorescenceSubtractor,
@@ -69,19 +82,6 @@ from .utils import (
     apply_percentile_smoothing,
     clip_and_scale_blank,
     estimate_autofluorescence_level,
-)
-from .features import (
-    batch_extract_features,
-    extract_channel_features,
-    features_to_vector,
-    infer_wavelength_group,
-)
-from .clustering import (
-    cluster_channels,
-    generate_cluster_qc,
-    get_cluster_representatives,
-    plot_cluster_summary,
-    propagate_cluster_parameters,
 )
 
 __all__ = [

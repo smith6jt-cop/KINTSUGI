@@ -84,6 +84,7 @@ from kintsugi.qc.quick_metrics import (
     fix_bad_zplanes_in_tiff,
     fix_bad_zplanes_in_zarr,
 )
+from kintsugi.qc.signal_quality import compute_signal_isolation_quality
 from kintsugi.qc.stripe_artifact import (
     StripeArtifactResult,
     classify_hp_fft_severity,
@@ -92,7 +93,6 @@ from kintsugi.qc.stripe_artifact import (
     detect_stripe_artifact,
     scan_zstack,
 )
-from kintsugi.qc.signal_quality import compute_signal_isolation_quality
 from kintsugi.qc.stripe_mitigation import (
     MitigationResult,
     apply_directional_filter,

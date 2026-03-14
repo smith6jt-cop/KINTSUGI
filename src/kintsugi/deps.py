@@ -301,7 +301,20 @@ def require(
 
 
 def install_optional(
-    group: Literal["gpu", "viz", "dl", "analysis", "bio", "claude", "dev", "docs", "kronos", "denoise", "rapids", "full"],
+    group: Literal[
+        "gpu",
+        "viz",
+        "dl",
+        "analysis",
+        "bio",
+        "claude",
+        "dev",
+        "docs",
+        "kronos",
+        "denoise",
+        "rapids",
+        "full",
+    ],
     use_conda: bool = False,
 ) -> bool:
     """
