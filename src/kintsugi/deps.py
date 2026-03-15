@@ -473,7 +473,6 @@ class DependencyChecker:
             ("ome-types", "0.5.0", "bio"),
             ("ome-zarr", None, "bio"),
             # Image processing
-            ("valis-wsi", "1.2.0", "core"),
             ("pyvips", "2.2.0", "core"),
             ("stackview", "0.18.0", "viz"),
         ]

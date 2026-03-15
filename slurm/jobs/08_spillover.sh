@@ -8,7 +8,7 @@
 # Output: Corrected and uncorrected per-cell quantification CSVs
 #
 # Usage:
-#   sbatch --export=ALL,PROJECT_DIR=/path/to/project 05_spillover.sh
+#   sbatch --export=ALL,PROJECT_DIR=/path/to/project 08_spillover.sh
 #
 # Reference: Bai et al., Front. Immunol. 12:652631 (2021)
 # =============================================================================

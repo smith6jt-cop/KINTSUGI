@@ -2222,7 +2222,8 @@ class Valis(object):
                 else:
                     # Some formats, like .mrxs have the main file but
                     # data in a subdirectory with the same name
-                    matching_f = [ff for ff in full_path_list if re.search(dir_name, ff) is not None and os.path.split(ff)[1] != dir_name]
+                    escape_dir = re.escape(dir_name)
+                    matching_f = [ff for ff in full_path_list if re.search(escape_dir, ff) is not None and os.path.split(ff)[1] != dir_name]
                     if len(matching_f) == 1:
                         if not matching_f[0] in self.original_img_list:
                             # Make sure that file not already in list
@@ -4674,7 +4675,8 @@ class Valis(object):
         except Exception as e:
             traceback_msg = traceback.format_exc()
             valtils.print_warning(e, rgb=Fore.RED, traceback_msg=traceback_msg)
-            kill_jvm()
+            if slide_io.ome is not None:
+                kill_jvm()
             return None, None, None
 
 
