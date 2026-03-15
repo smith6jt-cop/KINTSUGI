@@ -11,7 +11,9 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from kintsugi.signal.optimizer import (
+optuna = pytest.importorskip("optuna", reason="optuna not installed")
+
+from kintsugi.signal.optimizer import (  # noqa: E402
     BLANK_PARAMS_SPACE,
     CLEAN_PARAMS_SPACE,
     _flatten_params_for_optuna,

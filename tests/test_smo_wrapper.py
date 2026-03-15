@@ -89,7 +89,7 @@ class TestEstimateBackgroundSMO:
         """Background region of corrected image should have lower variance."""
         from kintsugi.signal.smo import estimate_background_smo
 
-        img, true_bg = synthetic_image_with_background
+        img, _true_bg = synthetic_image_with_background
 
         # Identify background pixels (below median)
         bg_mask = img < np.median(img)

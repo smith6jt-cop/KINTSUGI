@@ -79,11 +79,12 @@ def estimate_background_smo(
     bg_mean_val = float(bg_rv.mean())
     bg_std_val = float(bg_rv.std())
 
-    # Estimate per-pixel background as original minus corrected
-    bg_image = img_f - corrected if return_background else None
-
     # Clip negative values (background can exceed signal in some regions)
     corrected = np.clip(corrected, 0, None)
+
+    # Estimate per-pixel background from clipped corrected image so that
+    # background + corrected == original holds after clipping.
+    bg_image = img_f - corrected if return_background else None
 
     # Restore original dtype
     if np.issubdtype(original_dtype, np.integer):
