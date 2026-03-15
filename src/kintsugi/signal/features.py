@@ -217,9 +217,7 @@ def features_to_vector(features: dict) -> np.ndarray:
     numeric.extend([p[0], p[4], p[8]])  # p1, p50, p99
 
     # One-hot wavelength group
-    wl_one_hot = [
-        1.0 if features["wavelength_group"] == g else 0.0 for g in WAVELENGTH_GROUPS
-    ]
+    wl_one_hot = [1.0 if features["wavelength_group"] == g else 0.0 for g in WAVELENGTH_GROUPS]
 
     return np.array(numeric + wl_one_hot, dtype=np.float64)
 
@@ -268,7 +266,5 @@ def batch_extract_features(
                 b = marker_dict[blank_name]
                 blank = b.compute() if hasattr(b, "compute") else np.array(b)
 
-        features[name] = extract_channel_features(
-            img, blank=blank, channel_name=name
-        )
+        features[name] = extract_channel_features(img, blank=blank, channel_name=name)
     return features

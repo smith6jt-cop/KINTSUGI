@@ -225,9 +225,7 @@ def generate_qc_pages(
 
             # Normalize
             if normalize_mode == "matched":
-                before_norm, after_norm = _matched_normalize(
-                    before_ds, after_ds
-                )
+                before_norm, after_norm = _matched_normalize(before_ds, after_ds)
             else:
                 before_norm = _self_normalize(before_ds)
                 after_norm = _self_normalize(after_ds)

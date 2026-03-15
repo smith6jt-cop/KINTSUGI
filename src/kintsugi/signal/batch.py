@@ -786,15 +786,12 @@ def _validate_duplicate_blank(
     tuple[bool, str]
         (is_valid, reason) — False with reason if duplicate.
     """
-    if _strip_for_comparison(primary_blank) == _strip_for_comparison(
-        secondary_blank
-    ):
+    if _strip_for_comparison(primary_blank) == _strip_for_comparison(secondary_blank):
         return False, "duplicate_blank"
     if (
         primary_resolved
         and secondary_resolved
-        and _strip_for_comparison(primary_resolved)
-        == _strip_for_comparison(secondary_resolved)
+        and _strip_for_comparison(primary_resolved) == _strip_for_comparison(secondary_resolved)
     ):
         return False, "duplicate_blank_resolved"
     return True, ""
@@ -932,9 +929,7 @@ def _process_channel_recipe(
         # 2. Second subtraction
         if recipe.second:
             # Validate secondary blank is not the marker itself
-            valid, reason = _validate_secondary_blank(
-                spec.marker_name, recipe.second.blank_name
-            )
+            valid, reason = _validate_secondary_blank(spec.marker_name, recipe.second.blank_name)
             if not valid:
                 logger.error(
                     f"Secondary blank '{recipe.second.blank_name}' for "
@@ -955,15 +950,11 @@ def _process_channel_recipe(
                     )
                     warnings.append(f"secondary_blank_{dup_reason}")
                 else:
-                    resolved = _resolve_blank_path(
-                        recipe.second.blank_name, location_map
-                    )
+                    resolved = _resolve_blank_path(recipe.second.blank_name, location_map)
                     if resolved:
                         resolved_name, blank2_path = resolved
                         # Re-validate resolved name against marker
-                        valid2, reason2 = _validate_secondary_blank(
-                            spec.marker_name, resolved_name
-                        )
+                        valid2, reason2 = _validate_secondary_blank(spec.marker_name, resolved_name)
                         if not valid2:
                             logger.error(
                                 f"Secondary blank '{recipe.second.blank_name}' "
@@ -988,9 +979,7 @@ def _process_channel_recipe(
                                     f"primary blank '{spec.blank_name}' — "
                                     f"skipping second subtraction"
                                 )
-                                warnings.append(
-                                    f"secondary_blank_{dup2_reason}"
-                                )
+                                warnings.append(f"secondary_blank_{dup2_reason}")
                             else:
                                 blank2 = tifffile.imread(str(blank2_path))
                                 subtracted = subtract_autofluorescence(
@@ -1006,9 +995,7 @@ def _process_channel_recipe(
                                     high_percentile=recipe.second.high_percentile,
                                     erosion=recipe.second.erosion,
                                 )
-                                result.blank_used = (
-                                    f"{spec.blank_name}+{recipe.second.blank_name}"
-                                )
+                                result.blank_used = f"{spec.blank_name}+{recipe.second.blank_name}"
                     else:
                         logger.error(
                             f"Second blank '{recipe.second.blank_name}' not "
@@ -1050,8 +1037,7 @@ def _process_channel_recipe(
         )
         if over_sub:
             logger.warning(
-                f"Over-subtraction detected for {spec.marker_name} "
-                f"(recipe): {over_reason}"
+                f"Over-subtraction detected for {spec.marker_name} (recipe): {over_reason}"
             )
             # Attempt auto-analysis fallback
             try:
@@ -1061,13 +1047,10 @@ def _process_channel_recipe(
                 )
                 if (
                     fallback_result.zero_percent < result.zero_percent
-                    and fallback_result.quality_metrics.get("quality_score", 0)
-                    > qs
+                    and fallback_result.quality_metrics.get("quality_score", 0) > qs
                 ):
                     # Re-check fallback against quality gate
-                    fb_qs = fallback_result.quality_metrics.get(
-                        "quality_score", 0
-                    )
+                    fb_qs = fallback_result.quality_metrics.get("quality_score", 0)
                     fb_over, fb_reason = _check_over_subtraction(
                         fallback_result.zero_percent,
                         fb_qs,
@@ -1079,9 +1062,7 @@ def _process_channel_recipe(
                             f"over-subtracted: {fb_reason}"
                         )
                         fallback_result.status = "failed"
-                        warnings.append(
-                            f"auto_fallback_also_failed ({fb_reason})"
-                        )
+                        warnings.append(f"auto_fallback_also_failed ({fb_reason})")
                     else:
                         logger.info(
                             f"Auto fallback improved {spec.marker_name}: "
@@ -1089,9 +1070,7 @@ def _process_channel_recipe(
                             f"{fallback_result.zero_percent:.1f}%, "
                             f"quality {qs:.2f} -> {fb_qs:.2f}"
                         )
-                        warnings.append(
-                            f"auto_fallback (recipe: {over_reason})"
-                        )
+                        warnings.append(f"auto_fallback (recipe: {over_reason})")
 
                     fallback_result.recipe_source = "auto_fallback"
                     fallback_result.warning = "; ".join(warnings)
@@ -1101,9 +1080,7 @@ def _process_channel_recipe(
                         output_dir = Path(output_dir)
                         output_dir.mkdir(parents=True, exist_ok=True)
                         # Re-process with output to save
-                        fallback_saved = _auto_fallback(
-                            spec, output_dir=output_dir
-                        )
+                        fallback_saved = _auto_fallback(spec, output_dir=output_dir)
                         fallback_saved.recipe_source = "auto_fallback"
                         fallback_saved.warning = fallback_result.warning
                     return fallback_result
@@ -1115,9 +1092,7 @@ def _process_channel_recipe(
                     result.status = "failed"
                     warnings.append(f"over_subtracted ({over_reason})")
             except Exception as fb_err:
-                logger.warning(
-                    f"Auto fallback failed for {spec.marker_name}: {fb_err}"
-                )
+                logger.warning(f"Auto fallback failed for {spec.marker_name}: {fb_err}")
                 result.status = "failed"
                 warnings.append(f"over_subtracted ({over_reason})")
 
@@ -1193,7 +1168,11 @@ def process_channel(
     # Recipe path: use legacy multi-step pipeline
     if recipe is not None:
         return _process_channel_recipe(
-            spec, recipe, location_map or {}, output_dir, dry_run,
+            spec,
+            recipe,
+            location_map or {},
+            output_dir,
+            dry_run,
             quality_gate=quality_gate,
             clip_percentile=clip_percentile,
         )

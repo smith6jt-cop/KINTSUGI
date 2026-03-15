@@ -986,13 +986,9 @@ def _render_project(
     table.add_row(*reg_row)
 
     # Signal isolation row
-    si_style, si_symbol = _STATUS_STYLE.get(
-        status.signal_isolation_status, ("[dim]", "??")
-    )
+    si_style, si_symbol = _STATUS_STYLE.get(status.signal_isolation_status, ("[dim]", "??"))
     si_timing = (
-        f"{status.signal_isolation_timing / 60:.0f}m"
-        if status.signal_isolation_timing > 0
-        else ""
+        f"{status.signal_isolation_timing / 60:.0f}m" if status.signal_isolation_timing > 0 else ""
     )
     si_job_str = ""
     if show_jobs and status.signal_isolation_job:

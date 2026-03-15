@@ -37,6 +37,7 @@ from typing import Any, ClassVar, Literal
 PROJECT_CONFIG_FILE = "kintsugi_project.json"
 PROJECT_VERSION = "1.0.0"
 
+
 def _resolve_kintsugi_executable() -> str:
     """Resolve absolute path to the kintsugi CLI executable.
 

@@ -55,7 +55,7 @@ def cluster_channels(
 
     names = list(channel_features.keys())
     if len(names) < 3:
-        return {name: 0 for name in names}
+        return dict.fromkeys(names, 0)
 
     X = np.array([features_to_vector(channel_features[n]) for n in names])
 
@@ -85,7 +85,7 @@ def _cluster_wavelength_aware(
 
     result = {}
     cluster_offset = 0
-    for wl, members in wl_groups.items():
+    for _wl, members in wl_groups.items():
         if len(members) < 3:
             for _, name in members:
                 result[name] = cluster_offset
@@ -103,7 +103,7 @@ def _cluster_wavelength_aware(
         sub_n = _auto_n_clusters(X_scaled, n_clusters, method, max_clusters)
         labels = _fit_cluster_model(X_scaled, sub_n, method)
 
-        for name, label in zip(member_names, labels):
+        for name, label in zip(member_names, labels, strict=False):
             result[name] = int(label) + cluster_offset
         cluster_offset += sub_n
 
@@ -126,7 +126,7 @@ def _cluster_global(
     auto_n = _auto_n_clusters(X_scaled, n_clusters, method, max_clusters)
     labels = _fit_cluster_model(X_scaled, auto_n, method)
 
-    return {name: int(label) for name, label in zip(names, labels)}
+    return {name: int(label) for name, label in zip(names, labels, strict=False)}
 
 
 def _fit_cluster_model(X: np.ndarray, n_clusters: int, method: str) -> np.ndarray:

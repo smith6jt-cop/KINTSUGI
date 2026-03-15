@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from kintsugi.signal.features import (
-    WAVELENGTH_GROUPS,
     batch_extract_features,
     extract_channel_features,
     features_to_vector,
@@ -191,7 +190,7 @@ class TestBatchExtractFeatures:
         }
         features = batch_extract_features(marker_dict, progress=False)
         assert set(features.keys()) == {"CD3", "CD20", "DAPI"}
-        for name, f in features.items():
+        for _name, f in features.items():
             assert "mean" in f
             assert "snr_estimate" in f
 

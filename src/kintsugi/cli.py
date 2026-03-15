@@ -13,14 +13,15 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
 import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-console = Console()
-
 from kintsugi.deps import OPTIONAL_GROUPS, _find_project_root
+
+console = Console()
 
 
 def _resolve_project_dir(path: str | Path) -> Path:
@@ -548,7 +549,9 @@ def config(project_path: str, print_only: bool):
             with open(settings_file, "w") as f:
                 json_mod.dump(settings, f, indent=2)
                 f.write("\n")
-            console.print(f"[green]Added kintsugi to enabledMcpjsonServers in {settings_file}[/green]")
+            console.print(
+                f"[green]Added kintsugi to enabledMcpjsonServers in {settings_file}[/green]"
+            )
     else:
         settings = {
             "enableAllProjectMcpServers": True,
@@ -1377,7 +1380,6 @@ def workflow_check(project_dir: str):
 
     PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
     """
-    from pathlib import Path
 
     import yaml
 
@@ -1515,9 +1517,7 @@ def _run_with_dashboard(cmd: list[str], project_dir: Path, interval: int = 30) -
     help="Force re-run a specific rule (stitch/deconvolve/edf/registration)",
 )
 @click.option("--cycles", "-c", default=None, help="Override cycles: '1-3' or '1,2,5'")
-@click.option(
-    "--dashboard", "-d", is_flag=True, help="Show live progress dashboard while running"
-)
+@click.option("--dashboard", "-d", is_flag=True, help="Show live progress dashboard while running")
 @click.option(
     "--dashboard-interval",
     default=30,
@@ -1550,7 +1550,6 @@ def workflow_run(
         kintsugi workflow run . --forcerun stitch  # Force re-stitch
         kintsugi workflow run . --dashboard        # Run with live dashboard
     """
-    from pathlib import Path
 
     project_dir = _resolve_project_dir(project_dir)
     wf_dir = project_dir / "workflow"
@@ -1564,8 +1563,7 @@ def workflow_run(
                 generate_workflow_config(project_dir)
             except SystemExit:
                 console.print(
-                    "[red]Auto-generation failed. "
-                    "Run 'kintsugi workflow config .' manually.[/red]"
+                    "[red]Auto-generation failed. Run 'kintsugi workflow config .' manually.[/red]"
                 )
                 raise SystemExit(1)
         else:
@@ -1727,7 +1725,6 @@ def workflow_status(
         kintsugi workflow status . --json         # JSON output for scripting
         kintsugi workflow status /blue/maigan/smith6jt --all-projects
     """
-    from pathlib import Path
 
     from kintsugi.dashboard import (
         render_dashboard,
@@ -1851,9 +1848,10 @@ def _discover_batch_projects(
             continue
         if not (p / "data" / "raw" / ".staged").exists():
             continue
-        if not force and (
-            p / "data" / "processed" / "signal_isolated" / ".snakemake_complete"
-        ).exists():
+        if (
+            not force
+            and (p / "data" / "processed" / "signal_isolated" / ".snakemake_complete").exists()
+        ):
             continue
         eligible.append(p)
     return eligible
@@ -1861,14 +1859,10 @@ def _discover_batch_projects(
 
 def _detect_project_stage(project_dir: Path) -> str:
     """Detect the furthest completed stage for a project."""
-    if (
-        project_dir / "data" / "processed" / "signal_isolated" / ".snakemake_complete"
-    ).exists():
+    if (project_dir / "data" / "processed" / "signal_isolated" / ".snakemake_complete").exists():
         return "[green]signal_isolated[/green]"
 
-    if (
-        project_dir / "data" / "processed" / "registered" / ".snakemake_complete"
-    ).exists():
+    if (project_dir / "data" / "processed" / "registered" / ".snakemake_complete").exists():
         return "[cyan]registered[/cyan]"
 
     # Check EDF - are all cycles done?
@@ -1903,7 +1897,11 @@ def _run_single_project(
     start = time.time()
     try:
         result = subprocess.run(
-            cmd, check=False, capture_output=True, text=True, timeout=86400  # 24h max
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=86400,  # 24h max
         )
         duration = time.time() - start
         return (
@@ -1957,6 +1955,7 @@ def workflow_batch(
     import time
 
     import yaml
+
     from kintsugi.hpc import detect_live_multi_account
 
     projects_dir_path = Path(projects_dir).resolve()
@@ -2089,12 +2088,8 @@ def workflow_batch(
     if parallel <= 1:
         # Sequential execution
         for i, proj in enumerate(eligible, 1):
-            console.print(
-                f"[bold][{i}/{len(eligible)}] Processing {proj.name}...[/bold]"
-            )
-            name, rc, dur, stderr = _run_single_project(
-                proj, gpu_per_proc, force, phase_list
-            )
+            console.print(f"[bold][{i}/{len(eligible)}] Processing {proj.name}...[/bold]")
+            name, rc, dur, stderr = _run_single_project(proj, gpu_per_proc, force, phase_list)
             status = "[green]OK[/green]" if rc == 0 else f"[red]FAILED (rc={rc})[/red]"
             console.print(f"  {status}  ({dur / 60:.1f} min)")
             if rc != 0 and stderr:
@@ -2104,21 +2099,15 @@ def workflow_batch(
         # Parallel execution
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        console.print(
-            f"[bold]Running {len(eligible)} datasets with {parallel} workers[/bold]"
-        )
+        console.print(f"[bold]Running {len(eligible)} datasets with {parallel} workers[/bold]")
         with ThreadPoolExecutor(max_workers=parallel) as executor:
             futures = {
-                executor.submit(
-                    _run_single_project, p, gpu_per_proc, force, phase_list
-                ): p
+                executor.submit(_run_single_project, p, gpu_per_proc, force, phase_list): p
                 for p in eligible
             }
             for future in as_completed(futures):
                 name, rc, dur, stderr = future.result()
-                status = (
-                    "[green]OK[/green]" if rc == 0 else f"[red]FAILED (rc={rc})[/red]"
-                )
+                status = "[green]OK[/green]" if rc == 0 else f"[red]FAILED (rc={rc})[/red]"
                 console.print(f"  {name}: {status}  ({dur / 60:.1f} min)")
                 if rc != 0 and stderr:
                     console.print(f"    [dim]{stderr[-200:]}[/dim]")
@@ -2138,10 +2127,7 @@ def workflow_batch(
         status = "[green]OK[/green]" if rc == 0 else "[red]FAILED[/red]"
         summary.add_row(name, status, f"{dur / 60:.1f} min")
     console.print(summary)
-    console.print(
-        f"\n  {succeeded} succeeded, {failed} failed, "
-        f"total {total_time / 60:.1f} min"
-    )
+    console.print(f"\n  {succeeded} succeeded, {failed} failed, total {total_time / 60:.1f} min")
 
 
 @workflow.command("stop")
@@ -2216,7 +2202,6 @@ def export_prepare(project_dir: str, force: bool, dry_run: bool, include_blanks:
         kintsugi workflow export prepare . --dry-run    # Preview what would be exported
         kintsugi workflow export prepare . --force      # Reconvert everything
     """
-    from pathlib import Path
 
     from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
@@ -2331,7 +2316,6 @@ def export_deploy(
         kintsugi workflow export deploy . user@server:/path --dry-run
         kintsugi workflow export deploy . user@server:/path --bwlimit 10000
     """
-    from pathlib import Path
 
     from kintsugi.export import deploy_export
 
@@ -2374,7 +2358,6 @@ def export_status(project_dir: str):
 
     PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
     """
-    from pathlib import Path
 
     from kintsugi.export import get_export_status
 
@@ -2442,7 +2425,6 @@ def cleanup_status(project_dir: str):
 
     PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
     """
-    from pathlib import Path
 
     from kintsugi.cleanup import assess_cleanup_safety
 
@@ -2516,7 +2498,6 @@ def cleanup_plan(project_dir: str):
 
     PROJECT_DIR is the path to your KINTSUGI project directory (default: current).
     """
-    from pathlib import Path
 
     from kintsugi.cleanup import _dir_size, assess_cleanup_safety
 
@@ -2622,7 +2603,6 @@ def cleanup_execute(project_dir: str, no_trash: bool, force: bool, skip_vessel3d
         kintsugi workflow cleanup execute . --no-trash      # Permanent delete
         kintsugi workflow cleanup execute . --skip-vessel3d # Override vessel3d block
     """
-    from pathlib import Path
 
     from kintsugi.cleanup import assess_cleanup_safety, execute_cleanup
 
@@ -2786,7 +2766,6 @@ def cleanup_purge(project_dir: str, days: int, purge_all: bool, force: bool):
         kintsugi workflow cleanup purge . --days 1     # Entries > 1 day
         kintsugi workflow cleanup purge . --all        # Everything
     """
-    from pathlib import Path
 
     from kintsugi.cleanup import list_trash, purge_trash
 
@@ -3050,9 +3029,7 @@ def isolate_run(
     help="Normalization mode: 'independent' (each image uses own range) or "
     "'matched' (both use Before's range to reduce tile artifact visibility).",
 )
-def isolate_qc(
-    project_dir: str, page_size: int, dpi: int, downsample: int, normalize_mode: str
-):
+def isolate_qc(project_dir: str, page_size: int, dpi: int, downsample: int, normalize_mode: str):
     """
     Generate QC visualization pages for signal isolation results.
 
@@ -3099,7 +3076,6 @@ def isolate_status(project_dir: str):
         console.print(f"[yellow]{output}[/yellow]")
     else:
         # Re-render with our console for consistent formatting
-        from pathlib import Path
 
         project_dir = _resolve_project_dir(project_dir)
         manifest_path = (
@@ -3405,7 +3381,11 @@ def isolate_cluster(
     import json
     from pathlib import Path
 
-    from kintsugi.signal.clustering import cluster_channels, get_cluster_representatives, plot_cluster_summary
+    from kintsugi.signal.clustering import (
+        cluster_channels,
+        get_cluster_representatives,
+        plot_cluster_summary,
+    )
     from kintsugi.signal.features import batch_extract_features
 
     project_path = _resolve_project_dir(project_dir)
@@ -3484,8 +3464,7 @@ def isolate_cluster(
         "n_clusters": n_clusters_found,
         "assignments": assignments,
         "representatives": {
-            str(k): {"name": v[0], "member_count": v[1]}
-            for k, v in representatives.items()
+            str(k): {"name": v[0], "member_count": v[1]} for k, v in representatives.items()
         },
     }
 
@@ -3593,9 +3572,7 @@ def isolate_propagate(
     blank_map = param_dict.get("blank_map", {})
 
     # Propagate
-    results = propagate_cluster_parameters(
-        marker_dict, members, param_dict, blank_map, out
-    )
+    results = propagate_cluster_parameters(marker_dict, members, param_dict, blank_map, out)
 
     # Display results
     table = Table(title=f"Cluster {cluster_id} — Propagation Results")
@@ -3605,18 +3582,14 @@ def isolate_propagate(
 
     for ch, res in sorted(results.items()):
         status = res["status"]
-        status_str = (
-            f"[green]{status}[/green]" if status == "success" else f"[red]{status}[/red]"
-        )
+        status_str = f"[green]{status}[/green]" if status == "success" else f"[red]{status}[/red]"
         q = f"{res['quality_score']:.3f}" if res.get("quality_score") else "-"
         table.add_row(ch, status_str, q)
 
     console.print(table)
 
     successes = sum(1 for r in results.values() if r["status"] == "success")
-    console.print(
-        f"\n{successes}/{len(members)} channels processed successfully → {out}"
-    )
+    console.print(f"\n{successes}/{len(members)} channels processed successfully → {out}")
 
 
 # ============================================================================
@@ -3648,7 +3621,6 @@ def workflow_vessel3d(project_dir: str, cycle: int, channel: int, marker: str, d
         kintsugi workflow vessel3d . --cycle 5 --marker CD34     # CD34 in cycle 5
         kintsugi workflow vessel3d . --cycle 3 --dry-run         # Preview
     """
-    from pathlib import Path
 
     project_dir = _resolve_project_dir(project_dir)
     wf_dir = project_dir / "workflow"
@@ -3732,7 +3704,6 @@ def workflow_spillover(project_dir: str, sample: str | None, element_shape: str,
         kintsugi workflow spillover . --element-shape square     # Square kernel
         kintsugi workflow spillover . --dry-run                  # Preview
     """
-    from pathlib import Path
 
     project_dir = _resolve_project_dir(project_dir)
     wf_dir = project_dir / "workflow"

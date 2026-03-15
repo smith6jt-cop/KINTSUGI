@@ -192,7 +192,6 @@ class TestInstallCommand:
     @patch("subprocess.run")
     def test_install_conda_flag(self, mock_run, runner):
         """--conda flag should use conda_cmd when available."""
-        from kintsugi.deps import OPTIONAL_GROUPS
 
         mock_run.return_value = MagicMock(returncode=0)
         result = runner.invoke(main, ["install", "gpu", "--conda"])
@@ -213,7 +212,11 @@ class TestInstallCommand:
         assert "Installing full:" not in result.output
         # Single pip call with extras string
         assert mock_run.call_count == 1
-        cmd_arg = mock_run.call_args[0][0] if mock_run.call_args[0] else mock_run.call_args.kwargs.get("args", "")
+        cmd_arg = (
+            mock_run.call_args[0][0]
+            if mock_run.call_args[0]
+            else mock_run.call_args.kwargs.get("args", "")
+        )
         assert "pip install -e" in cmd_arg
         assert "gpu" in cmd_arg
         assert "rapids" not in cmd_arg
@@ -641,7 +644,7 @@ class TestWorkflowRun:
         mock_popen.return_value = mock_proc
         mock_scan.return_value = MagicMock()
 
-        result = runner.invoke(
+        runner.invoke(
             main, ["workflow", "run", str(project_with_workflow), "--dashboard", "--local"]
         )
         # Popen should have been called (not subprocess.run)
