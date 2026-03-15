@@ -4,11 +4,10 @@ Unit tests for SMO (Silver Mountain Operator) background estimation wrapper.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
-
 
 # --- Fixtures ---
 

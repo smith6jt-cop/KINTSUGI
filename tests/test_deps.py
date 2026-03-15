@@ -160,6 +160,7 @@ class TestOptionalGroups:
             "docs",
             "kronos",
             "denoise",
+            "optimize",
             "rapids",
             "full",
         }

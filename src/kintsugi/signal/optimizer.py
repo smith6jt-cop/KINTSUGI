@@ -15,11 +15,10 @@ Design Principles:
 
 from __future__ import annotations
 
-import json
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 import numpy as np
 
@@ -52,13 +51,13 @@ def optimize_signal_isolation(
     signal: np.ndarray,
     blank: np.ndarray,
     n_trials: int = 80,
-    timeout: Optional[int] = 300,
-    warm_start_params: Optional[dict] = None,
-    process_fn: Optional[Callable] = None,
-    quality_weights: Optional[dict] = None,
+    timeout: int | None = 300,
+    warm_start_params: dict | None = None,
+    process_fn: Callable | None = None,
+    quality_weights: dict | None = None,
     optimize_clean: bool = True,
-    study_name: Optional[str] = None,
-    storage_path: Optional[Path] = None,
+    study_name: str | None = None,
+    storage_path: Path | None = None,
     n_startup_trials: int = 15,
     show_progress: bool = True,
 ) -> dict:
@@ -242,9 +241,7 @@ def _sample_blank_params(trial) -> dict:
         if spec["type"] == "int":
             bp[key] = trial.suggest_int(key, spec["low"], spec["high"], step=spec.get("step", 1))
         elif spec["type"] == "float":
-            bp[key] = trial.suggest_float(
-                key, spec["low"], spec["high"], step=spec.get("step")
-            )
+            bp[key] = trial.suggest_float(key, spec["low"], spec["high"], step=spec.get("step"))
         elif spec["type"] == "categorical":
             bp[key] = trial.suggest_categorical(key, spec["choices"])
     return bp
@@ -258,9 +255,7 @@ def _sample_clean_params(trial) -> dict:
         if spec["type"] == "int":
             cp[key] = trial.suggest_int(name, spec["low"], spec["high"], step=spec.get("step", 1))
         elif spec["type"] == "float":
-            cp[key] = trial.suggest_float(
-                name, spec["low"], spec["high"], step=spec.get("step")
-            )
+            cp[key] = trial.suggest_float(name, spec["low"], spec["high"], step=spec.get("step"))
         elif spec["type"] == "categorical":
             cp[key] = trial.suggest_categorical(name, spec["choices"])
     return cp
@@ -302,7 +297,7 @@ def _extract_params_from_trial(trial, optimize_clean: bool) -> dict:
 def plot_optimization_history(
     study_name: str,
     storage_path: Path,
-    save_path: Optional[Path] = None,
+    save_path: Path | None = None,
 ):
     """
     Plot Optuna optimization history: quality score over trials,
@@ -310,9 +305,8 @@ def plot_optimization_history(
 
     Returns matplotlib Figure.
     """
-    import optuna
-
     import matplotlib
+    import optuna
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

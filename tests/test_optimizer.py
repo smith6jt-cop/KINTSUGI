@@ -4,10 +4,9 @@ Unit tests for Optuna-based signal isolation optimizer.
 
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -15,13 +14,11 @@ import pytest
 from kintsugi.signal.optimizer import (
     BLANK_PARAMS_SPACE,
     CLEAN_PARAMS_SPACE,
-    _extract_params_from_trial,
     _flatten_params_for_optuna,
     _sample_blank_params,
     _sample_clean_params,
     optimize_signal_isolation,
 )
-
 
 # --- Fixtures ---
 

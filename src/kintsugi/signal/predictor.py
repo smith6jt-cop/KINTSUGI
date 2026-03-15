@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
@@ -60,7 +59,7 @@ class ParameterPredictor:
         "backgrnd_thresh",
     ]
 
-    def __init__(self, model_path: Optional[Path] = None):
+    def __init__(self, model_path: Path | None = None):
         """
         Parameters
         ----------
@@ -84,7 +83,7 @@ class ParameterPredictor:
         self,
         features: list[np.ndarray],
         params: list[dict],
-        quality_scores: Optional[list[float]] = None,
+        quality_scores: list[float] | None = None,
         validation_split: float = 0.2,
     ) -> dict:
         """
@@ -218,8 +217,7 @@ class ParameterPredictor:
                 "predicted_params": None,
                 "confidence": 0.0,
                 "warning": (
-                    f"Need {MIN_TRAINING_EXAMPLES} examples, "
-                    f"have {self.n_training_examples}"
+                    f"Need {MIN_TRAINING_EXAMPLES} examples, have {self.n_training_examples}"
                 ),
             }
 
@@ -348,7 +346,7 @@ class ParameterPredictor:
 def train_from_sqlite(
     db_path: Path,
     model_path: Path,
-    tissue_type: Optional[str] = None,
+    tissue_type: str | None = None,
 ) -> dict:
     """
     Train a ParameterPredictor from the KINTSUGI parameter learning SQLite database.
@@ -377,9 +375,7 @@ def train_from_sqlite(
     cursor = conn.cursor()
 
     # Check if table exists
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='tuning_examples'"
-    )
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tuning_examples'")
     if not cursor.fetchone():
         conn.close()
         return {"status": "no_table", "n_examples": 0}

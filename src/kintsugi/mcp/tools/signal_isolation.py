@@ -1399,9 +1399,7 @@ async def optimize_parameters(
     try:
         from kintsugi.signal.optimizer import optimize_signal_isolation
     except ImportError as e:
-        return {
-            "error": f"Missing dependency: {e}. Install with: pip install kintsugi[optimize]"
-        }
+        return {"error": f"Missing dependency: {e}. Install with: pip install kintsugi[optimize]"}
 
     try:
         signal_data = _get_image(signal_channel)
@@ -1494,8 +1492,8 @@ async def predict_parameters(
     if blank_channel:
         try:
             blank_data = _get_image(blank_channel)
-            blank_np = blank_data.compute() if hasattr(blank_data, "compute") else np.array(
-                blank_data
+            blank_np = (
+                blank_data.compute() if hasattr(blank_data, "compute") else np.array(blank_data)
             )
         except ValueError:
             pass
@@ -1519,8 +1517,10 @@ async def predict_parameters(
         return {
             "status": "no_model",
             "message": "No trained predictor model found. Train one with train_from_sqlite().",
-            "features": {k: float(v) if isinstance(v, (int, float, np.floating)) else v
-                         for k, v in features.items()},
+            "features": {
+                k: float(v) if isinstance(v, (int, float, np.floating)) else v
+                for k, v in features.items()
+            },
         }
 
     predictor = ParameterPredictor(model_path=predictor_path)
@@ -1560,9 +1560,7 @@ async def estimate_background(
     try:
         from kintsugi.signal.smo import estimate_background_smo
     except ImportError as e:
-        return {
-            "error": f"Missing dependency: {e}. Install with: pip install kintsugi[optimize]"
-        }
+        return {"error": f"Missing dependency: {e}. Install with: pip install kintsugi[optimize]"}
 
     try:
         data = _get_image(channel)
@@ -1604,7 +1602,9 @@ async def estimate_background(
     # Store background if requested
     if return_background and result["background"] is not None:
         bg_name = f"{channel}_smo_background"
-        _store_image(bg_name, result["background"], {"source_channel": channel, "type": "background"})
+        _store_image(
+            bg_name, result["background"], {"source_channel": channel, "type": "background"}
+        )
 
     return {
         "status": "success",

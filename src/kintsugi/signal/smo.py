@@ -15,7 +15,6 @@ Reference: Silber et al., github.com/maurosilber/smo
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import numpy as np
 
@@ -101,7 +100,7 @@ def estimate_background_smo(
 
 def auto_select_kernel_size(
     image: np.ndarray,
-    test_sizes: Optional[list] = None,
+    test_sizes: list | None = None,
 ) -> dict:
     """
     Automatically select optimal SMO kernel size by testing several values

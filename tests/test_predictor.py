@@ -13,11 +13,9 @@ import numpy as np
 import pytest
 
 from kintsugi.signal.predictor import (
-    MIN_TRAINING_EXAMPLES,
     ParameterPredictor,
     train_from_sqlite,
 )
-
 
 # --- Fixtures ---
 
@@ -173,7 +171,7 @@ class TestParameterPredictor:
 
         assert "uncertainty" in result
         assert len(result["uncertainty"]) > 0
-        for param_name, std_val in result["uncertainty"].items():
+        for _param_name, std_val in result["uncertainty"].items():
             assert std_val >= 0.0
 
     def test_predict_confidence_between_0_and_1(self, training_data):
@@ -283,7 +281,6 @@ class TestTrainFromSQLite:
             """)
 
             # Insert 20 examples
-            from kintsugi.signal.features import features_to_vector
 
             for i in range(20):
                 fv = _make_feature_vector(seed=i)
@@ -302,8 +299,15 @@ class TestTrainFromSQLite:
                     "blank_ratio_mean": float(fv[10]),
                     "dynamic_range": float(fv[11]),
                     "intensity_percentiles": [
-                        float(fv[12]), 0, 0, 0, float(fv[13]),
-                        0, 0, 0, float(fv[14]),
+                        float(fv[12]),
+                        0,
+                        0,
+                        0,
+                        float(fv[13]),
+                        0,
+                        0,
+                        0,
+                        float(fv[14]),
                     ],
                     "wavelength_group": ["405", "488", "550", "594", "650", "750", "unknown"][
                         i % 7
@@ -357,12 +361,12 @@ class TestTrainFromSQLite:
             }
             params = _make_params(seed=0)
 
-            for i in range(5):
+            for _i in range(5):
                 conn.execute(
                     "INSERT INTO tuning_examples VALUES (?, ?, ?, ?)",
                     (json.dumps(feat_dict), json.dumps(params), 0.7, "tonsil"),
                 )
-            for i in range(3):
+            for _i in range(3):
                 conn.execute(
                     "INSERT INTO tuning_examples VALUES (?, ?, ?, ?)",
                     (json.dumps(feat_dict), json.dumps(params), 0.7, "spleen"),

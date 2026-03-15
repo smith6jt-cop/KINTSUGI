@@ -25,7 +25,6 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("kintsugi.workflow.hitl")
 
@@ -63,7 +62,7 @@ class SignalIsolationBatchWorkflow:
         project_paths: list[Path],
         output_dir: Path,
         tissue_type: str = "unknown",
-        predictor_model_path: Optional[Path] = None,
+        predictor_model_path: Path | None = None,
         use_optuna: bool = False,
         optuna_trials: int = 50,
     ):
