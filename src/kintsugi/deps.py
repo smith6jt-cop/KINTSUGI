@@ -110,6 +110,11 @@ OPTIONAL_GROUPS = {
         "packages": ["torch"],
         "install_cmd": "pip install torch",
     },
+    "optimize": {
+        "description": "Automated parameter optimization (Optuna + SMO)",
+        "packages": ["optuna", "smo", "joblib"],
+        "install_cmd": "pip install optuna smo joblib",
+    },
     "rapids": {
         "description": "RAPIDS GPU-accelerated data science",
         "packages": ["cudf", "cuml"],

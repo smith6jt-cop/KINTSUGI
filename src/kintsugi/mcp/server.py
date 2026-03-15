@@ -686,6 +686,98 @@ def _register_signal_isolation_tools(server: Server):
                     "required": [],
                 },
             ),
+            # Automated Optimization Tools (Tier 2)
+            Tool(
+                name="optimize_parameters",
+                description="Find optimal signal isolation parameters via Bayesian optimization (Optuna). Automatically searches the parameter space — no manual slider adjustment needed.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "signal_channel": {
+                            "type": "string",
+                            "description": "Name of loaded signal channel",
+                        },
+                        "blank_channel": {
+                            "type": "string",
+                            "description": "Name of loaded blank channel",
+                        },
+                        "n_trials": {
+                            "type": "integer",
+                            "description": "Maximum optimization trials (default: 80)",
+                            "default": 80,
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Maximum seconds for optimization (default: 300)",
+                            "default": 300,
+                        },
+                        "optimize_clean": {
+                            "type": "boolean",
+                            "description": "Also optimize background cleaning parameters (default: true)",
+                            "default": True,
+                        },
+                        "warm_start_params": {
+                            "type": "object",
+                            "description": "Initial parameter guess for faster convergence (optional)",
+                        },
+                        "project_path": {
+                            "type": "string",
+                            "description": "Project path for storing optimization study (optional)",
+                        },
+                    },
+                    "required": ["signal_channel", "blank_channel"],
+                },
+            ),
+            Tool(
+                name="predict_parameters",
+                description="Predict signal isolation parameters from image features using a trained Random Forest model. Includes confidence scores and uncertainty estimates.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "signal_channel": {
+                            "type": "string",
+                            "description": "Name of loaded signal channel",
+                        },
+                        "blank_channel": {
+                            "type": "string",
+                            "description": "Name of loaded blank channel (optional)",
+                        },
+                        "project_path": {
+                            "type": "string",
+                            "description": "Project path containing predictor model (optional)",
+                        },
+                        "model_path": {
+                            "type": "string",
+                            "description": "Explicit path to predictor model .joblib (optional)",
+                        },
+                    },
+                    "required": ["signal_channel"],
+                },
+            ),
+            Tool(
+                name="estimate_background",
+                description="Estimate and subtract background using SMO (Silver Mountain Operator). Parameter-free — no blank channel needed.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "channel": {
+                            "type": "string",
+                            "description": "Name of loaded channel image",
+                        },
+                        "kernel_size": {
+                            "type": "integer",
+                            "description": "SMO kernel size (default: 7, robust across 5-15)",
+                            "default": 7,
+                        },
+                        "return_background": {
+                            "type": "boolean",
+                            "description": "Store estimated background as a loaded image (default: false)",
+                            "default": False,
+                        },
+                    },
+                    "required": ["channel"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -750,6 +842,13 @@ def _register_signal_isolation_tools(server: Server):
                 result = await learning.approve_and_learn(**arguments)
             elif name == "get_learning_statistics":
                 result = await learning.get_learning_statistics(**arguments)
+            # Automated optimization tools (Tier 2)
+            elif name == "optimize_parameters":
+                result = await signal_isolation.optimize_parameters(**arguments)
+            elif name == "predict_parameters":
+                result = await signal_isolation.predict_parameters(**arguments)
+            elif name == "estimate_background":
+                result = await signal_isolation.estimate_background(**arguments)
             else:
                 result = {"error": f"Unknown tool: {name}"}
 
