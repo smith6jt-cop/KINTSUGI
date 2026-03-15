@@ -1367,3 +1367,251 @@ async def propagate_parameters_tool(
         "total": len(members),
         "results": summary,
     }
+
+
+async def optimize_parameters(
+    signal_channel: str,
+    blank_channel: str,
+    n_trials: int = 80,
+    timeout: int = 300,
+    optimize_clean: bool = True,
+    warm_start_params: dict | None = None,
+    project_path: str | None = None,
+) -> dict[str, Any]:
+    """
+    Find optimal signal isolation parameters via Bayesian optimization (Optuna).
+
+    Automatically searches the parameter space using a quality metric to
+    evaluate each trial. Much faster than manual slider exploration.
+
+    Parameters:
+    - signal_channel: Name of loaded signal channel
+    - blank_channel: Name of loaded blank channel
+    - n_trials: Maximum optimization trials (default 80)
+    - timeout: Maximum seconds (default 300)
+    - optimize_clean: Also optimize background cleaning parameters
+    - warm_start_params: Initial parameter guess for faster convergence
+    - project_path: Path to project for storing optimization study
+
+    Returns:
+    - Best parameters, quality score, and optimization summary
+    """
+    try:
+        from kintsugi.signal.optimizer import optimize_signal_isolation
+    except ImportError as e:
+        return {"error": f"Missing dependency: {e}. Install with: pip install kintsugi[optimize]"}
+
+    try:
+        signal_data = _get_image(signal_channel)
+        blank_data = _get_image(blank_channel)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    # Convert to numpy
+    if hasattr(signal_data, "compute"):
+        signal_np = signal_data.compute()
+        blank_np = blank_data.compute()
+    else:
+        signal_np = np.array(signal_data)
+        blank_np = np.array(blank_data)
+
+    # Storage path
+    storage_path = None
+    if project_path:
+        storage_dir = Path(project_path) / "configs" / "optuna"
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        storage_path = storage_dir / f"{signal_channel}_optimization.db"
+
+    try:
+        result = optimize_signal_isolation(
+            signal=signal_np,
+            blank=blank_np,
+            n_trials=n_trials,
+            timeout=timeout,
+            warm_start_params=warm_start_params,
+            optimize_clean=optimize_clean,
+            storage_path=storage_path,
+            show_progress=False,
+        )
+    except Exception as e:
+        return {"error": f"Optimization failed: {e}"}
+
+    _add_history(
+        signal_channel,
+        "optimize_parameters",
+        {
+            "n_trials": result["n_trials_completed"],
+            "best_quality": result["best_quality"],
+            "time_seconds": result["optimization_time_seconds"],
+        },
+    )
+
+    return result
+
+
+async def predict_parameters(
+    signal_channel: str,
+    blank_channel: str | None = None,
+    project_path: str | None = None,
+    model_path: str | None = None,
+) -> dict[str, Any]:
+    """
+    Predict signal isolation parameters from image features using a trained model.
+
+    Uses a Random Forest model trained on previous tuning examples to predict
+    optimal parameters without manual exploration. Includes confidence scores
+    and per-parameter uncertainty estimates.
+
+    Parameters:
+    - signal_channel: Name of loaded signal channel
+    - blank_channel: Name of loaded blank channel (optional, improves prediction)
+    - project_path: Path to project containing predictor model
+    - model_path: Explicit path to predictor model (.joblib)
+
+    Returns:
+    - Predicted parameters with confidence and uncertainty
+    """
+    try:
+        from kintsugi.signal.features import extract_channel_features, features_to_vector
+        from kintsugi.signal.predictor import ParameterPredictor
+    except ImportError as e:
+        return {"error": f"Missing module: {e}"}
+
+    try:
+        signal_data = _get_image(signal_channel)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    # Convert to numpy
+    if hasattr(signal_data, "compute"):
+        signal_np = signal_data.compute()
+    else:
+        signal_np = np.array(signal_data)
+
+    blank_np = None
+    if blank_channel:
+        try:
+            blank_data = _get_image(blank_channel)
+            blank_np = (
+                blank_data.compute() if hasattr(blank_data, "compute") else np.array(blank_data)
+            )
+        except ValueError:
+            pass
+
+    # Extract features
+    features = extract_channel_features(
+        signal_np,
+        blank=blank_np,
+        channel_name=signal_channel,
+    )
+    fv = features_to_vector(features)
+
+    # Find model path
+    predictor_path = None
+    if model_path:
+        predictor_path = Path(model_path)
+    elif project_path:
+        predictor_path = Path(project_path) / "configs" / "parameter_predictor.joblib"
+
+    if predictor_path is None or not predictor_path.exists():
+        return {
+            "status": "no_model",
+            "message": "No trained predictor model found. Train one with train_from_sqlite().",
+            "features": {
+                k: float(v) if isinstance(v, (int, float, np.floating)) else v
+                for k, v in features.items()
+            },
+        }
+
+    predictor = ParameterPredictor(model_path=predictor_path)
+    result = predictor.predict(fv)
+
+    _add_history(
+        signal_channel,
+        "predict_parameters",
+        {
+            "confidence": result.get("confidence", 0),
+            "status": result["status"],
+        },
+    )
+
+    return result
+
+
+async def estimate_background(
+    channel: str,
+    kernel_size: int = 7,
+    return_background: bool = False,
+) -> dict[str, Any]:
+    """
+    Estimate and subtract background using SMO (Silver Mountain Operator).
+
+    Parameter-free background estimation — no blank channel needed.
+    Useful when blank channels are unavailable or unreliable.
+
+    Parameters:
+    - channel: Name of loaded channel image
+    - kernel_size: SMO kernel size (default 7, robust across 5-15)
+    - return_background: If True, store estimated background as a loaded image
+
+    Returns:
+    - Background statistics, corrected image stored as '{channel}_smo_corrected'
+    """
+    try:
+        from kintsugi.signal.smo import estimate_background_smo
+    except ImportError as e:
+        return {"error": f"Missing dependency: {e}. Install with: pip install kintsugi[optimize]"}
+
+    try:
+        data = _get_image(channel)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    if hasattr(data, "compute"):
+        img_np = data.compute()
+    else:
+        img_np = np.array(data)
+
+    # Handle 3D stacks by using max projection
+    if img_np.ndim > 2:
+        img_np = img_np.max(axis=0) if img_np.ndim == 3 else img_np[0]
+
+    try:
+        result = estimate_background_smo(
+            img_np,
+            kernel_size=kernel_size,
+            return_background=return_background,
+        )
+    except Exception as e:
+        return {"error": f"SMO estimation failed: {e}"}
+
+    # Store corrected image
+    corrected_name = f"{channel}_smo_corrected"
+    _store_image(
+        corrected_name,
+        result["corrected"],
+        {"source_channel": channel, "method": "smo", "kernel_size": kernel_size},
+    )
+
+    _add_history(
+        channel,
+        "estimate_background_smo",
+        {"kernel_size": kernel_size, "background_mean": result["background_mean"]},
+    )
+
+    # Store background if requested
+    if return_background and result["background"] is not None:
+        bg_name = f"{channel}_smo_background"
+        _store_image(
+            bg_name, result["background"], {"source_channel": channel, "type": "background"}
+        )
+
+    return {
+        "status": "success",
+        "corrected_name": corrected_name,
+        "background_mean": result["background_mean"],
+        "background_std": result["background_std"],
+        "kernel_size_used": result["kernel_size_used"],
+        "corrected_shape": list(result["corrected"].shape),
+        "corrected_dtype": str(result["corrected"].dtype),
+    }

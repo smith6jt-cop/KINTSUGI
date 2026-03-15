@@ -70,6 +70,21 @@ from .features import (
     infer_wavelength_group,
 )
 from .isolation_qc import generate_qc_pages, generate_summary_table
+from .optimizer import (
+    BLANK_PARAMS_SPACE,
+    CLEAN_PARAMS_SPACE,
+    optimize_signal_isolation,
+    plot_optimization_history,
+)
+from .predictor import (
+    MIN_TRAINING_EXAMPLES,
+    ParameterPredictor,
+    train_from_sqlite,
+)
+from .smo import (
+    auto_select_kernel_size,
+    estimate_background_smo,
+)
 from .subtractor import (
     AutofluorescenceSubtractor,
     IntensityRange,
@@ -143,4 +158,16 @@ __all__ = [
     "propagate_cluster_parameters",
     "plot_cluster_summary",
     "generate_cluster_qc",
+    # Bayesian optimization
+    "optimize_signal_isolation",
+    "plot_optimization_history",
+    "BLANK_PARAMS_SPACE",
+    "CLEAN_PARAMS_SPACE",
+    # Parameter prediction
+    "ParameterPredictor",
+    "train_from_sqlite",
+    "MIN_TRAINING_EXAMPLES",
+    # SMO background estimation
+    "estimate_background_smo",
+    "auto_select_kernel_size",
 ]
