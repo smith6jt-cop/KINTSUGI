@@ -49,9 +49,6 @@ dependencies = [
     "imageio>=2.31.0",
     "pillow>=10.0.0",
 
-    # VALIS registration
-    "valis-wsi>=1.2.0",
-
     # libvips bindings
     "pyvips>=2.2.0",
 
