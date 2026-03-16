@@ -52,6 +52,9 @@ dependencies = [
     # libvips bindings
     "pyvips>=2.2.0",
 
+    # OME metadata (used by valis-wsi and Kreg registration)
+    "ome-types>=0.5.0",
+
     # Visualization
     "matplotlib>=3.7.0",
     "stackview>=0.18.0",
@@ -123,7 +126,6 @@ bio = [
     "aicsimageio>=4.14.0",
     "bioio>=1.0.0",
     "bioio-ome-tiff>=1.0.0",
-    "ome-types>=0.5.0",
     "ome-zarr>=0.9.0",
     "slideio>=2.6.0",
     "readlif>=0.6.0",
