@@ -3776,12 +3776,14 @@ def workflow_spillover(project_dir: str, sample: str | None, element_shape: str,
 @click.option("--tile-rows", type=int, default=None, help="Number of tile rows (auto-detected)")
 @click.option("--tile-cols", type=int, default=None, help="Number of tile columns (auto-detected)")
 @click.option(
-    "--xy-pixel-size", type=float, default=377.0, help="XY pixel size in nm (default: 377)"
+    "--xy-pixel-size", type=float, default=None, help="XY pixel size in nm (default: 377)"
 )
-@click.option("--z-step-size", type=float, default=1500.0, help="Z step size in nm (default: 1500)")
-@click.option("--numerical-aperture", type=float, default=0.75, help="Objective NA (default: 0.75)")
+@click.option("--z-step-size", type=float, default=None, help="Z step size in nm (default: 1500)")
 @click.option(
-    "--tissue-ri", type=float, default=1.44, help="Tissue refractive index (default: 1.44)"
+    "--numerical-aperture", type=float, default=None, help="Objective NA (default: 0.75)"
+)
+@click.option(
+    "--tissue-ri", type=float, default=None, help="Tissue refractive index (default: 1.44)"
 )
 def init(
     project_path: str,
@@ -3795,10 +3797,10 @@ def init(
     slurm_gpu_type: str | None,
     tile_rows: int | None,
     tile_cols: int | None,
-    xy_pixel_size: float,
-    z_step_size: float,
-    numerical_aperture: float,
-    tissue_ri: float,
+    xy_pixel_size: float | None,
+    z_step_size: float | None,
+    numerical_aperture: float | None,
+    tissue_ri: float | None,
 ):
     """
     Initialize a new KINTSUGI project.
@@ -3830,10 +3832,50 @@ def init(
             console.print(f"\n[bold]Updating existing project:[/bold] {project_path}")
             project._kintsugi_path = project._detect_kintsugi_path()
             project.config.kintsugi_path = str(project._kintsugi_path)
+
+            # Update project name if provided
+            if name is not None and name != project.config.name:
+                old_name = project.config.name
+                project.config.name = name
+                console.print(f"  Updated project name: '{old_name}' -> '{name}'")
+
             project.paths.create_all()
             project.setup_notebooks(overwrite=True)
             project._create_claude_config()
             project._create_vscode_config()
+
+            # Regenerate default_parameters.json
+            project._create_default_params_file()
+            console.print("  Regenerated default_parameters.json")
+
+            # Update experiment.json if any microscope params explicitly provided
+            microscope_overrides = {}
+            if tile_rows is not None:
+                microscope_overrides["tile_rows"] = tile_rows
+            if tile_cols is not None:
+                microscope_overrides["tile_cols"] = tile_cols
+            if xy_pixel_size is not None:
+                microscope_overrides["xy_pixel_size"] = xy_pixel_size
+            if z_step_size is not None:
+                microscope_overrides["z_step_size"] = z_step_size
+            if numerical_aperture is not None:
+                microscope_overrides["numerical_aperture"] = numerical_aperture
+            if tissue_ri is not None:
+                microscope_overrides["tissue_refractive_index"] = tissue_ri
+
+            if microscope_overrides:
+                exp_config = project.load_experiment_config()
+                if exp_config is None:
+                    from kintsugi.project import ExperimentConfig
+
+                    exp_config = ExperimentConfig()
+                for key, value in microscope_overrides.items():
+                    setattr(exp_config, key, value)
+                project.save_experiment_config(exp_config)
+                console.print(
+                    f"  Updated experiment.json: {', '.join(microscope_overrides.keys())}"
+                )
+
             if slurm:
                 project.setup_slurm(
                     account=slurm_account,
@@ -4035,7 +4077,7 @@ def init(
                         console.print("[yellow]Cancelled. No changes made.[/yellow]")
                         return
 
-        # Create the project
+        # Create the project (apply defaults for None microscope params)
         KintsugiProject.create(
             project_path,
             name=name,
@@ -4046,13 +4088,13 @@ def init(
             slurm_partition=slurm_partition,
             slurm_qos=slurm_qos,
             slurm_gpu_type=slurm_gpu_type,
-            # Microscope parameters
+            # Microscope parameters (apply defaults for new projects)
             tile_rows=tile_rows,
             tile_cols=tile_cols,
-            xy_pixel_size=xy_pixel_size,
-            z_step_size=z_step_size,
-            numerical_aperture=numerical_aperture,
-            tissue_refractive_index=tissue_ri,
+            xy_pixel_size=xy_pixel_size if xy_pixel_size is not None else 377.0,
+            z_step_size=z_step_size if z_step_size is not None else 1500.0,
+            numerical_aperture=numerical_aperture if numerical_aperture is not None else 0.75,
+            tissue_refractive_index=tissue_ri if tissue_ri is not None else 1.44,
         )
 
         # Delete processed stages if requested

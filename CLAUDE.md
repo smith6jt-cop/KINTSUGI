@@ -249,7 +249,7 @@ pip install -e ".[dev]"
 kintsugi install --list            # Show all 12 available groups
 kintsugi install gpu               # Install GPU acceleration
 kintsugi install gpu --conda       # Use conda instead of pip (where available)
-kintsugi install all               # Install all groups (skips 'full' composite)
+kintsugi install all               # Unified pip resolve via pyproject.toml extras
 
 # Run tests
 pytest tests/ -v
@@ -395,7 +395,9 @@ Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, py
 - `kronos` - KRONOS foundation model (prints post-install note about cloning KRONOS repo)
 - `denoise` - Advanced denoising (N2V, CARE)
 - `rapids` - RAPIDS GPU-accelerated data science
-- `full` - All optional features (composite, skipped by `kintsugi install all`)
+- `full` - All optional features (composite)
+
+`kintsugi install all` uses a single `pip install -e ".[gpu,viz,dl,...]"` pass via pyproject.toml extras to avoid cascading dependency conflicts. Skips `full` (composite) and `rapids` (needs NVIDIA channel). Falls back to sequential install + constraint repair if pyproject.toml not found. Conda mode (`--conda`) installs conda groups first, then remaining via pip extras.
 
 **External requirements**: libvips (native library). Java/Maven no longer required.
 

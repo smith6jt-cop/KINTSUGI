@@ -1833,8 +1833,14 @@ class KintsugiProject:
 
         return copied
 
-    def _create_default_configs(self) -> None:
-        """Create default configuration files."""
+    def _create_default_params_file(self) -> Path:
+        """Create or regenerate default_parameters.json from experiment.json.
+
+        Returns
+        -------
+        Path
+            Path to the written default_parameters.json file.
+        """
         # Read overlap and reference cycle from experiment.json if available
         overlap_pct = 30  # CODEX standard default
         ref_cycle = 1
@@ -1874,9 +1880,16 @@ class KintsugiProject:
             },
         }
 
+        self.paths.configs.mkdir(parents=True, exist_ok=True)
         params_file = self.paths.configs / "default_parameters.json"
         with open(params_file, "w") as f:
             json.dump(default_params, f, indent=2)
+
+        return params_file
+
+    def _create_default_configs(self) -> None:
+        """Create default configuration files."""
+        self._create_default_params_file()
 
         # Create experiment configuration with auto-detection
         # Use microscope parameters from project config if available
@@ -2363,6 +2376,11 @@ def init_project(
     if mode == "load":
         project = KintsugiProject.load(project_dir)
         project.setup_cuda_path()
+        if name is not None and name != project.config.name:
+            old_name = project.config.name
+            project.config.name = name
+            project.save()
+            print(f"  Updated project name: '{old_name}' -> '{name}'")
         if refresh:
             project.refresh_from_disk()
         # Check for existing processed data
@@ -2375,6 +2393,11 @@ def init_project(
     if mode == "auto" and config_file.exists():
         project = KintsugiProject.load(project_dir)
         project.setup_cuda_path()
+        if name is not None and name != project.config.name:
+            old_name = project.config.name
+            project.config.name = name
+            project.save()
+            print(f"  Updated project name: '{old_name}' -> '{name}'")
         if refresh:
             project.refresh_from_disk()
         # Check for existing processed data

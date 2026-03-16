@@ -63,6 +63,7 @@ dependencies = [
     "zarr>=2.16.0",
     "h5py>=3.9.0",
     "dask>=2023.7.0",
+    "dask-image>=0.6.0",
 
     # Utilities
     "tqdm>=4.65.0",
