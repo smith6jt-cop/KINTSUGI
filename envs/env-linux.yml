@@ -13,7 +13,7 @@ channels:
 # Installation:
 #   conda env create -f envs/env-linux.yml
 #   conda activate KINTSUGI
-#   pip install -e .
+#   kintsugi check
 #
 # Optional features (run after base install):
 #   kintsugi install gpu        # GPU acceleration (CuPy for CUDA)

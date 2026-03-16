@@ -17,7 +17,7 @@ channels:
 #   brew install vips  # Install libvips first
 #   conda env create -f envs/env-macos.yml
 #   conda activate KINTSUGI
-#   pip install -e .
+#   kintsugi check
 #
 # Optional features (run after base install):
 #   kintsugi install torch      # PyTorch for deep learning models
