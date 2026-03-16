@@ -200,7 +200,7 @@ see the dedicated repository: [rapids_singlecell](https://github.com/smith6jt-co
 | Dependency | Purpose | Installation |
 |------------|---------|--------------|
 | **libvips** | High-performance image I/O | `conda install libvips` (Linux/macOS) or Zenodo (Windows) |
-| **VALIS** | Image registration | `pip install valis-wsi` (included) |
+| **VALIS** | Image registration | Vendored as `Kreg` (no separate install needed) |
 | **CuPy** | GPU image processing | `conda install cupy` or `pip install cupy-cuda12x` |
 | **PyTorch** | Deep learning models (optional) | `pip install torch torchvision` |
 

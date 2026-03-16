@@ -71,7 +71,6 @@ autodoc_mock_imports = [
     "torchvision",
     "napari",
     "JPype1",
-    "valis_wsi",
     "valis",
     "basicpy",
     "aicsimageio",

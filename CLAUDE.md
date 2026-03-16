@@ -381,7 +381,7 @@ See `workflow/CLAUDE.md` for batch processing documentation: data staging, clean
 
 ## Dependencies
 
-Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, pyvips, valis-wsi
+Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, pyvips
 
 12 optional install groups defined in `deps.py` `OPTIONAL_GROUPS` (single source of truth, also used by `pyproject.toml` extras). Install via `kintsugi install <group>` (supports `--conda` for groups with conda recipes):
 - `gpu` - PyTorch + CuPy for GPU acceleration
