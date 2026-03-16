@@ -6,12 +6,8 @@ Citation Information:
 
 Smith, J. A. et al. Protocol for processing and analyzing multiplexed images improves lymphatic cell identification and spatial architecture in human tissue. STAR Protocols 6, 103976 (2025).
 
-</p>
-
 [![CI](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/ci.yml/badge.svg)](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/ci.yml)
 [![Documentation Status](https://readthedocs.org/projects/kintsugi/badge/?version=latest)](https://kintsugi.readthedocs.io/en/latest/?badge=latest)
-
-<div>
 
 ## Table of Contents
 
