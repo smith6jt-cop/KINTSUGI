@@ -21,6 +21,7 @@ Smith, J. A. et al. Protocol for processing and analyzing multiplexed images imp
   - [Windows](#windows)
   - [macOS](#macos)
   - [Optional Features](#optional-features)
+- [Updating Existing Projects](#updating-existing-projects)
 - [Verify Installation](#verify-installation)
 - [Usage](#usage)
   - [Command Line Interface](#command-line-interface)
@@ -173,6 +174,60 @@ accelerator = get_multi_gpu_accelerator(tile_shape)
 | 4_Segmentation_Analysis | `dl`, `viz`, `analysis` |
 
 Each notebook will check for required dependencies at startup and provide installation instructions if anything is missing.
+
+## Updating Existing Projects
+
+When KINTSUGI is updated (e.g., `git pull`), existing project directories may contain outdated copies of notebooks, modules, workflow scripts, or Snakefiles. Use these commands to bring them up to date.
+
+### Notebooks and Python Modules
+
+A post-commit hook runs `scripts/sync_to_projects.py` automatically after every `git commit`, syncing notebooks and Python modules (Kreg/, Kstitch/, Kview2/, Kio.py, etc.) to all discovered project directories. The sync uses MD5 checksums — only changed files are copied.
+
+To sync manually (e.g., after `git pull`):
+
+```bash
+python scripts/sync_to_projects.py           # Sync all projects
+python scripts/sync_to_projects.py --dry-run  # Preview changes
+python scripts/sync_to_projects.py --force    # Force overwrite all
+```
+
+> **Note:** Autoreload (`%autoreload 2`) is enabled in all KINTSUGI notebooks — you do **not** need to restart kernels after module updates. Just re-run the relevant cell.
+
+### Workflow Scripts and Snakefile
+
+Re-run `workflow config` to update the Snakefile, SLURM profiles, and add any new workflow scripts:
+
+```bash
+kintsugi workflow config /path/to/project
+```
+
+| File | Update behavior |
+|------|-----------------|
+| **Snakefile** | Always overwritten (pipeline logic must stay current) |
+| **profiles/** | Always overwritten (SLURM settings, precommand) |
+| **scripts/*.py** | Only added if missing (existing scripts are preserved) |
+
+**Updating existing workflow scripts:** If a workflow script has been updated in the repo (e.g., `registration.py`, `qc_report.py`), `workflow config` will not overwrite the project's copy. To update, delete the stale script and re-run config:
+
+```bash
+# Update a single script
+rm /path/to/project/workflow/scripts/registration.py
+kintsugi workflow config /path/to/project
+
+# Or update all scripts at once
+rm /path/to/project/workflow/scripts/*.py
+kintsugi workflow config /path/to/project
+```
+
+For bulk updates across many projects:
+
+```bash
+# Copy all current scripts to every configured project
+for proj_scripts in /path/to/KINTSUGI_Projects/*/workflow/scripts/; do
+    [ -d "$proj_scripts" ] || continue
+    cp workflow/scripts/*.py "$proj_scripts/"
+done
+```
 
 ## Verify Installation
 
@@ -389,21 +444,17 @@ KINTSUGI provides two SLURM submission systems. The **Snakemake workflow** (reco
 
 ### Prerequisites (HPC)
 
-Snakemake and its SLURM executor plugin must be installed in your KINTSUGI conda environment (one-time setup):
+Snakemake and its SLURM executor plugin are included in the base conda environment. Verify they are available:
 
 ```bash
 conda activate KINTSUGI
-pip install "snakemake>=8.0" snakemake-executor-plugin-slurm
-
-# Verify
 snakemake --version        # Should print 8.x.x or higher
 ```
 
-KINTSUGI itself must be installed in editable mode with GPU support:
+GPU support must be installed for HPC processing:
 
 ```bash
-cd /path/to/KINTSUGI
-pip install -e ".[gpu]"
+kintsugi install gpu
 kintsugi check
 ```
 
@@ -511,7 +562,7 @@ my_project/workflow/
     └── config.yaml          # SLURM executor profile (precommand, retries, etc.)
 ```
 
-`workflow config` always overwrites the Snakefile and SLURM profiles (so pipeline logic updates propagate). Scripts are only copied if they don't already exist.
+`workflow config` always overwrites the Snakefile and SLURM profiles (so pipeline logic updates propagate). Scripts are only copied if they don't already exist — see [Updating Existing Projects](#updating-existing-projects) for how to refresh stale scripts.
 
 #### Submitting Specific Cycles or Steps
 
@@ -600,24 +651,20 @@ kintsugi workflow run /path/to/project  # Snakemake detects missing outputs
 
 ### Batch Processing Multiple Projects
 
-For processing multiple staged datasets sequentially (all share the same SLURM resource pool):
+Process multiple staged datasets with the `kintsugi workflow batch` command:
 
 ```bash
-# Process all staged datasets (run inside tmux/screen!)
-tmux new -s batch
-bash /path/to/run_all_workflows.sh             # All staged datasets
-bash /path/to/run_all_workflows.sh --dry-run   # Preview
-bash /path/to/run_all_workflows.sh --dataset CX_19-002_lymph-node_R1  # Single dataset
+kintsugi workflow batch /path/to/KINTSUGI_Projects               # All eligible datasets
+kintsugi workflow batch /path/to/KINTSUGI_Projects --dry-run      # Preview eligible
+kintsugi workflow batch /path/to/KINTSUGI_Projects -d CX_19-004   # Single dataset
+kintsugi workflow batch /path/to/KINTSUGI_Projects -p 2 --detach  # Background, 2 concurrent
+kintsugi workflow batch /path/to/KINTSUGI_Projects --force         # Reprocess completed
+kintsugi workflow stop /path/to/KINTSUGI_Projects                  # Stop background batch
 ```
 
-Sequential processing is intentional: all datasets share the same 24 SLURM slots, so running multiple Snakemake instances in parallel would cause resource contention.
+A dataset is eligible if it has `workflow/config.yaml` + `data/raw/.staged` and is missing `data/processed/signal_isolated/.snakemake_complete` (unless `--force`). Sequential processing is the default since all datasets share the same GPU slots.
 
-Legacy batch submission is also available:
-
-```bash
-./slurm/submit_batch.sh projects.txt
-./slurm/submit_batch.sh --find /path/to/KINTSUGI_Projects
-```
+> **Important:** Always use `kintsugi workflow batch` — do not write custom batch scripts that invoke `snakemake` directly, as they bypass GPU validation and SLURM profile detection.
 
 ### Legacy SLURM Submission (`submit.sh`)
 
@@ -756,7 +803,7 @@ git clone https://github.com/smith6jt-cop/KINTSUGI.git
 cd KINTSUGI
 conda env create -f envs/env-linux.yml
 conda activate KINTSUGI
-pip install -e ".[dev]"
+kintsugi install dev
 ```
 
 ### Running Tests

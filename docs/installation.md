@@ -23,9 +23,9 @@ conda env create -f envs/env-windows.yml
 # macOS:
 conda env create -f envs/env-macos.yml
 
-# Activate and install package
+# Activate and verify
 conda activate KINTSUGI
-pip install -e .
+kintsugi check
 ```
 
 3. **Verify Installation**:
@@ -64,9 +64,6 @@ cd KINTSUGI
 # Create environment
 conda env create -f envs/env-windows.yml
 conda activate KINTSUGI
-
-# Install KINTSUGI package
-pip install -e .
 ```
 
 ### Download Windows Dependencies
@@ -103,7 +100,6 @@ cd KINTSUGI
 
 conda env create -f envs/env-linux.yml
 conda activate KINTSUGI
-pip install -e .
 ```
 
 ## macOS Installation
@@ -118,7 +114,6 @@ cd KINTSUGI
 
 conda env create -f envs/env-macos.yml
 conda activate KINTSUGI
-pip install -e .
 ```
 
 ## GPU Acceleration (Optional)
@@ -221,11 +216,9 @@ module load conda
 conda env create -f envs/env-linux.yml
 conda activate KINTSUGI
 
-# Install package with HPC extras
-pip install -e ".[claude]"
-
-# Install GPU support
+# Install GPU support and Claude Code integration
 kintsugi install gpu
+kintsugi install claude
 ```
 
 ### Optional Feature Groups
@@ -247,6 +240,29 @@ kintsugi install all        # All optional features
 - **CuPy on login nodes**: `kintsugi check` will report CuPy as unavailable on login nodes (no GPU hardware). This is expected — CuPy works correctly on compute nodes.
 - **Cache redirection**: SLURM jobs automatically redirect pip/torch/numba caches to `/blue/` storage via account-specific scripts. Do not install packages inside jobs.
 - **SLURM plugin patch**: SLURM >= 24.11 requires a patch to the Snakemake jobstep plugin. See the main README for details.
+
+## Updating Existing Projects
+
+When you update the KINTSUGI repository (`git pull`), project copies of notebooks, modules, and workflow scripts may become stale. See the **Updating Existing Projects** section in the [README](../README.md) for full details.
+
+**Key commands:**
+
+```bash
+# Sync notebooks and Python modules to all project folders
+python scripts/sync_to_projects.py          # Auto-discovers KINTSUGI_Projects/*/notebooks
+python scripts/sync_to_projects.py --dry-run  # Preview changes
+
+# Refresh workflow scripts for a single project
+kintsugi workflow config /path/to/project --force
+
+# Bulk-refresh workflow scripts across all projects
+for d in /path/to/KINTSUGI_Projects/*/workflow/scripts; do
+  cp workflow/scripts/*.py "$d/"
+done
+```
+
+> **Note:** A git post-commit hook automatically runs `sync_to_projects.py` after each commit.
+> Notebooks use `%autoreload 2` — no kernel restart needed after module updates.
 
 ## Verifying Installation
 
