@@ -73,7 +73,6 @@ dependencies:
     - -e ..
 
     # Core image processing
-    - valis-wsi>=1.2.0
     - basicpy>=1.2.0
     - opencv-contrib-python-headless>=4.9.0
     - pyvips>=2.2.3
