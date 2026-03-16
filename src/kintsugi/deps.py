@@ -443,6 +443,9 @@ class DependencyChecker:
             ("tqdm", "4.65.0"),
             ("click", "8.1.0"),
             ("rich", "13.0.0"),
+            ("pyvips", "2.2.0"),
+            ("ome-types", "0.5.0"),
+            ("stackview", "0.18.0"),
         ]
 
         for package, min_version in core_packages:
@@ -457,11 +460,9 @@ class DependencyChecker:
             print("\n[Optional Packages]")
 
         # Group packages with their group names
+        # Note: torch/torchvision/cupy are checked in _check_cuda (GPU/CUDA section)
+        # Note: pyvips/ome-types/stackview are checked in _check_core_packages (base env)
         optional_packages = [
-            # GPU
-            ("torch", "2.0.0", "gpu"),
-            ("torchvision", "0.15.0", "gpu"),
-            ("cupy", None, "gpu"),
             # Visualization
             ("napari", "0.4.19", "viz"),
             ("magicgui", "0.7.0", "viz"),
@@ -475,11 +476,7 @@ class DependencyChecker:
             ("scimap", None, "analysis"),
             # Bio formats
             ("aicsimageio", None, "bio"),
-            ("ome-types", "0.5.0", "bio"),
             ("ome-zarr", None, "bio"),
-            # Image processing
-            ("pyvips", "2.2.0", "core"),
-            ("stackview", "0.18.0", "viz"),
         ]
 
         for package, min_version, group in optional_packages:
@@ -591,58 +588,101 @@ class DependencyChecker:
             self._print_result(result)
 
     def _check_cuda(self, verbose: bool):
-        """Check CUDA/GPU availability."""
+        """Check GPU packages and CUDA hardware availability."""
         if verbose:
             print("\n[GPU/CUDA]")
 
-        # Check PyTorch CUDA
+        # Check torch package
+        torch_imported = False
         try:
             import torch
 
-            cuda_available = torch.cuda.is_available()
-
-            if cuda_available:
-                device_count = torch.cuda.device_count()
-                cuda_version = torch.version.cuda
-                devices = [torch.cuda.get_device_name(i) for i in range(device_count)]
-
-                result = DependencyResult(
-                    name="cuda-pytorch",
-                    status=DependencyStatus.OK,
-                    version=cuda_version,
-                    message=f"{device_count} GPU(s) available",
-                    is_optional=True,
-                    details={"devices": devices, "device_count": device_count},
-                )
-            else:
-                result = DependencyResult(
-                    name="cuda-pytorch",
-                    status=DependencyStatus.OPTIONAL_MISSING,
-                    message="CUDA not available (CPU mode)",
-                    is_optional=True,
-                )
-
+            torch_imported = True
+            result = DependencyResult(
+                name="torch",
+                status=DependencyStatus.OK,
+                version=torch.__version__,
+                is_optional=True,
+                details={"group": "gpu"},
+            )
         except ImportError:
             result = DependencyResult(
-                name="cuda-pytorch",
+                name="torch",
                 status=DependencyStatus.OPTIONAL_MISSING,
-                message="PyTorch not installed",
+                message="Not installed",
                 is_optional=True,
-                details={"hint": "Install with: kintsugi install gpu"},
-            )
-        except Exception as e:
-            result = DependencyResult(
-                name="cuda-pytorch",
-                status=DependencyStatus.ERROR,
-                message=str(e),
-                is_optional=True,
+                details={"group": "gpu", "hint": "Install with: kintsugi install gpu"},
             )
 
         self.results.append(result)
         if verbose:
             self._print_result(result)
 
-        # Check CuPy
+        # Check torchvision package
+        try:
+            import torchvision
+
+            result = DependencyResult(
+                name="torchvision",
+                status=DependencyStatus.OK,
+                version=torchvision.__version__,
+                is_optional=True,
+                details={"group": "gpu"},
+            )
+        except ImportError:
+            result = DependencyResult(
+                name="torchvision",
+                status=DependencyStatus.OPTIONAL_MISSING,
+                message="Not installed",
+                is_optional=True,
+                details={"group": "gpu", "hint": "Install with: kintsugi install gpu"},
+            )
+
+        self.results.append(result)
+        if verbose:
+            self._print_result(result)
+
+        # Check PyTorch CUDA hardware availability
+        if torch_imported:
+            try:
+                import torch
+
+                cuda_available = torch.cuda.is_available()
+
+                if cuda_available:
+                    device_count = torch.cuda.device_count()
+                    cuda_version = torch.version.cuda
+                    devices = [torch.cuda.get_device_name(i) for i in range(device_count)]
+
+                    result = DependencyResult(
+                        name="torch-cuda",
+                        status=DependencyStatus.OK,
+                        version=cuda_version,
+                        message=f"{device_count} GPU(s) available",
+                        is_optional=True,
+                        details={"devices": devices, "device_count": device_count},
+                    )
+                else:
+                    result = DependencyResult(
+                        name="torch-cuda",
+                        status=DependencyStatus.OPTIONAL_MISSING,
+                        message="CUDA not available (CPU mode)",
+                        is_optional=True,
+                    )
+
+            except Exception as e:
+                result = DependencyResult(
+                    name="torch-cuda",
+                    status=DependencyStatus.ERROR,
+                    message=str(e),
+                    is_optional=True,
+                )
+
+            self.results.append(result)
+            if verbose:
+                self._print_result(result)
+
+        # Check CuPy package
         try:
             import cupy
 
@@ -652,14 +692,15 @@ class DependencyChecker:
                 version=cupy.__version__,
                 message="GPU acceleration available",
                 is_optional=True,
+                details={"group": "gpu"},
             )
         except ImportError:
             result = DependencyResult(
                 name="cupy",
                 status=DependencyStatus.OPTIONAL_MISSING,
-                message="CuPy not installed (CPU fallback available)",
+                message="Not installed (CPU fallback available)",
                 is_optional=True,
-                details={"hint": "Install with: kintsugi install gpu"},
+                details={"group": "gpu", "hint": "Install with: kintsugi install gpu"},
             )
         except Exception as e:
             result = DependencyResult(
@@ -685,8 +726,10 @@ class DependencyChecker:
 
         symbol = symbols.get(result.status, "[?]")
         version_str = f" v{result.version}" if result.version else ""
-        group_str = f" ({result.details.get('group', '')})" if result.details.get("group") else ""
-        optional_str = " (optional)" if result.is_optional else ""
+        group = result.details.get("group", "")
+        group_str = f" ({group})" if group else ""
+        # Show (optional) only for items without a group tag (group already implies optional)
+        optional_str = " (optional)" if result.is_optional and not group else ""
 
         print(f"  {symbol:10} {result.name}{version_str}{group_str}{optional_str}")
 
