@@ -468,6 +468,80 @@ rule signal_isolation:
         "scripts/signal_isolation.py"
 
 
+# ===========================================================================
+# Rule 5b: Signal Isolation — Two-Phase HITL Workflow (Alternative)
+# ===========================================================================
+# Alternative to the monolithic signal_isolation rule above. Splits processing
+# into two phases with a human approval checkpoint between them:
+#
+#   Phase 1: Feature extraction → clustering → parameter suggestion
+#            Writes pending_approval.json for human review
+#   Phase 2: Reads approved parameters → processes all cluster members
+#
+# Usage:
+#   snakemake signal_isolation_phase1 --profile profiles/slurm  # Run phase 1
+#   # ... review pending_approval.json, set "approved": true ...
+#   snakemake signal_isolation_phase2 --profile profiles/slurm  # Run phase 2
+#
+# These rules are NOT part of the default 'all' target — invoke explicitly.
+# The monolithic signal_isolation rule (above) is used by 'all' for fully
+# automated processing. Use the two-phase rules when human review is needed.
+
+rule signal_isolation_phase1:
+    input:
+        reg_done=f"{PROJECT}/data/processed/registered/.snakemake_complete",
+    output:
+        sentinel=f"{PROJECT}/data/processed/signal_isolated/.snakemake_phase1_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+        cycles=CYCLES,
+        channel_names=CHANNEL_NAMES,
+    resources:
+        mem_mb=RES.get("mem_signal_isolation", 32000),
+        runtime=RES.get("time_signal_isolation_phase1", 60),
+        slurm_partition=_QC_CPU_ASSIGN["partition"],
+        slurm_account=_QC_CPU_ASSIGN["account"],
+        gres="",
+        cpus_per_task=RES.get("cpus_signal_isolation", 4),
+    log:
+        f"{PROJECT}/slurm/logs/snakemake/signal_isolation_phase1.log",
+    script:
+        "scripts/signal_isolation_phase1.py"
+
+
+rule signal_isolation_phase2:
+    input:
+        phase1_done=f"{PROJECT}/data/processed/signal_isolated/.snakemake_phase1_complete",
+    output:
+        sentinel=f"{PROJECT}/data/processed/signal_isolated/.snakemake_complete",
+    params:
+        project_dir=PROJECT,
+        kintsugi_dir=KINTSUGI,
+        channels=CHANNELS,
+        cycles=CYCLES,
+        channel_names=CHANNEL_NAMES,
+    resources:
+        mem_mb=RES.get("mem_signal_isolation", 32000),
+        runtime=RES.get("time_signal_isolation", 120),
+        slurm_partition=_QC_CPU_ASSIGN["partition"],
+        slurm_account=_QC_CPU_ASSIGN["account"],
+        gres="",
+        cpus_per_task=RES.get("cpus_signal_isolation", 4),
+    log:
+        f"{PROJECT}/slurm/logs/snakemake/signal_isolation_phase2.log",
+    script:
+        "scripts/signal_isolation_phase2.py"
+
+
+# Prefer monolithic signal_isolation over two-phase for the default 'all' target.
+# When signal_isolation_phase1 has already been run, signal_isolation_phase2
+# produces the same .snakemake_complete sentinel as signal_isolation, so
+# Snakemake needs ruleorder to resolve the ambiguity.
+ruleorder: signal_isolation > signal_isolation_phase2
+
+
 rule qc_signal_isolation:
     input:
         si_done=f"{PROJECT}/data/processed/signal_isolated/.snakemake_complete",
