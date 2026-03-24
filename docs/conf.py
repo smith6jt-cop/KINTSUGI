@@ -21,7 +21,6 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
     "sphinx.ext.intersphinx",
-    "sphinx.ext.autosummary",
     "myst_parser",  # For Markdown support
 ]
 
@@ -115,4 +114,5 @@ myst_enable_extensions = [
 myst_heading_anchors = 3
 
 # Suppress warnings for GitHub-style anchor links (they work but generate warnings)
-suppress_warnings = ["myst.xref_missing"]
+# and autodoc import failures for modules with optional dependencies (e.g., kreg requires SimpleITK)
+suppress_warnings = ["myst.xref_missing", "autodoc.import_object"]

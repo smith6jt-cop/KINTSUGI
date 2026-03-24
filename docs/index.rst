@@ -56,6 +56,19 @@ Quick Links
 
    contributing
    DOCS_MAINTENANCE
+   SUBMODULES
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Technical Notes
+
+   ALGORITHM_OPTIMIZATION_PLAN
+   ALGORITHM_OPTIMIZATION_RESULTS
+   PERFORMANCE_AUDIT
+   evaluation_pyimagej_edf
+   kstitch_alternatives_evaluation
+   optimization_plan_session
+   valis_upstream_bug_report
 
 
 Indices and tables

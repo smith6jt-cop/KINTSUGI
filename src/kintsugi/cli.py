@@ -3779,9 +3779,7 @@ def workflow_spillover(project_dir: str, sample: str | None, element_shape: str,
     "--xy-pixel-size", type=float, default=None, help="XY pixel size in nm (default: 377)"
 )
 @click.option("--z-step-size", type=float, default=None, help="Z step size in nm (default: 1500)")
-@click.option(
-    "--numerical-aperture", type=float, default=None, help="Objective NA (default: 0.75)"
-)
+@click.option("--numerical-aperture", type=float, default=None, help="Objective NA (default: 0.75)")
 @click.option(
     "--tissue-ri", type=float, default=None, help="Tissue refractive index (default: 1.44)"
 )
