@@ -668,8 +668,14 @@ async def subtract_blank(
         high_percentile = high_percentile if high_percentile is not None else 90
         erosion = erosion if erosion is not None else 0
 
+    # Ensure data are dask arrays for downstream dask operations
+    if not isinstance(blank_data, da.Array):
+        blank_data = da.from_array(np.asarray(blank_data), chunks=(1000, 1000))
+    if not isinstance(signal_data, da.Array):
+        signal_data = da.from_array(np.asarray(signal_data), chunks=(1000, 1000))
+
     # Ensure compatible types
-    blank_copy = da.Array.copy(blank_data)
+    blank_copy = blank_data.copy()
     signal_copy = signal_data.astype(blank_data.dtype)
 
     # Apply blank subtraction (from Kutils.ini_params)
@@ -790,7 +796,11 @@ async def denoise(
     except ValueError as e:
         return {"error": str(e)}
 
-    data_copy = da.Array.copy(data)
+    # Ensure data is a dask array for downstream dask operations
+    if not isinstance(data, da.Array):
+        data = da.from_array(np.asarray(data), chunks=(1000, 1000))
+
+    data_copy = data.copy()
 
     if method == "percentile":
         p = -percentile if upper else percentile
@@ -927,7 +937,11 @@ async def clean_background(
     except ValueError as e:
         return {"error": str(e)}
 
-    result = da.Array.copy(data)
+    # Ensure data is a dask array for downstream dask operations
+    if not isinstance(data, da.Array):
+        data = da.from_array(np.asarray(data), chunks=(1000, 1000))
+
+    result = data.copy()
 
     # Background thresholding
     result = da.where(result <= background_threshold, 0, result)
@@ -1003,6 +1017,10 @@ async def gaussian_subtract(
         data = _get_image(channel)
     except ValueError as e:
         return {"error": str(e)}
+
+    # Ensure data is a dask array for downstream dask operations
+    if not isinstance(data, da.Array):
+        data = da.from_array(np.asarray(data), chunks=(1000, 1000))
 
     # Create Gaussian-blurred version
     blurred = dask_image.ndfilters.gaussian_filter(data, sigma=sigma)

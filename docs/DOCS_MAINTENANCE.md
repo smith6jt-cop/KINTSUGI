@@ -139,7 +139,7 @@ For automatic API documentation from docstrings:
 1. Ensure modules have proper docstrings (Google or NumPy style)
 2. Use autodoc directives in `.rst` files:
 
-```rst
+```text
 .. automodule:: kintsugi.kreg
    :members:
    :undoc-members:
