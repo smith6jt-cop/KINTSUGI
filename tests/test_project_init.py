@@ -106,9 +106,7 @@ def test_init_project_updates_name_on_existing(tmp_path):
     assert project.config.name == "OldName"
 
     # Reload with a different name
-    reloaded = init_project(
-        project_root, name="NewName", interactive=False, check_processed=False
-    )
+    reloaded = init_project(project_root, name="NewName", interactive=False, check_processed=False)
     assert reloaded.config.name == "NewName"
 
     # Verify it was persisted to disk
@@ -122,9 +120,7 @@ def test_init_project_preserves_name_when_none(tmp_path):
     project = KintsugiProject.create(project_root, name="KeepMe")
     project.save()
 
-    reloaded = init_project(
-        project_root, name=None, interactive=False, check_processed=False
-    )
+    reloaded = init_project(project_root, name=None, interactive=False, check_processed=False)
     assert reloaded.config.name == "KeepMe"
 
 
@@ -134,9 +130,7 @@ def test_init_project_no_update_when_same_name(tmp_path):
     project = KintsugiProject.create(project_root, name="SameName")
     project.save()
 
-    reloaded = init_project(
-        project_root, name="SameName", interactive=False, check_processed=False
-    )
+    reloaded = init_project(project_root, name="SameName", interactive=False, check_processed=False)
     assert reloaded.config.name == "SameName"
 
 
@@ -149,9 +143,7 @@ def test_force_updates_project_name(tmp_path, monkeypatch):
     """kintsugi init --force --name should update project name."""
     repo_path = tmp_path / "repo"
     _create_fake_repo(repo_path)
-    monkeypatch.setattr(
-        KintsugiProject, "_detect_kintsugi_path", staticmethod(lambda: repo_path)
-    )
+    monkeypatch.setattr(KintsugiProject, "_detect_kintsugi_path", staticmethod(lambda: repo_path))
 
     project_root = tmp_path / "project"
     runner = CliRunner()
@@ -175,9 +167,7 @@ def test_force_regenerates_default_parameters(tmp_path, monkeypatch):
     """kintsugi init --force should regenerate default_parameters.json."""
     repo_path = tmp_path / "repo"
     _create_fake_repo(repo_path)
-    monkeypatch.setattr(
-        KintsugiProject, "_detect_kintsugi_path", staticmethod(lambda: repo_path)
-    )
+    monkeypatch.setattr(KintsugiProject, "_detect_kintsugi_path", staticmethod(lambda: repo_path))
 
     project_root = tmp_path / "project"
     runner = CliRunner()
@@ -208,9 +198,7 @@ def test_force_updates_experiment_json_selectively(tmp_path, monkeypatch):
     """kintsugi init --force with microscope params should update only those fields."""
     repo_path = tmp_path / "repo"
     _create_fake_repo(repo_path)
-    monkeypatch.setattr(
-        KintsugiProject, "_detect_kintsugi_path", staticmethod(lambda: repo_path)
-    )
+    monkeypatch.setattr(KintsugiProject, "_detect_kintsugi_path", staticmethod(lambda: repo_path))
 
     project_root = tmp_path / "project"
     runner = CliRunner()
@@ -228,9 +216,7 @@ def test_force_updates_experiment_json_selectively(tmp_path, monkeypatch):
     original_na = original["numerical_aperture"]
 
     # Force update with only xy_pixel_size changed
-    result = runner.invoke(
-        main, ["init", str(project_root), "--force", "--xy-pixel-size", "500.0"]
-    )
+    result = runner.invoke(main, ["init", str(project_root), "--force", "--xy-pixel-size", "500.0"])
     assert result.exit_code == 0
     assert "Updated experiment.json" in result.output
 
