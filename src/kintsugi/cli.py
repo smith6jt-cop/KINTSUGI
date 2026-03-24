@@ -992,6 +992,121 @@ def workflow():
     pass
 
 
+def _load_channel_names_lightweight(
+    meta_dir: Path,
+    channels_per_cycle: int = 4,
+) -> dict[int, list[str]]:
+    """Load channel names from CHANNELNAMES.txt using only stdlib.
+
+    This is a lightweight reimplementation of ``Kio.load_channel_names`` +
+    ``Kio.make_channel_names_unique`` that avoids importing numpy/scipy/skimage.
+    Used by ``generate_workflow_config`` which only needs parsed channel names.
+
+    Raises ``FileNotFoundError`` if no channel names file is found.
+    """
+    import re as _re
+
+    alt_names = [
+        "CHANNELNAMES.txt", "channelnames.txt", "channel_names.txt",
+        "channel_names.csv", "channels.txt", "markers.txt",
+    ]
+    channel_file = None
+    for name in alt_names:
+        candidate = Path(meta_dir) / name
+        if candidate.exists():
+            channel_file = candidate
+            break
+    if channel_file is None:
+        raise FileNotFoundError(f"No channel names file found in {meta_dir}")
+
+    lines = [
+        ln.strip() for ln in channel_file.read_text().splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
+    if not lines:
+        raise FileNotFoundError("Channel names file is empty")
+
+    channel_dict: dict[int, list[str]] = {}
+    first_line = lines[0]
+
+    # Detect cycle-prefixed format
+    is_cycle_prefixed = (
+        ":" in first_line
+        or "\t" in first_line
+        or (first_line.split(",")[0].strip().isdigit() and len(first_line.split(",")) > 2)
+    )
+
+    if is_cycle_prefixed:
+        for line in lines:
+            try:
+                if ":" in line:
+                    cycle_str, names_str = line.split(":", 1)
+                    cycle = int(cycle_str.strip())
+                    names = [n.strip() for n in names_str.split(",")]
+                elif "\t" in line:
+                    parts = line.split("\t")
+                    cycle = int(parts[0].strip())
+                    names = [n.strip() for n in parts[1:]]
+                else:
+                    parts = line.split(",")
+                    cycle = int(parts[0].strip())
+                    names = [n.strip() for n in parts[1:]]
+                channel_dict[cycle] = names
+            except (ValueError, IndexError):
+                continue
+    else:
+        current_cycle = 0
+        cycle_channels: list[str] = []
+        for line in lines:
+            dapi_match = _re.match(r"DAPI[-_]?(\d+)", line, _re.IGNORECASE)
+            dapi_bare = _re.match(r"DAPI\s*$", line, _re.IGNORECASE)
+            if dapi_match:
+                if cycle_channels and current_cycle > 0:
+                    channel_dict[current_cycle] = cycle_channels
+                current_cycle = int(dapi_match.group(1))
+                cycle_channels = [line]
+            elif dapi_bare:
+                if cycle_channels and current_cycle > 0:
+                    channel_dict[current_cycle] = cycle_channels
+                current_cycle += 1
+                cycle_channels = [line]
+            elif current_cycle > 0:
+                cycle_channels.append(line)
+                if len(cycle_channels) == channels_per_cycle:
+                    channel_dict[current_cycle] = cycle_channels
+                    cycle_channels = []
+        if cycle_channels and current_cycle > 0:
+            channel_dict[current_cycle] = cycle_channels
+
+    # --- make unique (inline reimplementation of Kio.make_channel_names_unique) ---
+    global_name_counts: dict[str, int] = {}
+    for cycle_names in channel_dict.values():
+        for name in cycle_names:
+            if name.upper().startswith("DAPI"):
+                continue
+            key = name.upper()
+            global_name_counts[key] = global_name_counts.get(key, 0) + 1
+    needs_suffix = {n for n, c in global_name_counts.items() if c > 1}
+
+    unique_dict: dict[int, list[str]] = {}
+    for cycle_num in sorted(channel_dict.keys()):
+        new_names = []
+        for ch_idx, name in enumerate(channel_dict[cycle_num]):
+            if name.upper().startswith("DAPI"):
+                if cycle_num > 1:
+                    new_names.append(f"DAPI_cyc{cycle_num:02d}")
+                else:
+                    new_names.append(name)
+            elif name.upper() in needs_suffix:
+                letter = chr(ord("a") + ch_idx - 1) if ch_idx > 0 else "a"
+                new_names.append(f"{name}_{cycle_num}{letter}")
+            else:
+                new_names.append(name)
+        unique_dict[cycle_num] = new_names
+
+    return unique_dict
+
+
 def generate_workflow_config(project_dir: Path, print_only: bool = False) -> Path | None:
     """Generate workflow/config.yaml for a project.
 
@@ -1035,17 +1150,14 @@ def generate_workflow_config(project_dir: Path, print_only: bool = False) -> Pat
     exp = ExperimentConfig.from_dict(raw_experiment.copy())
 
     # Load channel names from CHANNELNAMES.txt
+    # Use lightweight loader to avoid heavy scipy/skimage imports from Kio.py
     channel_names_dict: dict[int, list[str]] = {}
     try:
-        sys.path.insert(0, str(Path(__file__).parent.parent.parent.resolve() / "notebooks"))
-        from Kio import load_channel_names
-
-        channel_names_dict = load_channel_names(
+        channel_names_dict = _load_channel_names_lightweight(
             project_dir / "meta",
             channels_per_cycle=raw_experiment.get(
                 "channels_per_cycle", raw_experiment.get("numChannels", 4)
             ),
-            make_unique=True,
         )
         console.print(
             f"  Loaded channel names: {sum(len(v) for v in channel_names_dict.values())} markers"
@@ -1106,10 +1218,18 @@ def generate_workflow_config(project_dir: Path, print_only: bool = False) -> Pat
     )
 
     # Auto-detect tissue type from project name
+    # Use importlib to load batch_multi.py directly, bypassing signal/__init__.py
+    # which imports scipy-dependent modules that crash with numpy version mismatches
     try:
-        from kintsugi.signal.batch_multi import parse_tissue_type
+        import importlib.util
 
-        tissue_type = parse_tissue_type(project_dir.name, project_dir)
+        _mod_name = "_kintsugi_batch_multi"
+        _batch_multi_path = Path(__file__).parent / "signal" / "batch_multi.py"
+        _spec = importlib.util.spec_from_file_location(_mod_name, _batch_multi_path)
+        _mod = importlib.util.module_from_spec(_spec)
+        sys.modules[_mod_name] = _mod  # Required for dataclass processing
+        _spec.loader.exec_module(_mod)
+        tissue_type = _mod.parse_tissue_type(project_dir.name, project_dir)
     except Exception:
         tissue_type = "unknown"
 
