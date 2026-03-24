@@ -1029,7 +1029,7 @@ def _load_channel_names_lightweight(
         if ln.strip() and not ln.strip().startswith("#")
     ]
     if not lines:
-        raise FileNotFoundError("Channel names file is empty")
+        raise ValueError(f"Channel names file is empty: {channel_file}")
 
     channel_dict: dict[int, list[str]] = {}
     first_line = lines[0]
@@ -1171,6 +1171,8 @@ def generate_workflow_config(project_dir: Path, print_only: bool = False) -> Pat
         console.print(
             "[yellow]  Warning: meta/CHANNELNAMES.txt not found — EDF will use CH# names[/yellow]"
         )
+    except ValueError as e:
+        console.print(f"[yellow]  Warning: {e}[/yellow]")
     except Exception as e:
         console.print(f"[yellow]  Warning: Could not load channel names: {e}[/yellow]")
 
@@ -1231,9 +1233,17 @@ def generate_workflow_config(project_dir: Path, print_only: bool = False) -> Pat
         _mod_name = "_kintsugi_batch_multi"
         _batch_multi_path = Path(__file__).parent / "signal" / "batch_multi.py"
         _spec = importlib.util.spec_from_file_location(_mod_name, _batch_multi_path)
+        if _spec is None or _spec.loader is None:
+            raise ImportError(f"Cannot load spec for {_batch_multi_path}")
         _mod = importlib.util.module_from_spec(_spec)
         sys.modules[_mod_name] = _mod  # Required for dataclass processing
-        _spec.loader.exec_module(_mod)
+        _loaded = False
+        try:
+            _spec.loader.exec_module(_mod)
+            _loaded = True
+        finally:
+            if not _loaded:
+                sys.modules.pop(_mod_name, None)
         tissue_type = _mod.parse_tissue_type(project_dir.name, project_dir)
     except Exception:
         tissue_type = "unknown"
@@ -3445,7 +3455,9 @@ def isolate_batch(
             status_str = (
                 f"[green]{status}[/green]"
                 if status == "completed"
-                else f"[red]{status}[/red]" if status == "error" else status
+                else f"[red]{status}[/red]"
+                if status == "error"
+                else status
             )
             summary = info.get("summary", {})
             n_channels = summary.get("total", 0)
