@@ -1007,8 +1007,12 @@ def _load_channel_names_lightweight(
     import re as _re
 
     alt_names = [
-        "CHANNELNAMES.txt", "channelnames.txt", "channel_names.txt",
-        "channel_names.csv", "channels.txt", "markers.txt",
+        "CHANNELNAMES.txt",
+        "channelnames.txt",
+        "channel_names.txt",
+        "channel_names.csv",
+        "channels.txt",
+        "markers.txt",
     ]
     channel_file = None
     for name in alt_names:
@@ -1020,7 +1024,8 @@ def _load_channel_names_lightweight(
         raise FileNotFoundError(f"No channel names file found in {meta_dir}")
 
     lines = [
-        ln.strip() for ln in channel_file.read_text().splitlines()
+        ln.strip()
+        for ln in channel_file.read_text().splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
     if not lines:
@@ -3254,9 +3259,11 @@ def isolate_status(project_dir: str):
                     f"{scale:.2f}" if isinstance(scale, (int, float)) else str(scale),
                     ratio,
                     q_str,
-                    f"{info.get('zero_percent', ''):.1f}"
-                    if isinstance(info.get("zero_percent"), (int, float))
-                    else "",
+                    (
+                        f"{info.get('zero_percent', ''):.1f}"
+                        if isinstance(info.get("zero_percent"), (int, float))
+                        else ""
+                    ),
                     info.get("warning", ""),
                 )
 
@@ -3438,9 +3445,7 @@ def isolate_batch(
             status_str = (
                 f"[green]{status}[/green]"
                 if status == "completed"
-                else f"[red]{status}[/red]"
-                if status == "error"
-                else status
+                else f"[red]{status}[/red]" if status == "error" else status
             )
             summary = info.get("summary", {})
             n_channels = summary.get("total", 0)
@@ -3899,9 +3904,7 @@ def workflow_spillover(project_dir: str, sample: str | None, element_shape: str,
     "--xy-pixel-size", type=float, default=None, help="XY pixel size in nm (default: 377)"
 )
 @click.option("--z-step-size", type=float, default=None, help="Z step size in nm (default: 1500)")
-@click.option(
-    "--numerical-aperture", type=float, default=None, help="Objective NA (default: 0.75)"
-)
+@click.option("--numerical-aperture", type=float, default=None, help="Objective NA (default: 0.75)")
 @click.option(
     "--tissue-ri", type=float, default=None, help="Tissue refractive index (default: 1.44)"
 )
