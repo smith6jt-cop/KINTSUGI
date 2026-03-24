@@ -68,7 +68,6 @@ dependencies:
   - requests
   - psutil
   - natsort
-  - numba
 
   # Pip packages (core only)
   - pip:
@@ -76,7 +75,6 @@ dependencies:
     - -e ..
 
     # Core image processing
-    - basicpy>=1.2.0
     - opencv-contrib-python-headless>=4.9.0
     - pyvips>=2.2.3
 
@@ -87,10 +85,5 @@ dependencies:
     - stackview>=0.18.0
     - rich>=13.9.4
 
-    # Workflow orchestration
-    - snakemake>=8.0
-    - snakemake-executor-plugin-slurm
-
     # Utilities
-    - tenacity>=9.1.2
     - pqdm>=0.2.0

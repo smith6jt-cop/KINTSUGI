@@ -71,7 +71,8 @@ OPTIONAL_GROUPS = {
     "dl": {
         "description": "Deep learning segmentation (InstanSeg)",
         "packages": ["torch", "instanseg", "kornia"],
-        "install_cmd": "pip install torch torchvision instanseg instanseg-torch kornia",
+        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install instanseg instanseg-torch kornia",
+        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.4 -c pytorch -c nvidia -c conda-forge && pip install instanseg instanseg-torch kornia",
     },
     "analysis": {
         "description": "Spatial analysis (scanpy, scimap)",
@@ -102,13 +103,15 @@ OPTIONAL_GROUPS = {
     "kronos": {
         "description": "KRONOS foundation model for spatial proteomics",
         "packages": ["torch", "h5py", "umap"],
-        "install_cmd": "pip install torch h5py umap-learn scikit-learn anndata scanpy tifffile",
+        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install h5py umap-learn scikit-learn anndata scanpy tifffile",
+        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.4 -c pytorch -c nvidia -c conda-forge && pip install h5py umap-learn scikit-learn anndata scanpy tifffile",
         "note": "Also requires: git clone https://github.com/mahmoodlab/KRONOS.git && pip install -e KRONOS",
     },
     "denoise": {
         "description": "Advanced denoising (N2V, CARE)",
         "packages": ["torch"],
-        "install_cmd": "pip install torch",
+        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124",
+        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.4 -c pytorch -c nvidia -c conda-forge",
     },
     "optimize": {
         "description": "Automated parameter optimization (Optuna + SMO)",
@@ -120,6 +123,11 @@ OPTIONAL_GROUPS = {
         "packages": ["cudf", "cuml"],
         "install_cmd": "pip install cudf-cu12 cuml-cu12 --extra-index-url=https://pypi.nvidia.com",
         "conda_cmd": "conda install cudf cuml cugraph rmm -c rapidsai -c conda-forge -c nvidia",
+    },
+    "workflow": {
+        "description": "Snakemake workflow orchestration (HPC/SLURM)",
+        "packages": ["snakemake", "snakemake_executor_plugin_slurm"],
+        "install_cmd": "pip install snakemake snakemake-executor-plugin-slurm snakemake-executor-plugin-slurm-jobstep",
     },
     "full": {
         "description": "All optional features",
@@ -140,6 +148,14 @@ NOTEBOOK_REQUIREMENTS = {
     "Vessel_Analysis": ["viz", "analysis"],
     "2.5_Vessel_3D_Segmentation": ["analysis"],
 }
+
+
+def _find_constraints_file() -> Path | None:
+    """Find the constraints.txt file in the project root."""
+    root = _find_project_root()
+    if root and (root / "constraints.txt").exists():
+        return root / "constraints.txt"
+    return None
 
 
 def _find_project_root() -> Path | None:
@@ -305,6 +321,57 @@ def require(
     return status
 
 
+def _inject_constraints(cmd: str) -> str:
+    """Inject -c constraints.txt into pip install commands if the file exists."""
+    constraints = _find_constraints_file()
+    if constraints and "pip install" in cmd:
+        # Replace each 'pip install' with 'pip install -c constraints.txt'
+        return cmd.replace("pip install ", f"pip install -c {constraints} ")
+    return cmd
+
+
+# Groups that require CUDA-enabled PyTorch
+_TORCH_GROUPS = frozenset({"gpu", "dl", "denoise", "kronos"})
+
+
+def _pre_install_guard(group: str) -> list[str]:
+    """Check for conditions that will cause install to break the environment.
+
+    Returns list of warning messages. Empty list means safe to proceed.
+    """
+    warnings = []
+
+    # Guard 1: If installing a torch-using group (not gpu), check if CUDA torch exists
+    if group in _TORCH_GROUPS and group != "gpu":
+        try:
+            import torch
+
+            if not hasattr(torch.version, "cuda") or torch.version.cuda is None:
+                warnings.append(
+                    f"CPU-only PyTorch {torch.__version__} detected. "
+                    f"Run 'kintsugi install gpu' first for CUDA-enabled PyTorch."
+                )
+        except ImportError:
+            pass  # No torch yet — install will add it
+
+    # Guard 2: If installing analysis/bio, verify numpy constraint will hold
+    if group in {"analysis", "bio", "kronos"}:
+        try:
+            import numpy as np
+            from packaging.version import parse
+
+            if parse(np.__version__) >= parse("2.0.0"):
+                warnings.append(
+                    f"numpy {np.__version__} >= 2.0 detected! "
+                    f"This is incompatible with KINTSUGI core. "
+                    f"Fix with: pip install 'numpy>=1.24,<2.0'"
+                )
+        except ImportError:
+            pass
+
+    return warnings
+
+
 def install_optional(
     group: Literal[
         "gpu",
@@ -317,7 +384,9 @@ def install_optional(
         "docs",
         "kronos",
         "denoise",
+        "optimize",
         "rapids",
+        "workflow",
         "full",
     ],
     use_conda: bool = False,
@@ -348,6 +417,11 @@ def install_optional(
         print(f"Available groups: {', '.join(OPTIONAL_GROUPS.keys())}")
         return False
 
+    # Pre-install guard checks
+    guard_warnings = _pre_install_guard(group)
+    for warning in guard_warnings:
+        print(f"\n⚠️  Warning: {warning}")
+
     info = OPTIONAL_GROUPS[group]
     print(f"\nInstalling {group}: {info['description']}")
     print("-" * 50)
@@ -356,6 +430,9 @@ def install_optional(
         cmd = info["conda_cmd"]
     else:
         cmd = info["install_cmd"]
+
+    # Inject constraints file for pip commands
+    cmd = _inject_constraints(cmd)
 
     print(f"Running: {cmd}\n")
 
@@ -418,6 +495,9 @@ class DependencyChecker:
 
         # Optional packages
         self._check_optional_packages(verbose)
+
+        # Environment safety (deep validation)
+        self._check_environment_safety(verbose)
 
         # Summary
         summary = self._generate_summary(verbose)
@@ -714,6 +794,138 @@ class DependencyChecker:
         if verbose:
             self._print_result(result)
 
+    def _check_environment_safety(self, verbose: bool):
+        """Run deep validation checks for known conflict conditions."""
+        if verbose:
+            print("\n[Environment Safety]")
+
+        self._check_numpy_version_constraint(verbose)
+        self._check_torch_cuda_build(verbose)
+        self._check_cupy_cuda_libs(verbose)
+        self._check_snakemake_tres_patch(verbose)
+
+    def _check_numpy_version_constraint(self, verbose: bool):
+        """Verify numpy < 2.0 (critical for all processing)."""
+        try:
+            import numpy as np
+            from packaging.version import parse
+
+            if parse(np.__version__) >= parse("2.0.0"):
+                result = DependencyResult(
+                    name="numpy-constraint",
+                    status=DependencyStatus.ERROR,
+                    version=np.__version__,
+                    message=(
+                        "numpy >= 2.0 detected! This WILL break processing. "
+                        "Fix: pip install 'numpy>=1.24,<2.0'"
+                    ),
+                )
+            else:
+                result = DependencyResult(
+                    name="numpy-constraint",
+                    status=DependencyStatus.OK,
+                    version=np.__version__,
+                    message="numpy < 2.0 constraint satisfied",
+                )
+        except ImportError:
+            result = DependencyResult(
+                name="numpy-constraint",
+                status=DependencyStatus.MISSING,
+                message="numpy not installed",
+            )
+        self.results.append(result)
+        if verbose:
+            self._print_result(result)
+
+    def _check_torch_cuda_build(self, verbose: bool):
+        """Verify torch is CUDA build, not CPU-only."""
+        try:
+            import torch
+
+            if hasattr(torch.version, "cuda") and torch.version.cuda is not None:
+                result = DependencyResult(
+                    name="torch-build",
+                    status=DependencyStatus.OK,
+                    version=f"CUDA {torch.version.cuda}",
+                    message="CUDA-enabled PyTorch build",
+                    is_optional=True,
+                    details={"group": "gpu"},
+                )
+            else:
+                result = DependencyResult(
+                    name="torch-build",
+                    status=DependencyStatus.ERROR,
+                    version=torch.__version__,
+                    message=(
+                        "CPU-only PyTorch detected! GPU processing will fail. "
+                        "Fix: kintsugi install gpu"
+                    ),
+                    is_optional=True,
+                    details={"group": "gpu"},
+                )
+        except ImportError:
+            return  # torch not installed = fine (optional)
+        self.results.append(result)
+        if verbose:
+            self._print_result(result)
+
+    def _check_cupy_cuda_libs(self, verbose: bool):
+        """Verify CuPy can actually load CUDA libraries (not just installed)."""
+        try:
+            import cupy  # noqa: F401
+        except ImportError:
+            return  # cupy not installed = fine
+        except Exception as e:
+            err_str = str(e)
+            if "libcufft" in err_str or "libcublas" in err_str or "libcusolver" in err_str:
+                result = DependencyResult(
+                    name="cupy-libs",
+                    status=DependencyStatus.ERROR,
+                    message=(
+                        f"CuPy installed but CUDA libraries missing: {err_str}. "
+                        "Fix: conda install cuda-libraries cuda-cudart-dev -c nvidia"
+                    ),
+                    is_optional=True,
+                    details={"group": "gpu"},
+                )
+                self.results.append(result)
+                if verbose:
+                    self._print_result(result)
+
+    def _check_snakemake_tres_patch(self, verbose: bool):
+        """Check if the SLURM_TRES_PER_TASK patch is applied to snakemake jobstep plugin."""
+        try:
+            import snakemake_executor_plugin_slurm_jobstep
+
+            init_file = Path(snakemake_executor_plugin_slurm_jobstep.__file__)
+            source = init_file.read_text()
+            if "SLURM_TRES_PER_TASK" in source:
+                result = DependencyResult(
+                    name="slurm-tres-patch",
+                    status=DependencyStatus.OK,
+                    message="SLURM_TRES_PER_TASK patch applied",
+                    is_optional=True,
+                    details={"group": "workflow"},
+                )
+            else:
+                result = DependencyResult(
+                    name="slurm-tres-patch",
+                    status=DependencyStatus.ERROR,
+                    message=(
+                        "SLURM_TRES_PER_TASK patch NOT applied! GPU jobs will fail. "
+                        "Fix: kintsugi patch slurm"
+                    ),
+                    is_optional=True,
+                    details={"group": "workflow"},
+                )
+        except ImportError:
+            return  # snakemake not installed = fine
+        except Exception:
+            return  # can't read file = skip
+        self.results.append(result)
+        if verbose:
+            self._print_result(result)
+
     def _print_result(self, result: DependencyResult):
         """Print a single dependency check result."""
         symbols = {
@@ -819,7 +1031,7 @@ class DependencyChecker:
         return summary
 
 
-def check_dependencies(verbose: bool = True) -> dict:
+def check_dependencies(verbose: bool = True, strict: bool = False) -> dict:
     """
     Convenience function to check all dependencies.
 
@@ -827,6 +1039,8 @@ def check_dependencies(verbose: bool = True) -> dict:
     ----------
     verbose : bool
         Print status messages.
+    strict : bool
+        If True, returns non-zero exit info when errors are found.
 
     Returns
     -------
@@ -834,7 +1048,18 @@ def check_dependencies(verbose: bool = True) -> dict:
         Summary of dependency checks.
     """
     checker = DependencyChecker()
-    return checker.check_all(verbose=verbose)
+    summary = checker.check_all(verbose=verbose)
+
+    if strict:
+        errors = [
+            r for r in checker.results if r.status == DependencyStatus.ERROR
+        ]
+        summary["has_errors"] = len(errors) > 0
+        summary["errors"] = [
+            {"name": r.name, "message": r.message} for r in errors
+        ]
+
+    return summary
 
 
 if __name__ == "__main__":

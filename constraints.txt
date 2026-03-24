@@ -1,0 +1,12 @@
+# KINTSUGI dependency constraints
+# ================================
+# This file prevents known-bad version combinations when installing
+# optional dependency groups. It is automatically enforced by
+# `kintsugi install <group>` commands.
+#
+# Manual usage: pip install -c constraints.txt <package>
+
+# Core constraint: numpy 2.x breaks scipy, cupy, scikit-image, and many
+# other packages in the KINTSUGI stack. This will be lifted when all
+# dependencies support numpy 2.x.
+numpy>=1.24.0,<2.0.0

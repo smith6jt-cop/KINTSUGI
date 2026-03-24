@@ -162,9 +162,17 @@ class TestOptionalGroups:
             "denoise",
             "optimize",
             "rapids",
+            "workflow",
             "full",
         }
         assert set(OPTIONAL_GROUPS.keys()) == expected
+
+    def test_workflow_group_exists(self):
+        """Workflow group for Snakemake/SLURM should exist."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        assert "workflow" in OPTIONAL_GROUPS
+        assert "snakemake" in OPTIONAL_GROUPS["workflow"]["packages"]
 
     def test_bio_group_has_bio_packages(self):
         """Bio group should contain bio I/O packages, not analysis packages."""
@@ -259,3 +267,170 @@ class TestPythonPackageChecks:
 
         assert result.status == DependencyStatus.OPTIONAL_MISSING
         assert result.is_optional is True
+
+
+class TestCudaIndexInInstallCommands:
+    """Test that torch-using groups use CUDA index URL."""
+
+    def test_dl_group_has_cuda_index(self):
+        """dl group must use CUDA index to avoid CPU-only torch."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        cmd = OPTIONAL_GROUPS["dl"]["install_cmd"]
+        assert "--index-url" in cmd or "--extra-index-url" in cmd, (
+            "dl group install_cmd missing CUDA index URL — will install CPU-only torch!"
+        )
+        assert "download.pytorch.org" in cmd
+
+    def test_denoise_group_has_cuda_index(self):
+        """denoise group must use CUDA index to avoid CPU-only torch."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        cmd = OPTIONAL_GROUPS["denoise"]["install_cmd"]
+        assert "--index-url" in cmd or "--extra-index-url" in cmd, (
+            "denoise group install_cmd missing CUDA index URL!"
+        )
+
+    def test_kronos_group_has_cuda_index(self):
+        """kronos group must use CUDA index to avoid CPU-only torch."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        cmd = OPTIONAL_GROUPS["kronos"]["install_cmd"]
+        assert "--index-url" in cmd or "--extra-index-url" in cmd, (
+            "kronos group install_cmd missing CUDA index URL!"
+        )
+
+    def test_gpu_group_has_cuda_index(self):
+        """gpu group must use CUDA index."""
+        from kintsugi.deps import OPTIONAL_GROUPS
+
+        cmd = OPTIONAL_GROUPS["gpu"]["install_cmd"]
+        assert "--index-url" in cmd or "--extra-index-url" in cmd
+
+
+class TestConstraintsFile:
+    """Test constraints file injection."""
+
+    def test_inject_constraints_with_pip(self):
+        """Constraints should be injected into pip install commands."""
+        from unittest.mock import patch
+
+        from kintsugi.deps import _inject_constraints
+
+        fake_constraints = "/fake/path/constraints.txt"
+        with patch("kintsugi.deps._find_constraints_file", return_value=fake_constraints):
+            result = _inject_constraints("pip install numpy scipy")
+            assert f"-c {fake_constraints}" in result
+
+    def test_inject_constraints_no_file(self):
+        """No injection when constraints file doesn't exist."""
+        from unittest.mock import patch
+
+        from kintsugi.deps import _inject_constraints
+
+        with patch("kintsugi.deps._find_constraints_file", return_value=None):
+            cmd = "pip install numpy scipy"
+            result = _inject_constraints(cmd)
+            assert result == cmd
+
+    def test_inject_constraints_non_pip(self):
+        """Conda commands should not get constraints injection."""
+        from unittest.mock import patch
+
+        from kintsugi.deps import _inject_constraints
+
+        with patch(
+            "kintsugi.deps._find_constraints_file", return_value="/fake/constraints.txt"
+        ):
+            cmd = "conda install numpy scipy -c conda-forge"
+            result = _inject_constraints(cmd)
+            assert result == cmd
+
+
+class TestPreInstallGuard:
+    """Test pre-install guard checks."""
+
+    def test_guard_warns_on_cpu_torch(self):
+        """Guard should warn when CPU-only torch is installed and installing dl."""
+        import sys
+        import types
+        from unittest.mock import patch
+
+        from kintsugi.deps import _pre_install_guard
+
+        mock_torch = types.ModuleType("torch")
+        mock_torch.__version__ = "2.5.0"
+        mock_torch_version = types.SimpleNamespace(cuda=None)
+        mock_torch.version = mock_torch_version
+
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            warnings = _pre_install_guard("dl")
+            assert any("CPU-only" in w for w in warnings)
+
+    def test_guard_ok_with_cuda_torch(self):
+        """Guard should not warn when CUDA torch is installed."""
+        import sys
+        import types
+        from unittest.mock import patch
+
+        from kintsugi.deps import _pre_install_guard
+
+        mock_torch = types.ModuleType("torch")
+        mock_torch.__version__ = "2.5.0+cu124"
+        mock_torch_version = types.SimpleNamespace(cuda="12.4")
+        mock_torch.version = mock_torch_version
+
+        with patch.dict(sys.modules, {"torch": mock_torch}):
+            warnings = _pre_install_guard("dl")
+            assert not any("CPU-only" in w for w in warnings)
+
+    def test_guard_no_warn_for_non_torch_group(self):
+        """Guard should not warn about torch for non-torch groups."""
+        from kintsugi.deps import _pre_install_guard
+
+        warnings = _pre_install_guard("docs")
+        assert not any("CPU-only" in w for w in warnings)
+        assert not any("numpy" in w for w in warnings)
+
+
+class TestEnvironmentSafetyChecks:
+    """Test deep validation checks in DependencyChecker."""
+
+    def test_numpy_constraint_check_passes(self):
+        """numpy < 2.0 should pass the constraint check."""
+        from kintsugi.deps import DependencyChecker, DependencyStatus
+
+        checker = DependencyChecker()
+        checker._check_numpy_version_constraint(verbose=False)
+
+        numpy_results = [r for r in checker.results if r.name == "numpy-constraint"]
+        assert len(numpy_results) == 1
+        # Current environment should have numpy < 2.0
+        assert numpy_results[0].status == DependencyStatus.OK
+
+    def test_torch_build_check_runs(self):
+        """torch build check should run without error."""
+        from kintsugi.deps import DependencyChecker
+
+        checker = DependencyChecker()
+        # Should not raise regardless of torch availability
+        checker._check_torch_cuda_build(verbose=False)
+
+    def test_environment_safety_included_in_check_all(self):
+        """check_all should include environment safety results."""
+        from kintsugi.deps import DependencyChecker
+
+        checker = DependencyChecker()
+        checker.check_all(verbose=False)
+
+        result_names = [r.name for r in checker.results]
+        assert "numpy-constraint" in result_names
+
+    def test_check_dependencies_strict_mode(self):
+        """strict mode should add has_errors and errors keys."""
+        from kintsugi.deps import check_dependencies
+
+        result = check_dependencies(verbose=False, strict=True)
+        assert "has_errors" in result
+        assert "errors" in result
+        assert isinstance(result["errors"], list)

@@ -55,9 +55,44 @@ def main():
 @main.command()
 @click.option("--verbose/--quiet", "-v/-q", default=True, help="Verbose output")
 @click.option("--json", "output_json", is_flag=True, help="Output as JSON")
-def check(verbose: bool, output_json: bool):
+@click.option("--strict", is_flag=True, help="Exit code 1 if any errors detected")
+@click.option(
+    "--for",
+    "workflow_name",
+    type=click.Choice(
+        ["pipeline", "analysis", "segmentation", "vessel3d", "kronos", "all"],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="Validate deps for a specific workflow",
+)
+def check(verbose: bool, output_json: bool, strict: bool, workflow_name: str | None):
     """Check all KINTSUGI dependencies."""
-    from kintsugi.deps import DependencyChecker
+    from kintsugi.deps import DependencyChecker, DependencyStatus, require
+
+    # If --for is specified, check workflow-specific deps first
+    if workflow_name:
+        workflow_groups = {
+            "pipeline": ["gpu"],
+            "analysis": ["analysis", "dl", "viz"],
+            "segmentation": ["dl", "viz"],
+            "vessel3d": ["gpu", "analysis"],
+            "kronos": ["kronos"],
+            "all": ["gpu", "viz", "dl", "analysis"],
+        }
+        groups = workflow_groups.get(workflow_name, [])
+        if groups:
+            try:
+                require(*groups, strict=True)
+                if not output_json:
+                    console.print(
+                        f"[green]All dependencies for '{workflow_name}' workflow are installed.[/green]"
+                    )
+            except Exception as e:
+                if not output_json:
+                    console.print(f"[red]{e}[/red]")
+                if strict:
+                    raise SystemExit(1)
 
     checker = DependencyChecker()
 
@@ -66,6 +101,15 @@ def check(verbose: bool, output_json: bool):
         click.echo(json.dumps(result, indent=2))
     else:
         checker.check_all(verbose=verbose)
+
+    if strict:
+        errors = [r for r in checker.results if r.status == DependencyStatus.ERROR]
+        if errors:
+            if not output_json:
+                console.print(f"\n[red]Strict check failed: {len(errors)} error(s) found[/red]")
+                for err in errors:
+                    console.print(f"  [red]{err.name}: {err.message}[/red]")
+            raise SystemExit(1)
 
 
 @main.command()
@@ -270,7 +314,14 @@ def install(group: str | None, list_groups: bool, use_conda: bool):
         console.print(f"Available groups: {', '.join(available)}, all")
         raise SystemExit(1)
 
-    # Single-group install — unchanged behavior
+    # Single-group install
+    from kintsugi.deps import _inject_constraints, _pre_install_guard
+
+    # Pre-install guard checks
+    guard_warnings = _pre_install_guard(group)
+    for warning in guard_warnings:
+        console.print(f"\n[yellow]Warning: {warning}[/yellow]")
+
     info = OPTIONAL_GROUPS[group]
     console.print(f"\n[bold]Installing {group}:[/bold] {info['description']}")
 
@@ -278,6 +329,8 @@ def install(group: str | None, list_groups: bool, use_conda: bool):
         cmd = info["conda_cmd"]
     else:
         cmd = info["install_cmd"]
+        # Inject constraints file for pip commands
+        cmd = _inject_constraints(cmd)
 
     console.print(f"[dim]Running: {cmd}[/dim]")
 
@@ -291,7 +344,26 @@ def install(group: str | None, list_groups: bool, use_conda: bool):
     if "note" in info:
         console.print(f"[yellow]Note: {info['note']}[/yellow]")
 
+    # Post-install validation
+    _post_install_validate()
+
     console.print("\n[bold green]Installation complete![/bold green]")
+
+
+def _post_install_validate() -> None:
+    """Run quick post-install validation to catch broken dependencies."""
+    from kintsugi.deps import DependencyChecker, DependencyStatus
+
+    console.print("\n[dim]Validating environment...[/dim]")
+    checker = DependencyChecker()
+    checker.check_all(verbose=False)
+
+    errors = [r for r in checker.results if r.status == DependencyStatus.ERROR]
+    if errors:
+        console.print("[yellow]Post-install warnings:[/yellow]")
+        for err in errors:
+            console.print(f"  [yellow]{err.name}: {err.message}[/yellow]")
+        console.print("[dim]Run 'kintsugi check --strict' for full details[/dim]")
 
 
 def _install_all(use_conda: bool) -> None:
@@ -382,12 +454,115 @@ def _install_all(use_conda: bool) -> None:
         if "note" in OPTIONAL_GROUPS[grp]:
             console.print(f"\n[yellow]Note ({grp}): {OPTIONAL_GROUPS[grp]['note']}[/yellow]")
 
+    # Auto-apply SLURM TRES patch if jobstep plugin is installed
+    _auto_patch_slurm_tres()
+
+    # Post-install validation
+    _post_install_validate()
+
     # Remind about rapids (excluded from 'all')
     console.print(
         "\n[dim]Note: 'rapids' requires separate installation "
         "(NVIDIA channel). Run: kintsugi install rapids[/dim]"
     )
     console.print("\n[bold green]Installation complete![/bold green]")
+
+
+def _auto_patch_slurm_tres() -> None:
+    """Automatically apply the SLURM_TRES_PER_TASK patch if needed."""
+    try:
+        import snakemake_executor_plugin_slurm_jobstep
+
+        init_file = Path(snakemake_executor_plugin_slurm_jobstep.__file__)
+        source = init_file.read_text()
+        if "SLURM_TRES_PER_TASK" not in source:
+            console.print(
+                "\n[yellow]Applying SLURM_TRES_PER_TASK patch to jobstep plugin...[/yellow]"
+            )
+            _apply_tres_patch(init_file, source)
+    except ImportError:
+        pass  # Not installed
+    except Exception:
+        pass  # Can't read/write
+
+
+def _apply_tres_patch(init_file: Path, source: str) -> bool:
+    """Apply the SLURM_TRES_PER_TASK patch to the jobstep plugin.
+
+    Inserts os.environ.pop("SLURM_TRES_PER_TASK", None) into the
+    __post_init__ method of the executor class.
+    """
+    # Find __post_init__ method
+    patch_line = '        os.environ.pop("SLURM_TRES_PER_TASK", None)  # KINTSUGI patch\n'
+
+    # Look for the __post_init__ method and insert after it
+    lines = source.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if "def __post_init__" in line:
+            # Insert after the next line (which is usually the docstring or first statement)
+            insert_at = i + 1
+            # Skip docstring if present
+            while insert_at < len(lines) and (
+                lines[insert_at].strip().startswith('"""')
+                or lines[insert_at].strip().startswith("'''")
+                or lines[insert_at].strip() == ""
+            ):
+                insert_at += 1
+                # Handle multi-line docstrings
+                if insert_at > 0 and (
+                    lines[insert_at - 1].strip().endswith('"""')
+                    or lines[insert_at - 1].strip().endswith("'''")
+                ):
+                    break
+
+            # Also need 'import os' at the top
+            if "import os" not in source:
+                lines.insert(0, "import os\n")
+                insert_at += 1
+
+            lines.insert(insert_at, patch_line)
+            init_file.write_text("".join(lines))
+            console.print("[green]✓ SLURM_TRES_PER_TASK patch applied[/green]")
+            return True
+
+    console.print("[yellow]Could not locate __post_init__ method in jobstep plugin[/yellow]")
+    return False
+
+
+@main.command("patch")
+@click.argument("target", type=click.Choice(["slurm"]))
+def patch_command(target: str):
+    """Apply patches to third-party plugins.
+
+    \b
+    Targets:
+        slurm   Apply SLURM_TRES_PER_TASK fix to snakemake-executor-plugin-slurm-jobstep
+    """
+    if target == "slurm":
+        try:
+            import snakemake_executor_plugin_slurm_jobstep
+
+            init_file = Path(snakemake_executor_plugin_slurm_jobstep.__file__)
+            source = init_file.read_text()
+
+            if "SLURM_TRES_PER_TASK" in source:
+                console.print("[green]SLURM_TRES_PER_TASK patch is already applied.[/green]")
+                return
+
+            if _apply_tres_patch(init_file, source):
+                console.print(
+                    "\n[dim]This patch must be re-applied after upgrading "
+                    "snakemake-executor-plugin-slurm-jobstep.[/dim]"
+                )
+            else:
+                raise SystemExit(1)
+
+        except ImportError:
+            console.print(
+                "[red]snakemake-executor-plugin-slurm-jobstep not installed.[/red]\n"
+                "[dim]Install with: kintsugi install workflow[/dim]"
+            )
+            raise SystemExit(1)
 
 
 # ============================================================================

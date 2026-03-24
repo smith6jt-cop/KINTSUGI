@@ -105,30 +105,34 @@ kintsugi check
 
 ### Optional Features
 
-After installing the base environment, add optional features as needed using the `kintsugi install` command:
+After installing the base environment, add optional features as needed. **Install `gpu` first** — other groups that need PyTorch depend on it for CUDA-enabled builds.
+
+> **Important:** Always use `kintsugi install` commands — never run `pip install torch` directly, as it installs a CPU-only build that breaks GPU processing.
 
 ```bash
-# GPU acceleration (CuPy for CUDA)
+# Step 1: GPU acceleration (install this FIRST — provides CUDA torch + CuPy)
 kintsugi install gpu
 
-# PyTorch for deep learning models
-kintsugi install torch
+# Step 2 (HPC only): Snakemake workflow orchestration
+kintsugi install workflow
+kintsugi patch slurm              # Required for SLURM >= 24.11
 
-# Spatial biology analysis (scanpy, scimap, squidpy)
-kintsugi install bio
+# Step 3: Additional features as needed
+kintsugi install dl               # Deep learning segmentation (InstanSeg)
+kintsugi install analysis         # Spatial analysis (scanpy, scimap)
+kintsugi install viz              # Napari interactive visualization
+kintsugi install bio              # Bio formats I/O (OME-TIFF, LIF)
+kintsugi install claude           # Claude Code MCP integration
+kintsugi install dev              # Development tools (pytest, ruff, black)
 
-# Napari interactive visualization
-kintsugi install viz
-
-# Claude Code MCP integration
-kintsugi install claude
-
-# Development tools (pytest, ruff, black, mypy)
-kintsugi install dev
-
-# All optional features
+# Or install everything at once (resolves all constraints together)
 kintsugi install all
+
+# Step 4: Verify everything is correct
+kintsugi check --strict
 ```
+
+All `kintsugi install` commands automatically enforce a `constraints.txt` file that prevents known-bad version combinations (e.g., numpy 2.x). See [docs/DEPENDENCY_GUIDE.md](docs/DEPENDENCY_GUIDE.md) for troubleshooting.
 
 ### Multi-GPU Acceleration
 

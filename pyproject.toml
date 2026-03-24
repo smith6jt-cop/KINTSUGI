@@ -65,6 +65,9 @@ dependencies = [
     "dask>=2023.7.0",
     "dask-image>=0.6.0",
 
+    # Visualization (used by Kprocess, Kseg, Kanalysis)
+    "seaborn>=0.12.0",
+
     # Utilities
     "tqdm>=4.65.0",
     "pyyaml>=6.0",
@@ -72,6 +75,7 @@ dependencies = [
     "rich>=13.0.0",
     "natsort>=8.4.0",
     "packaging>=23.0",
+    "pqdm>=0.2.0",
 ]
 
 [project.optional-dependencies]
@@ -110,7 +114,9 @@ dl = [
 ]
 
 # Spatial analysis
+# numpy<2.0 repeated here to guard individual group installs
 analysis = [
+    "numpy>=1.24.0,<2.0.0",
     "scanpy>=1.9.0",
     "anndata>=0.9.0",
     "phenograph>=1.5.0",
@@ -123,7 +129,9 @@ analysis = [
 ]
 
 # Slide/bioformats I/O
+# numpy<2.0 repeated here to guard individual group installs
 bio = [
+    "numpy>=1.24.0,<2.0.0",
     "aicsimageio>=4.14.0",
     "bioio>=1.0.0",
     "bioio-ome-tiff>=1.0.0",
@@ -152,6 +160,7 @@ optimize = [
 #   git clone https://github.com/mahmoodlab/KRONOS.git && pip install -e KRONOS
 # Model weights require HuggingFace access: MahmoodLab/KRONOS (CC-BY-NC-ND-4.0)
 kronos = [
+    "numpy>=1.24.0,<2.0.0",
     "torch>=2.0.0",
     "h5py>=3.9.0",
     "umap-learn>=0.5.0",
@@ -187,6 +196,13 @@ dev = [
     "mypy>=1.5.0",
     "pre-commit>=3.4.0",
     "commitizen>=3.12.0",
+]
+
+# Snakemake workflow orchestration (HPC/SLURM)
+workflow = [
+    "snakemake>=8.0",
+    "snakemake-executor-plugin-slurm>=0.10.0",
+    "snakemake-executor-plugin-slurm-jobstep>=0.3.0",
 ]
 
 # Documentation

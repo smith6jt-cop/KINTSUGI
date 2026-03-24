@@ -381,9 +381,9 @@ See `workflow/CLAUDE.md` for batch processing documentation: data staging, clean
 
 ## Dependencies
 
-Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, pyvips
+Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, pyvips, seaborn, pqdm
 
-12 optional install groups defined in `deps.py` `OPTIONAL_GROUPS` (single source of truth, also used by `pyproject.toml` extras). Install via `kintsugi install <group>` (supports `--conda` for groups with conda recipes):
+13 optional install groups defined in `deps.py` `OPTIONAL_GROUPS` (single source of truth, also used by `pyproject.toml` extras). Install via `kintsugi install <group>` (supports `--conda` for groups with conda recipes):
 - `gpu` - PyTorch + CuPy for GPU acceleration
 - `viz` - Napari visualization
 - `dl` - Deep learning segmentation (InstanSeg)
@@ -394,12 +394,32 @@ Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, py
 - `docs` - Documentation (Sphinx)
 - `kronos` - KRONOS foundation model (prints post-install note about cloning KRONOS repo)
 - `denoise` - Advanced denoising (N2V, CARE)
+- `optimize` - Parameter optimization (Optuna + SMO)
+- `workflow` - Snakemake workflow orchestration (HPC/SLURM)
 - `rapids` - RAPIDS GPU-accelerated data science
 - `full` - All optional features (composite)
 
 `kintsugi install all` uses a single `pip install -e ".[gpu,viz,dl,...]"` pass via pyproject.toml extras to avoid cascading dependency conflicts. Skips `full` (composite) and `rapids` (needs NVIDIA channel). Falls back to sequential install + constraint repair if pyproject.toml not found. Conda mode (`--conda`) installs conda groups first, then remaining via pip extras.
 
 **External requirements**: libvips (native library). Java/Maven no longer required.
+
+### Dependency Safety
+
+**Constraint guards** prevent known-bad dependency combinations:
+- `constraints.txt` at repo root enforces `numpy<2.0` — auto-injected into all `kintsugi install` pip commands
+- All torch-using groups (`gpu`, `dl`, `denoise`, `kronos`) use `--index-url https://download.pytorch.org/whl/cu124` to avoid CPU-only torch
+- `analysis`, `bio`, `kronos` groups have explicit `numpy>=1.24.0,<2.0.0` in pyproject.toml extras
+- Pre-install guards warn before installing groups that would break existing packages
+
+**Validation**: `kintsugi check --strict` catches:
+- numpy >= 2.0 installed (ERROR)
+- CPU-only PyTorch build (ERROR)
+- CuPy missing CUDA runtime libraries (ERROR)
+- SLURM TRES patch not applied (ERROR on HPC)
+
+**SLURM TRES patch**: `kintsugi patch slurm` auto-applies the `SLURM_TRES_PER_TASK` fix. Also applied automatically by `kintsugi install all` and `kintsugi install workflow`.
+
+See `docs/DEPENDENCY_GUIDE.md` for full troubleshooting guide.
 
 ### CuPy & HPC Cache (IMPORTANT)
 
