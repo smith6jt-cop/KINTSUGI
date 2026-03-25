@@ -133,7 +133,6 @@ analysis = [
 # numpy<2.0 repeated here to guard individual group installs
 bio = [
     "numpy>=1.24.0,<2.0.0",
-    "aicsimageio>=4.14.0",
     "bioio>=1.0.0",
     "bioio-ome-tiff>=1.0.0",
     "ome-zarr>=0.9.0",

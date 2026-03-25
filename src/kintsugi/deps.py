@@ -82,8 +82,8 @@ OPTIONAL_GROUPS = {
     },
     "bio": {
         "description": "Bio formats I/O (OME-TIFF, LIF, etc.)",
-        "packages": ["aicsimageio", "bioio", "ome-zarr", "slideio"],
-        "install_cmd": "pip install aicsimageio bioio bioio-ome-tiff ome-zarr slideio readlif",
+        "packages": ["bioio", "ome-zarr", "slideio"],
+        "install_cmd": "pip install bioio bioio-ome-tiff ome-zarr slideio readlif",
     },
     "claude": {
         "description": "Claude Code MCP integration",
@@ -132,7 +132,7 @@ OPTIONAL_GROUPS = {
     "full": {
         "description": "All optional features",
         "packages": [],  # Composite group
-        "install_cmd": "conda install cuda-libraries cuda-cudart-dev -c nvidia -y && cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev/null; pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install cupy-cuda12x napari magicgui instanseg instanseg-torch kornia scanpy anndata phenograph scimap aicsimageio bioio bioio-ome-tiff ome-zarr slideio readlif",
+        "install_cmd": "conda install cuda-libraries cuda-cudart-dev -c nvidia -y && cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev/null; pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install cupy-cuda12x napari magicgui instanseg instanseg-torch kornia scanpy anndata phenograph scimap bioio bioio-ome-tiff ome-zarr slideio readlif",
     },
 }
 
@@ -174,6 +174,31 @@ def _find_project_root() -> Path | None:
     except Exception:
         pass
     return None
+
+
+def _pre_install_pims() -> None:
+    """Pre-install pims with --no-build-isolation to work around setuptools bug.
+
+    pims uses a legacy setup.py that references the removed ``install_layout``
+    attribute, causing build failures with setuptools >= 69. Building without
+    isolation uses the already-installed setuptools (which may be patched or
+    older), avoiding the error.  This is a no-op if pims is already installed.
+    """
+    try:
+        import pims  # noqa: F401
+
+        return  # Already installed
+    except ImportError:
+        pass
+
+    constraints = _find_constraints_file()
+    cmd = "pip install pims --no-build-isolation"
+    if constraints:
+        cmd = f"pip install -c {constraints} pims --no-build-isolation"
+    try:
+        subprocess.run(cmd, shell=True, check=True, capture_output=True)
+    except subprocess.CalledProcessError:
+        pass  # Non-fatal; main install may still succeed if pims is optional
 
 
 class MissingDependencyError(Exception):
@@ -555,7 +580,7 @@ class DependencyChecker:
             ("phenograph", "1.5.0", "analysis"),
             ("scimap", None, "analysis"),
             # Bio formats
-            ("aicsimageio", None, "bio"),
+            ("bioio", "1.0.0", "bio"),
             ("ome-zarr", None, "bio"),
         ]
 

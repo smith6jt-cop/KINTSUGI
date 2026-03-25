@@ -152,8 +152,8 @@ class InstanSeg():
                 return image_str, img_pixel_size
 
         elif self.prefered_image_reader == "AICSImageIO":
-            from aicsimageio import AICSImage
-            slide = AICSImage(image_str)
+            from bioio import BioImage
+            slide = BioImage(image_str)
             img_pixel_size = slide.physical_pixel_sizes.X
             num_pixels = np.cumprod(slide.shape)[-1]
             if num_pixels < self.medium_image_threshold:
@@ -184,10 +184,9 @@ class InstanSeg():
         except Exception as e:
             print(e)
             pass
-        from aicsimageio import AICSImage 
+        from bioio import BioImage
         try:
-            
-            slide = AICSImage(image_str)
+            slide = BioImage(image_str)
             img_pixel_size = slide.physical_pixel_sizes.X
             if img_pixel_size is not None and img_pixel_size > 0 and img_pixel_size < 2:
                 return img_pixel_size
