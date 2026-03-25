@@ -82,7 +82,7 @@ OPTIONAL_GROUPS = {
     },
     "bio": {
         "description": "Bio formats I/O (OME-TIFF, LIF, etc.)",
-        "packages": ["bioio", "ome-zarr", "slideio"],
+        "packages": ["bioio", "bioio-ome-tiff", "ome-zarr", "slideio", "readlif"],
         "install_cmd": "pip install bioio bioio-ome-tiff ome-zarr slideio readlif",
     },
     "claude": {
@@ -191,14 +191,18 @@ def _pre_install_pims() -> None:
     except ImportError:
         pass
 
+    import logging
+
+    logger = logging.getLogger(__name__)
     constraints = _find_constraints_file()
-    cmd = "pip install pims --no-build-isolation"
+    cmd = ["pip", "install", "pims", "--no-build-isolation"]
     if constraints:
-        cmd = f"pip install -c {constraints} pims --no-build-isolation"
+        cmd = ["pip", "install", "-c", str(constraints), "pims", "--no-build-isolation"]
     try:
-        subprocess.run(cmd, shell=True, check=True, capture_output=True)
-    except subprocess.CalledProcessError:
-        pass  # Non-fatal; main install may still succeed if pims is optional
+        subprocess.run(cmd, check=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode() if exc.stderr else ""
+        logger.warning("Pre-install of pims failed (non-fatal): %s", stderr[:200])
 
 
 class MissingDependencyError(Exception):
@@ -582,6 +586,7 @@ class DependencyChecker:
             # Bio formats
             ("bioio", "1.0.0", "bio"),
             ("ome-zarr", None, "bio"),
+            ("slideio", None, "bio"),
         ]
 
         for package, min_version, group in optional_packages:
@@ -1076,13 +1081,9 @@ def check_dependencies(verbose: bool = True, strict: bool = False) -> dict:
     summary = checker.check_all(verbose=verbose)
 
     if strict:
-        errors = [
-            r for r in checker.results if r.status == DependencyStatus.ERROR
-        ]
+        errors = [r for r in checker.results if r.status == DependencyStatus.ERROR]
         summary["has_errors"] = len(errors) > 0
-        summary["errors"] = [
-            {"name": r.name, "message": r.message} for r in errors
-        ]
+        summary["errors"] = [{"name": r.name, "message": r.message} for r in errors]
 
     return summary
 

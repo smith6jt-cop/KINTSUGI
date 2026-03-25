@@ -378,12 +378,12 @@ def _install_all(use_conda: bool) -> None:
     extras = [k for k in OPTIONAL_GROUPS if k not in _SKIP_FROM_ALL]
     project_root = _find_project_root()
 
-    # Pre-install pims to work around setuptools build failure (needed by dask-image)
-    from kintsugi.deps import _pre_install_pims
-
-    _pre_install_pims()
-
     if project_root and not use_conda:
+        # Pre-install pims to work around setuptools build failure (needed by dask-image)
+        from kintsugi.deps import _pre_install_pims
+
+        _pre_install_pims()
+
         # Single pip resolution pass using pyproject.toml extras
         extras_str = ",".join(extras)
         cmd = f'pip install -e "{project_root}[{extras_str}]"'
