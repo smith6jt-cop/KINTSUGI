@@ -339,9 +339,7 @@ class TestConstraintsFile:
 
         from kintsugi.deps import _inject_constraints
 
-        with patch(
-            "kintsugi.deps._find_constraints_file", return_value="/fake/constraints.txt"
-        ):
+        with patch("kintsugi.deps._find_constraints_file", return_value="/fake/constraints.txt"):
             cmd = "conda install numpy scipy -c conda-forge"
             result = _inject_constraints(cmd)
             assert result == cmd
