@@ -113,12 +113,23 @@ PROJECT_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 if [ "$HPC_MODE" = false ]; then
     if [ -n "${SLURM_CONF:-}" ] || [ -n "${MODULESHOME:-}" ]; then
         print_info "HPC environment detected (SLURM/modules found)"
-        print_info "Use --hpc flag for full HPC install, or proceed with desktop install"
-        echo ""
-        read -p "Use HPC environment file? (Y/n) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-            HPC_MODE=true
+        if [ -t 0 ]; then
+            # Interactive shell: prompt the user
+            print_info "Use --hpc flag for full HPC install, or proceed with desktop install"
+            echo ""
+            read -p "Use HPC environment file? (Y/n) " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                HPC_MODE=true
+            fi
+        else
+            # Non-interactive: honor KINTSUGI_ASSUME_HPC if set
+            if [ "${KINTSUGI_ASSUME_HPC:-}" = "1" ]; then
+                print_info "Non-interactive mode with KINTSUGI_ASSUME_HPC=1; enabling HPC mode."
+                HPC_MODE=true
+            else
+                print_info "Non-interactive mode; defaulting to desktop. Set KINTSUGI_ASSUME_HPC=1 to auto-enable HPC."
+            fi
         fi
     fi
 fi

@@ -109,8 +109,8 @@ dependencies:
   # === Pip-only packages ===
   # These are not available on conda-forge or need specific PyPI versions.
   - pip:
-    # KINTSUGI package (editable install from parent directory)
-    - -e ..
+    # KINTSUGI package (editable install from repository root)
+    - -e .
 
     # Image processing (no conda packages)
     - opencv-contrib-python-headless>=4.9.0
@@ -157,4 +157,3 @@ dependencies:
     # Utilities
     - pqdm>=0.2.0
     - dask-image>=0.6.0
-    - imagecodecs>=2023.7.0

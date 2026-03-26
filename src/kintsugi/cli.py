@@ -345,7 +345,12 @@ def install(group: str | None, list_groups: bool, use_conda: bool):
         console.print(f"[yellow]Note: {info['note']}[/yellow]")
 
     # Post-install validation
-    _post_install_validate()
+    if not _post_install_validate():
+        console.print(
+            "\n[red bold]Installation completed with ERRORS. "
+            "Environment may be broken.[/red bold]"
+        )
+        raise SystemExit(1)
 
     console.print("\n[bold green]Installation complete![/bold green]")
 
@@ -362,14 +367,11 @@ def _post_install_validate() -> bool:
     missing_required = [
         r
         for r in checker.results
-        if not r.is_optional
-        and r.status in (DependencyStatus.MISSING, DependencyStatus.ERROR)
+        if not r.is_optional and r.status in (DependencyStatus.MISSING, DependencyStatus.ERROR)
     ]
 
     if missing_required:
-        console.print(
-            "[red bold]CRITICAL: Required dependencies broken after install:[/red bold]"
-        )
+        console.print("[red bold]CRITICAL: Required dependencies broken after install:[/red bold]")
         for err in missing_required:
             msg = err.message or "not found"
             console.print(f"  [red]✗ {err.name}: {msg}[/red]")
@@ -657,8 +659,15 @@ def fix_hpc_command():
     console.print("\n[bold]Step 2: Ensuring conda libstdcxx-ng is up to date[/bold]")
     try:
         subprocess.run(
-            "conda install libstdcxx-ng>=12.0 libgcc-ng>=12.0 -c conda-forge -y",
-            shell=True,
+            [
+                "conda",
+                "install",
+                "libstdcxx-ng>=12.0",
+                "libgcc-ng>=12.0",
+                "-c",
+                "conda-forge",
+                "-y",
+            ],
             check=True,
             capture_output=False,
         )
@@ -672,18 +681,20 @@ def fix_hpc_command():
     conda_include = Path(conda_prefix) / "include"
     if targets_include.is_dir():
         try:
-            subprocess.run(
-                f"cp -r {targets_include}/* {conda_include}/ 2>/dev/null",
-                shell=True,
-                check=False,
-            )
+            import shutil as _shutil
+
+            conda_include.mkdir(parents=True, exist_ok=True)
+            for item in targets_include.iterdir():
+                dst = conda_include / item.name
+                if item.is_dir():
+                    _shutil.copytree(item, dst, dirs_exist_ok=True)
+                else:
+                    _shutil.copy2(item, dst)
             console.print("[green]✓ CUDA headers copied[/green]")
-        except Exception:
-            console.print("[yellow]Warning: Could not copy CUDA headers[/yellow]")
+        except OSError as e:
+            console.print(f"[yellow]Warning: Could not copy CUDA headers: {e}[/yellow]")
     else:
-        console.print(
-            "[dim]CUDA headers not found (cuda-cudart-dev may not be installed)[/dim]"
-        )
+        console.print("[dim]CUDA headers not found (cuda-cudart-dev may not be installed)[/dim]")
 
     # Instructions
     console.print("\n[bold yellow]IMPORTANT: Deactivate and reactivate to apply:[/bold yellow]")
@@ -3756,9 +3767,7 @@ def isolate_batch(
             status_str = (
                 f"[green]{status}[/green]"
                 if status == "completed"
-                else f"[red]{status}[/red]"
-                if status == "error"
-                else status
+                else f"[red]{status}[/red]" if status == "error" else status
             )
             summary = info.get("summary", {})
             n_channels = summary.get("total", 0)

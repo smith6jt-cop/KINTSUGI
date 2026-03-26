@@ -26,7 +26,7 @@ if [ -d "${_CONDA_TARGETS_LIB}" ]; then
 fi
 
 # Set CUDA paths for CuPy JIT compilation and torch
-if [ -d "${CONDA_PREFIX}/include/cuda.h" ] || [ -d "${CONDA_PREFIX}/targets/x86_64-linux/include" ]; then
+if [ -f "${CONDA_PREFIX}/include/cuda.h" ] || [ -d "${CONDA_PREFIX}/targets/x86_64-linux/include" ]; then
     export CUDA_PATH="${CONDA_PREFIX}"
     export CUDA_HOME="${CONDA_PREFIX}"
 fi

@@ -65,7 +65,7 @@ if [ -f "$CONDA_PREFIX/lib/libstdc++.so.6" ]; then
     check_pass "Conda libstdc++.so.6 exists"
 else
     check_fail "Conda libstdc++.so.6 not found"
-    echo "         Fix: conda install libstdcxx-ng>=12.0 -c conda-forge"
+    echo "         Fix: conda install 'libstdcxx-ng>=12.0' -c conda-forge"
 fi
 
 # 3. Check activation scripts are deployed
@@ -110,7 +110,7 @@ else
 fi
 
 # Note: torch.cuda.is_available() is expected to be False on login nodes
-if python -c "import torch; torch.cuda.is_available()" 2>/dev/null; then
+if python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
     check_pass "CUDA hardware available"
 else
     check_warn "CUDA hardware not available (expected on login nodes)"

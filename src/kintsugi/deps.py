@@ -179,17 +179,18 @@ def _find_project_root() -> Path | None:
 
 
 def detect_hpc() -> bool:
-    """Detect if running on an HPC cluster (SLURM-based).
+    """Detect if running on an HPC cluster (typically SLURM-based).
 
-    Checks for common HPC indicators: SLURM config, environment module
-    system, or the HiPerGator ``/apps/`` directory convention.
+    Uses strong indicators to avoid false positives on non-HPC systems:
+    - SLURM environment (``SLURM_CONF``)
+    - Environment modules (``MODULESHOME``)
+    - Presence of SLURM commands (``srun``, ``sbatch``) on PATH
     """
-    indicators = [
-        os.environ.get("SLURM_CONF"),
-        os.environ.get("MODULESHOME"),
-        Path("/apps/").is_dir() if Path("/apps/").exists() else False,
-    ]
-    return any(indicators)
+    if os.environ.get("SLURM_CONF") or os.environ.get("MODULESHOME"):
+        return True
+    if shutil.which("srun") or shutil.which("sbatch"):
+        return True
+    return False
 
 
 def deploy_activation_scripts() -> bool:
@@ -972,7 +973,7 @@ class DependencyChecker:
                     status=DependencyStatus.OK,
                     message="System libstdc++ is sufficient",
                 )
-            except ImportError:
+            except (ImportError, OSError):
                 result = DependencyResult(
                     name="libstdcxx",
                     status=DependencyStatus.ERROR,
