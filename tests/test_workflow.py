@@ -189,20 +189,26 @@ class TestInstallCommand:
         assert "gpu" in result.output
         assert "analysis" in result.output
 
+    @patch("kintsugi.cli._post_install_validate", return_value=True)
     @patch("subprocess.run")
-    def test_install_conda_flag(self, mock_run, runner):
+    def test_install_conda_flag(self, mock_run, mock_validate, runner):
         """--conda flag should use conda_cmd when available."""
 
         mock_run.return_value = MagicMock(returncode=0)
         result = runner.invoke(main, ["install", "gpu", "--conda"])
         assert result.exit_code == 0
-        # Should have called the conda command
-        call_args = mock_run.call_args
-        assert "conda" in call_args[0][0] or "conda" in call_args.kwargs.get("args", [""])[0]
+        # Should have called the conda command (first subprocess call)
+        first_call = mock_run.call_args_list[0]
+        cmd = first_call[0][0] if first_call[0] else first_call.kwargs.get("args", [""])[0]
+        assert "conda" in cmd
 
+    @patch("kintsugi.cli._post_install_validate", return_value=True)
+    @patch("kintsugi.cli._auto_patch_slurm_tres")
     @patch("subprocess.run")
     @patch("kintsugi.cli._find_project_root")
-    def test_install_all_uses_extras(self, mock_root, mock_run, runner, tmp_path):
+    def test_install_all_uses_extras(
+        self, mock_root, mock_run, mock_tres, mock_validate, runner, tmp_path
+    ):
         """'all' with project root should use single pip extras invocation."""
         mock_root.return_value = tmp_path
         mock_run.return_value = MagicMock(returncode=0)
@@ -210,23 +216,27 @@ class TestInstallCommand:
         assert result.exit_code == 0
         # Should NOT have printed "Installing full:" or sequential per-group lines
         assert "Installing full:" not in result.output
-        # Single pip call with extras string
-        assert mock_run.call_count == 1
-        cmd_arg = (
-            mock_run.call_args[0][0]
-            if mock_run.call_args[0]
-            else mock_run.call_args.kwargs.get("args", "")
-        )
-        assert "pip install -e" in cmd_arg
+        # Find the main pip install call (may also have _pre_install_pims call)
+        pip_calls = [
+            c
+            for c in mock_run.call_args_list
+            if c[0] and "pip install -e" in str(c[0][0])
+        ]
+        assert len(pip_calls) == 1, f"Expected 1 pip install -e call, got {len(pip_calls)}"
+        cmd_arg = pip_calls[0][0][0]
         assert "gpu" in cmd_arg
         assert "rapids" not in cmd_arg
         assert "full" not in cmd_arg
         # rapids exclusion note
         assert "rapids" in result.output
 
+    @patch("kintsugi.cli._post_install_validate", return_value=True)
+    @patch("kintsugi.cli._auto_patch_slurm_tres")
     @patch("subprocess.run")
     @patch("kintsugi.cli._find_project_root")
-    def test_install_all_fallback_sequential(self, mock_root, mock_run, runner):
+    def test_install_all_fallback_sequential(
+        self, mock_root, mock_run, mock_tres, mock_validate, runner
+    ):
         """'all' without project root should fall back to sequential + repair."""
         mock_root.return_value = None
         mock_run.return_value = MagicMock(returncode=0)
@@ -239,22 +249,32 @@ class TestInstallCommand:
         repair_call = mock_run.call_args_list[-1]
         assert "pip install -e ." in repair_call[0][0]
 
+    @patch("kintsugi.cli._post_install_validate", return_value=True)
+    @patch("kintsugi.cli._auto_patch_slurm_tres")
     @patch("subprocess.run")
     @patch("kintsugi.cli._find_project_root")
-    def test_install_all_skips_full_and_rapids(self, mock_root, mock_run, runner, tmp_path):
+    def test_install_all_skips_full_and_rapids(
+        self, mock_root, mock_run, mock_tres, mock_validate, runner, tmp_path
+    ):
         """'all' should skip both 'full' composite and 'rapids'."""
         mock_root.return_value = tmp_path
         mock_run.return_value = MagicMock(returncode=0)
         result = runner.invoke(main, ["install", "all"])
         assert result.exit_code == 0
-        cmd_arg = mock_run.call_args[0][0]
+        # Find the main pip install -e call
+        pip_calls = [
+            c for c in mock_run.call_args_list if c[0] and "pip install -e" in str(c[0][0])
+        ]
+        assert len(pip_calls) >= 1
+        cmd_arg = pip_calls[0][0][0]
         # Neither full nor rapids in the extras string
         extras_part = cmd_arg.split("[")[1].split("]")[0]
         assert "full" not in extras_part
         assert "rapids" not in extras_part
 
+    @patch("kintsugi.cli._post_install_validate", return_value=True)
     @patch("subprocess.run")
-    def test_install_prints_note(self, mock_run, runner):
+    def test_install_prints_note(self, mock_run, mock_validate, runner):
         """Groups with notes should print the note after install."""
         mock_run.return_value = MagicMock(returncode=0)
         result = runner.invoke(main, ["install", "kronos"])
