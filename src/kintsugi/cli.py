@@ -350,8 +350,8 @@ def install(group: str | None, list_groups: bool, use_conda: bool):
     console.print("\n[bold green]Installation complete![/bold green]")
 
 
-def _post_install_validate() -> None:
-    """Run quick post-install validation to catch broken dependencies."""
+def _post_install_validate() -> bool:
+    """Run post-install validation. Returns False if critical errors found."""
     from kintsugi.deps import DependencyChecker, DependencyStatus
 
     console.print("\n[dim]Validating environment...[/dim]")
@@ -359,11 +359,30 @@ def _post_install_validate() -> None:
     checker.check_all(verbose=False)
 
     errors = [r for r in checker.results if r.status == DependencyStatus.ERROR]
+    missing_required = [
+        r
+        for r in checker.results
+        if not r.is_optional
+        and r.status in (DependencyStatus.MISSING, DependencyStatus.ERROR)
+    ]
+
+    if missing_required:
+        console.print(
+            "[red bold]CRITICAL: Required dependencies broken after install:[/red bold]"
+        )
+        for err in missing_required:
+            msg = err.message or "not found"
+            console.print(f"  [red]✗ {err.name}: {msg}[/red]")
+        console.print("[dim]Run 'kintsugi check' for full details[/dim]")
+        return False
+
     if errors:
         console.print("[yellow]Post-install warnings:[/yellow]")
         for err in errors:
             console.print(f"  [yellow]{err.name}: {err.message}[/yellow]")
         console.print("[dim]Run 'kintsugi check --strict' for full details[/dim]")
+
+    return True
 
 
 def _install_all(use_conda: bool) -> None:
@@ -373,10 +392,25 @@ def _install_all(use_conda: bool) -> None:
     dependency conflicts from sequential per-group pip invocations.
     Falls back to sequential install + constraint repair if pyproject.toml
     is not found (e.g., wheel install without source checkout).
+
+    On HPC (detected automatically), switches to conda mode to ensure
+    CUDA runtime libraries and conda-compiled packages are installed
+    correctly via conda channels rather than pip.
     """
+    from kintsugi.deps import _inject_constraints, detect_hpc
+
+    # Auto-detect HPC and switch to conda mode
+    if detect_hpc() and not use_conda:
+        console.print(
+            "[yellow]HPC environment detected. Switching to conda mode "
+            "for GPU/CUDA packages.[/yellow]"
+        )
+        use_conda = True
+
     _SKIP_FROM_ALL = {"full", "rapids"}
     extras = [k for k in OPTIONAL_GROUPS if k not in _SKIP_FROM_ALL]
     project_root = _find_project_root()
+    failed_groups: list[str] = []
 
     if project_root and not use_conda:
         # Pre-install pims to work around setuptools build failure (needed by dask-image)
@@ -396,10 +430,13 @@ def _install_all(use_conda: bool) -> None:
             console.print(f"[red]✗ Failed: {e}[/red]")
             raise SystemExit(1)
     elif use_conda:
-        # Conda mode: run conda_cmd groups first, then pip extras for the rest
+        # Conda mode: run conda_cmd groups first, then pip-only groups individually.
+        # IMPORTANT: We do NOT use pyproject.toml extras for the pip phase because
+        # that would re-install torch from PyPI, overwriting the conda version.
         conda_groups = [g for g in extras if "conda_cmd" in OPTIONAL_GROUPS[g]]
-        pip_extras = [g for g in extras if g not in conda_groups]
+        pip_only_groups = [g for g in extras if g not in conda_groups]
 
+        # Phase 1: Install all conda groups
         for grp in conda_groups:
             info = OPTIONAL_GROUPS[grp]
             console.print(f"\n[bold]Installing {grp} (conda):[/bold] {info['description']}")
@@ -409,30 +446,28 @@ def _install_all(use_conda: bool) -> None:
                 subprocess.run(cmd, shell=True, check=True, capture_output=False)
                 console.print(f"[green]✓ {grp} installed[/green]")
             except subprocess.CalledProcessError as e:
-                console.print(f"[red]✗ Failed to install {grp}: {e}[/red]")
+                console.print(f"[red]✗ FAILED to install {grp}: {e}[/red]")
+                failed_groups.append(grp)
 
-        if pip_extras and project_root:
-            extras_str = ",".join(pip_extras)
-            cmd = f'pip install -e "{project_root}[{extras_str}]"'
-            console.print(f"\n[bold]Installing remaining groups via pip:[/bold] {extras_str}")
+        # Phase 2: Install pip-only groups individually (not via pyproject extras
+        # to avoid re-pulling torch from PyPI and overwriting conda version)
+        for grp in pip_only_groups:
+            info = OPTIONAL_GROUPS[grp]
+            cmd = _inject_constraints(info["install_cmd"])
+            console.print(f"\n[bold]Installing {grp} (pip):[/bold] {info['description']}")
             console.print(f"[dim]Running: {cmd}[/dim]")
             try:
                 subprocess.run(cmd, shell=True, check=True, capture_output=False)
-                console.print("[green]✓ Remaining groups installed[/green]")
+                console.print(f"[green]✓ {grp} installed[/green]")
             except subprocess.CalledProcessError as e:
-                console.print(f"[red]✗ Failed: {e}[/red]")
-        elif pip_extras:
-            # No project root — sequential fallback for pip-only groups
-            for grp in pip_extras:
-                info = OPTIONAL_GROUPS[grp]
-                console.print(f"\n[bold]Installing {grp}:[/bold] {info['description']}")
-                cmd = info["install_cmd"]
-                console.print(f"[dim]Running: {cmd}[/dim]")
-                try:
-                    subprocess.run(cmd, shell=True, check=True, capture_output=False)
-                    console.print(f"[green]✓ {grp} installed[/green]")
-                except subprocess.CalledProcessError as e:
-                    console.print(f"[red]✗ Failed to install {grp}: {e}[/red]")
+                console.print(f"[red]✗ FAILED to install {grp}: {e}[/red]")
+                failed_groups.append(grp)
+
+        if failed_groups:
+            console.print(
+                f"\n[red bold]Installation FAILED for groups: "
+                f"{', '.join(failed_groups)}[/red bold]"
+            )
     else:
         # Fallback: sequential install + repair (no pyproject.toml found)
         console.print(
@@ -448,7 +483,8 @@ def _install_all(use_conda: bool) -> None:
                 subprocess.run(cmd, shell=True, check=True, capture_output=False)
                 console.print(f"[green]✓ {grp} installed[/green]")
             except subprocess.CalledProcessError as e:
-                console.print(f"[red]✗ Failed to install {grp}: {e}[/red]")
+                console.print(f"[red]✗ FAILED to install {grp}: {e}[/red]")
+                failed_groups.append(grp)
 
         # Repair core constraints
         console.print("\n[bold]Repairing core constraints...[/bold]")
@@ -462,14 +498,23 @@ def _install_all(use_conda: bool) -> None:
     # Auto-apply SLURM TRES patch if jobstep plugin is installed
     _auto_patch_slurm_tres()
 
-    # Post-install validation
-    _post_install_validate()
+    # Post-install validation (fails loudly on critical errors)
+    validation_ok = _post_install_validate()
 
     # Remind about rapids (excluded from 'all')
     console.print(
         "\n[dim]Note: 'rapids' requires separate installation "
         "(NVIDIA channel). Run: kintsugi install rapids[/dim]"
     )
+
+    if failed_groups or not validation_ok:
+        console.print(
+            "\n[red bold]Installation completed with ERRORS. "
+            "Environment may be broken.[/red bold]"
+        )
+        console.print("[dim]Run 'kintsugi check' for details[/dim]")
+        raise SystemExit(1)
+
     console.print("\n[bold green]Installation complete![/bold green]")
 
 
@@ -568,6 +613,82 @@ def patch_command(target: str):
                 "[dim]Install with: kintsugi install workflow[/dim]"
             )
             raise SystemExit(1)
+
+
+@main.command("fix-hpc")
+def fix_hpc_command():
+    """Fix common HPC environment issues (libstdc++, CUDA paths).
+
+    \b
+    Deploys conda activation scripts that:
+      - Prepend $CONDA_PREFIX/lib to LD_LIBRARY_PATH (fixes libstdc++ mismatch)
+      - Set CUDA_PATH/CUDA_HOME for CuPy JIT compilation
+
+    Also copies CUDA headers and installs libstdcxx-ng if needed.
+
+    \b
+    After running this command, deactivate and reactivate the environment:
+      conda deactivate && conda activate KINTSUGI
+    """
+    import os
+
+    from kintsugi.deps import deploy_activation_scripts, detect_hpc
+
+    if not detect_hpc():
+        console.print("[yellow]Warning: HPC environment not detected. Running anyway.[/yellow]")
+
+    conda_prefix = os.environ.get("CONDA_PREFIX", "")
+    if not conda_prefix:
+        console.print("[red]Error: No conda environment is active.[/red]")
+        raise SystemExit(1)
+
+    # Step 1: Deploy activation scripts
+    console.print("\n[bold]Step 1: Deploying LD_LIBRARY_PATH activation scripts[/bold]")
+    if deploy_activation_scripts():
+        console.print("[green]✓ Activation scripts deployed[/green]")
+    else:
+        console.print("[red]✗ Failed to deploy activation scripts[/red]")
+        console.print(
+            "[dim]Ensure KINTSUGI is installed in dev mode "
+            "(pip install -e .) and envs/activate.d/ exists[/dim]"
+        )
+
+    # Step 2: Install libstdcxx-ng if needed
+    console.print("\n[bold]Step 2: Ensuring conda libstdcxx-ng is up to date[/bold]")
+    try:
+        subprocess.run(
+            "conda install libstdcxx-ng>=12.0 libgcc-ng>=12.0 -c conda-forge -y",
+            shell=True,
+            check=True,
+            capture_output=False,
+        )
+        console.print("[green]✓ libstdcxx-ng up to date[/green]")
+    except subprocess.CalledProcessError:
+        console.print("[yellow]Warning: Could not update libstdcxx-ng[/yellow]")
+
+    # Step 3: Copy CUDA headers for CuPy JIT compilation
+    console.print("\n[bold]Step 3: Copying CUDA headers[/bold]")
+    targets_include = Path(conda_prefix) / "targets" / "x86_64-linux" / "include"
+    conda_include = Path(conda_prefix) / "include"
+    if targets_include.is_dir():
+        try:
+            subprocess.run(
+                f"cp -r {targets_include}/* {conda_include}/ 2>/dev/null",
+                shell=True,
+                check=False,
+            )
+            console.print("[green]✓ CUDA headers copied[/green]")
+        except Exception:
+            console.print("[yellow]Warning: Could not copy CUDA headers[/yellow]")
+    else:
+        console.print(
+            "[dim]CUDA headers not found (cuda-cudart-dev may not be installed)[/dim]"
+        )
+
+    # Instructions
+    console.print("\n[bold yellow]IMPORTANT: Deactivate and reactivate to apply:[/bold yellow]")
+    console.print("  conda deactivate && conda activate KINTSUGI")
+    console.print("\n[dim]Then verify: kintsugi check[/dim]")
 
 
 # ============================================================================

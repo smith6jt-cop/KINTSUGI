@@ -8,6 +8,7 @@
 # Options:
 #   --env-name NAME     Environment name (default: KINTSUGI)
 #   --features LIST     Comma-separated features to install (gpu,viz,dl,analysis,bio,full)
+#   --hpc               Use HPC environment file (envs/env-hpc.yml) with full GPU/CUDA stack
 #   --skip-validate     Skip dependency validation after install
 #   --help              Show this help message
 #
@@ -18,6 +19,7 @@ set -e  # Exit on error
 ENV_NAME="KINTSUGI"
 FEATURES=""
 SKIP_VALIDATE=false
+HPC_MODE=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -60,11 +62,13 @@ Options:
   --env-name NAME     Environment name (default: KINTSUGI)
   --features LIST     Comma-separated features to install after base
                       Available: gpu, viz, dl, analysis, bio, full
+  --hpc               Use HPC environment (includes GPU, CUDA, analysis)
   --skip-validate     Skip dependency validation after install
   --help              Show this help message
 
 Examples:
-  ./scripts/install.sh                          # Base install only
+  ./scripts/install.sh                          # Base install only (desktop Linux)
+  ./scripts/install.sh --hpc                    # Full HPC install (HiPerGator)
   ./scripts/install.sh --features gpu           # Base + GPU support
   ./scripts/install.sh --features gpu,viz,dl    # Base + multiple features
   ./scripts/install.sh --features full          # Base + all features
@@ -82,6 +86,10 @@ while [[ $# -gt 0 ]]; do
         --features)
             FEATURES="$2"
             shift 2
+            ;;
+        --hpc)
+            HPC_MODE=true
+            shift
             ;;
         --skip-validate)
             SKIP_VALIDATE=true
@@ -101,11 +109,30 @@ done
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 
+# Auto-detect HPC if --hpc not explicitly passed
+if [ "$HPC_MODE" = false ]; then
+    if [ -n "${SLURM_CONF:-}" ] || [ -n "${MODULESHOME:-}" ]; then
+        print_info "HPC environment detected (SLURM/modules found)"
+        print_info "Use --hpc flag for full HPC install, or proceed with desktop install"
+        echo ""
+        read -p "Use HPC environment file? (Y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            HPC_MODE=true
+        fi
+    fi
+fi
+
 print_header "KINTSUGI Installation"
 echo ""
 print_info "Project directory: $PROJECT_DIR"
 print_info "Environment name: $ENV_NAME"
-print_info "Features: ${FEATURES:-none (base only)}"
+if [ "$HPC_MODE" = true ]; then
+    print_info "Mode: HPC (comprehensive GPU/CUDA/analysis)"
+else
+    print_info "Mode: Desktop (base + optional features)"
+    print_info "Features: ${FEATURES:-none (base only)}"
+fi
 echo ""
 
 # Detect OS
@@ -113,11 +140,19 @@ OS=$(uname -s)
 case "$OS" in
     Linux*)
         PLATFORM="linux"
-        ENV_FILE="envs/env-linux.yml"
+        if [ "$HPC_MODE" = true ]; then
+            ENV_FILE="envs/env-hpc.yml"
+        else
+            ENV_FILE="envs/env-linux.yml"
+        fi
         ;;
     Darwin*)
         PLATFORM="macos"
         ENV_FILE="envs/env-macos.yml"
+        if [ "$HPC_MODE" = true ]; then
+            print_warning "HPC mode is not supported on macOS. Using standard macOS environment."
+            HPC_MODE=false
+        fi
         # Check for libvips on macOS
         if ! command -v vips &> /dev/null; then
             print_warning "libvips not found. Installing via Homebrew..."
@@ -137,6 +172,13 @@ case "$OS" in
         ;;
 esac
 print_info "Detected platform: $PLATFORM"
+print_info "Environment file: $ENV_FILE"
+
+# Verify env file exists
+if [ ! -f "$PROJECT_DIR/$ENV_FILE" ]; then
+    print_error "Environment file not found: $PROJECT_DIR/$ENV_FILE"
+    exit 1
+fi
 
 # Check for conda
 if ! command -v conda &> /dev/null; then
@@ -181,8 +223,44 @@ print_header "Activating Environment"
 conda activate "$ENV_NAME"
 print_success "Environment activated: $ENV_NAME"
 
-# Install optional features if specified
-if [ -n "$FEATURES" ]; then
+# HPC-specific post-install steps
+if [ "$HPC_MODE" = true ]; then
+    print_header "HPC Post-Install Configuration"
+
+    # Deploy conda activation scripts for LD_LIBRARY_PATH
+    ACTIVATE_DIR="$CONDA_PREFIX/etc/conda/activate.d"
+    DEACTIVATE_DIR="$CONDA_PREFIX/etc/conda/deactivate.d"
+    mkdir -p "$ACTIVATE_DIR" "$DEACTIVATE_DIR"
+
+    if [ -f "$PROJECT_DIR/envs/activate.d/env_vars.sh" ]; then
+        cp "$PROJECT_DIR/envs/activate.d/env_vars.sh" "$ACTIVATE_DIR/"
+        cp "$PROJECT_DIR/envs/deactivate.d/env_vars.sh" "$DEACTIVATE_DIR/"
+        chmod +x "$ACTIVATE_DIR/env_vars.sh" "$DEACTIVATE_DIR/env_vars.sh"
+        print_success "Deployed LD_LIBRARY_PATH activation scripts"
+    else
+        print_warning "Activation scripts not found in envs/activate.d/"
+    fi
+
+    # Copy CUDA headers for CuPy JIT compilation
+    TARGETS_INCLUDE="$CONDA_PREFIX/targets/x86_64-linux/include"
+    if [ -d "$TARGETS_INCLUDE" ]; then
+        cp -r "$TARGETS_INCLUDE"/* "$CONDA_PREFIX/include/" 2>/dev/null || true
+        print_success "CUDA headers copied to conda include directory"
+    fi
+
+    # Re-activate to pick up new env vars
+    print_info "Re-activating environment to apply LD_LIBRARY_PATH..."
+    conda deactivate
+    conda activate "$ENV_NAME"
+    print_success "Environment re-activated with HPC fixes"
+
+    # Apply SLURM TRES patch
+    print_info "Applying SLURM TRES patch..."
+    kintsugi patch slurm 2>/dev/null || print_warning "SLURM patch skipped (may not be needed)"
+fi
+
+# Install optional features if specified (desktop mode)
+if [ -n "$FEATURES" ] && [ "$HPC_MODE" = false ]; then
     print_header "Installing Optional Features"
 
     # Split features by comma
@@ -200,12 +278,24 @@ fi
 # Validate installation
 if [ "$SKIP_VALIDATE" = false ]; then
     print_header "Validating Installation"
-
     print_info "Checking dependencies..."
-    kintsugi check || {
-        print_warning "Some optional dependencies may be missing."
-        print_info "Install them with: kintsugi install <feature>"
-    }
+
+    if [ "$HPC_MODE" = true ]; then
+        # Strict validation on HPC — fail if required deps are broken
+        if ! kintsugi check; then
+            print_error "Validation FAILED. Required dependencies are missing or broken."
+            print_error "Review the errors above. Common fixes:"
+            print_error "  - Run: kintsugi fix-hpc"
+            print_error "  - Then: conda deactivate && conda activate $ENV_NAME"
+            exit 1
+        fi
+        print_success "All required dependencies validated"
+    else
+        kintsugi check || {
+            print_warning "Some optional dependencies may be missing."
+            print_info "Install them with: kintsugi install <feature>"
+        }
+    fi
 fi
 
 print_header "Installation Complete!"
@@ -216,10 +306,18 @@ echo ""
 print_info "To verify installation:"
 echo "    kintsugi check"
 echo ""
-print_info "To install optional features:"
-echo "    kintsugi install gpu       # GPU acceleration (CuPy for CUDA)"
-echo "    kintsugi install torch     # PyTorch for deep learning models"
-echo "    kintsugi install bio       # Spatial biology analysis (scanpy, scimap, squidpy)"
-echo "    kintsugi install viz       # Napari visualization"
-echo "    kintsugi install all       # All optional features"
+
+if [ "$HPC_MODE" = true ]; then
+    print_info "HPC-specific commands:"
+    echo "    kintsugi fix-hpc           # Repair HPC env issues"
+    echo "    kintsugi patch slurm       # Re-apply SLURM patch after updates"
+    echo "    kintsugi workflow run .     # Run Snakemake pipeline"
+else
+    print_info "To install optional features:"
+    echo "    kintsugi install gpu       # GPU acceleration (CuPy for CUDA)"
+    echo "    kintsugi install dl        # Deep learning segmentation"
+    echo "    kintsugi install analysis  # Spatial analysis (scanpy, scimap)"
+    echo "    kintsugi install viz       # Napari visualization"
+    echo "    kintsugi install all       # All optional features"
+fi
 echo ""

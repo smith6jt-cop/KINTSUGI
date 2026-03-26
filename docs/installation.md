@@ -204,42 +204,82 @@ see the dedicated repository: [rapids_singlecell](https://github.com/smith6jt-co
 
 ## HPC Installation (SLURM Clusters)
 
-For HPC environments like UF HiPerGator, KINTSUGI supports distributed batch processing via Snakemake + SLURM.
+For HPC environments like UF HiPerGator, KINTSUGI provides a dedicated environment file (`envs/env-hpc.yml`) that installs all dependencies upfront — including GPU/CUDA packages, spatial analysis tools, and workflow orchestration. This avoids the common "install base then install extras" pattern that causes silent failures on HPC.
 
-### Environment Setup
+### Quick Start (Recommended)
 
 ```bash
-# Load conda module (HiPerGator-specific)
+module load conda
+git clone https://github.com/smith6jt-cop/KINTSUGI.git
+cd KINTSUGI
+./scripts/install.sh --hpc
+```
+
+This single command:
+1. Creates the KINTSUGI conda env from `envs/env-hpc.yml`
+2. Installs PyTorch + CUDA 12.4 via conda (not pip — avoids version conflicts)
+3. Installs CUDA runtime libraries (libcufft, libcublas) needed by CuPy
+4. Deploys LD_LIBRARY_PATH activation scripts (fixes libstdc++ mismatch on old OS kernels)
+5. Copies CUDA headers for CuPy JIT compilation
+6. Applies the SLURM TRES patch for Snakemake
+7. Runs `kintsugi check` and fails if required dependencies are broken
+
+### Manual HPC Installation
+
+If you prefer step-by-step control:
+
+```bash
 module load conda
 
-# Create environment from Linux yml
-conda env create -f envs/env-linux.yml
+# Create environment with full GPU/CUDA/analysis stack
+conda env create -f envs/env-hpc.yml
 conda activate KINTSUGI
 
-# Install GPU support and Claude Code integration
-kintsugi install gpu
-kintsugi install claude
+# Deploy LD_LIBRARY_PATH fix + CUDA headers
+kintsugi fix-hpc
+
+# CRITICAL: Re-activate to pick up the new LD_LIBRARY_PATH
+conda deactivate && conda activate KINTSUGI
+
+# Apply SLURM compatibility patch
+kintsugi patch slurm
+
+# Verify everything works
+kintsugi check
 ```
 
-### Optional Feature Groups
+### Fixing a Broken HPC Environment
 
-Install additional capabilities as needed:
+If `kintsugi check` shows `[MISSING]` for packages that ARE installed (scikit-learn, matplotlib, pyvips, stackview), this is the **libstdc++ version mismatch** — the system's C++ library is too old and loading before conda's. Fix without recreating the env:
 
 ```bash
-kintsugi install gpu        # GPU acceleration (CuPy for CUDA)
-kintsugi install torch      # PyTorch for deep learning models
-kintsugi install bio        # Spatial biology analysis (scanpy, scimap, squidpy)
-kintsugi install viz        # Napari visualization
-kintsugi install claude     # Claude Code MCP integration
-kintsugi install dev        # Development tools (pytest, ruff, black, mypy)
-kintsugi install all        # All optional features
+conda activate KINTSUGI
+kintsugi fix-hpc
+conda deactivate && conda activate KINTSUGI
+kintsugi check
 ```
+
+For comprehensive troubleshooting, see [HPC Troubleshooting](HPC_TROUBLESHOOTING.md).
+
+### env-hpc.yml vs env-linux.yml
+
+| Feature | `env-linux.yml` (Desktop) | `env-hpc.yml` (HPC) |
+|---------|---------------------------|----------------------|
+| PyTorch + CUDA | Not included (install via `kintsugi install gpu`) | Included via conda pytorch channel |
+| CUDA runtime libs | Not included | `cuda-libraries`, `cuda-cudart-dev` |
+| libstdcxx-ng | Not pinned | Pinned `>=12.0` (fixes GLIBCXX mismatch) |
+| scanpy/analysis | Not included (install via `kintsugi install analysis`) | Included via conda-forge |
+| Napari | Not included | Not included (no display on HPC) |
+| Snakemake/SLURM | Included | Included |
+| Target use | Workstations, laptops | SLURM clusters (HiPerGator, etc.) |
 
 ### HPC-Specific Notes
 
-- **CuPy on login nodes**: `kintsugi check` will report CuPy as unavailable on login nodes (no GPU hardware). This is expected — CuPy works correctly on compute nodes.
-- **Cache redirection**: SLURM jobs automatically redirect pip/torch/numba caches to `/blue/` storage via account-specific scripts. Do not install packages inside jobs.
-- **SLURM plugin patch**: SLURM >= 24.11 requires a patch to the Snakemake jobstep plugin. See the main README for details.
+- **Login nodes vs compute nodes**: Install on login nodes (no GPU). The env includes torch and CuPy, which are importable without GPU hardware. `kintsugi check` reporting "CUDA not available" on login nodes is expected.
+- **Never install packages inside SLURM jobs.** The conda env must be fully built before submitting.
+- **Cache redirection**: SLURM jobs automatically redirect pip/torch/numba caches to `/blue/` storage via account-specific scripts.
+- **SLURM TRES patch**: SLURM >= 24.11 requires `kintsugi patch slurm`. This is auto-applied by `install.sh --hpc` and `kintsugi install all`.
+- **Verification**: Run `./scripts/verify_hpc_env.sh` for a comprehensive environment check beyond `kintsugi check`.
 
 ## Updating Existing Projects
 
