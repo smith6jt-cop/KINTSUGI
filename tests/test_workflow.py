@@ -1156,6 +1156,6 @@ class TestSentinelFormat:
         }
         for script_name, expected_stage in expected_stages.items():
             content = (scripts_dir / script_name).read_text()
-            assert (
-                f"stage={expected_stage}" in content
-            ), f"{script_name} missing stage={expected_stage}"
+            assert f"stage={expected_stage}" in content, (
+                f"{script_name} missing stage={expected_stage}"
+            )

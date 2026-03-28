@@ -347,8 +347,7 @@ def install(group: str | None, list_groups: bool, use_conda: bool):
     # Post-install validation
     if not _post_install_validate():
         console.print(
-            "\n[red bold]Installation completed with ERRORS. "
-            "Environment may be broken.[/red bold]"
+            "\n[red bold]Installation completed with ERRORS. Environment may be broken.[/red bold]"
         )
         raise SystemExit(1)
 
@@ -467,8 +466,7 @@ def _install_all(use_conda: bool) -> None:
 
         if failed_groups:
             console.print(
-                f"\n[red bold]Installation FAILED for groups: "
-                f"{', '.join(failed_groups)}[/red bold]"
+                f"\n[red bold]Installation FAILED for groups: {', '.join(failed_groups)}[/red bold]"
             )
     else:
         # Fallback: sequential install + repair (no pyproject.toml found)
@@ -511,8 +509,7 @@ def _install_all(use_conda: bool) -> None:
 
     if failed_groups or not validation_ok:
         console.print(
-            "\n[red bold]Installation completed with ERRORS. "
-            "Environment may be broken.[/red bold]"
+            "\n[red bold]Installation completed with ERRORS. Environment may be broken.[/red bold]"
         )
         console.print("[dim]Run 'kintsugi check' for details[/dim]")
         raise SystemExit(1)
@@ -3767,7 +3764,9 @@ def isolate_batch(
             status_str = (
                 f"[green]{status}[/green]"
                 if status == "completed"
-                else f"[red]{status}[/red]" if status == "error" else status
+                else f"[red]{status}[/red]"
+                if status == "error"
+                else status
             )
             summary = info.get("summary", {})
             n_channels = summary.get("total", 0)
