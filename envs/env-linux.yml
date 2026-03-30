@@ -1,7 +1,8 @@
 name: KINTSUGI
 channels:
   - conda-forge
-  - defaults
+  # NOTE: Do NOT add 'defaults' here. Miniforge uses conda-forge only.
+  # Adding defaults causes solver hangs due to cross-channel conflicts.
 
 # =============================================================================
 # KINTSUGI Base Environment for Linux

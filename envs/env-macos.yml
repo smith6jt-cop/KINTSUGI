@@ -1,7 +1,6 @@
 name: KINTSUGI
 channels:
   - conda-forge
-  - defaults
 
 # =============================================================================
 # KINTSUGI Base Environment for macOS

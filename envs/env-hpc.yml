@@ -3,7 +3,8 @@ channels:
   - pytorch
   - nvidia
   - conda-forge
-  - defaults
+  # NOTE: Do NOT add 'defaults' here. Miniforge uses conda-forge only.
+  # Adding defaults causes solver hangs due to cross-channel conflicts.
 
 # =============================================================================
 # KINTSUGI HPC Environment (HiPerGator / SLURM Clusters)
@@ -69,11 +70,12 @@ dependencies:
   # PyTorch installed from pytorch channel (not pip) to avoid conflicts.
   # cuda-libraries provides libcufft, libcublas, libcusolver needed by CuPy.
   # cuda-cudart-dev provides headers for CuPy JIT compilation.
+  # Versions pinned to reduce solver space and avoid cross-channel conflicts.
   - pytorch>=2.0
   - torchvision
   - pytorch-cuda=12.4
-  - cuda-libraries
-  - cuda-cudart-dev
+  - cuda-libraries=12.*
+  - cuda-cudart-dev=12.*
 
   # === Spatial Analysis (conda-forge) ===
   # These packages have C extensions (leidenalg, hdbscan) that are
