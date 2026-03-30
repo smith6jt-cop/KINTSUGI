@@ -1,0 +1,159 @@
+name: KINTSUGI
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+# =============================================================================
+# KINTSUGI HPC Environment (HiPerGator / SLURM Clusters)
+# =============================================================================
+# Comprehensive environment that installs ALL dependencies upfront, including
+# GPU/CUDA packages. This avoids the "install base then install extras" pattern
+# that causes silent failures on HPC.
+#
+# Key differences from env-linux.yml (desktop):
+#   - Installs PyTorch + CUDA via conda (not pip) to avoid version conflicts
+#   - Includes CUDA runtime libraries (libcufft, libcublas, etc.) for CuPy
+#   - Pins libstdcxx-ng to fix GLIBCXX version mismatch on old OS kernels
+#   - Includes analysis packages (scanpy, leidenalg) via conda-forge
+#   - Omits napari (no display server on HPC compute nodes)
+#
+# Installation:
+#   module load conda
+#   conda env create -f envs/env-hpc.yml
+#   conda activate KINTSUGI
+#
+# Post-install (run AFTER activation):
+#   kintsugi fix-hpc       # Deploy LD_LIBRARY_PATH scripts + CUDA headers
+#   kintsugi patch slurm   # SLURM >= 24.11 compatibility
+#   kintsugi check         # Verify everything
+#
+# Or use the install script which handles all of this:
+#   ./scripts/install.sh --hpc
+# =============================================================================
+
+dependencies:
+  # === Core Python ===
+  - python=3.11
+  - pip
+  - setuptools
+  - wheel
+
+  # === C++ Runtime Fix (CRITICAL for HPC) ===
+  # HiPerGator's system /lib64/libstdc++.so.6 is too old (missing
+  # GLIBCXX_3.4.30, CXXABI_1.3.15). Pinning these ensures conda's
+  # newer versions are available. The activation scripts in
+  # envs/activate.d/env_vars.sh prepend $CONDA_PREFIX/lib to
+  # LD_LIBRARY_PATH so these take priority over /lib64/.
+  - libstdcxx-ng>=12.0
+  - libgcc-ng>=12.0
+
+  # === Core Scientific Computing ===
+  - numpy>=1.24,<2.0
+  - scipy
+  - pandas
+  - scikit-learn
+  - scikit-image
+  - matplotlib
+  - seaborn
+
+  # === Image Processing ===
+  - tifffile
+  - imagecodecs
+  - imageio
+  - pillow
+  - libvips
+
+  # === GPU / CUDA ===
+  # PyTorch installed from pytorch channel (not pip) to avoid conflicts.
+  # cuda-libraries provides libcufft, libcublas, libcusolver needed by CuPy.
+  # cuda-cudart-dev provides headers for CuPy JIT compilation.
+  - pytorch>=2.0
+  - torchvision
+  - pytorch-cuda=12.4
+  - cuda-libraries
+  - cuda-cudart-dev
+
+  # === Spatial Analysis (conda-forge) ===
+  # These packages have C extensions (leidenalg, hdbscan) that are
+  # difficult to build from pip on HPC without a full toolchain.
+  - scanpy
+  - anndata
+  - leidenalg
+  - umap-learn
+  - hdbscan
+  - networkx
+
+  # === Jupyter Environment ===
+  - jupyterlab
+  - ipywidgets
+  - ipykernel
+
+  # === Data Handling ===
+  - h5py
+  - zarr
+  - dask-core
+  - tqdm
+  - pyyaml
+  - openpyxl
+
+  # === Utilities ===
+  - click
+  - packaging
+  - requests
+  - psutil
+  - natsort
+  - joblib
+
+  # === Pip-only packages ===
+  # These are not available on conda-forge or need specific PyPI versions.
+  - pip:
+    # KINTSUGI package (editable install from repository root)
+    - -e .
+
+    # Image processing (no conda packages)
+    - opencv-contrib-python-headless>=4.9.0
+    - pyvips>=2.2.3
+
+    # GPU acceleration (pip-only CUDA binding)
+    - cupy-cuda12x>=12.0.0
+
+    # Bio formats
+    - ome-types>=0.6.1
+    - bioio>=1.0.0
+    - bioio-ome-tiff>=1.0.0
+    - ome-zarr>=0.9.0
+    - slideio>=2.6.0
+    - readlif>=0.6.0
+
+    # Deep learning segmentation (pip-only)
+    - instanseg>=0.0.2
+    - instanseg-torch>=0.0.9
+    - kornia>=0.7.0
+
+    # Spatial analysis (pip-only)
+    - phenograph>=1.5.0
+    - scimap>=0.0.1
+    - skan>=0.11.0
+
+    # Visualization (headless-compatible)
+    - stackview>=0.18.0
+    - rich>=13.9.4
+
+    # Workflow orchestration (HPC/SLURM)
+    - snakemake>=8.0
+    - snakemake-executor-plugin-slurm>=0.10.0
+    - snakemake-executor-plugin-slurm-jobstep>=0.3.0
+
+    # Claude Code MCP integration
+    - mcp>=1.0.0
+    - httpx>=0.27.0
+
+    # Parameter optimization
+    - optuna>=3.0
+    - smo>=0.7
+
+    # Utilities
+    - pqdm>=0.2.0
+    - dask-image>=0.6.0

@@ -13,6 +13,8 @@ Note: Java/Maven dependencies are deprecated and no longer required.
 The pipeline now uses pure Python implementations for all processing.
 """
 
+import os
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
@@ -174,6 +176,62 @@ def _find_project_root() -> Path | None:
     except Exception:
         pass
     return None
+
+
+def detect_hpc() -> bool:
+    """Detect if running on an HPC cluster (typically SLURM-based).
+
+    Uses strong indicators to avoid false positives on non-HPC systems:
+    - SLURM environment (``SLURM_CONF``)
+    - Environment modules (``MODULESHOME``)
+    - Presence of SLURM commands (``srun``, ``sbatch``) on PATH
+    """
+    if os.environ.get("SLURM_CONF") or os.environ.get("MODULESHOME"):
+        return True
+    if shutil.which("srun") or shutil.which("sbatch"):
+        return True
+    return False
+
+
+def deploy_activation_scripts() -> bool:
+    """Deploy conda activate/deactivate scripts for HPC LD_LIBRARY_PATH fix.
+
+    Copies ``envs/activate.d/env_vars.sh`` and ``envs/deactivate.d/env_vars.sh``
+    from the KINTSUGI project root into the active conda environment's
+    activation directories. These scripts prepend ``$CONDA_PREFIX/lib`` to
+    ``LD_LIBRARY_PATH`` so conda's ``libstdc++.so.6`` is loaded before the
+    system's (which is often too old on HPC clusters).
+
+    Returns True on success, False if unable to deploy.
+    """
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if not conda_prefix:
+        return False
+
+    project_root = _find_project_root()
+    if not project_root:
+        return False
+
+    activate_src = project_root / "envs" / "activate.d" / "env_vars.sh"
+    deactivate_src = project_root / "envs" / "deactivate.d" / "env_vars.sh"
+
+    if not activate_src.exists() or not deactivate_src.exists():
+        return False
+
+    activate_dst = Path(conda_prefix) / "etc" / "conda" / "activate.d"
+    deactivate_dst = Path(conda_prefix) / "etc" / "conda" / "deactivate.d"
+
+    try:
+        activate_dst.mkdir(parents=True, exist_ok=True)
+        deactivate_dst.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(activate_src, activate_dst / "env_vars.sh")
+        shutil.copy2(deactivate_src, deactivate_dst / "env_vars.sh")
+        # Make executable
+        (activate_dst / "env_vars.sh").chmod(0o755)
+        (deactivate_dst / "env_vars.sh").chmod(0o755)
+        return True
+    except OSError:
+        return False
 
 
 def _pre_install_pims() -> None:
@@ -830,6 +888,7 @@ class DependencyChecker:
             print("\n[Environment Safety]")
 
         self._check_numpy_version_constraint(verbose)
+        self._check_libstdcxx(verbose)
         self._check_torch_cuda_build(verbose)
         self._check_cupy_cuda_libs(verbose)
         self._check_snakemake_tres_patch(verbose)
@@ -863,6 +922,68 @@ class DependencyChecker:
                 status=DependencyStatus.MISSING,
                 message="numpy not installed",
             )
+        self.results.append(result)
+        if verbose:
+            self._print_result(result)
+
+    def _check_libstdcxx(self, verbose: bool):
+        """Check that conda's libstdc++ is loaded instead of the system's.
+
+        On HPC systems (e.g., HiPerGator), the system ``/lib64/libstdc++.so.6``
+        may be too old (missing GLIBCXX_3.4.30, CXXABI_1.3.15). If conda's
+        newer version isn't on LD_LIBRARY_PATH, packages like scikit-learn,
+        matplotlib, pyvips, and stackview will fail to import despite being
+        installed.
+        """
+        import sys
+
+        if sys.platform != "linux":
+            return  # Only relevant on Linux (HPC)
+
+        conda_prefix = os.environ.get("CONDA_PREFIX", "")
+        if not conda_prefix:
+            return  # Not in a conda env
+
+        # Check if LD_LIBRARY_PATH includes conda lib
+        ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+        conda_lib = os.path.join(conda_prefix, "lib")
+        conda_lib_in_path = conda_lib in ld_path.split(os.pathsep)
+
+        # Check if conda's libstdc++ exists and is newer than system's
+        conda_libstdcxx = Path(conda_prefix) / "lib" / "libstdc++.so.6"
+        if not conda_libstdcxx.exists():
+            return  # No conda libstdc++ to check against
+
+        if conda_lib_in_path:
+            result = DependencyResult(
+                name="libstdcxx",
+                status=DependencyStatus.OK,
+                version=conda_lib,
+                message="Conda lib directory on LD_LIBRARY_PATH",
+            )
+        else:
+            # Check if this is actually causing problems by testing a
+            # known-affected import
+            try:
+                import sklearn  # noqa: F401
+
+                # It works — system lib might be new enough
+                result = DependencyResult(
+                    name="libstdcxx",
+                    status=DependencyStatus.OK,
+                    message="System libstdc++ is sufficient",
+                )
+            except (ImportError, OSError):
+                result = DependencyResult(
+                    name="libstdcxx",
+                    status=DependencyStatus.ERROR,
+                    message=(
+                        f"Conda lib dir not on LD_LIBRARY_PATH ({conda_lib}). "
+                        "System libstdc++ may be too old, causing import failures "
+                        "for scikit-learn, matplotlib, pyvips, stackview. "
+                        "Fix: kintsugi fix-hpc"
+                    ),
+                )
         self.results.append(result)
         if verbose:
             self._print_result(result)
