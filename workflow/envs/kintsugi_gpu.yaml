@@ -4,7 +4,8 @@
 channels:
   - conda-forge
   - bioconda
-  - defaults
+  # NOTE: Do NOT add 'defaults' here. Miniforge uses conda-forge only.
+  # Adding defaults causes solver hangs due to cross-channel conflicts.
 dependencies:
   - python=3.11
   - numpy>=1.24,<2.0
@@ -16,7 +17,6 @@ dependencies:
   - pillow
   - setuptools
   - psutil
-  - numba
   - tqdm
   - matplotlib
   - seaborn

@@ -23,6 +23,14 @@ except PackageNotFoundError:
 __author__ = "Smith JT"
 __email__ = "smith6jt@cop.ufl.edu"
 
+# Auto-deploy HPC activation scripts if needed (fast, idempotent, HPC-only)
+try:
+    from kintsugi.deps import ensure_hpc_activation_scripts
+
+    ensure_hpc_activation_scripts()
+except Exception:
+    pass  # Never break import over deployment
+
 # Mapping of public names to submodule names
 _SUBMODULE_MAPPING = {
     "Kreg": "kreg",

@@ -234,6 +234,43 @@ def deploy_activation_scripts() -> bool:
         return False
 
 
+def ensure_hpc_activation_scripts() -> None:
+    """Auto-deploy HPC activation scripts if missing (idempotent, <1ms).
+
+    Called at import time on HPC systems. Only acts when:
+    1. Running on an HPC cluster (SLURM detected)
+    2. A conda environment is active
+    3. The activation scripts are NOT already deployed
+
+    This is the permanent fix for the libstdc++ version mismatch on HiPerGator.
+    Without these scripts, conda's ``libstdc++.so.6`` is not on
+    ``LD_LIBRARY_PATH``, causing import failures for scikit-learn, matplotlib,
+    pyvips, and stackview.
+    """
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    if not conda_prefix:
+        return
+
+    # Only on HPC (SLURM or module system detected)
+    if not (os.environ.get("SLURM_CONF") or os.environ.get("MODULESHOME")):
+        return
+
+    # Already deployed — fast path
+    target = Path(conda_prefix) / "etc" / "conda" / "activate.d" / "env_vars.sh"
+    if target.exists():
+        return
+
+    # Deploy and notify user to re-activate
+    if deploy_activation_scripts():
+        import sys
+
+        print(
+            "KINTSUGI: Deployed HPC activation scripts. "
+            "Run 'conda deactivate && conda activate KINTSUGI' to apply.",
+            file=sys.stderr,
+        )
+
+
 def _pre_install_pims() -> None:
     """Pre-install pims with --no-build-isolation to work around setuptools bug.
 
@@ -974,15 +1011,24 @@ class DependencyChecker:
                     message="System libstdc++ is sufficient",
                 )
             except (ImportError, OSError):
-                result = DependencyResult(
-                    name="libstdcxx",
-                    status=DependencyStatus.ERROR,
-                    message=(
-                        f"Conda lib dir not on LD_LIBRARY_PATH ({conda_lib}). "
+                # Try to auto-deploy activation scripts before reporting error
+                deployed = deploy_activation_scripts()
+                msg = f"Conda lib dir not on LD_LIBRARY_PATH ({conda_lib}). "
+                if deployed:
+                    msg += (
+                        "Activation scripts deployed. "
+                        "Run: conda deactivate && conda activate KINTSUGI"
+                    )
+                else:
+                    msg += (
                         "System libstdc++ may be too old, causing import failures "
                         "for scikit-learn, matplotlib, pyvips, stackview. "
                         "Fix: kintsugi fix-hpc"
-                    ),
+                    )
+                result = DependencyResult(
+                    name="libstdcxx",
+                    status=DependencyStatus.ERROR,
+                    message=msg,
                 )
         self.results.append(result)
         if verbose:
