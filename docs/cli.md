@@ -194,7 +194,47 @@ kintsugi workflow run /path/to/project --cycles 1-3  # Specific cycles
 kintsugi workflow run /path/to/project --forcerun stitch  # Force re-run
 kintsugi workflow run /path/to/project --local --cores 4  # Local execution
 kintsugi workflow run /path/to/project -j 16         # Override job count
+kintsugi workflow run /path/to/project --dashboard   # Run with live progress dashboard
+kintsugi workflow run /path/to/project --dashboard --dashboard-interval 15
 ```
+
+When `--dashboard` is supplied, Snakemake runs in the background and the dashboard refreshes in the foreground. Pressing Ctrl+C **detaches** without killing the SLURM jobs.
+
+### kintsugi workflow status
+
+Display a live pipeline progress dashboard for one or more projects. Scans sentinel files, queries SLURM via `squeue`/`sacct`, parses log timings, and reports per-cycle, per-stage completion alongside live GPU/memory utilization and ETA estimates.
+
+```bash
+kintsugi workflow status /path/to/project              # One-shot snapshot
+kintsugi workflow status /path/to/project --watch      # Auto-refresh
+kintsugi workflow status /path/to/project -w -i 15     # Custom refresh interval (seconds)
+kintsugi workflow status /path/to/project --json       # Machine-readable output
+kintsugi workflow status /path/to/parent_dir --all-projects --watch  # Scan every project
+kintsugi workflow status /path/to/project --no-hardware --no-estimates --no-jobs
+```
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--watch`, `-w` | Auto-refresh the dashboard until Ctrl+C |
+| `--interval`, `-i` | Refresh interval in seconds (default: 30) |
+| `--all-projects` | Recursively discover every directory under `PROJECT_DIR` containing `workflow/config.yaml` |
+| `--json` | Emit a JSON snapshot instead of the Rich table (suitable for scripting) |
+| `--no-hardware` | Hide the per-account GPU/CPU/memory utilization section |
+| `--no-estimates` | Hide the wall-clock ETA estimate |
+| `--no-jobs` | Hide the active SLURM job details column |
+
+**What it reports per project:**
+
+- **Cycle table** — stitch / decon / EDF status per cycle, per-stage timing, active job, and node assignment
+- **Aggregate stages** — registration and signal-isolation status with timings
+- **QC sentinels** — completion of `qc_stitch`, `qc_decon`, `qc_edf`, `qc_registration`, `qc_signal_isolation`
+- **SLURM jobs** — job id, state, elapsed time, MaxRSS, GPU id, partition, account
+- **Hardware utilization** — per-account GPU allocated/used/available and memory pools
+- **Completion estimate** — wall-clock ETA derived from historical log timings and current parallelism
+
+The dashboard is also available embedded in `kintsugi workflow run --dashboard` (see above). Both entry points share `src/kintsugi/dashboard.py` (`scan_project_progress`, `render_dashboard`, `watch_dashboard`).
 
 ## SLURM Commands
 
