@@ -506,15 +506,16 @@ kintsugi workflow run /path/to/project
 
 #### Multi-Account Architecture
 
-KINTSUGI maximizes throughput by distributing jobs across **multiple independent SLURM accounts**, each with its own GPU and CPU pools:
+KINTSUGI distributes jobs across non-blocked SLURM accounts, each with its own GPU and CPU pools. As of Apr 8 2026, `clive` is in `BLOCKED_ACCOUNTS` (its QOS pool was throttled and is regularly saturated by other group members), so the active configuration is **maigan only**:
 
 | Account | GPUs | GPU Slots | CPUs | CPU Slots | Calculation |
 |---------|------|-----------|------|-----------|-------------|
-| `clive` | 3 | 3 | 104 | 11 | floor(0.85 * 104 / 8) |
 | `maigan` | 2 | 2 | 80 | 8 | floor(0.85 * 80 / 8) |
-| **Total** | | **5** | | **19** | **24 concurrent jobs** |
+| **Total** | | **2** | | **8** | **10 concurrent jobs** |
 
-Cycles are **pre-assigned** to accounts and modes (GPU/CPU) at DAG creation time via `_build_cycle_assignment()` for deterministic scheduling. GPU cycles run first, CPU cycles fill remaining capacity. Each rule uses lambda resource functions to route jobs to the correct account, partition, and resource allocation. GPU jobs use `gres="gpu:1"` (not `gpus=1`, which triggers SLURM_TRES_PER_TASK conflicts on SLURM >= 24.11).
+Cycles are **pre-assigned** to accounts at DAG creation time via `_build_cycle_assignment()` for deterministic scheduling. Each rule uses lambda resource functions to route jobs to the correct account, partition, and resource allocation. GPU jobs use `gres="gpu:1"` (not `gpus=1`, which triggers SLURM_TRES_PER_TASK conflicts on SLURM >= 24.11).
+
+**Live-aware routing** (Apr 8 2026): `kintsugi workflow run` queries `detect_live_multi_account()` and forwards per-account `gpu_avail`/`cpu_avail`/`mem_avail_gb` to Snakemake via `--config live_accounts=<json>`. The Snakefile assignment helpers use the live data to skip accounts saturated by **other users on the same QOS investment pool**, which is the failure mode that previously caused jobs to get stuck on `QOSGrpMemLimit`. Hard-fails if every account has zero live availability instead of queueing forever.
 
 #### Workflow Configuration (`workflow/config.yaml`)
 
@@ -533,17 +534,14 @@ tile_overlap: 0.3
 
 resources:
   accounts:
-    - name: clive
-      partition_gpu: "hpg-b200,hpg-turin"
-      partition_cpu: hpg-default
-      gpu_slots: 3
-      cpu_slots: 11
     - name: maigan
       partition_gpu: "hpg-b200,hpg-turin"
       partition_cpu: hpg-default
       gpu_slots: 2
       cpu_slots: 8
-  total_slots: 24
+  total_gpu_slots: 2
+  total_cpu_slots: 8
+  total_slots: 10
   cpu_time_multiplier: 5
   cpu_cpus_per_task: 8
 ```

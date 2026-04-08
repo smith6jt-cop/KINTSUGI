@@ -126,6 +126,41 @@ def get_raw_dir(wildcards):
 # ---------------------------------------------------------------------------
 ACCOUNTS = RES.get("accounts", [])
 
+# Live availability injected by `kintsugi workflow run` via `--config
+# live_accounts=<json>`. When present, the assignment helpers below use live
+# `gpu_avail`/`cpu_avail`/`mem_avail_gb` instead of the static `gpu_slots`
+# from config.yaml. This routes around accounts saturated by other users on
+# the same QOS investment pool (e.g. QOSGrpMemLimit blockages).
+_live_raw = config.get("live_accounts", None)
+if isinstance(_live_raw, str):
+    import json as _json
+    try:
+        LIVE_ACCOUNTS = _json.loads(_live_raw)
+    except (ValueError, TypeError):
+        LIVE_ACCOUNTS = None
+elif isinstance(_live_raw, list):
+    LIVE_ACCOUNTS = _live_raw
+else:
+    LIVE_ACCOUNTS = None
+
+
+def _live_lookup(acct_name):
+    """Return the live availability dict for an account, or None."""
+    if not LIVE_ACCOUNTS:
+        return None
+    for la in LIVE_ACCOUNTS:
+        if la.get("name") == acct_name:
+            return la
+    return None
+
+
+def _effective_gpu_slots(acct):
+    """Live GPU availability if injected, else static `gpu_slots` from config."""
+    la = _live_lookup(acct["name"])
+    if la is not None:
+        return max(0, int(la.get("gpu_avail", 0)))
+    return acct.get("gpu_slots", 0)
+
 
 def _build_cycle_assignment():
     """Pre-assign each cycle to an account and mode (gpu-only).
@@ -145,21 +180,39 @@ def _build_cycle_assignment():
 
     Snakemake's -j flag (set to total GPU slots) limits concurrent SLURM
     submissions, so cycles naturally pipeline through freed GPU slots.
+
+    When `live_accounts` is injected via --config, accounts with 0 live GPU
+    availability are excluded entirely — preventing assignment to accounts
+    saturated by other users on the same QOS investment pool.
     """
     assignment = {}
 
-    # Build GPU-only queue: each account contributes gpu_slots entries,
+    # Build GPU-only queue: each account contributes effective slots entries,
     # then round-robin for any overflow beyond the total GPU slot count.
     gpu_queue = []
     for acct in ACCOUNTS:
+        slots = _effective_gpu_slots(acct)
         gpu_queue.extend([{
             "account": acct["name"],
             "mode": "gpu",
             "partition": acct.get("partition_gpu", "hpg-b200,hpg-turin"),
-        }] * acct.get("gpu_slots", 0))
+        }] * slots)
 
-    # Build list of GPU accounts for round-robin overflow
-    gpu_accounts = [acct for acct in ACCOUNTS if acct.get("gpu_slots", 0) > 0]
+    # Build list of GPU accounts for round-robin overflow (live-aware)
+    gpu_accounts = [acct for acct in ACCOUNTS if _effective_gpu_slots(acct) > 0]
+
+    # Fallback: if live data zeroed out everything, fall back to static
+    # gpu_slots so the workflow doesn't crash with an empty account list.
+    # The CLI guard in `kintsugi workflow run` should catch this case first,
+    # but bare `snakemake` invocations can still hit it.
+    if not gpu_accounts:
+        gpu_accounts = [a for a in ACCOUNTS if a.get("gpu_slots", 0) > 0]
+        for acct in ACCOUNTS:
+            gpu_queue.extend([{
+                "account": acct["name"],
+                "mode": "gpu",
+                "partition": acct.get("partition_gpu", "hpg-b200,hpg-turin"),
+            }] * acct.get("gpu_slots", 0))
 
     for i, cyc in enumerate(CYCLES):
         cyc_key = cyc_fmt(cyc)
@@ -367,12 +420,34 @@ rule edf:
 REG_CFG = config.get("registration", {})
 
 def _registration_assignment():
-    """Pick account for registration: prefer first GPU account, CPU fallback.
+    """Pick account for registration: prefer GPU account with most live headroom.
 
     Registration uses VggFD feature detector (GPU-accelerated) by default.
     Returns a dict with account, mode, and partition.
+
+    When `live_accounts` is injected, picks the GPU-capable account with the
+    most live (gpu_avail, mem_avail_gb) — routing around saturated accounts.
     """
-    # Prefer GPU account for VggFD feature detector
+    gpu_candidates = [a for a in ACCOUNTS if a.get("gpu_slots", 0) > 0]
+
+    if LIVE_ACCOUNTS and gpu_candidates:
+        def _live_gpu_score(acct):
+            la = _live_lookup(acct["name"])
+            if la is None:
+                return (0, 0)
+            return (int(la.get("gpu_avail", 0)), int(la.get("mem_avail_gb", 0)))
+
+        gpu_candidates_sorted = sorted(gpu_candidates, key=_live_gpu_score, reverse=True)
+        # Only pick a live-aware account if it has nonzero GPU headroom
+        top = gpu_candidates_sorted[0]
+        if _live_gpu_score(top)[0] > 0:
+            return {
+                "account": top["name"],
+                "mode": "gpu",
+                "partition": top.get("partition_gpu", "hpg-b200,hpg-turin"),
+            }
+
+    # Static fallback: prefer first GPU account in config order
     for acct in ACCOUNTS:
         if acct.get("gpu_slots", 0) > 0:
             return {
@@ -399,7 +474,28 @@ def _qc_cpu_assignment():
 
     QC rules and signal isolation use pyvips + matplotlib + numpy/scipy,
     not GPU compute. Running them on CPU frees GPU slots for processing.
+
+    When `live_accounts` is injected, picks the CPU-capable account with the
+    most live memory headroom — preventing QC jobs from getting stuck on a
+    QOS pool saturated by another user (the failure mode that prompted this
+    feature: see plans/velvety-juggling-thimble.md).
     """
+    cpu_candidates = [a for a in ACCOUNTS if a.get("partition_cpu")]
+
+    if LIVE_ACCOUNTS and cpu_candidates:
+        def _live_cpu_score(acct):
+            la = _live_lookup(acct["name"])
+            if la is None:
+                return (0, 0)
+            return (int(la.get("mem_avail_gb", 0)), int(la.get("cpu_avail", 0)))
+
+        cpu_candidates_sorted = sorted(cpu_candidates, key=_live_cpu_score, reverse=True)
+        top = cpu_candidates_sorted[0]
+        # Only honor live ranking if the top has nonzero memory headroom
+        if _live_cpu_score(top)[0] > 0:
+            return {"account": top["name"], "partition": top["partition_cpu"]}
+
+    # Static fallback: first account with a CPU partition
     for acct in ACCOUNTS:
         if acct.get("partition_cpu"):
             return {"account": acct["name"], "partition": acct["partition_cpu"]}

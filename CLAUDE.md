@@ -129,13 +129,19 @@ Eligibility: project has `workflow/config.yaml` + `data/raw/.staged`, and is mis
 - Do NOT write bash scripts that invoke `snakemake` directly
 - Do NOT use `subprocess.run(["snakemake", ...])` — use `kintsugi workflow run`
 - Do NOT omit `--profile profiles/slurm` — this causes CPU-only execution
-- Do NOT use `-j 1` — GPU pipelining requires `-j` >= total GPU slots (5)
+- Do NOT use `-j 1` — GPU pipelining requires `-j` >= total GPU slots (currently 2 on maigan)
 
 ### GPU-Only Scheduling
 
 All processing (stitch, decon, EDF, registration) runs on GPU. CPU is 5-25x slower per step. QC rules (stitch/decon/edf/registration QC) run on CPU partition — they use pyvips + matplotlib, not GPU compute. The `-j` flag accounts for both GPU processing slots and CPU QC slots.
 
-`workflow run` will **hard-fail** if no GPU slots are detected or if no SLURM profile exists (unless `--local` is explicitly passed). There is no silent CPU fallback.
+`workflow run` will **hard-fail** if no GPU slots are detected, if no SLURM profile exists (unless `--local` is explicitly passed), or if every account has zero live availability. There is no silent CPU fallback.
+
+### Multi-Account State (Apr 8 2026)
+
+`BLOCKED_ACCOUNTS` in `src/kintsugi/hpc.py` contains `{brusko, clive}`. **Maigan is the only active account** (gpu_slots=2, cpu_slots=8). Clive was blocked because its QOS pool was throttled to 1 GPU/312.5 GB and is regularly saturated by other users on the shared investment QOS, causing chronic `QOSGrpMemLimit` blockages.
+
+`workflow run` injects per-account live availability into Snakemake via `--config live_accounts=<json>`. The Snakefile's `_build_cycle_assignment`, `_registration_assignment`, and `_qc_cpu_assignment` use the live data to skip accounts saturated by other users. See `workflow/CLAUDE.md` "Resource Pool Calculation" and the `live-aware-account-routing` skill for details.
 
 ## Development Workspace
 

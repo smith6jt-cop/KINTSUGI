@@ -16,8 +16,13 @@ from typing import Any
 # Account blocklist — these accounts are NEVER used for any KINTSUGI jobs.
 # Enforced in get_user_slurm_accounts(), detect_multi_account_resources(),
 # and detect_live_multi_account().  To add/remove accounts, edit this set.
+#
+# - brusko: permanently blocked (legacy)
+# - clive:  blocked Apr 2026 — QOS pool throttled to 1 GPU / 312.5 GB and
+#           regularly saturated by other group members; KINTSUGI jobs end up
+#           stuck on QOSGrpMemLimit indefinitely. Use maigan exclusively.
 # ============================================================================
-BLOCKED_ACCOUNTS: frozenset[str] = frozenset({"brusko"})
+BLOCKED_ACCOUNTS: frozenset[str] = frozenset({"brusko", "clive"})
 
 
 def _filter_blocked(accounts: list[str]) -> list[str]:

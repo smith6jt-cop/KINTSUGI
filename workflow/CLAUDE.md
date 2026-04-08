@@ -31,27 +31,32 @@ KINTSUGI calculates available GPU slots from **all** non-blocked SLURM accounts:
 
 - **GPU slots** per account = QOS `gres/gpu` limit (via `sacctmgr`)
 - **CPU slots** are still detected but **not used for scheduling** (CPU is 5-25x slower per step — see `gpu-only-scheduling` skill)
-- **`brusko` account is permanently blocked** — hard-coded in `BLOCKED_ACCOUNTS` frozenset in `hpc.py`
+- **Blocked accounts** (Apr 8 2026): `brusko`, `clive` — hard-coded in `BLOCKED_ACCOUNTS` frozenset in `hpc.py`. `clive` was blocked because its QOS pool was throttled to `1 GPU / 312.5 GB / 40 CPUs` and is regularly saturated by other group members on the shared investment QOS.
+- **Active account**: `maigan` only (`gpu_slots: 2`, `cpu_slots: 8`)
 
-**Total Concurrent** = sum(GPU slots) across all accounts (CPU pool is informational only)
+**Total Concurrent** = sum(GPU slots) across all unblocked accounts
 
-**Example calculation** (two accounts):
-| Account | GPUs | GPU Slots | CPU Slots (unused) |
-|---------|------|-----------|-------------------|
-| `clive` | 3 | 3 | 11 |
-| `maigan` | 2 | 2 | 8 |
-| **Total** | **5** | **5** | 19 (not used) |
+**Live-aware routing** (Apr 8 2026): `kintsugi workflow run` queries `detect_live_multi_account()` and forwards per-account `gpu_avail`/`cpu_avail`/`mem_avail_gb` to Snakemake via `--config live_accounts=<json>`. The Snakefile's `_build_cycle_assignment`, `_registration_assignment`, and `_qc_cpu_assignment` use the live data to skip accounts saturated by other users on the same QOS investment pool. Hard-fails if every account has zero live availability instead of queueing forever. Falls back to static `gpu_slots` for bare `snakemake` invocations. See the `live-aware-account-routing` skill for the full implementation.
 
 ## How GPU-Only Scheduling Works
 
 1. `detect_multi_account_resources()` / `detect_live_multi_account()` query `sacctmgr show associations` for all user accounts (filtering burst `-b` accounts and blocked accounts)
-2. Each account's GPU slots are calculated from its QOS limits
-3. `_build_cycle_assignment()` pre-assigns ALL cycles to GPU, round-robin across accounts proportional to GPU slot counts
+2. Each account's GPU slots are calculated from its QOS limits and current usage (live mode also subtracts other users' consumption)
+3. `_build_cycle_assignment()` pre-assigns ALL cycles to GPU, round-robin across accounts proportional to **live** GPU slot counts (when injected) or static `gpu_slots` (fallback)
 4. Overflow cycles (beyond total GPU slots) still get GPU assignments — they queue in SLURM until a GPU slot frees up
 5. Snakemake `-j` = total GPU slots, so concurrent SLURM submissions match available GPUs
 6. Per-cycle pipeline (`stitch→decon→edf`) means freed GPU slots are immediately used by the next stage
 
 **Why no CPU fallback**: Measured per-step (CX_19-003, 9x7, 4ch, 20z): stitch GPU ~8 min vs CPU ~200 min (25x), decon ~12 vs ~60 min (5x), EDF ~1.5 vs ~22 min (15x). Full cycle ~22 min GPU vs ~282 min CPU. Queuing for GPU is always faster.
+
+**Recognizing noisy-neighbor failures**:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `PENDING (QOSGrpMemLimit)` | Another user saturated the QOS group's memory pool | Live-aware routing skips that account; if chronic, add to `BLOCKED_ACCOUNTS` |
+| `PENDING (QOSGrpCpuLimit)` | Another user saturated the QOS group's CPUs | Same |
+| `PENDING (QOSGrpGRES)` | Your own jobs queueing for a GPU slot | **Normal pipeline pressure**, not a problem |
+| `PENDING (BeginTime)` | Scheduled to start at a specific time | Not a real wait |
 
 ## Snakemake Workflow (Alternative to submit.sh)
 
@@ -79,29 +84,26 @@ kintsugi workflow run .       # Submit via Snakemake (auto-sets -j)
 | Aggregate QC rules (5 stages) | QC runs once across ALL cycles for cross-cycle comparison heatmaps + registration overlays + signal isolation |
 | Dynamic worker counts | Wrapper scripts read `cpus_per_task` from Snakemake resources instead of hardcoded 4 |
 
-**Config format** (`workflow/config.yaml`):
+**Config format** (`workflow/config.yaml`, post-clive-block):
 ```yaml
 resources:
   accounts:
-    - name: clive
-      partition_gpu: "hpg-b200,hpg-turin"
-      partition_cpu: hpg-default
-      gpu_slots: 3
-      cpu_slots: 11
     - name: maigan
       partition_gpu: "hpg-b200,hpg-turin"
       partition_cpu: hpg-default
       gpu_slots: 2
       cpu_slots: 8
-  total_slots: 24
+  total_gpu_slots: 2
+  total_cpu_slots: 8
+  total_slots: 10
   cpu_time_multiplier: 5
   cpu_cpus_per_task: 8
 ```
 
-**Cycle assignment example** (9 cycles, clive 3G, maigan 2G = 5 GPU slots):
-- Cycles 1-3 → clive GPU, Cycles 4-5 → maigan GPU (fills all 5 GPU slots)
-- Cycles 6-9 → overflow: round-robin clive/maigan GPU (queue in SLURM until a GPU frees up)
-- No CPU assignments — all cycles run on GPU
+**Cycle assignment example** (9 cycles, maigan 2 GPU slots):
+- Cycles 1-2 → maigan GPU (fills both slots)
+- Cycles 3-9 → overflow: round-robin maigan GPU (queue in SLURM until a slot frees up)
+- All cycles run on GPU; pipeline pressure shows as `PENDING (QOSGrpGRES)` until slots drain
 
 **Lambda resource routing** (per-rule in Snakefile):
 ```python

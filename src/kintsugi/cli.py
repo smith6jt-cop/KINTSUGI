@@ -2057,6 +2057,48 @@ def workflow_run(
                 console.print("  Run: kintsugi workflow config .")
                 raise SystemExit(1)
 
+            # Build per-account live availability for the Snakefile to consume.
+            # When `clive` is saturated by another user (e.g. QOSGrpMemLimit),
+            # gpu_avail/cpu_avail/mem_avail_gb will be 0 and the assignment
+            # helpers in Snakefile will route everything to a healthier account.
+            live_accounts = [
+                {
+                    "name": a["name"],
+                    "gpu_avail": a.get("gpu_avail", 0),
+                    "cpu_avail": a.get("cpu_avail", 0),
+                    "mem_avail_gb": max(
+                        0,
+                        a.get("alloc", {}).get("mem_gb", 0)
+                        - a.get("usage", {}).get("mem_gb", 0),
+                    ),
+                }
+                for a in pool["accounts"]
+            ]
+
+            # Hard-fail if every account has zero live headroom — better than
+            # queuing forever waiting for another user's job to finish.
+            if (
+                pool["total_gpu_avail"] == 0
+                and pool.get("total_cpu_avail", 0) == 0
+            ):
+                console.print(
+                    "[red bold]ERROR: All configured SLURM accounts are "
+                    "saturated.[/red bold]"
+                )
+                for a in pool["accounts"]:
+                    used_mem = a.get("usage", {}).get("mem_gb", 0)
+                    used_gpu = a.get("usage", {}).get("gpus", 0)
+                    console.print(
+                        f"  {a['name']}: 0 GPU avail, 0 CPU avail "
+                        f"(in use: {used_gpu} GPU, {used_mem} GB mem — "
+                        f"may include other users on the QOS)"
+                    )
+                console.print(
+                    "[dim]Wait for other jobs to drain or check "
+                    "`squeue -A <account>`[/dim]"
+                )
+                raise SystemExit(1)
+
             if total < 2:
                 console.print(
                     f"[yellow]WARNING: Only {total} GPU slot — "
@@ -2071,8 +2113,19 @@ def workflow_run(
                 f"  Resources: {pool['total_gpu_avail']} GPU available "
                 f"(of {pool['total_gpu_slots']} total GPU slots)"
             )
+            for a in live_accounts:
+                console.print(
+                    f"    {a['name']}: {a['gpu_avail']} GPU avail, "
+                    f"{a['cpu_avail']} CPU avail, "
+                    f"{a['mem_avail_gb']} GB mem avail"
+                )
 
             cmd.extend(["--profile", str(profile_dir), "-j", str(total_with_cpu)])
+            # Forward live availability to Snakemake so the Snakefile's
+            # assignment helpers can route around saturated accounts.
+            cmd.extend(
+                ["--config", f"live_accounts={json.dumps(live_accounts)}"]
+            )
         else:
             if not local:
                 console.print("[red bold]ERROR: No SLURM profile found.[/red bold]")
