@@ -33,10 +33,8 @@ from pathlib import Path, PurePosixPath
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 SRC_ENDPOINT = "f1b69b9e-f07a-11ef-8c40-0e26ca329435"
-SRC_BASE = (
-    "/run/user/1001/gvfs/smb-share:"
-    "server=path.ahc.ufl.edu,share=path$/SHARE/HuBMAP/"
-)
+# Use cifs mount, NOT GVFS — GVFS causes EOF errors / Path-not-allowed under load
+SRC_BASE = "/mnt/ahc_share/SHARE/HuBMAP/"
 
 DST_ENDPOINT = "5dbaf795-8a7e-4dca-91aa-6e10d610c2b3"
 DST_BASE = "/blue/maigan/smith6jt/KINTSUGI_Projects/"
