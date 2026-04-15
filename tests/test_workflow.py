@@ -1156,6 +1156,9 @@ class TestSentinelFormat:
         }
         for script_name, expected_stage in expected_stages.items():
             content = (scripts_dir / script_name).read_text()
-            assert f"stage={expected_stage}" in content, (
-                f"{script_name} missing stage={expected_stage}"
-            )
+            # Accept either legacy flat text ("stage=stitch") or JSON payload
+            # (""stage": "stitch""). stitch.py migrated to JSON in Apr 2026;
+            # decon/edf still write the legacy format.
+            legacy = f"stage={expected_stage}" in content
+            json_format = f'"stage": "{expected_stage}"' in content
+            assert legacy or json_format, f"{script_name} missing stage={expected_stage}"
