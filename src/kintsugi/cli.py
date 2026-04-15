@@ -2068,8 +2068,7 @@ def workflow_run(
                     "cpu_avail": a.get("cpu_avail", 0),
                     "mem_avail_gb": max(
                         0,
-                        a.get("alloc", {}).get("mem_gb", 0)
-                        - a.get("usage", {}).get("mem_gb", 0),
+                        a.get("alloc", {}).get("mem_gb", 0) - a.get("usage", {}).get("mem_gb", 0),
                     ),
                 }
                 for a in pool["accounts"]
@@ -2077,13 +2076,9 @@ def workflow_run(
 
             # Hard-fail if every account has zero live headroom — better than
             # queuing forever waiting for another user's job to finish.
-            if (
-                pool["total_gpu_avail"] == 0
-                and pool.get("total_cpu_avail", 0) == 0
-            ):
+            if pool["total_gpu_avail"] == 0 and pool.get("total_cpu_avail", 0) == 0:
                 console.print(
-                    "[red bold]ERROR: All configured SLURM accounts are "
-                    "saturated.[/red bold]"
+                    "[red bold]ERROR: All configured SLURM accounts are saturated.[/red bold]"
                 )
                 for a in pool["accounts"]:
                     used_mem = a.get("usage", {}).get("mem_gb", 0)
@@ -2094,8 +2089,7 @@ def workflow_run(
                         f"may include other users on the QOS)"
                     )
                 console.print(
-                    "[dim]Wait for other jobs to drain or check "
-                    "`squeue -A <account>`[/dim]"
+                    "[dim]Wait for other jobs to drain or check `squeue -A <account>`[/dim]"
                 )
                 raise SystemExit(1)
 
@@ -2123,9 +2117,7 @@ def workflow_run(
             cmd.extend(["--profile", str(profile_dir), "-j", str(total_with_cpu)])
             # Forward live availability to Snakemake so the Snakefile's
             # assignment helpers can route around saturated accounts.
-            cmd.extend(
-                ["--config", f"live_accounts={json.dumps(live_accounts)}"]
-            )
+            cmd.extend(["--config", f"live_accounts={json.dumps(live_accounts)}"])
         else:
             if not local:
                 console.print("[red bold]ERROR: No SLURM profile found.[/red bold]")
