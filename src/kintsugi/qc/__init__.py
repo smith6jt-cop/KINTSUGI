@@ -49,6 +49,13 @@ from kintsugi.qc.batch_qc import (
     compute_batch_statistics,
     detect_batch_effects,
 )
+from kintsugi.qc.boundary_check import (
+    BoundaryInfo,
+    check_boundary_quality,
+    compute_boundary_positions,
+    measure_boundary_discontinuity,
+    select_alternate_zplanes,
+)
 from kintsugi.qc.cell_qc import (
     CellQC,
     detect_cycle_dropout,
@@ -213,4 +220,10 @@ __all__ = [
     "compute_batch_statistics",
     # Signal isolation quality
     "compute_signal_isolation_quality",
+    # Tile boundary QC (post-stitch)
+    "BoundaryInfo",
+    "check_boundary_quality",
+    "compute_boundary_positions",
+    "measure_boundary_discontinuity",
+    "select_alternate_zplanes",
 ]

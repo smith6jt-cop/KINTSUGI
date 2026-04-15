@@ -97,6 +97,7 @@ kintsugi workflow config .                         # Generate config from experi
 kintsugi workflow check .                          # Verify SLURM resources
 kintsugi workflow run .                            # Full pipeline (auto-generates config if missing)
 kintsugi workflow run . --dry-run                  # Preview
+kintsugi workflow run . --detach                   # Background (survives SSH disconnect)
 kintsugi workflow run . --dashboard                # Run with live progress dashboard
 kintsugi workflow run . --dashboard -i 15          # Custom refresh interval
 kintsugi workflow run . --cycles 1-5               # Specific cycles
@@ -104,7 +105,9 @@ kintsugi workflow run . --local --cores 8          # Local (no SLURM)
 kintsugi workflow status . --watch                 # Standalone dashboard
 ```
 
-`workflow run` auto-generates `workflow/config.yaml` from `meta/experiment.json` if the config is missing. The `--dashboard` flag launches snakemake in the background and displays a live progress dashboard; Ctrl+C detaches without killing SLURM jobs.
+`workflow run` auto-generates `workflow/config.yaml` from `meta/experiment.json` if the config is missing. The `--detach` flag runs Snakemake in a separate process group that survives SSH disconnects and terminal exits (log: `slurm/logs/snakemake/workflow_run_detached.log`, PID: `.kintsugi_run.pid`). The `--dashboard` flag launches snakemake in the background and displays a live progress dashboard; Ctrl+C detaches without killing SLURM jobs. **Without `--detach` or `--dashboard`, the Snakemake coordinator runs in the foreground** — if the terminal is killed, no new SLURM jobs will be submitted for dependent steps.
+
+**SLURM context warning**: When run inside a SLURM job (e.g., VS Code server) without `--detach` or `--dashboard`, the CLI warns that the coordinator must stay alive. Always use `--detach` for unattended/automated runs.
 
 **Path resolution**: All workflow subcommands use `_resolve_project_dir()` which auto-detects when you're inside a `workflow/` subdirectory and resolves to the parent project root. So `cd project/workflow && kintsugi workflow config .` works correctly.
 

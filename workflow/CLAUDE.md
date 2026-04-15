@@ -271,6 +271,8 @@ Wave-based parallel execution across multi-account GPU pool:
 
 **Per-channel skip-existing**: Wrapper scripts (`stitch.py`, `deconvolve.py`, `edf.py`) check per-channel completion inside jobs to resume interrupted cycles. Sentinel files include `skipped=N` in logs. Dynamic worker counts read from `snakemake.resources.cpus_per_task`.
 
+**Boundary QC + Multi-Z Fallback (Apr 2026)**: After computing the stitch model from the reference z-plane (n_zplanes // 2, CH1/DAPI), `workflow/scripts/stitch.py` runs `kintsugi.qc.boundary_check.check_boundary_quality()` on the stitched reference image. The metric is **sharpness ratio** (Laplacian variance): `sharpness(overlap_region) / sharpness(adjacent_non_overlap)`. A healthy boundary has ratio ~1.0; a misaligned boundary has ghosted/blurred features in the overlap → ratio < 0.7 (default threshold 0.65). If any boundaries are flagged, the script tries alternate z-planes from `select_alternate_zplanes(ref, n, 4)` (quarter/three-quarter/top/bottom), running `stitch_images()` on each and picking the complete model with the fewest + least severe flagged boundaries. The chosen model is saved as `result_df.pkl` and the reference z-plane is re-stitched. Decision log written to `data/processed/stitched/cyc{NN}/CH1/boundary_qc.json`. Config keys: `boundary_qc_enabled` (default true), `boundary_qc_threshold` (default 0.65), `boundary_qc_max_alternates` (default 4). Overhead: ~100ms when no boundaries fail (common case); ~30-60s per alternate z-plane (rare). Tests: `tests/test_boundary_check.py`.
+
 **Snakemake replaces** `submit.sh` orchestration/dependency wiring; **keeps** Python wrapper scripts (`workflow/scripts/*.py`). Run one system or the other, not both.
 
 ## Batch Processing (Multi-Dataset)

@@ -1591,6 +1591,11 @@ def generate_workflow_config(project_dir: Path, print_only: bool = False) -> Pat
         "basic_flatfield_min": 0.1,
         "basic_max_iterations": 500,
         "basic_optimization_tolerance": 1.0e-6,
+        # Post-stitch boundary QC (detects rare misalignment and retries
+        # with alternate z-planes for the stitch model)
+        "boundary_qc_enabled": True,
+        "boundary_qc_threshold": 0.65,
+        "boundary_qc_max_alternates": 4,
         # EDF parameters
         "edf": {
             "radius_x": 2,
@@ -1968,6 +1973,11 @@ def _run_with_dashboard(cmd: list[str], project_dir: Path, interval: int = 30) -
     type=int,
     help="Dashboard refresh interval in seconds (default: 30)",
 )
+@click.option(
+    "--detach",
+    is_flag=True,
+    help="Run in background (survives SSH disconnect and terminal exit)",
+)
 def workflow_run(
     project_dir: str,
     jobs: int,
@@ -1978,6 +1988,7 @@ def workflow_run(
     cycles: str | None,
     dashboard: bool,
     dashboard_interval: int,
+    detach: bool,
 ):
     """
     Run the Snakemake processing pipeline.
@@ -1993,6 +2004,7 @@ def workflow_run(
         kintsugi workflow run . --local --cores 4  # Local execution
         kintsugi workflow run . --forcerun stitch  # Force re-stitch
         kintsugi workflow run . --dashboard        # Run with live dashboard
+        kintsugi workflow run . --detach           # Background (survives disconnect)
     """
 
     project_dir = _resolve_project_dir(project_dir)
@@ -2166,6 +2178,71 @@ def workflow_run(
 
     console.print(f"[bold]Running:[/bold] {' '.join(cmd)}")
     console.print()
+
+    # ── Detach mode: relaunch in background and return immediately ──
+    if detach and not dry_run:
+        log_dir = project_dir / "slurm" / "logs" / "snakemake"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "workflow_run_detached.log"
+        pid_path = project_dir / ".kintsugi_run.pid"
+
+        # Re-invoke ourselves without --detach
+        relaunch_cmd = [sys.executable, "-m", "kintsugi.cli", "workflow", "run",
+                        str(project_dir)]
+        if jobs != 8:
+            relaunch_cmd.extend(["-j", str(jobs)])
+        if local:
+            relaunch_cmd.append("--local")
+            relaunch_cmd.extend(["--cores", str(cores)])
+        if forcerun:
+            relaunch_cmd.extend(["--forcerun", forcerun])
+        if cycles:
+            relaunch_cmd.extend(["--cycles", cycles])
+
+        with open(log_path, "w") as log_file:
+            proc = subprocess.Popen(
+                relaunch_cmd,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
+        pid_path.write_text(str(proc.pid))
+        console.print(f"  Pipeline launched in background (PID {proc.pid})")
+        console.print(f"  Log:    {log_path}")
+        console.print(f"  PID:    {pid_path}")
+        console.print(f"\n  Monitor: tail -f {log_path}")
+        console.print(f"  Status:  kintsugi workflow status {project_dir}")
+        console.print(f"  Stop:    kill $(cat {pid_path})")
+        return
+
+    # ── SLURM context warning ──
+    # Skip if we were relaunched by --detach (start_new_session makes us
+    # persistent, even though SLURM_JOB_ID is still inherited).
+    _is_session_leader = hasattr(os, "getsid") and os.getsid(0) == os.getpid()
+    if (
+        not local
+        and not dry_run
+        and not dashboard
+        and not _is_session_leader
+        and os.environ.get("SLURM_JOB_ID")
+    ):
+        console.print(
+            "[yellow bold]WARNING: Running inside a SLURM job without "
+            "--detach or --dashboard.[/yellow bold]"
+        )
+        console.print(
+            "  The Snakemake coordinator must stay alive to submit "
+            "dependent jobs."
+        )
+        console.print(
+            "  If this terminal/process is killed, the pipeline will "
+            "stall with no new jobs submitted."
+        )
+        console.print(
+            "  Recommended: add --detach (background) or "
+            "--dashboard (Ctrl+C to detach)\n"
+        )
 
     if dashboard and not dry_run:
         _run_with_dashboard(cmd, project_dir, interval=dashboard_interval)

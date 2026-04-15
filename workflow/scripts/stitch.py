@@ -68,6 +68,11 @@ INITIAL_NCC_THRESHOLD = float(wf_config["ncc_threshold"])
 POU = float(wf_config["pou"])
 BLEND_SIGMA = float(wf_config.get("blend_sigma", 15.0))
 
+# Boundary QC + multi-z fallback (detects and corrects rare misalignments)
+BOUNDARY_QC_ENABLED = bool(wf_config.get("boundary_qc_enabled", True))
+BOUNDARY_QC_THRESHOLD = float(wf_config.get("boundary_qc_threshold", 0.65))
+BOUNDARY_QC_MAX_ALTERNATES = int(wf_config.get("boundary_qc_max_alternates", 4))
+
 # Number of CPU cores available (from SLURM allocation)
 CPUS = int(getattr(snakemake.resources, "cpus_per_task", 4))
 
@@ -98,6 +103,10 @@ from Kstitch.stitching import stitch_images
 from kintsugi.kcorrect_gpu import KCorrectGPU
 from kintsugi.stitch_blend import stitch_with_blending
 from kintsugi.gpu import cleanup_gpu_memory
+from kintsugi.qc.boundary_check import (
+    check_boundary_quality,
+    select_alternate_zplanes,
+)
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -249,25 +258,22 @@ def save_qc_image(data, output_path, title=""):
 # ---------------------------------------------------------------------------
 # Per-z-plane processing
 # ---------------------------------------------------------------------------
-def process_zplane(cycle, channel, zplane, device_id=0):
-    """Process a single z-plane: load tiles, correct, stitch, save."""
+def _load_and_correct_tiles(zplane, channel, device_id=0):
+    """Load + BaSiC-correct all tiles for one (zplane, channel).
+
+    Returns (corrected_uint16, error_or_None).
+    """
     pattern = f"*_Z{zplane:03d}_CH{channel}.tif"
     tile_files = sorted(cycle_dir.glob(pattern), key=alphanumeric_key)
-
     if not tile_files:
         pattern = f"*_Z{zplane:02d}_CH{channel}.tif"
         tile_files = sorted(cycle_dir.glob(pattern), key=alphanumeric_key)
-
     if not tile_files:
         return None, f"No files for Z{zplane} CH{channel}"
-
     if len(tile_files) != n_tiles:
         print(f"  Warning: Expected {n_tiles} tiles, found {len(tile_files)}")
 
-    # Load tiles
     tiles = load_tiles_parallel(tile_files)
-
-    # Normalize to float
     dtype_max = (
         np.iinfo(tiles.dtype).max
         if np.issubdtype(tiles.dtype, np.integer)
@@ -275,7 +281,6 @@ def process_zplane(cycle, channel, zplane, device_id=0):
     )
     tiles_float = tiles.astype(np.float64) / dtype_max
 
-    # BaSiC illumination correction
     corrector = KCorrectGPU(
         use_gpu=use_gpu, verbose=False, device_id=device_id if use_gpu else None
     )
@@ -290,40 +295,16 @@ def process_zplane(cycle, channel, zplane, device_id=0):
     corrected = (tiles_float - darkfield) / flatfield_safe
     corrected = np.clip(corrected, 0, 1)
     corrected = (corrected * dtype_max).astype(np.uint16)
+    return corrected, None
 
-    # Get or compute stitch model
-    output_dir = STITCH_DIR / f"cyc{CYCLE:02d}" / f"CH{channel}"
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    ref_zplane = n_zplanes // 2
-    ch1_pkl = STITCH_DIR / f"cyc{CYCLE:02d}" / "CH1" / "result_df.pkl"
-
-    if channel == 1 and zplane == ref_zplane:
-        result_df, _ = stitch_images(
-            corrected,
-            rows,
-            cols,
-            initial_ncc_threshold=INITIAL_NCC_THRESHOLD,
-            overlap_percentage=OVERLAP_PERCENTAGE,
-            pou=POU,
-            max_cores=CPUS,
-            use_gpu=use_gpu,
-        )
-        pkl_path = output_dir / "result_df.pkl"
-        result_df.to_pickle(str(pkl_path))
-    elif ch1_pkl.exists():
-        result_df = pd.read_pickle(str(ch1_pkl))
-    else:
-        return None, f"No stitch model at {ch1_pkl}"
-
-    # Normalize positions
+def _stitch_with_model(corrected, result_df):
+    """Apply an existing stitch model to corrected tiles, return stitched image."""
     result_df = result_df.copy()
     result_df["y_pos2"] = result_df["y_pos"] - result_df["y_pos"].min()
     result_df["x_pos2"] = result_df["x_pos"] - result_df["x_pos"].min()
-
-    # Stitch with blending
     overlap_fraction = (TILE_OVERLAP, TILE_OVERLAP)
-    stitched = stitch_with_blending(
+    return stitch_with_blending(
         corrected,
         result_df,
         blend=True,
@@ -332,11 +313,207 @@ def process_zplane(cycle, channel, zplane, device_id=0):
         output_dtype=np.uint16,
     )
 
-    # Save
+
+def _compute_stitch_model(corrected):
+    """Run phase correlation + spanning tree to produce a stitch model."""
+    result_df, _ = stitch_images(
+        corrected,
+        rows,
+        cols,
+        initial_ncc_threshold=INITIAL_NCC_THRESHOLD,
+        overlap_percentage=OVERLAP_PERCENTAGE,
+        pou=POU,
+        max_cores=CPUS,
+        use_gpu=use_gpu,
+    )
+    return result_df
+
+
+def process_zplane(cycle, channel, zplane, device_id=0, model_df=None):
+    """Process a single z-plane: load tiles, correct, stitch, save.
+
+    If ``model_df`` is provided, that stitch model is used (no recomputation).
+    Otherwise, for (channel=1, zplane=ref_zplane) a model is computed and
+    saved; for other z-planes the saved CH1 model is loaded.
+    """
+    corrected, error = _load_and_correct_tiles(zplane, channel, device_id=device_id)
+    if error:
+        return None, error
+
+    output_dir = STITCH_DIR / f"cyc{CYCLE:02d}" / f"CH{channel}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    ref_zplane = n_zplanes // 2
+    ch1_pkl = STITCH_DIR / f"cyc{CYCLE:02d}" / "CH1" / "result_df.pkl"
+
+    if model_df is not None:
+        result_df = model_df
+    elif channel == 1 and zplane == ref_zplane:
+        result_df = _compute_stitch_model(corrected)
+        pkl_path = output_dir / "result_df.pkl"
+        result_df.to_pickle(str(pkl_path))
+    elif ch1_pkl.exists():
+        result_df = pd.read_pickle(str(ch1_pkl))
+    else:
+        return None, f"No stitch model at {ch1_pkl}"
+
+    stitched = _stitch_with_model(corrected, result_df)
+
     output_file = output_dir / f"{zplane:02d}.tif"
     imsave(str(output_file), stitched, check_contrast=False)
 
     return str(output_file), None
+
+
+def _run_boundary_qc_with_fallback(cycle):
+    """Check reference-z-plane boundaries; try alternate z-planes if needed.
+
+    Must be called AFTER the initial ref_zplane has been stitched with the
+    initial model. Modifies the saved result_df.pkl if a better model is
+    found, and re-stitches the reference z-plane.
+
+    Writes a JSON log to data/processed/stitched/cyc{NN}/CH1/boundary_qc.json.
+    """
+    import json
+
+    ref_zplane = n_zplanes // 2
+    ch1_dir = STITCH_DIR / f"cyc{CYCLE:02d}" / "CH1"
+    ch1_pkl = ch1_dir / "result_df.pkl"
+    ref_tif = ch1_dir / f"{ref_zplane:02d}.tif"
+
+    if not ref_tif.exists() or not ch1_pkl.exists():
+        print("  BOUNDARY QC: skipped (reference stitch output missing)")
+        return
+
+    # Load the reference stitched image and the initial model
+    initial_df = pd.read_pickle(str(ch1_pkl))
+    ref_stitched = imread(str(ref_tif))
+
+    # Need tile dimensions — get them from a raw tile
+    sample_files = sorted(
+        cycle_dir.glob(f"*_Z{ref_zplane:03d}_CH1.tif"), key=alphanumeric_key
+    )
+    if not sample_files:
+        sample_files = sorted(
+            cycle_dir.glob(f"*_Z{ref_zplane:02d}_CH1.tif"), key=alphanumeric_key
+        )
+    if not sample_files:
+        print("  BOUNDARY QC: skipped (cannot determine tile size)")
+        return
+    sample_tile = imread(str(sample_files[0]))
+    tile_h_px, tile_w_px = sample_tile.shape
+
+    initial_passed, initial_flagged, initial_scores = check_boundary_quality(
+        ref_stitched, initial_df, tile_h_px, tile_w_px,
+        threshold=BOUNDARY_QC_THRESHOLD,
+    )
+
+    qc_log = {
+        "ref_zplane": ref_zplane,
+        "threshold": BOUNDARY_QC_THRESHOLD,
+        "initial": {
+            "n_flagged": len(initial_flagged),
+            "worst_score": min(
+                [f["score"] for f in initial_flagged], default=None,
+            ),
+            "flagged": [
+                {
+                    "orientation": f["orientation"],
+                    "tile_a": list(f["tile_a"]),
+                    "tile_b": list(f["tile_b"]),
+                    "score": f["score"],
+                } for f in initial_flagged[:10]
+            ],
+        },
+        "alternates": [],
+        "final_model_zplane": ref_zplane,
+        "final_n_flagged": len(initial_flagged),
+    }
+
+    if initial_passed:
+        print(f"  BOUNDARY QC: all {len(initial_scores)} boundaries passed")
+        with open(ch1_dir / "boundary_qc.json", "w") as fh:
+            json.dump(qc_log, fh, indent=2)
+        return
+
+    print(
+        f"  BOUNDARY QC: {len(initial_flagged)} boundaries flagged "
+        f"(worst ratio={initial_flagged[0]['score']:.3f}); trying alternate z-planes"
+    )
+    for f in initial_flagged[:5]:
+        print(
+            f"    {f['orientation']:10s} {f['tile_a']} | {f['tile_b']}  "
+            f"ratio={f['score']:.3f}"
+        )
+
+    best_df = initial_df
+    best_n_flagged = len(initial_flagged)
+    best_worst_score = initial_flagged[0]["score"]
+    best_zplane = ref_zplane
+
+    alternates = select_alternate_zplanes(
+        ref_zplane, n_zplanes, BOUNDARY_QC_MAX_ALTERNATES,
+    )
+    for alt_z in alternates:
+        print(f"  Trying alternate Z{alt_z}...")
+        alt_corrected, err = _load_and_correct_tiles(alt_z, channel=1)
+        if err:
+            print(f"    skipped: {err}")
+            continue
+        alt_df = _compute_stitch_model(alt_corrected)
+        alt_stitched = _stitch_with_model(alt_corrected, alt_df)
+        alt_passed, alt_flagged, alt_scores = check_boundary_quality(
+            alt_stitched, alt_df, tile_h_px, tile_w_px,
+            threshold=BOUNDARY_QC_THRESHOLD,
+        )
+        alt_worst = min(
+            [f["score"] for f in alt_flagged], default=1.0,
+        )
+        qc_log["alternates"].append({
+            "zplane": alt_z,
+            "passed": alt_passed,
+            "n_flagged": len(alt_flagged),
+            "worst_score": alt_worst,
+        })
+        print(
+            f"    Z{alt_z}: {len(alt_flagged)} flagged, "
+            f"worst={alt_worst:.3f}"
+        )
+        # Adopt alt if it has strictly fewer flagged, or equal flagged but
+        # higher worst score (= less severe)
+        if (
+            len(alt_flagged) < best_n_flagged
+            or (len(alt_flagged) == best_n_flagged and alt_worst > best_worst_score)
+        ):
+            best_df = alt_df
+            best_n_flagged = len(alt_flagged)
+            best_worst_score = alt_worst
+            best_zplane = alt_z
+            if alt_passed:
+                print(f"    → Z{alt_z} passes cleanly, stopping search")
+                break
+
+    qc_log["final_model_zplane"] = best_zplane
+    qc_log["final_n_flagged"] = best_n_flagged
+
+    if best_zplane != ref_zplane:
+        print(
+            f"  BOUNDARY QC: adopting model from Z{best_zplane} "
+            f"({best_n_flagged} flagged vs initial {len(initial_flagged)})"
+        )
+        best_df.to_pickle(str(ch1_pkl))
+        # Re-stitch the reference z-plane with the new model
+        result, error = process_zplane(CYCLE, 1, ref_zplane, model_df=best_df)
+        if error:
+            print(f"  WARNING: re-stitch of Z{ref_zplane} failed: {error}")
+    else:
+        print(
+            f"  BOUNDARY QC: no alternate improved on initial model; "
+            f"keeping Z{ref_zplane}"
+        )
+
+    with open(ch1_dir / "boundary_qc.json", "w") as fh:
+        json.dump(qc_log, fh, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +560,11 @@ for channel in channels:
         if error:
             print(f"  ERROR: {error}")
             sys.exit(1)
+
+        # Post-stitch boundary QC: detect misaligned boundaries and try
+        # alternate z-planes if the initial model produces visible ghosting.
+        if BOUNDARY_QC_ENABLED and n_zplanes >= 2:
+            _run_boundary_qc_with_fallback(CYCLE)
 
     # Process all z-planes
     processed = 0
