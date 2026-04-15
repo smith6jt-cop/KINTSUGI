@@ -15,6 +15,8 @@ A channel is considered complete only when ALL expected z-plane TIFs exist.
 """
 
 import gc
+import hashlib
+import json
 import re
 import sys
 import time
@@ -72,6 +74,25 @@ BLEND_SIGMA = float(wf_config.get("blend_sigma", 15.0))
 CPUS = int(getattr(snakemake.resources, "cpus_per_task", 4))
 
 # ---------------------------------------------------------------------------
+# Parameter fingerprint (invalidates stale output on parameter change)
+# ---------------------------------------------------------------------------
+# Only parameters that affect the stitched pixel output are included. Changing
+# any of these should trigger a re-run even if the output TIFFs already exist.
+STITCH_PARAMS = {
+    "tile_rows": TILE_ROWS,
+    "tile_cols": TILE_COLS,
+    "tile_overlap": TILE_OVERLAP,
+    "ncc_threshold": INITIAL_NCC_THRESHOLD,
+    "pou": POU,
+    "blend_sigma": BLEND_SIGMA,
+    "basic_flatfield_min": BASIC_FLATFIELD_MIN,
+    "basic_max_iterations": BASIC_MAX_ITERATIONS,
+    "basic_optimization_tolerance": BASIC_OPTIMIZATION_TOLERANCE,
+}
+_params_blob = json.dumps(STITCH_PARAMS, sort_keys=True).encode("utf-8")
+CONFIG_HASH = hashlib.sha256(_params_blob).hexdigest()[:16]
+
+# ---------------------------------------------------------------------------
 # GPU initialization (respects device_mode from Snakemake rule)
 # ---------------------------------------------------------------------------
 REQUESTED_DEVICE_MODE = getattr(snakemake.params, "device_mode", "gpu")
@@ -83,13 +104,23 @@ if REQUESTED_DEVICE_MODE == "gpu":
 
         cp.cuda.Device(0).use()
         _ = cp.zeros(1)
-        print(f"CUDA initialized successfully on device 0")
+        print("CUDA initialized successfully on device 0")
         use_gpu = True
     except Exception as e:
-        print(f"WARNING: CUDA initialization failed: {e}")
-        print("Falling back to CPU processing")
+        # Fail loudly: the Snakemake rule allocated a GPU slot and every
+        # downstream step (stitch, decon, EDF) is 5–25x slower on CPU.
+        # A silent CPU fallback here wastes a GPU allocation and produces
+        # output indistinguishable from a GPU run until someone notices
+        # the runtime. Match the "GPU-only scheduling" policy documented
+        # in workflow/CLAUDE.md and the stitch_images() no-fallback contract.
+        raise RuntimeError(
+            f"GPU mode requested by Snakemake rule but CUDA initialization "
+            f"failed: {e}. This job was allocated a GPU slot; refusing to "
+            f"silently fall back to CPU. Check CuPy/CUDA driver compatibility "
+            f"on this node, or set device_mode=cpu in the Snakemake rule."
+        ) from e
 else:
-    print(f"CPU mode (requested by Snakemake rule)")
+    print("CPU mode (requested by Snakemake rule)")
 
 # ---------------------------------------------------------------------------
 # Imports (after PYTHONPATH setup)
@@ -340,16 +371,75 @@ def process_zplane(cycle, channel, zplane, device_id=0):
 
 
 # ---------------------------------------------------------------------------
-# Skip-existing helper
+# Skip-existing helpers
 # ---------------------------------------------------------------------------
-def channel_complete(channel):
-    """Check if all z-planes are already stitched for this channel."""
+def load_previous_config_hash(sentinel_path):
+    """Return config_hash from an existing sentinel, or None if unavailable.
+
+    Sentinels written by older stitch.py revisions used a flat key=value
+    format without config_hash — those are treated as missing so a re-run
+    is triggered the first time under the new format.
+    """
+    if not sentinel_path.exists():
+        return None
+    try:
+        data = json.loads(sentinel_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data.get("config_hash")
+
+
+def newest_raw_mtime(raw_cycle_dir):
+    """Return mtime (float seconds) of the newest raw tile, or 0.0 if none."""
+    newest = 0.0
+    for f in raw_cycle_dir.glob("*.tif"):
+        try:
+            mt = f.stat().st_mtime
+        except OSError:
+            continue
+        if mt > newest:
+            newest = mt
+    return newest
+
+
+def channel_complete(channel, raw_newest_mtime, previous_hash):
+    """Return True iff this channel's output is current and complete.
+
+    A channel is considered complete only if:
+      * all expected z-plane TIFFs exist on disk,
+      * (channel 1) the stitch-model pickle exists,
+      * no raw tile is newer than any stitched TIFF (mtime check),
+      * when a stored config hash is available, it matches current params.
+
+    A stored hash mismatch forces re-processing; this prevents a stale
+    result from being silently reused after a parameter change. If the
+    cycle-level sentinel is missing or legacy/unparseable, fall back to
+    the per-channel existence and mtime checks so interrupted runs can
+    still skip already-complete channels (matches the documented
+    per-channel resume behavior).
+    """
     ch_dir = STITCH_DIR / f"cyc{CYCLE:02d}" / f"CH{channel}"
     if not ch_dir.exists():
         return False
+    # Enforce config consistency only when a previous hash was actually
+    # recorded. Missing / legacy sentinel metadata should not disable the
+    # per-channel resume path for already-complete outputs.
+    if previous_hash is not None and previous_hash != CONFIG_HASH:
+        return False
     for z in range(1, n_zplanes + 1):
-        if not (ch_dir / f"{z:02d}.tif").exists():
+        tif = ch_dir / f"{z:02d}.tif"
+        if not tif.exists():
             return False
+        # Raw data re-staged since this output was produced → stale.
+        if raw_newest_mtime > 0:
+            try:
+                tif_mtime = tif.stat().st_mtime
+            except OSError:
+                return False
+            if tif_mtime < raw_newest_mtime:
+                return False
     # CH1 also needs the stitch model pickle
     if channel == 1 and not (ch_dir / "result_df.pkl").exists():
         return False
@@ -364,9 +454,26 @@ channels = list(range(START_CHANNEL, END_CHANNEL + 1))
 ref_zplane = n_zplanes // 2
 skipped_channels = 0
 
+# Staleness inputs for channel_complete(): the previous sentinel's config hash
+# (if any) and the newest raw-tile mtime (for stale-output detection). Read
+# once before the channel loop so all channels get a consistent view.
+sentinel_path = Path(snakemake.output.sentinel)
+previous_config_hash = load_previous_config_hash(sentinel_path)
+raw_newest_mtime = newest_raw_mtime(cycle_dir)
+
+if previous_config_hash is not None and previous_config_hash != CONFIG_HASH:
+    print(
+        f"Config hash changed since last run "
+        f"({previous_config_hash} -> {CONFIG_HASH}); "
+        f"all channels will be re-processed."
+    )
+
 for channel in channels:
-    if channel_complete(channel):
-        print(f"\n--- Channel {channel}/{END_CHANNEL} --- SKIPPED (all {n_zplanes} z-planes exist)")
+    if channel_complete(channel, raw_newest_mtime, previous_config_hash):
+        print(
+            f"\n--- Channel {channel}/{END_CHANNEL} --- "
+            f"SKIPPED (all {n_zplanes} z-planes exist, unchanged)"
+        )
         skipped_channels += 1
         continue
 
@@ -445,16 +552,30 @@ summary_after("stitch", PROJECT_DIR, total_time, exit_code=0)
 # ---------------------------------------------------------------------------
 # Write sentinel (replaces .complete marker)
 # ---------------------------------------------------------------------------
+# JSON payload so downstream tools (and the next run's channel_complete) can
+# recover the exact parameters and config hash that produced this output.
+# Previous format was flat key=value text; only `.exists()` is checked by
+# downstream consumers (Snakemake DAG, dashboard.py, cleanup.py).
 sentinel = Path(snakemake.output.sentinel)
 sentinel.parent.mkdir(parents=True, exist_ok=True)
 sentinel.write_text(
-    f"stage=stitch\n"
-    f"cycle={CYCLE}\n"
-    f"completed={datetime.now().isoformat()}\n"
-    f"channels={START_CHANNEL}-{END_CHANNEL}\n"
-    f"zplanes={n_zplanes}\n"
-    f"skipped={skipped_channels}\n"
-    f"duration_minutes={total_time/60:.1f}\n"
+    json.dumps(
+        {
+            "stage": "stitch",
+            "cycle": CYCLE,
+            "completed": datetime.now().isoformat(),
+            "channels": f"{START_CHANNEL}-{END_CHANNEL}",
+            "zplanes": n_zplanes,
+            "skipped_channels": skipped_channels,
+            "duration_minutes": round(total_time / 60, 1),
+            "device_mode": "gpu" if use_gpu else "cpu",
+            "config_hash": CONFIG_HASH,
+            "params": STITCH_PARAMS,
+        },
+        indent=2,
+        sort_keys=True,
+    )
+    + "\n"
 )
 print(f"Sentinel written: {sentinel}")
 log_footer(0)
