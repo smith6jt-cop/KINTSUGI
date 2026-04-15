@@ -411,25 +411,35 @@ def channel_complete(channel, raw_newest_mtime, previous_hash):
       * all expected z-plane TIFFs exist on disk,
       * (channel 1) the stitch-model pickle exists,
       * no raw tile is newer than any stitched TIFF (mtime check),
-      * the stored config hash matches the current parameters.
-    Any mismatch forces re-processing on resume; this prevents a partial or
-    stale result from being silently reused after a parameter change or
-    raw-data re-stage.
+      * when a stored config hash is available, it matches current params.
+
+    A stored hash mismatch forces re-processing; this prevents a stale
+    result from being silently reused after a parameter change. If the
+    cycle-level sentinel is missing or legacy/unparseable, fall back to
+    the per-channel existence and mtime checks so interrupted runs can
+    still skip already-complete channels (matches the documented
+    per-channel resume behavior).
     """
     ch_dir = STITCH_DIR / f"cyc{CYCLE:02d}" / f"CH{channel}"
     if not ch_dir.exists():
         return False
-    # Parameter change since last run → re-process (also covers missing /
-    # legacy sentinel: previous_hash is None and will never match).
-    if previous_hash != CONFIG_HASH:
+    # Enforce config consistency only when a previous hash was actually
+    # recorded. Missing / legacy sentinel metadata should not disable the
+    # per-channel resume path for already-complete outputs.
+    if previous_hash is not None and previous_hash != CONFIG_HASH:
         return False
     for z in range(1, n_zplanes + 1):
         tif = ch_dir / f"{z:02d}.tif"
         if not tif.exists():
             return False
         # Raw data re-staged since this output was produced → stale.
-        if raw_newest_mtime > 0 and tif.stat().st_mtime < raw_newest_mtime:
-            return False
+        if raw_newest_mtime > 0:
+            try:
+                tif_mtime = tif.stat().st_mtime
+            except OSError:
+                return False
+            if tif_mtime < raw_newest_mtime:
+                return False
     # CH1 also needs the stitch model pickle
     if channel == 1 and not (ch_dir / "result_df.pkl").exists():
         return False
