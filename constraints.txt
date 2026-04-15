@@ -10,3 +10,19 @@
 # other packages in the KINTSUGI stack. This will be lifted when all
 # dependencies support numpy 2.x.
 numpy>=1.24.0,<2.0.0
+
+# Prevents the `bio` install (bioio-ome-tiff -> pydantic resolution) from
+# downgrading pydantic-core to 2.41.5 while pydantic stays at 2.12.x
+# (which requires pydantic-core==2.46.0). The mismatch breaks ome-types
+# validators with:
+#   "The installed pydantic-core version (2.41.5) is incompatible with
+#    the current pydantic version, which requires 2.46.0."
+# and causes `kintsugi install all` to fail post-install validation.
+pydantic-core>=2.46.0
+
+# snakemake and snakemake-interface-common require packaging<26. Without
+# this pin, commitizen 4.10+ (installed by the `dev` group) drags in
+# packaging>=26, and the `workflow` group then downgrades to 25.0,
+# leaving commitizen broken. Pinning packaging forces pip to pick a
+# commitizen release compatible with packaging<26.
+packaging>=24.0,<26

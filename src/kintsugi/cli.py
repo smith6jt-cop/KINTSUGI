@@ -408,7 +408,10 @@ def _install_all(use_conda: bool) -> None:
         )
         use_conda = True
 
-    _SKIP_FROM_ALL = {"full", "rapids"}
+    # 'docs' is excluded from 'all' because Sphinx/myst-parser are only
+    # needed to build documentation, not to run KINTSUGI. Install with
+    # `kintsugi install docs` if you need them.
+    _SKIP_FROM_ALL = {"full", "rapids", "docs"}
     extras = [k for k in OPTIONAL_GROUPS if k not in _SKIP_FROM_ALL]
     project_root = _find_project_root()
     failed_groups: list[str] = []
@@ -505,6 +508,12 @@ def _install_all(use_conda: bool) -> None:
     console.print(
         "\n[dim]Note: 'rapids' requires separate installation "
         "(NVIDIA channel). Run: kintsugi install rapids[/dim]"
+    )
+
+    # Remind about docs (excluded from 'all')
+    console.print(
+        "[dim]Note: 'docs' is excluded from 'all' (build-time only). "
+        "Run: kintsugi install docs[/dim]"
     )
 
     if failed_groups or not validation_ok:
