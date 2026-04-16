@@ -709,6 +709,175 @@ def fix_hpc_command():
 
 
 # ============================================================================
+# Workspace Commands (kintsugi-dev.code-workspace)
+# ============================================================================
+
+
+_DEFAULT_WORKSPACE_FILE = Path("/blue/maigan/smith6jt/kintsugi-dev.code-workspace")
+_DEFAULT_PROJECTS_DIR = Path("/blue/maigan/smith6jt/KINTSUGI_Projects")
+_SLOT_PREFIX = {"full": "Full Project", "test": "Test Project"}
+
+
+def _is_kintsugi_project(path: Path) -> bool:
+    return (path / "meta" / "experiment.json").is_file()
+
+
+def _resolve_workspace_target(project: str, projects_dir: Path) -> Path:
+    candidate = Path(project)
+    if not candidate.is_absolute():
+        candidate = projects_dir / project
+    return candidate.resolve()
+
+
+@main.group()
+def workspace():
+    """Manage the kintsugi-dev VS Code multi-root workspace."""
+    pass
+
+
+@workspace.command("list")
+@click.option(
+    "--projects-dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=_DEFAULT_PROJECTS_DIR,
+    show_default=True,
+    help="Directory containing project subdirectories",
+)
+def workspace_list(projects_dir: Path):
+    """List candidate projects (directories with meta/experiment.json)."""
+    matches = sorted(
+        p for p in projects_dir.iterdir() if p.is_dir() and _is_kintsugi_project(p)
+    )
+    if not matches:
+        console.print(
+            f"[yellow]No kintsugi projects (with meta/experiment.json) found in "
+            f"{projects_dir}[/yellow]"
+        )
+        return
+    table = Table(title=f"Projects under {projects_dir}")
+    table.add_column("Name", style="cyan")
+    table.add_column("Path", style="dim")
+    for p in matches:
+        table.add_row(p.name, str(p))
+    console.print(table)
+    console.print(
+        f"\n[dim]{len(matches)} project(s). "
+        f"Use 'kintsugi workspace set-project NAME' to switch.[/dim]"
+    )
+
+
+@workspace.command("set-project")
+@click.argument("project")
+@click.option(
+    "--workspace-file",
+    type=click.Path(path_type=Path),
+    default=_DEFAULT_WORKSPACE_FILE,
+    show_default=True,
+    help="VS Code multi-root workspace file to update",
+)
+@click.option(
+    "--projects-dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=_DEFAULT_PROJECTS_DIR,
+    show_default=True,
+    help="Directory used to resolve PROJECT when not absolute",
+)
+@click.option(
+    "--slot",
+    type=click.Choice(["full", "test"]),
+    default="full",
+    show_default=True,
+    help="Which workspace folder slot to update",
+)
+@click.option("--dry-run", is_flag=True, help="Preview the change without writing")
+@click.option("--force", is_flag=True, help="Allow paths missing meta/experiment.json")
+def workspace_set_project(
+    project: str,
+    workspace_file: Path,
+    projects_dir: Path,
+    slot: str,
+    dry_run: bool,
+    force: bool,
+):
+    """Update the Full Project (or Test Project) entry in the workspace file.
+
+    PROJECT is a project name (resolved against --projects-dir) or an absolute path.
+
+    \b
+    Examples:
+        kintsugi workspace set-project CX_20-005_TH_CC1-A
+        kintsugi workspace set-project /abs/path/to/project --slot full
+        kintsugi workspace set-project NAME --dry-run
+    """
+    import tempfile
+
+    workspace_file = Path(workspace_file)
+    if not workspace_file.is_file():
+        console.print(f"[red]Workspace file not found: {workspace_file}[/red]")
+        raise SystemExit(1)
+
+    target = _resolve_workspace_target(project, Path(projects_dir))
+    if not target.is_dir():
+        console.print(f"[red]Target project directory does not exist: {target}[/red]")
+        raise SystemExit(1)
+    if not _is_kintsugi_project(target) and not force:
+        console.print(
+            f"[red]Target is not a kintsugi project (no meta/experiment.json): "
+            f"{target}[/red]"
+        )
+        console.print("[yellow]Use --force to override.[/yellow]")
+        raise SystemExit(1)
+
+    with open(workspace_file) as f:
+        config = json.load(f)
+
+    folders = config.get("folders", [])
+    prefix = _SLOT_PREFIX[slot]
+    slot_index = next(
+        (
+            i
+            for i, entry in enumerate(folders)
+            if isinstance(entry.get("name"), str) and entry["name"].startswith(prefix)
+        ),
+        None,
+    )
+    if slot_index is None:
+        console.print(f"[red]No '{prefix}' folder found in {workspace_file}[/red]")
+        console.print(f"Existing folders: {[entry.get('name') for entry in folders]}")
+        raise SystemExit(1)
+
+    new_path = str(target)
+    new_name = f"{prefix} ({target.name})"
+    old = folders[slot_index].copy()
+    folders[slot_index]["path"] = new_path
+    folders[slot_index]["name"] = new_name
+
+    console.print(f"[bold]{prefix} slot[/bold]")
+    console.print(f"  before: {old.get('name')!r} -> {old.get('path')}")
+    console.print(f"  after:  {new_name!r} -> {new_path}")
+
+    if dry_run:
+        console.print("[yellow]--dry-run: not writing file[/yellow]")
+        return
+
+    fd, tmp = tempfile.mkstemp(prefix=workspace_file.name + ".", dir=workspace_file.parent)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(config, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, workspace_file)
+    except Exception:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+    console.print(f"[green]Updated {workspace_file}[/green]")
+    console.print(
+        "[dim]Reload VS Code window (Cmd/Ctrl+Shift+P -> 'Reload Window') "
+        "to see the change.[/dim]"
+    )
+
+
+# ============================================================================
 # MCP Server Commands for Claude Code Integration
 # ============================================================================
 

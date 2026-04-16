@@ -158,6 +158,18 @@ Use the VS Code multi-root workspace (`kintsugi-dev.code-workspace`) which combi
 
 Notebooks default to mini_project for testing. Change `PROJECT_DIR` for other projects.
 
+To swap the **Full Project** slot to a different dataset without editing JSON by hand:
+
+```bash
+kintsugi workspace list                              # show all candidate projects
+kintsugi workspace set-project CX_20-005_TH_CC1-A    # swap by name (resolved under KINTSUGI_Projects/)
+kintsugi workspace set-project /abs/path/to/project  # or by absolute path
+kintsugi workspace set-project NAME --dry-run        # preview the change
+kintsugi workspace set-project NAME --slot test      # update the Test Project slot instead
+```
+
+After switching, reload the VS Code window (Cmd/Ctrl+Shift+P -> "Reload Window").
+
 ### Automatic Project Sync
 
 **Always edit `KINTSUGI/notebooks/` first** — never edit project folders directly. A git post-commit hook auto-syncs notebook modules and Python files to all project folders via `scripts/sync_to_projects.py` (MD5 checksum comparison). Manual sync: `python scripts/sync_to_projects.py [--dry-run|--force]`.
