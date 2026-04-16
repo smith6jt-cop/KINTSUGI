@@ -73,7 +73,7 @@ dependencies:
   # Versions pinned to reduce solver space and avoid cross-channel conflicts.
   - pytorch>=2.0
   - torchvision
-  - pytorch-cuda=12.4
+  - pytorch-cuda=12.8
   - cuda-libraries=12.*
   - cuda-cudart-dev=12.*
 

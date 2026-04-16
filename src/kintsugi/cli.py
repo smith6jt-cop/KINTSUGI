@@ -344,6 +344,12 @@ def install(group: str | None, list_groups: bool, use_conda: bool):
     if "note" in info:
         console.print(f"[yellow]Note: {info['note']}[/yellow]")
 
+    # Auto-apply SLURM TRES patch if the jobstep plugin is installed.
+    # Idempotent: the patcher skips if the marker is already in the plugin
+    # source, so it's safe (and cheap) to call on every install — e.g., a
+    # `viz`-only install is a no-op because the plugin isn't installed.
+    _auto_patch_slurm_tres()
+
     # Post-install validation
     if not _post_install_validate():
         console.print(
@@ -355,7 +361,12 @@ def install(group: str | None, list_groups: bool, use_conda: bool):
 
 
 def _post_install_validate() -> bool:
-    """Run post-install validation. Returns False if critical errors found."""
+    """Run post-install validation. Returns False if critical errors found.
+
+    PENDING statuses (library loads that will clear after conda reactivation)
+    do NOT count as failures — the install is treated as a success and the
+    user gets a single banner telling them to reactivate.
+    """
     from kintsugi.deps import DependencyChecker, DependencyStatus
 
     console.print("\n[dim]Validating environment...[/dim]")
@@ -382,6 +393,15 @@ def _post_install_validate() -> bool:
         for err in errors:
             console.print(f"  [yellow]{err.name}: {err.message}[/yellow]")
         console.print("[dim]Run 'kintsugi check --strict' for full details[/dim]")
+
+    # Single clear banner when activation scripts were just deployed — avoids
+    # the cascade of red CXXABI/GLIBCXX errors that used to scare the user on
+    # a fresh install.
+    if checker._libstdcxx_pending:
+        console.print("\n[yellow]⚠  Environment activation scripts were just deployed.[/yellow]")
+        console.print("[yellow]   Reactivate the env to verify all libraries load:[/yellow]")
+        console.print("[yellow]     conda deactivate && conda activate KINTSUGI[/yellow]")
+        console.print("[yellow]     kintsugi check[/yellow]")
 
     return True
 

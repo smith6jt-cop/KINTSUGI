@@ -428,7 +428,7 @@ Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, py
 
 **Constraint guards** prevent known-bad dependency combinations:
 - `constraints.txt` at repo root enforces `numpy<2.0` — auto-injected into all `kintsugi install` pip commands
-- All torch-using groups (`gpu`, `dl`, `denoise`, `kronos`) use `--index-url https://download.pytorch.org/whl/cu124` to avoid CPU-only torch
+- All torch-using groups (`gpu`, `dl`, `denoise`, `kronos`) use `--index-url https://download.pytorch.org/whl/cu128` to avoid CPU-only torch (cu128 supports Blackwell/B200 sm_100)
 - `analysis`, `bio`, `kronos` groups have explicit `numpy>=1.24.0,<2.0.0` in pyproject.toml extras
 - Pre-install guards warn before installing groups that would break existing packages
 

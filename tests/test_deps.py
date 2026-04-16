@@ -374,8 +374,8 @@ class TestPreInstallGuard:
         from kintsugi.deps import _pre_install_guard
 
         mock_torch = types.ModuleType("torch")
-        mock_torch.__version__ = "2.5.0+cu124"
-        mock_torch_version = types.SimpleNamespace(cuda="12.4")
+        mock_torch.__version__ = "2.5.0+cu128"
+        mock_torch_version = types.SimpleNamespace(cuda="12.8")
         mock_torch.version = mock_torch_version
 
         with patch.dict(sys.modules, {"torch": mock_torch}):
