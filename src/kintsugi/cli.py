@@ -398,12 +398,8 @@ def _post_install_validate() -> bool:
     # the cascade of red CXXABI/GLIBCXX errors that used to scare the user on
     # a fresh install.
     if checker._libstdcxx_pending:
-        console.print(
-            "\n[yellow]⚠  Environment activation scripts were just deployed.[/yellow]"
-        )
-        console.print(
-            "[yellow]   Reactivate the env to verify all libraries load:[/yellow]"
-        )
+        console.print("\n[yellow]⚠  Environment activation scripts were just deployed.[/yellow]")
+        console.print("[yellow]   Reactivate the env to verify all libraries load:[/yellow]")
         console.print("[yellow]     conda deactivate && conda activate KINTSUGI[/yellow]")
         console.print("[yellow]     kintsugi check[/yellow]")
 

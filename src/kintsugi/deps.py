@@ -1240,8 +1240,7 @@ class DependencyChecker:
         required_missing = [
             r.name
             for r in self.results
-            if not r.is_optional
-            and r.status not in (DependencyStatus.OK, DependencyStatus.PENDING)
+            if not r.is_optional and r.status not in (DependencyStatus.OK, DependencyStatus.PENDING)
         ]
         required_pending = [
             r.name
@@ -1310,9 +1309,7 @@ class DependencyChecker:
                     print(f"    - {name}")
                 print("\n  Install with: pip install -e .")
             elif required_pending:
-                print(
-                    "\n  ⚠ Environment activation scripts were just deployed."
-                )
+                print("\n  ⚠ Environment activation scripts were just deployed.")
                 print("     Reactivate to verify the remaining checks:")
                 print("       conda deactivate && conda activate KINTSUGI")
                 print("       kintsugi check")
