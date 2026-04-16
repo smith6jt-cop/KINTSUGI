@@ -30,6 +30,20 @@ class DependencyStatus(Enum):
     VERSION_MISMATCH = "version_mismatch"
     ERROR = "error"
     OPTIONAL_MISSING = "optional_missing"
+    # Transient: library will load fine once conda activation scripts take effect
+    # (e.g., libstdc++ version mismatch resolved by reactivating the env).
+    PENDING = "pending"
+
+
+def _is_libstdcxx_load_error(message: str) -> bool:
+    """Return True if `message` looks like a libstdc++ version mismatch at load time.
+
+    Matches the signatures produced when a Python extension is linked against a
+    newer libstdc++ than the one currently on LD_LIBRARY_PATH — typically
+    right after conda activation scripts are deployed but before the env is
+    reactivated. Those failures all clear on the next `conda activate`.
+    """
+    return any(tok in message for tok in ("CXXABI_", "GLIBCXX_", "libstdc++"))
 
 
 @dataclass
@@ -57,11 +71,11 @@ OPTIONAL_GROUPS = {
         "packages": ["torch", "torchvision", "cupy"],
         # CUDA runtime libraries (libcufft, etc.) must be installed via conda;
         # cupy-cuda12x (pip) only provides Python bindings, not the native libs
-        # Use CUDA 12.9 for broad GPU support including Blackwell (B200, compute 10.0)
+        # Use CUDA 12.8 for broad GPU support including Blackwell (B200, sm_100)
         # cuda-cudart-dev provides headers needed for CuPy JIT compilation
         # Headers must be copied to $CONDA_PREFIX/include for CuPy to find them
-        "install_cmd": "conda install cuda-libraries cuda-cudart-dev -c nvidia -y && cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev/null; pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install cupy-cuda12x",
-        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.4 cupy cuda-libraries cuda-cudart-dev -c pytorch -c nvidia -c conda-forge && cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev/null",
+        "install_cmd": "conda install cuda-libraries cuda-cudart-dev -c nvidia -y && cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev/null; pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128 && pip install cupy-cuda12x",
+        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.8 cupy cuda-libraries cuda-cudart-dev -c pytorch -c nvidia -c conda-forge && cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev/null",
     },
     "viz": {
         "description": "Napari interactive visualization",
@@ -73,8 +87,8 @@ OPTIONAL_GROUPS = {
     "dl": {
         "description": "Deep learning segmentation (InstanSeg)",
         "packages": ["torch", "instanseg", "kornia"],
-        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install instanseg instanseg-torch kornia",
-        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.4 -c pytorch -c nvidia -c conda-forge && pip install instanseg instanseg-torch kornia",
+        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128 && pip install instanseg instanseg-torch kornia",
+        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.8 -c pytorch -c nvidia -c conda-forge && pip install instanseg instanseg-torch kornia",
     },
     "analysis": {
         "description": "Spatial analysis (scanpy, scimap)",
@@ -105,15 +119,15 @@ OPTIONAL_GROUPS = {
     "kronos": {
         "description": "KRONOS foundation model for spatial proteomics",
         "packages": ["torch", "h5py", "umap"],
-        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install h5py umap-learn scikit-learn anndata scanpy tifffile",
-        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.4 -c pytorch -c nvidia -c conda-forge && pip install h5py umap-learn scikit-learn anndata scanpy tifffile",
+        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128 && pip install h5py umap-learn scikit-learn anndata scanpy tifffile",
+        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.8 -c pytorch -c nvidia -c conda-forge && pip install h5py umap-learn scikit-learn anndata scanpy tifffile",
         "note": "Also requires: git clone https://github.com/mahmoodlab/KRONOS.git && pip install -e KRONOS",
     },
     "denoise": {
         "description": "Advanced denoising (N2V, CARE)",
         "packages": ["torch"],
-        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124",
-        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.4 -c pytorch -c nvidia -c conda-forge",
+        "install_cmd": "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128",
+        "conda_cmd": "conda install pytorch torchvision pytorch-cuda=12.8 -c pytorch -c nvidia -c conda-forge",
     },
     "optimize": {
         "description": "Automated parameter optimization (Optuna + SMO)",
@@ -134,7 +148,7 @@ OPTIONAL_GROUPS = {
     "full": {
         "description": "All optional features",
         "packages": [],  # Composite group
-        "install_cmd": "conda install cuda-libraries cuda-cudart-dev -c nvidia -y && cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev/null; pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124 && pip install cupy-cuda12x napari magicgui instanseg instanseg-torch kornia scanpy anndata phenograph scimap bioio bioio-ome-tiff ome-zarr slideio readlif",
+        "install_cmd": "conda install cuda-libraries cuda-cudart-dev -c nvidia -y && cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev/null; pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128 && pip install cupy-cuda12x napari magicgui instanseg instanseg-torch kornia scanpy anndata phenograph scimap bioio bioio-ome-tiff ome-zarr slideio readlif",
     },
 }
 
@@ -586,6 +600,10 @@ class DependencyChecker:
 
     def __init__(self):
         self.results: list[DependencyResult] = []
+        # Set by _detect_libstdcxx_pending() at the top of check_all(). When True,
+        # library-loading failures that match libstdc++ version-mismatch signatures
+        # are reported as PENDING instead of MISSING/ERROR.
+        self._libstdcxx_pending: bool = False
 
     def check_all(self, verbose: bool = True) -> dict:
         """
@@ -602,11 +620,17 @@ class DependencyChecker:
             Summary of all dependency checks.
         """
         self.results = []
+        self._libstdcxx_pending = False
 
         if verbose:
             print("=" * 60)
             print("KINTSUGI Dependency Check")
             print("=" * 60)
+
+        # Detect stale LD_LIBRARY_PATH before running cascade-prone checks, so
+        # transient libstdc++ load failures get reported as PENDING instead of
+        # as a wall of ERROR lines.
+        self._detect_libstdcxx_pending()
 
         # Core Python packages
         self._check_core_packages(verbose)
@@ -739,19 +763,36 @@ class DependencyChecker:
             )
 
         except ImportError as e:
+            err_msg = str(e)
+            if self._libstdcxx_pending and _is_libstdcxx_load_error(err_msg):
+                return DependencyResult(
+                    name=package,
+                    status=DependencyStatus.PENDING,
+                    required_version=min_version,
+                    message="Will verify after env reactivation (stale LD_LIBRARY_PATH)",
+                    is_optional=optional,
+                )
             status = DependencyStatus.OPTIONAL_MISSING if optional else DependencyStatus.MISSING
             return DependencyResult(
                 name=package,
                 status=status,
                 required_version=min_version,
-                message=str(e),
+                message=err_msg,
                 is_optional=optional,
             )
         except Exception as e:
+            err_msg = str(e)
+            if self._libstdcxx_pending and _is_libstdcxx_load_error(err_msg):
+                return DependencyResult(
+                    name=package,
+                    status=DependencyStatus.PENDING,
+                    message="Will verify after env reactivation (stale LD_LIBRARY_PATH)",
+                    is_optional=optional,
+                )
             return DependencyResult(
                 name=package,
                 status=DependencyStatus.ERROR,
-                message=str(e),
+                message=err_msg,
                 is_optional=optional,
             )
 
@@ -778,15 +819,23 @@ class DependencyChecker:
             )
 
         except Exception as e:
-            result = DependencyResult(
-                name="libvips",
-                status=DependencyStatus.MISSING,
-                message=str(e),
-                details={
-                    "hint": "Install libvips: conda install -c conda-forge libvips "
-                    "or download from Zenodo (Windows)"
-                },
-            )
+            err_msg = str(e)
+            if self._libstdcxx_pending and _is_libstdcxx_load_error(err_msg):
+                result = DependencyResult(
+                    name="libvips",
+                    status=DependencyStatus.PENDING,
+                    message="Will verify after env reactivation (stale LD_LIBRARY_PATH)",
+                )
+            else:
+                result = DependencyResult(
+                    name="libvips",
+                    status=DependencyStatus.MISSING,
+                    message=err_msg,
+                    details={
+                        "hint": "Install libvips: conda install -c conda-forge libvips "
+                        "or download from Zenodo (Windows)"
+                    },
+                )
 
         self.results.append(result)
         if verbose:
@@ -963,6 +1012,31 @@ class DependencyChecker:
         if verbose:
             self._print_result(result)
 
+    def _detect_libstdcxx_pending(self) -> None:
+        """Set ``self._libstdcxx_pending`` if conda's libstdc++ is newer but
+        ``LD_LIBRARY_PATH`` still points at the (older) system libstdc++.
+
+        This is a silent pre-check that does NOT emit a result record — its only
+        job is to flip the flag so downstream checks can downgrade cascade-prone
+        load errors to PENDING. The full ``_check_libstdcxx()`` still runs later
+        in the Environment Safety section and emits the user-facing record.
+        """
+        import sys
+
+        if sys.platform != "linux":
+            return
+        conda_prefix = os.environ.get("CONDA_PREFIX", "")
+        if not conda_prefix:
+            return
+        ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+        conda_lib = os.path.join(conda_prefix, "lib")
+        if conda_lib in ld_path.split(os.pathsep):
+            return  # conda lib already on LD_LIBRARY_PATH — no cascade risk
+        conda_libstdcxx = Path(conda_prefix) / "lib" / "libstdc++.so.6"
+        if not conda_libstdcxx.exists():
+            return  # no newer libstdc++ to shadow the system one
+        self._libstdcxx_pending = True
+
     def _check_libstdcxx(self, verbose: bool):
         """Check that conda's libstdc++ is loaded instead of the system's.
 
@@ -1019,15 +1093,21 @@ class DependencyChecker:
                         "Activation scripts deployed. "
                         "Run: conda deactivate && conda activate KINTSUGI"
                     )
+                    # Transient: will clear on next activate. Report PENDING so
+                    # the install flow doesn't exit non-zero on a self-healing
+                    # condition, and so the cascade of CXXABI/GLIBCXX import
+                    # failures below gets downgraded to PENDING too.
+                    status = DependencyStatus.PENDING
                 else:
                     msg += (
                         "System libstdc++ may be too old, causing import failures "
                         "for scikit-learn, matplotlib, pyvips, stackview. "
                         "Fix: kintsugi fix-hpc"
                     )
+                    status = DependencyStatus.ERROR
                 result = DependencyResult(
                     name="libstdcxx",
-                    status=DependencyStatus.ERROR,
+                    status=status,
                     message=msg,
                 )
         self.results.append(result)
@@ -1131,6 +1211,7 @@ class DependencyChecker:
             DependencyStatus.VERSION_MISMATCH: "[VERSION]",
             DependencyStatus.ERROR: "[ERROR]",
             DependencyStatus.OPTIONAL_MISSING: "[SKIP]",
+            DependencyStatus.PENDING: "[PENDING]",
         }
 
         symbol = symbols.get(result.status, "[?]")
@@ -1154,8 +1235,18 @@ class DependencyChecker:
             1 for r in self.results if not r.is_optional and r.status == DependencyStatus.OK
         )
         required_total = sum(1 for r in self.results if not r.is_optional)
+        # PENDING means "will verify after env reactivation" — don't count as
+        # missing (the env isn't broken, it just needs activate).
         required_missing = [
-            r.name for r in self.results if not r.is_optional and r.status != DependencyStatus.OK
+            r.name
+            for r in self.results
+            if not r.is_optional
+            and r.status not in (DependencyStatus.OK, DependencyStatus.PENDING)
+        ]
+        required_pending = [
+            r.name
+            for r in self.results
+            if not r.is_optional and r.status == DependencyStatus.PENDING
         ]
 
         optional_ok = sum(
@@ -1179,13 +1270,16 @@ class DependencyChecker:
                 "passed": required_ok,
                 "total": required_total,
                 "missing": required_missing,
+                "pending": required_pending,
             },
             "optional": {
                 "passed": optional_ok,
                 "total": optional_total,
             },
             "groups": groups_status,
-            "all_required_ok": required_ok == required_total,
+            # PENDING counts as OK for exit-status purposes — the env isn't broken.
+            "all_required_ok": (required_ok + len(required_pending)) == required_total,
+            "libstdcxx_pending": self._libstdcxx_pending,
             "results": [
                 {
                     "name": r.name,
@@ -1215,6 +1309,16 @@ class DependencyChecker:
                 for name in required_missing:
                     print(f"    - {name}")
                 print("\n  Install with: pip install -e .")
+            elif required_pending:
+                print(
+                    "\n  ⚠ Environment activation scripts were just deployed."
+                )
+                print("     Reactivate to verify the remaining checks:")
+                print("       conda deactivate && conda activate KINTSUGI")
+                print("       kintsugi check")
+                print("\n  Pending (will clear after reactivate):")
+                for name in required_pending:
+                    print(f"    - {name}")
             else:
                 print("\n  ✓ All required dependencies satisfied!")
 

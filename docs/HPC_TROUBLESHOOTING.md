@@ -91,13 +91,13 @@ cp -r $CONDA_PREFIX/targets/x86_64-linux/include/* $CONDA_PREFIX/include/ 2>/dev
 pip uninstall torch torchvision -y
 
 # Re-install from PyTorch CUDA channel
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
 # Or via conda (preferred on HPC):
-conda install pytorch torchvision pytorch-cuda=12.4 -c pytorch -c nvidia -c conda-forge
+conda install pytorch torchvision pytorch-cuda=12.8 -c pytorch -c nvidia -c conda-forge
 ```
 
-**Prevention:** Use `envs/env-hpc.yml` which installs PyTorch from the `pytorch` conda channel with `pytorch-cuda=12.4`. Never run bare `pip install torch` on HPC — always use the CUDA index URL.
+**Prevention:** Use `envs/env-hpc.yml` which installs PyTorch from the `pytorch` conda channel with `pytorch-cuda=12.8`. Never run bare `pip install torch` on HPC — always use the CUDA index URL.
 
 ## Issue 5: SLURM Jobs Fail With TRES Error
 
