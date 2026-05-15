@@ -332,6 +332,110 @@ def make_channel_names_unique(channel_dict: Dict[int, List[str]]) -> Dict[int, L
 
 
 # =============================================================================
+# CYCLE DIRECTORY NORMALIZATION
+# =============================================================================
+
+_CYCLE_DIR_LONG_RE = re.compile(
+    r"^(?:cyc|cycle)[_\-]?(\d+)(?:_reg\d+)?(?:[_\-].*)?$",
+    re.IGNORECASE,
+)
+
+
+def normalize_cycle_dirs(
+    raw_dir: Union[str, Path],
+    width: int = 3,
+    dry_run: bool = False,
+    verbose: bool = True,
+) -> Dict[str, str]:
+    """
+    Rename long-form cycle folders to short form (e.g. ``cyc001``).
+
+    CODEX raw data often comes with long folder names like
+    ``cyc004_reg001_211206_201615``. Downstream notebook cells and hard-coded
+    glob patterns expect the short form ``cyc004``. This helper normalizes
+    cycle folders in-place so the rest of the pipeline can assume short names.
+
+    Matching rule: any directory whose name matches
+    ``(cyc|cycle)[-_]?<N>(_reg<M>)?(<anything>)?`` is renamed to
+    ``cyc<N zero-padded to `width`>``.
+
+    The function is idempotent — folders already in short form are left alone.
+    If the target name already exists as a different directory, the rename is
+    skipped for that folder and an error is raised at the end listing all
+    collisions (nothing is overwritten).
+
+    Parameters
+    ----------
+    raw_dir : str or Path
+        Directory containing cycle folders (typically ``project.paths.raw``).
+    width : int
+        Zero-padding width for the cycle number (default 3 → ``cyc001``).
+    dry_run : bool
+        If True, print what would happen without renaming anything.
+    verbose : bool
+        If True (default), print each rename.
+
+    Returns
+    -------
+    dict
+        Mapping of ``{original_name: new_name}`` for folders that were
+        renamed (or would be, in dry-run mode). Already-short folders are
+        not included.
+
+    Raises
+    ------
+    RuntimeError
+        If one or more renames would collide with an existing different
+        directory. No folders are renamed in that case.
+    """
+    raw_dir = Path(raw_dir)
+    if not raw_dir.exists():
+        return {}
+
+    renames: Dict[str, str] = {}
+    collisions: List[Tuple[str, str]] = []
+
+    for item in sorted(raw_dir.iterdir()):
+        if not item.is_dir():
+            continue
+        match = _CYCLE_DIR_LONG_RE.match(item.name)
+        if not match:
+            continue
+
+        cycle_num = int(match.group(1))
+        short_name = f"cyc{cycle_num:0{width}d}"
+
+        if item.name == short_name:
+            continue  # already normalized
+
+        target = raw_dir / short_name
+        if target.exists() and target.resolve() != item.resolve():
+            collisions.append((item.name, short_name))
+            continue
+
+        renames[item.name] = short_name
+
+    if collisions:
+        lines = [f"  {old} -> {new} (target already exists)" for old, new in collisions]
+        raise RuntimeError(
+            "Cannot normalize cycle directories: target names collide with "
+            "existing folders:\n" + "\n".join(lines)
+        )
+
+    if not renames:
+        return renames
+
+    for old_name, new_name in renames.items():
+        if verbose or dry_run:
+            prefix = "[dry-run] " if dry_run else ""
+            print(f"  {prefix}{old_name} -> {new_name}")
+        if not dry_run:
+            (raw_dir / old_name).rename(raw_dir / new_name)
+
+    return renames
+
+
+# =============================================================================
 # OME-TIFF CHANNEL EXTRACTION
 # =============================================================================
 

@@ -203,6 +203,8 @@ my_project/
 
 > **Tip**: If you run `kintsugi init` on a directory that already has raw data, it will detect and organize the data automatically.
 
+> **CODEX long-form names**: Raw folders from CODEX acquisitions (e.g. `cyc004_reg001_211206_201615`) are renamed to short form (`cyc004`) the first time you open Notebook 1 or Notebook 2 via `Kio.normalize_cycle_dirs()`. The Snakemake workflow also resolves long-form names automatically (`workflow/scripts/stitch.py:find_cycle_dir()`), so no manual rename is required either way.
+
 ## HPC Quick Start (SLURM)
 
 For large datasets on HPC clusters, use the Snakemake workflow:

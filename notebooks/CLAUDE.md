@@ -49,6 +49,26 @@ When users report `NameError: name 'function_name' is not defined`:
 
 4. **Solution**: Run cells sequentially from the top, or at minimum run the definition cell before the calling cell.
 
+## Shared Notebook Utilities (`Kio.py`)
+
+Canonical home for helpers used by more than one notebook. Add functions here instead of duplicating in notebook cells.
+
+| Helper | Purpose | Used by |
+|--------|---------|---------|
+| `load_channel_names()` | Parse `CHANNELNAMES.txt` (multiple formats) | Notebooks 1, 2, 3 |
+| `make_channel_names_unique()` | Disambiguate duplicate Blank/Empty names | Notebooks 1, 2 |
+| `save_channel_names_template()` | Write a `CHANNELNAMES.txt` starter | Notebook 1 |
+| `extract_channels_from_ome()` | OME-TIFF → per-channel TIFFs | Notebook 4 |
+| `normalize_cycle_dirs()` | Rename long-form CODEX cycle folders (e.g. `cyc004_reg001_211206_201615` → `cyc004`) | Notebooks 1 cell 5, 2 cell 6 |
+| `load_tiles_parallel()` / `load_stack_parallel()` | Threaded tile/z-stack loading | Notebook 2 |
+| `ProgressCounter`, `ProcessingConfig`, `zarr_write_lock` | Shared dataclasses | Notebook 2 |
+
+### Cycle Directory Normalization
+
+Raw CODEX folders can arrive as `cyc004_reg001_211206_201615`, but Notebook 1 cell 14 and Notebook 2 cells 13/16/42 all hard-code short-form paths like `f"cyc{cycle:03d}"`. The `normalize_cycle_dirs(raw_dir, width=3, dry_run=False)` helper renames in place, is idempotent, and raises `RuntimeError` on collisions (never overwrites).
+
+This was previously a cell in Notebook 2 that got dropped. Both notebooks now call it automatically before `find_raw_cycles()`. The SLURM/Snakemake path uses a different mechanism (`workflow/scripts/stitch.py:find_cycle_dir()` resolves long-form at glob time) and is unaffected.
+
 ## Notebook 4: Segmentation & Spatial Analysis
 
 Notebook 4 provides a comprehensive workflow for cell segmentation, feature extraction, and spatial analysis:
