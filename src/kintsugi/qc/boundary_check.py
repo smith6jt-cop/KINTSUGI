@@ -50,8 +50,8 @@ class BoundaryInfo:
     overlap_end: int
     extent_start: int
     extent_end: int
-    tile_a: tuple[int, int]    # (row, col) of one tile
-    tile_b: tuple[int, int]    # (row, col) of the adjacent tile
+    tile_a: tuple[int, int]  # (row, col) of one tile
+    tile_b: tuple[int, int]  # (row, col) of the adjacent tile
 
     @property
     def coord(self) -> int:
@@ -100,15 +100,17 @@ def compute_boundary_positions(
                 y_start = int(round(max(tile.y_pos2, right.y_pos2)))
                 y_end = int(round(min(tile.y_pos2 + tile_h, right.y_pos2 + tile_h)))
                 if y_end > y_start:
-                    boundaries.append(BoundaryInfo(
-                        orientation="vertical",
-                        overlap_start=x_ov_start,
-                        overlap_end=x_ov_end,
-                        extent_start=y_start,
-                        extent_end=y_end,
-                        tile_a=(row, col),
-                        tile_b=(row, col + 1),
-                    ))
+                    boundaries.append(
+                        BoundaryInfo(
+                            orientation="vertical",
+                            overlap_start=x_ov_start,
+                            overlap_end=x_ov_end,
+                            extent_start=y_start,
+                            extent_end=y_end,
+                            tile_a=(row, col),
+                            tile_b=(row, col + 1),
+                        )
+                    )
 
         # Bottom neighbor → horizontal boundary
         below = by_rc.get((row + 1, col))
@@ -119,15 +121,17 @@ def compute_boundary_positions(
                 x_start = int(round(max(tile.x_pos2, below.x_pos2)))
                 x_end = int(round(min(tile.x_pos2 + tile_w, below.x_pos2 + tile_w)))
                 if x_end > x_start:
-                    boundaries.append(BoundaryInfo(
-                        orientation="horizontal",
-                        overlap_start=y_ov_start,
-                        overlap_end=y_ov_end,
-                        extent_start=x_start,
-                        extent_end=x_end,
-                        tile_a=(row, col),
-                        tile_b=(row + 1, col),
-                    ))
+                    boundaries.append(
+                        BoundaryInfo(
+                            orientation="horizontal",
+                            overlap_start=y_ov_start,
+                            overlap_end=y_ov_end,
+                            extent_start=x_start,
+                            extent_end=x_end,
+                            tile_a=(row, col),
+                            tile_b=(row + 1, col),
+                        )
+                    )
 
     boundaries.sort(key=lambda b: (b.orientation, b.tile_a))
     return boundaries
@@ -299,14 +303,16 @@ def check_boundary_quality(
     for idx, b in enumerate(boundaries):
         score = scores.get(idx, float("nan"))
         if not np.isnan(score) and score < threshold:
-            flagged.append({
-                "index": idx,
-                "orientation": b.orientation,
-                "coord": b.coord,
-                "tile_a": b.tile_a,
-                "tile_b": b.tile_b,
-                "score": score,
-            })
+            flagged.append(
+                {
+                    "index": idx,
+                    "orientation": b.orientation,
+                    "coord": b.coord,
+                    "tile_a": b.tile_a,
+                    "tile_b": b.tile_b,
+                    "score": score,
+                }
+            )
 
     flagged.sort(key=lambda d: d["score"])  # worst (lowest) first
     return (len(flagged) == 0), flagged, scores

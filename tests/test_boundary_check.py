@@ -8,17 +8,16 @@ import pytest
 from scipy.ndimage import gaussian_filter
 
 from kintsugi.qc.boundary_check import (
-    BoundaryInfo,
     check_boundary_quality,
     compute_boundary_positions,
     measure_boundary_discontinuity,
     select_alternate_zplanes,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_result_df(
     n_rows: int,
@@ -33,10 +32,14 @@ def _make_result_df(
     rows = []
     for r in range(n_rows):
         for c in range(n_cols):
-            rows.append({
-                "row": r, "col": c,
-                "y_pos": r * step_y, "x_pos": c * step_x,
-            })
+            rows.append(
+                {
+                    "row": r,
+                    "col": c,
+                    "y_pos": r * step_y,
+                    "x_pos": c * step_x,
+                }
+            )
     return pd.DataFrame(rows)
 
 
@@ -50,6 +53,7 @@ def _build_sharp_image(shape: tuple[int, int], seed: int = 0) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # compute_boundary_positions
 # ---------------------------------------------------------------------------
+
 
 def test_compute_boundary_positions_3x3_count():
     """3x3 grid → 6 vertical + 6 horizontal = 12 boundaries."""
@@ -72,7 +76,7 @@ def test_compute_boundary_positions_overlap_extent():
     assert b.orientation == "vertical"
     assert b.overlap_start == 70
     assert b.overlap_end == 100
-    assert b.coord == 85   # midline
+    assert b.coord == 85  # midline
     assert b.extent_start == 0
     assert b.extent_end == 100
     assert b.tile_a == (0, 0)
@@ -99,6 +103,7 @@ def test_compute_boundary_positions_rejects_bad_df():
 # measure_boundary_discontinuity (sharpness ratio)
 # ---------------------------------------------------------------------------
 
+
 def test_measure_sharpness_ratio_aligned():
     """When overlap has the same sharpness as adjacent → ratio ≈ 1.0."""
     # Build a long strip where sharpness is uniform (same random pattern
@@ -108,10 +113,12 @@ def test_measure_sharpness_ratio_aligned():
     img = rng.integers(100, 500, size=(100, 230), dtype=np.uint16)
 
     # Boundary: overlap spans x=100..130 (30px wide)
-    df = pd.DataFrame([
-        {"row": 0, "col": 0, "y_pos": 0, "x_pos": 0},
-        {"row": 0, "col": 1, "y_pos": 0, "x_pos": 100},
-    ])
+    df = pd.DataFrame(
+        [
+            {"row": 0, "col": 0, "y_pos": 0, "x_pos": 0},
+            {"row": 0, "col": 1, "y_pos": 0, "x_pos": 100},
+        ]
+    )
     boundaries = compute_boundary_positions(df, tile_h=100, tile_w=130)
     scores = measure_boundary_discontinuity(img, boundaries)
     valid = [s for s in scores.values() if not np.isnan(s)]
@@ -130,10 +137,12 @@ def test_measure_sharpness_ratio_blurred_overlap():
     img_mixed[:, 100:130] = blurred_overlap
     img_mixed = img_mixed.astype(np.uint16)
 
-    df = pd.DataFrame([
-        {"row": 0, "col": 0, "y_pos": 0, "x_pos": 0},
-        {"row": 0, "col": 1, "y_pos": 0, "x_pos": 100},
-    ])
+    df = pd.DataFrame(
+        [
+            {"row": 0, "col": 0, "y_pos": 0, "x_pos": 0},
+            {"row": 0, "col": 1, "y_pos": 0, "x_pos": 100},
+        ]
+    )
     boundaries = compute_boundary_positions(df, tile_h=100, tile_w=130)
     scores = measure_boundary_discontinuity(img_mixed, boundaries)
     valid = [s for s in scores.values() if not np.isnan(s)]
@@ -145,10 +154,12 @@ def test_measure_sharpness_ratio_blurred_overlap():
 def test_measure_sharpness_background_returns_nan():
     """All-background overlap and adjacent → NaN."""
     img = np.zeros((100, 230), dtype=np.uint16)
-    df = pd.DataFrame([
-        {"row": 0, "col": 0, "y_pos": 0, "x_pos": 0},
-        {"row": 0, "col": 1, "y_pos": 0, "x_pos": 100},
-    ])
+    df = pd.DataFrame(
+        [
+            {"row": 0, "col": 0, "y_pos": 0, "x_pos": 0},
+            {"row": 0, "col": 1, "y_pos": 0, "x_pos": 100},
+        ]
+    )
     boundaries = compute_boundary_positions(df, tile_h=100, tile_w=130)
     scores = measure_boundary_discontinuity(img, boundaries)
     assert np.isnan(scores[0])
@@ -158,16 +169,23 @@ def test_measure_sharpness_background_returns_nan():
 # check_boundary_quality
 # ---------------------------------------------------------------------------
 
+
 def test_check_boundary_quality_passes_on_aligned():
     """Uniform texture → all boundaries pass."""
     rng = np.random.default_rng(1)
     img = rng.integers(100, 500, size=(100, 230), dtype=np.uint16)
-    df = pd.DataFrame([
-        {"row": 0, "col": 0, "y_pos": 0, "x_pos": 0},
-        {"row": 0, "col": 1, "y_pos": 0, "x_pos": 100},
-    ])
+    df = pd.DataFrame(
+        [
+            {"row": 0, "col": 0, "y_pos": 0, "x_pos": 0},
+            {"row": 0, "col": 1, "y_pos": 0, "x_pos": 100},
+        ]
+    )
     passed, flagged, scores = check_boundary_quality(
-        img, df, tile_h=100, tile_w=130, threshold=0.7,
+        img,
+        df,
+        tile_h=100,
+        tile_w=130,
+        threshold=0.7,
     )
     assert passed, f"aligned should pass, flagged={flagged}"
 
@@ -181,12 +199,18 @@ def test_check_boundary_quality_flags_blurred():
     img_mixed[:, 100:130] = blurred
     img_mixed = img_mixed.astype(np.uint16)
 
-    df = pd.DataFrame([
-        {"row": 0, "col": 0, "y_pos": 0, "x_pos": 0},
-        {"row": 0, "col": 1, "y_pos": 0, "x_pos": 100},
-    ])
+    df = pd.DataFrame(
+        [
+            {"row": 0, "col": 0, "y_pos": 0, "x_pos": 0},
+            {"row": 0, "col": 1, "y_pos": 0, "x_pos": 100},
+        ]
+    )
     passed, flagged, scores = check_boundary_quality(
-        img_mixed, df, tile_h=100, tile_w=130, threshold=0.7,
+        img_mixed,
+        df,
+        tile_h=100,
+        tile_w=130,
+        threshold=0.7,
     )
     assert not passed
     assert len(flagged) == 1
@@ -210,7 +234,11 @@ def test_check_boundary_quality_worst_first():
 
     df = _make_result_df(1, 3, tile_h=100, tile_w=100, overlap=0.3)
     passed, flagged, scores = check_boundary_quality(
-        img, df, tile_h=100, tile_w=100, threshold=0.9,
+        img,
+        df,
+        tile_h=100,
+        tile_w=100,
+        threshold=0.9,
     )
     assert not passed
     assert len(flagged) == 2, f"expected 2 flagged, got {flagged}; scores={scores}"
@@ -221,6 +249,7 @@ def test_check_boundary_quality_worst_first():
 # ---------------------------------------------------------------------------
 # select_alternate_zplanes
 # ---------------------------------------------------------------------------
+
 
 def test_select_alternate_zplanes_13_from_7():
     alternates = select_alternate_zplanes(ref_zplane=7, n_zplanes=13, max_alternates=4)

@@ -13,6 +13,8 @@ from typing import Any
 
 import numpy as np
 
+from kintsugi.mcp.path_safety import clamp_int, validate_choice
+
 # Import session state from signal_isolation
 from kintsugi.mcp.tools.signal_isolation import _loaded_images
 
@@ -108,6 +110,16 @@ async def get_thumbnail(
 
     Returns base64-encoded image data that Claude can view.
     """
+    try:
+        clamp_int(max_size, "max_size", minimum=1, maximum=20000)
+        validate_choice(format.lower(), {"png", "jpeg", "jpg"}, "format")
+    except ValueError as e:
+        return {"error": str(e)}
+
+    # Canonicalize so the accepted "jpg" alias does not fail in Pillow, which
+    # only recognizes "JPEG" for that format.
+    format = "jpeg" if format.lower() == "jpg" else format.lower()
+
     try:
         from PIL import Image
     except ImportError:

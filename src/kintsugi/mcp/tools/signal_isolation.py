@@ -12,6 +12,15 @@ from typing import Any
 
 import numpy as np
 
+from kintsugi.mcp.path_safety import (
+    PathSafetyError,
+    clamp_float,
+    clamp_int,
+    ensure_within,
+    safe_filename,
+    validate_choice,
+)
+
 logger = logging.getLogger("kintsugi.mcp.signal_isolation")
 
 # Session state - shared with server
@@ -61,6 +70,18 @@ async def load_channel(
     Returns image metadata and prepares it for processing.
     """
 
+    # cycle and channel become path/glob components below, so reject any value
+    # that could traverse out of the project tree or broaden the glob search.
+    # Validate cheap inputs before importing heavy optional dependencies.
+    try:
+        cycle = safe_filename(str(cycle), "cycle")
+        channel = safe_filename(channel, "channel")
+    except (PathSafetyError, ValueError) as e:
+        return {"error": str(e)}
+    for _value, _name in ((cycle, "cycle"), (channel, "channel")):
+        if any(ch in _value for ch in "*?[]"):
+            return {"error": f"{_name} must not contain glob wildcards (*?[]): {_value!r}"}
+
     try:
         import dask.array as da  # noqa: F401
         import tifffile  # noqa: F401
@@ -68,7 +89,7 @@ async def load_channel(
     except ImportError as e:
         return {"error": f"Missing dependency: {e}"}
 
-    project_path = Path(project_path)
+    project_path = Path(project_path).resolve()
 
     # Try to load from KINTSUGI project structure
     try:
@@ -123,6 +144,12 @@ async def load_channel(
             "error": f"Channel '{channel}' not found in cycle '{cycle_name}'",
             "searched_paths": [str(p) for p in search_paths if p.exists()],
         }
+
+    # Guard against a symlinked match resolving outside the project tree.
+    try:
+        ensure_within(image_path, project_path, "channel file")
+    except PathSafetyError as e:
+        return {"error": str(e)}
 
     # Load the image
     try:
@@ -483,6 +510,19 @@ async def subtract_blank(
     - record_success: Record successful parameters to learning database
     - quality_threshold: Minimum quality score to consider successful
     """
+    # Validate untrusted arguments (the low-level server does not enforce schema).
+    try:
+        validate_choice(method, {"global", "weighted"}, "method")
+        validate_choice(range_method, {"percentile", "otsu"}, "range_method")
+        clamp_int(n_ranges, "n_ranges", minimum=3, maximum=10)
+        clamp_float(transition_width, "transition_width", minimum=0.0, maximum=0.5)
+        if blank_scale_factor is not None:
+            clamp_float(blank_scale_factor, "blank_scale_factor", minimum=0.0)
+        if erosion is not None:
+            clamp_int(erosion, "erosion", minimum=0, maximum=50)
+    except ValueError as e:
+        return {"error": str(e)}
+
     # Get loaded images
     try:
         signal_data = _get_image(signal_channel)
@@ -786,6 +826,12 @@ async def denoise(
     - median: Median filter (edge-preserving)
     """
     try:
+        clamp_int(filter_size, "filter_size", minimum=1, maximum=99)
+        clamp_int(percentile, "percentile", minimum=0, maximum=100)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    try:
         import dask.array as da
         import dask_image.ndfilters
     except ImportError as e:
@@ -853,6 +899,13 @@ async def apply_clahe(
 
     CLAHE enhances local contrast while limiting noise amplification.
     """
+    try:
+        clamp_float(clip_limit, "clip_limit", minimum=0.0, maximum=1.0)
+        clamp_int(tile_grid_size, "tile_grid_size", minimum=1, maximum=10000)
+        clamp_int(nbins, "nbins", minimum=2, maximum=65536)
+    except ValueError as e:
+        return {"error": str(e)}
+
     try:
         from skimage.exposure import equalize_adapthist, rescale_intensity
     except ImportError as e:
@@ -1008,6 +1061,11 @@ async def gaussian_subtract(
     Subtract Gaussian-blurred version to remove structured background.
     """
     try:
+        clamp_int(sigma, "sigma", minimum=1, maximum=1000)
+    except ValueError as e:
+        return {"error": str(e)}
+
+    try:
         import dask.array as da
         import dask_image.ndfilters
     except ImportError as e:
@@ -1092,6 +1150,16 @@ async def denoise_advanced(
     Returns:
     - status, output name, noise estimates, and method details
     """
+    try:
+        clamp_int(n2v_epochs, "n2v_epochs", minimum=1, maximum=10000)
+        if model_path is not None:
+            resolved_model = Path(model_path).resolve()
+            if not resolved_model.is_file():
+                return {"error": f"model_path does not exist or is not a file: {model_path}"}
+            model_path = str(resolved_model)
+    except ValueError as e:
+        return {"error": str(e)}
+
     try:
         data = _get_image(channel)
     except ValueError as e:
@@ -1253,7 +1321,7 @@ async def cluster_channels_tool(
     except ImportError as e:
         return {"error": f"Missing module: {e}"}
 
-    project_path_obj = Path(project_path)
+    project_path_obj = Path(project_path).resolve()
 
     # Discover channel images
     search_dirs = [
@@ -1332,12 +1400,15 @@ async def propagate_parameters_tool(
     except ImportError as e:
         return {"error": f"Missing module: {e}"}
 
-    project_path_obj = Path(project_path)
+    project_path_obj = Path(project_path).resolve()
 
-    if output_dir:
-        out = Path(output_dir)
-    else:
-        out = project_path_obj / "data" / "processed" / "signal_isolated"
+    try:
+        if output_dir:
+            out = ensure_within(output_dir, project_path_obj, "output_dir")
+        else:
+            out = project_path_obj / "data" / "processed" / "signal_isolated"
+    except PathSafetyError as e:
+        return {"error": str(e)}
 
     # Get member channels from loaded images
     loaded = get_loaded_images()
@@ -1414,6 +1485,12 @@ async def optimize_parameters(
     Returns:
     - Best parameters, quality score, and optimization summary
     """
+    try:
+        clamp_int(n_trials, "n_trials", minimum=1, maximum=1000)
+        clamp_int(timeout, "timeout", minimum=1, maximum=86400)
+    except ValueError as e:
+        return {"error": str(e)}
+
     try:
         from kintsugi.signal.optimizer import optimize_signal_isolation
     except ImportError as e:
@@ -1575,6 +1652,11 @@ async def estimate_background(
     Returns:
     - Background statistics, corrected image stored as '{channel}_smo_corrected'
     """
+    try:
+        clamp_int(kernel_size, "kernel_size", minimum=1, maximum=999)
+    except ValueError as e:
+        return {"error": str(e)}
+
     try:
         from kintsugi.signal.smo import estimate_background_smo
     except ImportError as e:
