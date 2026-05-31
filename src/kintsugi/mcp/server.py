@@ -22,10 +22,12 @@ except ImportError:
     MCP_AVAILABLE = False
     Server = None
 
-# Configure logging
+# Configure logging. The stdio transport uses stdout for the JSON-RPC stream,
+# so all logging MUST go to stderr to avoid corrupting protocol messages.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    stream=sys.stderr,
 )
 logger = logging.getLogger("kintsugi.mcp")
 
@@ -46,12 +48,11 @@ def create_server() -> Server:
 
     server = Server("kintsugi")
 
-    # Register tools
+    # Register all tools. Despite the historical name, this single registration
+    # function declares the full tool surface (signal isolation, quality
+    # assessment, visualization, workflow, clustering, learning, and
+    # optimization) and routes calls to the appropriate handler module.
     _register_signal_isolation_tools(server)
-    # TODO: Implement these registration functions
-    # _register_quality_assessment_tools(server)
-    # _register_visualization_tools(server)
-    # _register_workflow_tools(server)
 
     return server
 
@@ -869,7 +870,10 @@ def _register_signal_isolation_tools(server: Server):
 async def run_server():
     """Run the MCP server using stdio transport."""
     if not MCP_AVAILABLE:
-        print("Error: MCP package not installed. Install with: pip install kintsugi[claude]")
+        print(
+            "Error: MCP package not installed. Install with: pip install kintsugi[claude]",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     server = create_server()

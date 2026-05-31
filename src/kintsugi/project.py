@@ -49,12 +49,21 @@ def _resolve_kintsugi_executable() -> str:
     if path:
         return str(Path(path).resolve())
 
-    # Fall back to sibling of current Python interpreter
-    candidate = Path(sys.executable).parent / "kintsugi"
-    if candidate.exists():
-        return str(candidate.resolve())
+    # Fall back to a sibling of the current Python interpreter. Layouts differ
+    # by platform: POSIX venv/conda put console scripts in the same bin/ as
+    # python, while Windows uses a Scripts/ dir and an .exe suffix.
+    interp_dir = Path(sys.executable).parent
+    candidates = [
+        interp_dir / "kintsugi",
+        interp_dir / "kintsugi.exe",
+        interp_dir / "Scripts" / "kintsugi.exe",
+        interp_dir.parent / "Scripts" / "kintsugi.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate.resolve())
 
-    # Last resort: bare command name
+    # Last resort: bare command name (resolved from PATH at launch time).
     return "kintsugi"
 
 

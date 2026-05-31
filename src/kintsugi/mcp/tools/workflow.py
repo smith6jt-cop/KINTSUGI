@@ -14,6 +14,13 @@ from typing import Any
 
 import numpy as np
 
+from kintsugi.mcp.path_safety import (
+    PathSafetyError,
+    ensure_within,
+    safe_filename,
+    validate_choice,
+)
+
 # Import session state from signal_isolation
 from kintsugi.mcp.tools.signal_isolation import (
     _loaded_images,
@@ -145,6 +152,14 @@ async def save_processed(
     if channel not in _loaded_images:
         return {"error": f"Channel not loaded: {channel}"}
 
+    # Validate untrusted inputs up front so failures are reported in-band.
+    try:
+        validate_choice(format, {"tiff", "tif", "ome-tiff", "zarr"}, "format")
+        if output_name is not None:
+            output_name = safe_filename(output_name, "output_name")
+    except (PathSafetyError, ValueError) as e:
+        return {"error": str(e)}
+
     image_info = _loaded_images[channel]
     data = image_info["data"]
     metadata = image_info.get("metadata", {})
@@ -168,6 +183,7 @@ async def save_processed(
             output_dir = Path.cwd() / "output"
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = output_dir.resolve()
 
     # Generate output filename
     if output_name is None:
@@ -183,13 +199,13 @@ async def save_processed(
         if format == "tiff" or format == "tif":
             import tifffile
 
-            output_path = output_dir / f"{output_name}.tiff"
+            output_path = ensure_within(output_dir / f"{output_name}.tiff", output_dir)
             tifffile.imwrite(str(output_path), data.astype(np.uint16))
 
         elif format == "ome-tiff":
             import tifffile
 
-            output_path = output_dir / f"{output_name}.ome.tiff"
+            output_path = ensure_within(output_dir / f"{output_name}.ome.tiff", output_dir)
             # Create basic OME-XML
             tifffile.imwrite(
                 str(output_path),
@@ -201,7 +217,7 @@ async def save_processed(
         elif format == "zarr":
             import zarr
 
-            output_path = output_dir / f"{output_name}.zarr"
+            output_path = ensure_within(output_dir / f"{output_name}.zarr", output_dir)
             z = zarr.open(
                 str(output_path),
                 mode="w",

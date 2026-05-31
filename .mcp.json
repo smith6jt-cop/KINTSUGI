@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "kintsugi": {
-      "command": "/blue/maigan/smith6jt/miniforge3/envs/KINTSUGI/bin/kintsugi",
-      "args": ["mcp", "start"],
-      "cwd": "/blue/maigan/smith6jt/KINTSUGI"
+      "command": "kintsugi",
+      "args": ["mcp", "start"]
     }
   }
 }
