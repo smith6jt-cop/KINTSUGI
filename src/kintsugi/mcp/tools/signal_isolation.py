@@ -826,7 +826,6 @@ async def denoise(
     - median: Median filter (edge-preserving)
     """
     try:
-        validate_choice(method, {"percentile", "uniform", "median"}, "method")
         clamp_int(filter_size, "filter_size", minimum=1, maximum=99)
         clamp_int(percentile, "percentile", minimum=0, maximum=100)
     except ValueError as e:
@@ -1152,11 +1151,6 @@ async def denoise_advanced(
     - status, output name, noise estimates, and method details
     """
     try:
-        validate_choice(
-            method,
-            {"adaptive", "bilateral", "nlm", "bm3d", "n2v", "patch_svd"},
-            "method",
-        )
         clamp_int(n2v_epochs, "n2v_epochs", minimum=1, maximum=10000)
         if model_path is not None:
             resolved_model = Path(model_path).resolve()

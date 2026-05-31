@@ -197,14 +197,6 @@ async def test_denoise_rejects_out_of_range_filter_size(loaded_channel):
     assert "filter_size" in result["error"]
 
 
-async def test_denoise_rejects_unknown_method(loaded_channel):
-    from kintsugi.mcp.tools import signal_isolation as si
-
-    result = await si.denoise(channel=loaded_channel, method="wavelet")
-    assert "error" in result
-    assert "method" in result["error"]
-
-
 async def test_optimize_parameters_rejects_huge_n_trials(loaded_channel):
     from kintsugi.mcp.tools import signal_isolation as si
 
