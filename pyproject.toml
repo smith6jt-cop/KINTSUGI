@@ -142,7 +142,10 @@ bio = [
 
 # Claude Code MCP integration
 claude = [
-    "mcp>=1.0.0",
+    # >=1.10 is required for structured tool output (Tool.outputSchema /
+    # CallToolResult.structuredContent / FastMCP structured_output), which the
+    # server relies on. <2 guards against the next major SDK revision.
+    "mcp>=1.10.0,<2",
     "httpx>=0.27.0",
     "optuna>=3.0",
     "smo>=0.7",
@@ -191,6 +194,9 @@ dev = [
     "pytest-asyncio>=0.23.0,<1.0",
     "pytest-cov>=4.1.0",
     "pytest-xdist>=3.3.0",
+    # MCP stack so the MCP server/tool tests can construct the FastMCP server
+    # and exercise the protocol (tools/list, tools/call, structured output).
+    "mcp>=1.10.0,<2",
     "black==26.1.0",
     "ruff>=0.1.0",
     "mypy>=1.5.0",

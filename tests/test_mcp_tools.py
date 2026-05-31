@@ -30,6 +30,42 @@ HAS_DASK_IMAGE = importlib.util.find_spec("dask_image") is not None
 requires_zarr = pytest.mark.skipif(not HAS_ZARR, reason="zarr not installed")
 requires_dask_image = pytest.mark.skipif(not HAS_DASK_IMAGE, reason="dask_image not installed")
 
+try:
+    from kintsugi.mcp.server import MCP_AVAILABLE
+except Exception:  # pragma: no cover - server import should not fail
+    MCP_AVAILABLE = False
+requires_mcp = pytest.mark.skipif(not MCP_AVAILABLE, reason="mcp package not installed")
+
+# The full public MCP tool surface (kept in sync with kintsugi.mcp.tool_specs).
+EXPECTED_TOOL_NAMES = {
+    "load_channel",
+    "subtract_blank",
+    "denoise",
+    "apply_clahe",
+    "clean_background",
+    "gaussian_subtract",
+    "denoise_advanced",
+    "assess_quality",
+    "compute_snr",
+    "get_image_stats",
+    "get_thumbnail",
+    "list_channels",
+    "save_processed",
+    "get_processing_history",
+    "suggest_parameters",
+    "generate_jupyter_cell",
+    "cluster_channels",
+    "propagate_parameters",
+    "get_learned_parameters",
+    "record_successful_parameters",
+    "suggest_with_learning",
+    "approve_and_learn",
+    "get_learning_statistics",
+    "optimize_parameters",
+    "predict_parameters",
+    "estimate_background",
+}
+
 
 # =============================================================================
 # Test Fixtures
@@ -1148,35 +1184,80 @@ class TestMCPServer:
             # Restore original value
             server.MCP_AVAILABLE = original_mcp_available
 
-    def test_tool_routing(self):
-        """Test that all tools are properly routed."""
-        # This test verifies the tool routing in server.py
-        expected_tools = [
-            "load_channel",
-            "subtract_blank",
-            "denoise",
-            "apply_clahe",
-            "clean_background",
-            "gaussian_subtract",
-            "denoise_advanced",
-            "assess_quality",
-            "compute_snr",
-            "get_image_stats",
-            "get_thumbnail",
-            "list_channels",
-            "save_processed",
-            "get_processing_history",
-            "suggest_parameters",
-            "generate_jupyter_cell",
-            "get_learned_parameters",
-            "record_successful_parameters",
-            "suggest_with_learning",
-            "approve_and_learn",
-            "get_learning_statistics",
-        ]
+    def test_tool_registry_complete(self):
+        """Every advertised tool resolves to an importable coroutine handler."""
+        import importlib
+        import inspect
 
-        # Verify count matches expected
-        assert len(expected_tools) == 21
+        from kintsugi.mcp import tool_specs
+
+        names = [spec["name"] for spec in tool_specs.TOOL_SPECS]
+        # Names are unique and cover the full public surface.
+        assert len(names) == len(set(names))
+        assert set(names) == EXPECTED_TOOL_NAMES
+
+        # Each spec points at a real async handler in kintsugi.mcp.tools.
+        for spec in tool_specs.TOOL_SPECS:
+            module = importlib.import_module(f"kintsugi.mcp.tools.{spec['module']}")
+            handler = getattr(module, spec["attr"])
+            assert inspect.iscoroutinefunction(handler), spec["name"]
+            assert isinstance(spec["input_schema"], dict)
+
+
+# =============================================================================
+# Structured Output Tests (FastMCP server)
+# =============================================================================
+
+
+@requires_mcp
+class TestStructuredOutput:
+    """The FastMCP server advertises curated schemas and emits structured content."""
+
+    async def test_all_tools_registered_with_output_schema(self):
+        """Every tool is registered and declares an output schema."""
+        from kintsugi.mcp.server import create_server
+
+        server = create_server()
+        tools = await server.list_tools()
+
+        assert {t.name for t in tools} == EXPECTED_TOOL_NAMES
+        for tool in tools:
+            assert tool.outputSchema is not None, f"{tool.name} missing outputSchema"
+
+    async def test_curated_input_schema_advertised(self):
+        """The curated input schema (enums + descriptions) is advertised verbatim."""
+        from kintsugi.mcp.server import create_server
+
+        server = create_server()
+        tools = {t.name: t for t in await server.list_tools()}
+
+        # enum constraint preserved (FastMCP's signature-derived schema would drop it)
+        method = tools["denoise"].inputSchema["properties"]["method"]
+        assert method.get("enum") == ["percentile", "uniform", "median"]
+        # per-parameter description preserved
+        channel = tools["load_channel"].inputSchema["properties"]["channel"]
+        assert "description" in channel
+
+    async def test_call_returns_structured_content(self):
+        """A tool call returns structuredContent plus a human-readable text block."""
+        from mcp.shared.memory import create_connected_server_and_client_session as connect
+
+        from kintsugi.mcp.server import create_server
+
+        server = create_server()
+        async with connect(server._mcp_server) as client:
+            result = await client.call_tool("get_processing_history", {"channel": "nope"})
+
+        assert result.isError is False
+        assert result.structuredContent == {
+            "status": "success",
+            "channel": "nope",
+            "steps": [],
+            "total_steps": 0,
+            "source_metadata": {},
+        }
+        # Backward-compatible text block is still present.
+        assert result.content and result.content[0].type == "text"
 
 
 # =============================================================================
