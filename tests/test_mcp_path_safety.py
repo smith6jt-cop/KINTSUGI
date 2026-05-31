@@ -131,6 +131,14 @@ def test_clamp_float_bounds():
         clamp_float(1.5, "clip_limit", minimum=0.0, maximum=1.0)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_clamp_float_rejects_non_finite(value):
+    # NaN/inf must be rejected even with no upper bound (they slip past range
+    # comparisons otherwise).
+    with pytest.raises(ValueError):
+        clamp_float(value, "blank_scale_factor", minimum=0.0)
+
+
 # =============================================================================
 # Tool-level validation (handlers return in-band {"error": ...})
 # =============================================================================
@@ -219,6 +227,25 @@ async def test_denoise_advanced_rejects_missing_model_path(loaded_channel):
     )
     assert "error" in result
     assert "model_path" in result["error"]
+
+
+@pytest.mark.parametrize("channel", ["*", "[A-Z]*", "CD?"])
+async def test_load_channel_rejects_glob_wildcards(tmp_path, channel):
+    from kintsugi.mcp.tools import signal_isolation as si
+
+    result = await si.load_channel(project_path=str(tmp_path), cycle="1", channel=channel)
+    assert "error" in result
+    assert "wildcard" in result["error"]
+
+
+async def test_get_thumbnail_canonicalizes_jpg(loaded_channel):
+    pytest.importorskip("PIL")
+    from kintsugi.mcp.tools import visualization as vis
+
+    result = await vis.get_thumbnail(channel=loaded_channel, format="jpg")
+    # "jpg" alias must be canonicalized to JPEG and succeed (not error in Pillow).
+    assert result.get("status") == "success", result
+    assert result["thumbnail"]["format"] == "jpeg"
 
 
 # =============================================================================

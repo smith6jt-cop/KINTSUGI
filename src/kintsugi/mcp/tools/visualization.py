@@ -116,6 +116,10 @@ async def get_thumbnail(
     except ValueError as e:
         return {"error": str(e)}
 
+    # Canonicalize so the accepted "jpg" alias does not fail in Pillow, which
+    # only recognizes "JPEG" for that format.
+    format = "jpeg" if format.lower() == "jpg" else format.lower()
+
     try:
         from PIL import Image
     except ImportError:

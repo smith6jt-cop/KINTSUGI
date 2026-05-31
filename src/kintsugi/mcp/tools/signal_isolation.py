@@ -70,20 +70,24 @@ async def load_channel(
     Returns image metadata and prepares it for processing.
     """
 
+    # cycle and channel become path/glob components below, so reject any value
+    # that could traverse out of the project tree or broaden the glob search.
+    # Validate cheap inputs before importing heavy optional dependencies.
+    try:
+        cycle = safe_filename(str(cycle), "cycle")
+        channel = safe_filename(channel, "channel")
+    except (PathSafetyError, ValueError) as e:
+        return {"error": str(e)}
+    for _value, _name in ((cycle, "cycle"), (channel, "channel")):
+        if any(ch in _value for ch in "*?[]"):
+            return {"error": f"{_name} must not contain glob wildcards (*?[]): {_value!r}"}
+
     try:
         import dask.array as da  # noqa: F401
         import tifffile  # noqa: F401
         import zarr  # noqa: F401
     except ImportError as e:
         return {"error": f"Missing dependency: {e}"}
-
-    # cycle and channel become path/glob components below, so reject any value
-    # that could traverse out of the project tree.
-    try:
-        safe_filename(str(cycle), "cycle")
-        safe_filename(channel, "channel")
-    except (PathSafetyError, ValueError) as e:
-        return {"error": str(e)}
 
     project_path = Path(project_path).resolve()
 

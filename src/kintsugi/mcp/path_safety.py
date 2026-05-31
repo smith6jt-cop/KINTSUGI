@@ -20,6 +20,7 @@ sees the failure and can self-correct.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -103,10 +104,14 @@ def clamp_float(
     minimum: float | None = None,
     maximum: float | None = None,
 ) -> float:
-    """Validate that ``value`` is a real number within ``[minimum, maximum]``."""
+    """Validate that ``value`` is a finite real number within ``[minimum, maximum]``."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{param} must be a number, got {value!r}")
     value = float(value)
+    # NaN slips past range comparisons (both are False) and inf can bypass an
+    # absent bound, so reject non-finite values explicitly.
+    if not math.isfinite(value):
+        raise ValueError(f"{param} must be a finite number, got {value!r}")
     if minimum is not None and value < minimum:
         raise ValueError(f"{param} must be >= {minimum}, got {value}")
     if maximum is not None and value > maximum:
