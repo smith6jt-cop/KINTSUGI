@@ -765,9 +765,7 @@ def workspace():
 )
 def workspace_list(projects_dir: Path):
     """List candidate projects (directories with meta/experiment.json)."""
-    matches = sorted(
-        p for p in projects_dir.iterdir() if p.is_dir() and _is_kintsugi_project(p)
-    )
+    matches = sorted(p for p in projects_dir.iterdir() if p.is_dir() and _is_kintsugi_project(p))
     if not matches:
         console.print(
             f"[yellow]No kintsugi projects (with meta/experiment.json) found in "
@@ -842,8 +840,7 @@ def workspace_set_project(
         raise SystemExit(1)
     if not _is_kintsugi_project(target) and not force:
         console.print(
-            f"[red]Target is not a kintsugi project (no meta/experiment.json): "
-            f"{target}[/red]"
+            f"[red]Target is not a kintsugi project (no meta/experiment.json): {target}[/red]"
         )
         console.print("[yellow]Use --force to override.[/yellow]")
         raise SystemExit(1)
@@ -892,8 +889,7 @@ def workspace_set_project(
 
     console.print(f"[green]Updated {workspace_file}[/green]")
     console.print(
-        "[dim]Reload VS Code window (Cmd/Ctrl+Shift+P -> 'Reload Window') "
-        "to see the change.[/dim]"
+        "[dim]Reload VS Code window (Cmd/Ctrl+Shift+P -> 'Reload Window') to see the change.[/dim]"
     )
 
 
@@ -2377,8 +2373,7 @@ def workflow_run(
         pid_path = project_dir / ".kintsugi_run.pid"
 
         # Re-invoke ourselves without --detach
-        relaunch_cmd = [sys.executable, "-m", "kintsugi.cli", "workflow", "run",
-                        str(project_dir)]
+        relaunch_cmd = [sys.executable, "-m", "kintsugi.cli", "workflow", "run", str(project_dir)]
         if jobs != 8:
             relaunch_cmd.extend(["-j", str(jobs)])
         if local:
@@ -2421,17 +2416,13 @@ def workflow_run(
             "[yellow bold]WARNING: Running inside a SLURM job without "
             "--detach or --dashboard.[/yellow bold]"
         )
-        console.print(
-            "  The Snakemake coordinator must stay alive to submit "
-            "dependent jobs."
-        )
+        console.print("  The Snakemake coordinator must stay alive to submit dependent jobs.")
         console.print(
             "  If this terminal/process is killed, the pipeline will "
             "stall with no new jobs submitted."
         )
         console.print(
-            "  Recommended: add --detach (background) or "
-            "--dashboard (Ctrl+C to detach)\n"
+            "  Recommended: add --detach (background) or --dashboard (Ctrl+C to detach)\n"
         )
 
     if dashboard and not dry_run:
