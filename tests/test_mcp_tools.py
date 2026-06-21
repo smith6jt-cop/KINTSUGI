@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from kintsugi.mcp.server import MCP_AVAILABLE
+
 # Check for optional dependencies using importlib
 HAS_ZARR = importlib.util.find_spec("zarr") is not None
 HAS_DASK_IMAGE = importlib.util.find_spec("dask_image") is not None
@@ -30,10 +32,6 @@ HAS_DASK_IMAGE = importlib.util.find_spec("dask_image") is not None
 requires_zarr = pytest.mark.skipif(not HAS_ZARR, reason="zarr not installed")
 requires_dask_image = pytest.mark.skipif(not HAS_DASK_IMAGE, reason="dask_image not installed")
 
-try:
-    from kintsugi.mcp.server import MCP_AVAILABLE
-except Exception:  # pragma: no cover - server import should not fail
-    MCP_AVAILABLE = False
 requires_mcp = pytest.mark.skipif(not MCP_AVAILABLE, reason="mcp package not installed")
 
 # The full public MCP tool surface (kept in sync with kintsugi.mcp.tool_specs).
