@@ -213,16 +213,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model (default: {DEFAULT_MODEL}).")
     parser.add_argument("--json", metavar="PATH", help="Write the full report as JSON.")
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero on structural problems (coverage gaps, missing descriptions).",
+    )
     args = parser.parse_args(argv)
 
     tools = load_tools()
-    report: dict[str, Any] = {"structural": run_structural(tools, TASKS)}
+    structural = run_structural(tools, TASKS)
+    report: dict[str, Any] = {"structural": structural}
     if args.agentic:
         report["agentic"] = run_agentic(tools, TASKS, args.model)
 
     if args.json:
         Path(args.json).write_text(json.dumps(report, indent=2))
         print(f"\nWrote report to {args.json}")
+
+    if args.strict and (
+        structural["task_coverage_gaps"]
+        or structural["tools_missing_description"]
+        or structural["params_missing_description_count"]
+    ):
+        print("\nstrict: structural problems detected — failing.", file=sys.stderr)
+        return 1
     return 0
 
 
