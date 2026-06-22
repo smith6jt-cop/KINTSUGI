@@ -1,0 +1,10 @@
+{
+  "name": "mcp-fastmcp-structured-output",
+  "version": "1.0.0",
+  "description": "Migrate a Python MCP server to FastMCP with structured tool output, preserve curated schemas, and evaluate the tool surface. Trigger when: (1) migrating kintsugi.mcp or any low-level mcp.server.Server to FastMCP, (2) adding structured output / outputSchema to MCP tools, (3) an MCP tool result fails output validation with 'None is not of type ...', (4) preserving per-parameter descriptions or enums under FastMCP's auto schemas, (5) building an MCP tool-selection evaluation harness or wiring it into CI.",
+  "author": {
+    "name": "KINTSUGI Team"
+  },
+  "skills": "./skills",
+  "repository": "https://github.com/smith6jt-cop/Skills_Registry"
+}
