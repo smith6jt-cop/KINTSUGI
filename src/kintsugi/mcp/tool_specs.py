@@ -97,6 +97,49 @@ TOOL_SPECS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "analyze_weighted_subtraction",
+        "module": "signal_isolation",
+        "attr": "analyze_weighted_subtraction",
+        "description": (
+            "Preview the per-intensity-range weights for weighted autofluorescence "
+            "subtraction WITHOUT applying it. Use this to verify the plan before calling "
+            "subtract_blank with method='weighted'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "signal_channel": {
+                    "type": "string",
+                    "description": "Name of loaded signal channel",
+                },
+                "blank_channel": {
+                    "type": "string",
+                    "description": "Name of loaded blank channel",
+                },
+                "n_ranges": {
+                    "type": "integer",
+                    "description": "Number of intensity ranges (default: 5)",
+                    "default": 5,
+                },
+                "range_method": {
+                    "type": "string",
+                    "enum": ["percentile", "otsu"],
+                    "description": "Range boundary method (default: percentile)",
+                    "default": "percentile",
+                },
+                "tissue_type": {
+                    "type": "string",
+                    "description": "Tissue type for context (optional)",
+                },
+                "marker_name": {
+                    "type": "string",
+                    "description": "Marker name for context (optional)",
+                },
+            },
+            "required": ["signal_channel", "blank_channel"],
+        },
+    },
+    {
         "name": "denoise",
         "module": "signal_isolation",
         "attr": "denoise",

@@ -38,6 +38,7 @@ requires_mcp = pytest.mark.skipif(not MCP_AVAILABLE, reason="mcp package not ins
 EXPECTED_TOOL_NAMES = {
     "load_channel",
     "subtract_blank",
+    "analyze_weighted_subtraction",
     "denoise",
     "apply_clahe",
     "clean_background",
