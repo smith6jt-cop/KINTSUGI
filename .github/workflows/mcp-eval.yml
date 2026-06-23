@@ -1,0 +1,102 @@
+name: MCP Eval
+
+# Evaluates the KINTSUGI MCP tool surface.
+#   * Structural pass (token cost, schema quality, tool coverage): runs on every
+#     PR as a fast, deterministic gate (no API key, --strict fails on regressions
+#     such as a documented-but-unregistered tool).
+#   * Agentic tool-selection pass: runs on manual dispatch and weekly schedule
+#     only, and only when an ANTHROPIC_API_KEY secret is configured (it spends
+#     API tokens and is nondeterministic, so it never runs on PRs).
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "src/kintsugi/mcp/**"
+      - "evals/mcp/**"
+      - ".github/workflows/mcp-eval.yml"
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model for the agentic tool-selection eval"
+        default: "claude-sonnet-4-6"
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mcp-eval:
+    name: MCP tool-surface eval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvips-dev
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" anthropic
+
+      - name: Run MCP evaluation
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EVAL_MODEL: ${{ github.event.inputs.model || 'claude-sonnet-4-6' }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
+            python evals/mcp/harness.py --agentic --model "$EVAL_MODEL" --strict --json mcp_eval_report.json
+          else
+            if [ "${{ github.event_name }}" != "pull_request" ]; then
+              echo "::notice::ANTHROPIC_API_KEY secret not set — running the structural eval only."
+            fi
+            python evals/mcp/harness.py --strict --json mcp_eval_report.json
+          fi
+
+      - name: Write job summary
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          p = pathlib.Path("mcp_eval_report.json")
+          if not p.exists():
+              print("No eval report produced.")
+              raise SystemExit(0)
+          r = json.loads(p.read_text())
+          s = r["structural"]
+          print("## MCP tool-surface eval\n")
+          print(f"- Tools: **{s['tool_count']}** (output schemas: "
+                f"{s['tools_with_output_schema']}/{s['tool_count']})")
+          print(f"- Tool-definition tokens (est.): **~{s['total_definition_tokens_est']:,}**")
+          print(f"- Params missing description: {s['params_missing_description_count']}")
+          gaps = s["task_coverage_gaps"]
+          print(f"- Task coverage gaps: {gaps if gaps else 'none'}")
+          a = r.get("agentic")
+          if a:
+              print(f"\n### Agentic tool-selection: **{a['passed']}/{a['total']} = "
+                    f"{a['accuracy']:.0%}** (model `{a['model']}`)\n")
+              fails = [x for x in a["results"] if not x["pass"]]
+              if fails:
+                  print("| task | chose | expected |")
+                  print("|------|-------|----------|")
+                  for x in fails:
+                      print(f"| {x['task']} | {x['chosen']} | {', '.join(x['expected'])} |")
+          else:
+              print("\n_Agentic pass skipped (PR event or no ANTHROPIC_API_KEY secret)._")
+          PY
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-eval-report
+          path: mcp_eval_report.json

@@ -932,43 +932,19 @@ def start():
 @mcp.command()
 def tools():
     """List available MCP tools."""
+    from kintsugi.mcp.tool_specs import TOOL_SPECS
+
     table = Table(title="KINTSUGI MCP Tools")
     table.add_column("Tool", style="cyan")
     table.add_column("Description", style="white")
 
-    tool_list = [
-        # Signal Isolation
-        ("load_channel", "Load a channel image from a KINTSUGI project"),
-        ("subtract_blank", "Subtract autofluorescence/blank channel from signal"),
-        ("denoise", "Apply denoising filters (percentile, uniform, median)"),
-        ("denoise_advanced", "Advanced denoising (N2V, NLM, BM3D, bilateral, adaptive)"),
-        ("apply_clahe", "Apply Contrast Limited Adaptive Histogram Equalization"),
-        ("clean_background", "Remove background and small objects"),
-        ("gaussian_subtract", "Subtract Gaussian-blurred version for background removal"),
-        # Quality Assessment
-        ("assess_quality", "Assess channel quality using DL/heuristic metrics"),
-        ("compute_snr", "Compute Signal-to-Noise Ratio"),
-        # Visualization
-        ("get_image_stats", "Get statistics for a loaded image"),
-        ("get_thumbnail", "Get a downsampled thumbnail for preview"),
-        # Workflow
-        ("list_channels", "List available channels in the project"),
-        ("save_processed", "Save processed channel to output directory"),
-        ("suggest_parameters", "Analyze channel and suggest processing parameters"),
-        ("generate_jupyter_cell", "Generate Jupyter cell for interactive tuning"),
-        # Parameter Learning
-        ("get_learned_parameters", "Get recommended params from tissue/marker history"),
-        ("record_successful_parameters", "Record approved params for future learning"),
-        ("suggest_with_learning", "Get suggestions combining analysis + learned history"),
-        ("approve_and_learn", "Approve results and record all params for learning"),
-        ("get_learning_statistics", "Get statistics about the learning database"),
-    ]
-
-    for name, desc in tool_list:
-        table.add_row(name, desc)
+    for spec in TOOL_SPECS:
+        table.add_row(spec["name"], spec["description"])
 
     console.print(table)
-    console.print("\n[dim]Use 'kintsugi mcp start' to start the server[/dim]")
+    console.print(
+        f"\n[dim]{len(TOOL_SPECS)} tools. Use 'kintsugi mcp start' to start the server.[/dim]"
+    )
     console.print("[dim]Learning tools remember successful parameters by tissue/marker[/dim]")
 
 

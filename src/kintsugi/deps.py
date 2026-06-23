@@ -104,12 +104,14 @@ OPTIONAL_GROUPS = {
     "claude": {
         "description": "Claude Code MCP integration",
         "packages": ["mcp", "httpx"],
-        "install_cmd": "pip install mcp httpx",
+        # mcp>=1.10 is required for FastMCP structured tool output (see pyproject
+        # claude extra); quote the spec so the shell does not treat < as redirect.
+        "install_cmd": "pip install 'mcp>=1.10.0,<2' httpx",
     },
     "dev": {
         "description": "Development tools (pytest, ruff, black, mypy)",
-        "packages": ["pytest", "ruff", "black", "mypy", "pre_commit"],
-        "install_cmd": "pip install pytest pytest-asyncio pytest-cov pytest-xdist ruff black mypy pre-commit commitizen",
+        "packages": ["pytest", "ruff", "black", "mypy", "pre_commit", "mcp"],
+        "install_cmd": "pip install pytest pytest-asyncio pytest-cov pytest-xdist 'mcp>=1.10.0,<2' ruff black mypy pre-commit commitizen",
     },
     "docs": {
         "description": "Documentation (Sphinx)",
