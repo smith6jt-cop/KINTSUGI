@@ -781,14 +781,36 @@ require('gpu', 'viz', strict=False)  # Shows warning instead of error
 
 **Conda environment creation hangs**
 
-The base environment is designed to install quickly. If you experience hangs:
-```bash
-# Use libmamba solver (faster)
-conda config --set solver libmamba
+`conda env create` sitting at `Solving environment` for 15+ minutes, or stopping with no
+output, has three known causes. Check them in order.
 
-# Then retry
-conda env create -f envs/env-linux.yml
-```
+1. **`defaults` channel in your conda configuration** (Miniconda and Anaconda ship
+   `channels: [defaults]`). conda merges `.condarc` channels into every env-file solve,
+   and a conda-forge + defaults solve of this environment does not finish in 25 minutes.
+   The env files now list `nodefaults` to block the merge, but the Anaconda
+   Terms-of-Service plugin (conda >= 25.x) still gates `conda env create` on the configured
+   channels: it prompts in a terminal and raises `CondaToSNonInteractiveError` when stdin is
+   not a terminal (scripts, IDE tasks, Claude Code).
+   ```bash
+   conda config --show channels                 # is 'defaults' listed?
+   conda config --remove channels defaults
+   conda config --add channels conda-forge
+   conda config --set channel_priority strict
+   # if 'defaults' comes from the install's own .condarc:
+   conda config --file "$(conda info --base)/.condarc" --remove channels defaults
+   ```
+   [Miniforge](https://github.com/conda-forge/miniforge) ships conda-forge-only and needs none of this.
+2. **Classic solver** (conda < 23.10, or `solver: classic` in `.condarc`):
+   ```bash
+   conda install -n base conda-libmamba-solver
+   conda config --set solver libmamba
+   ```
+3. **Old copy of the env file.** Run `git pull`. `envs/env-linux.yml` now pins
+   numpy/pandas/packaging and the large packages to major versions; with conda 26.7 +
+   libmamba that cut the conda-forge-only solve from over 25 minutes to about 80 seconds.
+
+`./scripts/install.sh` checks 1 and 2 before creating the environment. With Miniforge,
+`mamba env create -f envs/env-linux.yml` is the fastest route (about 1 minute for the solve).
 
 ### HPC/SLURM Issues
 

@@ -2,9 +2,22 @@
 
 ## Quick Start (All Platforms)
 
-1. **Install Miniconda** (if not already installed):
-   - Download from [Anaconda](https://www.anaconda.com/download/success#miniconda)
-   - Follow platform-specific installation instructions
+1. **Install Miniforge** (if you do not already have conda):
+   - Download from [conda-forge/miniforge](https://github.com/conda-forge/miniforge)
+   - Miniforge is configured for conda-forge only and ships the `mamba` and libmamba solver,
+     which is what the KINTSUGI environment files are written for.
+   - **Already using Miniconda or Anaconda?** Remove the `defaults` channel first. It is not
+     needed, it triggers the Anaconda Terms-of-Service prompt on every `conda env create`
+     (an error when stdin is not a terminal), and a conda-forge + defaults solve of this
+     environment does not finish in 25 minutes:
+     ```bash
+     conda config --remove channels defaults
+     conda config --add channels conda-forge
+     conda config --set channel_priority strict
+     # if 'defaults' comes from the install's own .condarc:
+     conda config --file "$(conda info --base)/.condarc" --remove channels defaults
+     conda config --set solver libmamba          # conda < 23.10 only
+     ```
 
 2. **Clone and Install KINTSUGI**:
 

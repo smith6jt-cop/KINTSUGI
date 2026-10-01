@@ -202,6 +202,40 @@ print_success "Conda found: $(conda --version)"
 # Initialize conda for script
 eval "$(conda shell.bash hook)"
 
+# ---------------------------------------------------------------------------
+# Pre-flight: conda configuration that makes `conda env create` look hung
+# ---------------------------------------------------------------------------
+# 1. 'defaults' (repo.anaconda.com) in the channel configuration.
+#    Miniconda/Anaconda ship `channels: [defaults]`. The env files list
+#    `nodefaults`, so the solve itself stays conda-forge-only, but the
+#    Anaconda Terms-of-Service plugin (conda >= 25.x) still gates every
+#    `conda env create` on the configured channels: it prompts in a terminal
+#    and raises CondaToSNonInteractiveError when stdin is not a TTY.
+#    Without `nodefaults`, 'defaults' is merged into the solve, which did not
+#    finish within 25 minutes in testing.
+if conda config --show channels 2>/dev/null | grep -q -E '^[[:space:]]*-[[:space:]]*defaults[[:space:]]*$'; then
+    print_warning "'defaults' (repo.anaconda.com) is in your conda channel configuration."
+    print_warning "KINTSUGI only needs conda-forge. Keeping 'defaults' triggers the Anaconda"
+    print_warning "Terms-of-Service prompt and, with older conda, a very slow cross-channel solve."
+    print_info "One-time fix (Miniforge users are already configured this way):"
+    echo "    conda config --remove channels defaults"
+    echo "    conda config --add channels conda-forge"
+    echo "    conda config --set channel_priority strict"
+    echo "    # if 'defaults' is set in the install's own .condarc:"
+    echo "    conda config --file \"\$(conda info --base)/.condarc\" --remove channels defaults"
+    echo ""
+fi
+
+# 2. Classic solver. libmamba is the default since conda 23.10 and solves
+#    this environment in about 80 seconds (conda 26.7); classic is far slower.
+CONDA_SOLVER_CFG=$(conda config --show solver 2>/dev/null | awk '/^solver:/ {print $2}')
+if [ "$CONDA_SOLVER_CFG" = "classic" ]; then
+    print_warning "conda is configured with the classic solver, which is far slower than"
+    print_warning "libmamba on this environment and can look like a hang."
+    print_info "Fix: conda install -n base conda-libmamba-solver && conda config --set solver libmamba"
+    echo ""
+fi
+
 # Check if environment already exists
 if conda env list | grep -q "^$ENV_NAME "; then
     print_warning "Environment '$ENV_NAME' already exists."

@@ -5,7 +5,7 @@ This guide covers common issues and their solutions when installing or running K
 ## Table of Contents
 
 - [Installation Issues](#installation-issues)
-  - [Conda Environment Creation Fails](#conda-environment-creation-fails)
+  - [Conda Environment Creation Fails or Hangs](#conda-environment-creation-fails-or-hangs)
   - [Package Installation Errors](#package-installation-errors)
 - [Dependency Issues](#dependency-issues)
   - [libvips Not Found](#libvips-not-found)
@@ -26,34 +26,53 @@ This guide covers common issues and their solutions when installing or running K
 
 ## Installation Issues
 
-### Conda Environment Creation Fails
+### Conda Environment Creation Fails or Hangs
 
-**Symptom**: `conda env create` command fails with dependency conflicts.
+**Symptom**: `conda env create` sits at `Solving environment` for 15+ minutes, stops with
+no output, or fails with dependency conflicts.
 
-**Solutions**:
+**Solutions** (check in order):
 
-1. **Use libmamba solver** (faster and more reliable):
+1. **Remove the `defaults` channel** (Miniconda and Anaconda ship `channels: [defaults]`).
+   conda merges `.condarc` channels into every env-file solve; the KINTSUGI env files list
+   `nodefaults` to block that, but the Anaconda Terms-of-Service plugin (conda >= 25.x)
+   still gates `conda env create` on the configured channels. In a terminal it prompts;
+   without a terminal (scripts, IDE tasks, Claude Code) it raises
+   `CondaToSNonInteractiveError`. A conda-forge + defaults solve of this environment does
+   not finish in 25 minutes.
+   ```bash
+   conda config --show channels                 # is 'defaults' listed?
+   conda config --remove channels defaults
+   conda config --add channels conda-forge
+   conda config --set channel_priority strict
+   # if 'defaults' comes from the install's own .condarc:
+   conda config --file "$(conda info --base)/.condarc" --remove channels defaults
+   ```
+   Or install [Miniforge](https://github.com/conda-forge/miniforge), which is conda-forge-only.
+
+2. **Use the libmamba solver** (default since conda 23.10):
    ```bash
    conda install -n base conda-libmamba-solver
    conda config --set solver libmamba
    conda env create -f envs/env-linux.yml
    ```
 
-2. **Update conda**:
+3. **Update conda and the env file**:
    ```bash
    conda update -n base conda
+   git pull        # envs/*.yml carry solver pins and nodefaults
    ```
 
-3. **Try the streamlined environment**:
+4. **Use mamba** (bundled with Miniforge); the solve takes about a minute:
    ```bash
-   conda env create -f env_streamlined.yml
+   mamba env create -f envs/env-linux.yml
    ```
 
-4. **Create minimal environment and add packages**:
+5. **Create a minimal environment and add packages**:
    ```bash
-   conda create -n KINTSUGI python=3.10
+   conda create -n KINTSUGI -c conda-forge --override-channels python=3.11 pip libvips
    conda activate KINTSUGI
-   pip install -e .
+   pip install -e ".[workflow]"
    # Install additional dependencies as needed
    ```
 
