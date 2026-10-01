@@ -60,7 +60,7 @@ dependencies:
 
   # Data Handling
   - h5py
-  - zarr
+  - zarr<3                # zarr_io.py uses the v2 API (zarr.storage.DirectoryStore, zarr.Blosc)
   - dask-core
   - tqdm
   - pyyaml

@@ -18,6 +18,9 @@
      conda config --file "$(conda info --base)/.condarc" --remove channels defaults
      conda config --set solver libmamba          # conda < 23.10 only
      ```
+     `channel_priority strict` matters for solve time: with Miniconda's default `flexible`
+     priority conda 26.7 was still solving `env-linux.yml` after 18 minutes; with `strict`
+     it took under 2 minutes.
 
 2. **Clone and Install KINTSUGI**:
 
@@ -111,9 +114,18 @@ sudo apt-get install -y libvips-dev
 git clone https://github.com/smith6jt-cop/KINTSUGI.git
 cd KINTSUGI
 
+# Pinned lock file (x86_64): no solver run, about 90 s, then the pip-only packages
+conda create -n KINTSUGI --file envs/env-linux.lock.txt
+conda activate KINTSUGI
+pip install -e ".[workflow]"
+
+# Or solve the environment file (slower and variable, see Troubleshooting)
 conda env create -f envs/env-linux.yml
 conda activate KINTSUGI
 ```
+
+The lock file is generated from `envs/env-linux.yml`; regenerate it after editing the YAML
+(command in the lock file header).
 
 ## macOS Installation
 

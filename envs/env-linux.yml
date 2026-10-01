@@ -36,9 +36,12 @@ dependencies:
 
   # Core Scientific Computing
   # Version bounds below are solver pins, not feature requirements. Unbounded
-  # specs let libmamba consider every historical build of these packages; with
-  # conda 26.7 that solve ran for more than 25 minutes on this file. With the
-  # bounds it takes about 80 seconds. numpy stays <2 (see constraints.txt).
+  # specs let the solver consider every historical build of these packages: with
+  # conda 26.7 + libmamba the unpinned file never solved within 32 minutes. With
+  # the bounds and `channel_priority: strict` (Miniforge default) conda solved
+  # it in 93 s and 48 s; with `flexible` (Miniconda default) one run took 79 s
+  # and a repeat was still solving after 18 minutes. micromamba: under 75 s.
+  # env-linux.lock.txt skips the solver entirely. numpy stays <2 (constraints.txt).
   - numpy=1.26.*
   - scipy>=1.11,<2
   - pandas>=2.2,<3        # snakemake-executor-plugin-slurm requires pandas<3
@@ -61,7 +64,7 @@ dependencies:
 
   # Data Handling
   - h5py>=3.9
-  - zarr>=2.16
+  - zarr>=2.16,<3        # zarr_io.py uses the v2 API (zarr.storage.DirectoryStore, zarr.Blosc)
   - dask-core>=2024
   - tqdm
   - pyyaml

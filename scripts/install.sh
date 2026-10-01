@@ -9,6 +9,8 @@
 #   --env-name NAME     Environment name (default: KINTSUGI)
 #   --features LIST     Comma-separated features to install (gpu,viz,dl,analysis,bio,full)
 #   --hpc               Use HPC environment file (envs/env-hpc.yml) with full GPU/CUDA stack
+#   --solve             Solve envs/env-linux.yml with conda instead of installing the
+#                       pinned lock file envs/env-linux.lock.txt (Linux x86_64 desktop only)
 #   --skip-validate     Skip dependency validation after install
 #   --help              Show this help message
 #
@@ -20,6 +22,8 @@ ENV_NAME="KINTSUGI"
 FEATURES=""
 SKIP_VALIDATE=false
 HPC_MODE=false
+FORCE_SOLVE=false
+USE_LOCK=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -63,6 +67,9 @@ Options:
   --features LIST     Comma-separated features to install after base
                       Available: gpu, viz, dl, analysis, bio, full
   --hpc               Use HPC environment (includes GPU, CUDA, analysis)
+  --solve             Solve envs/env-linux.yml with conda instead of installing the
+                      pinned lock file (Linux x86_64 desktop only). The lock file
+                      needs no solver and installs in about 90 seconds.
   --skip-validate     Skip dependency validation after install
   --help              Show this help message
 
@@ -89,6 +96,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --hpc)
             HPC_MODE=true
+            shift
+            ;;
+        --solve)
+            FORCE_SOLVE=true
             shift
             ;;
         --skip-validate)
@@ -155,6 +166,13 @@ case "$OS" in
             ENV_FILE="envs/env-hpc.yml"
         else
             ENV_FILE="envs/env-linux.yml"
+            # Pinned explicit lock file: no solver run at all. Generated from
+            # env-linux.yml (see its header); conda-forge-only solves of the
+            # YAML took anywhere from 79 s to more than 25 minutes in testing.
+            LOCK_FILE="envs/env-linux.lock.txt"
+            if [ "$FORCE_SOLVE" = false ] && [ "$(uname -m)" = "x86_64" ] && [ -f "$PROJECT_DIR/$LOCK_FILE" ]; then
+                USE_LOCK=true
+            fi
         fi
         ;;
     Darwin*)
@@ -184,6 +202,9 @@ case "$OS" in
 esac
 print_info "Detected platform: $PLATFORM"
 print_info "Environment file: $ENV_FILE"
+if [ "$USE_LOCK" = true ]; then
+    print_info "Lock file: $LOCK_FILE (pinned, solver-free; pass --solve to solve the YAML instead)"
+fi
 
 # Verify env file exists
 if [ ! -f "$PROJECT_DIR/$ENV_FILE" ]; then
@@ -226,13 +247,25 @@ if conda config --show channels 2>/dev/null | grep -q -E '^[[:space:]]*-[[:space
     echo ""
 fi
 
-# 2. Classic solver. libmamba is the default since conda 23.10 and solves
-#    this environment in about 80 seconds (conda 26.7); classic is far slower.
+# 2. Classic solver. libmamba is the default since conda 23.10; the classic
+#    solver was still solving the pinned file after 12 minutes in testing.
 CONDA_SOLVER_CFG=$(conda config --show solver 2>/dev/null | awk '/^solver:/ {print $2}')
 if [ "$CONDA_SOLVER_CFG" = "classic" ]; then
     print_warning "conda is configured with the classic solver, which is far slower than"
     print_warning "libmamba on this environment and can look like a hang."
     print_info "Fix: conda install -n base conda-libmamba-solver && conda config --set solver libmamba"
+    echo ""
+fi
+
+# 3. Flexible channel priority (the Miniconda default; Miniforge sets strict).
+#    Only the solver path is affected (the lock file is not solved). With
+#    flexible priority conda 26.7 was still solving the pinned env-linux.yml
+#    after 18 minutes; with strict priority the same solve took 93 s and 48 s.
+CONDA_PRIORITY_CFG=$(conda config --show channel_priority 2>/dev/null | awk '/^channel_priority:/ {print $2}')
+if [ "$USE_LOCK" = false ] && [ "$CONDA_PRIORITY_CFG" != "strict" ]; then
+    print_warning "channel_priority is '${CONDA_PRIORITY_CFG:-flexible}'. Solving the KINTSUGI env files"
+    print_warning "with conda's libmamba solver is much faster with strict channel priority."
+    print_info "Fix: conda config --set channel_priority strict"
     echo ""
 fi
 
@@ -256,6 +289,9 @@ cd "$PROJECT_DIR"
 if [ "$UPDATE_MODE" = true ]; then
     print_info "Updating environment from $ENV_FILE..."
     conda env update -n "$ENV_NAME" -f "$ENV_FILE" --prune
+elif [ "$USE_LOCK" = true ]; then
+    print_info "Creating environment from $LOCK_FILE (no solve)..."
+    conda create -y -n "$ENV_NAME" --file "$LOCK_FILE"
 else
     print_info "Creating environment from $ENV_FILE..."
     conda env create -n "$ENV_NAME" -f "$ENV_FILE"
@@ -267,6 +303,14 @@ print_success "Conda environment created/updated"
 print_header "Activating Environment"
 conda activate "$ENV_NAME"
 print_success "Environment activated: $ENV_NAME"
+
+# The lock file holds the conda packages only; install the pip section of
+# env-linux.yml (kintsugi + its PyPI deps + snakemake) the same way the YAML does.
+if [ "$USE_LOCK" = true ] && [ "$UPDATE_MODE" != true ]; then
+    print_info "Installing KINTSUGI and pip-only dependencies (pip install -e '.[workflow]')..."
+    python -m pip install -e ".[workflow]"
+    print_success "pip packages installed"
+fi
 
 # HPC-specific post-install steps
 if [ "$HPC_MODE" = true ]; then

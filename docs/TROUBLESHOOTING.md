@@ -50,25 +50,39 @@ no output, or fails with dependency conflicts.
    ```
    Or install [Miniforge](https://github.com/conda-forge/miniforge), which is conda-forge-only.
 
-2. **Use the libmamba solver** (default since conda 23.10):
+2. **Set strict channel priority** (Miniforge's default; Miniconda uses `flexible`):
+   ```bash
+   conda config --set channel_priority strict
+   ```
+   With `flexible`, conda 26.7 + libmamba solved the pinned `env-linux.yml` in 79 s once
+   and was still solving a repeat run after 18 minutes; with `strict` the same solve took
+   93 s and 48 s in two runs. The unpinned file never finished within 32 minutes.
+
+3. **Use the libmamba solver** (default since conda 23.10):
    ```bash
    conda install -n base conda-libmamba-solver
    conda config --set solver libmamba
    conda env create -f envs/env-linux.yml
    ```
 
-3. **Update conda and the env file**:
+4. **Skip the solver with the lock file** (Linux x86_64). `envs/env-linux.lock.txt` is
+   an explicit, md5-pinned list generated from `envs/env-linux.yml`; conda installs it
+   without solving (about 90 s), then add the pip-only packages:
+   ```bash
+   conda create -n KINTSUGI --file envs/env-linux.lock.txt
+   conda activate KINTSUGI
+   pip install -e ".[workflow]"
+   ```
+
+5. **Update conda and the env file**:
    ```bash
    conda update -n base conda
    git pull        # envs/*.yml carry solver pins and nodefaults
    ```
+   micromamba 2.9 (the solver core behind Miniforge's `mamba env create`) solved both the
+   old and the new `env-linux.yml` in under 75 s in every run.
 
-4. **Use mamba** (bundled with Miniforge); the solve takes about a minute:
-   ```bash
-   mamba env create -f envs/env-linux.yml
-   ```
-
-5. **Create a minimal environment and add packages**:
+6. **Create a minimal environment and add packages**:
    ```bash
    conda create -n KINTSUGI -c conda-forge --override-channels python=3.11 pip libvips
    conda activate KINTSUGI
