@@ -1,6 +1,11 @@
 name: KINTSUGI
 channels:
   - conda-forge
+  # nodefaults: stop conda from merging the user's .condarc channels (Miniconda and
+  # Anaconda ship `channels: [defaults]`) into this solve. Without it, 'defaults' is
+  # still used even though it is not listed here, and the cross-channel solve did not
+  # finish within 25 minutes in testing. Miniforge is unaffected (conda-forge only).
+  - nodefaults
 
 # =============================================================================
 # KINTSUGI Base Environment for Windows
@@ -55,7 +60,7 @@ dependencies:
 
   # Data Handling
   - h5py
-  - zarr
+  - zarr<3                # zarr_io.py uses the v2 API (zarr.storage.DirectoryStore, zarr.Blosc)
   - dask-core
   - tqdm
   - pyyaml

@@ -57,13 +57,23 @@ KINTSUGI uses a streamlined base installation with optional feature groups that 
 git clone https://github.com/smith6jt-cop/KINTSUGI.git
 cd KINTSUGI
 
-# 2. Create the base conda environment
-conda env create -f envs/env-linux.yml
-
-# 3. Activate and verify
+# 2a. Create the base conda environment from the pinned lock file (x86_64, no solver run,
+#     about 90 s) and add the pip-only packages
+conda create -n KINTSUGI --file envs/env-linux.lock.txt
 conda activate KINTSUGI
+pip install -e ".[workflow]"
+
+# 2b. Or solve the environment file instead (other architectures, or to pick up newer
+#     packages; conda-forge-only solves took 79 s to 25+ min in testing)
+conda env create -f envs/env-linux.yml
+conda activate KINTSUGI
+
+# 3. Verify
 kintsugi check
 ```
+
+`./scripts/install.sh` does 2a by default (`--solve` for 2b). Miniconda/Anaconda users: remove the
+`defaults` channel first, see [Troubleshooting](#troubleshooting).
 
 ### Windows
 
@@ -781,14 +791,51 @@ require('gpu', 'viz', strict=False)  # Shows warning instead of error
 
 **Conda environment creation hangs**
 
-The base environment is designed to install quickly. If you experience hangs:
-```bash
-# Use libmamba solver (faster)
-conda config --set solver libmamba
+`conda env create` sitting at `Solving environment` for 15+ minutes, or stopping with no
+output, has three known causes. Check them in order.
 
-# Then retry
-conda env create -f envs/env-linux.yml
-```
+1. **`defaults` channel in your conda configuration** (Miniconda and Anaconda ship
+   `channels: [defaults]`). conda merges `.condarc` channels into every env-file solve,
+   and a conda-forge + defaults solve of this environment does not finish in 25 minutes.
+   The env files now list `nodefaults` to block the merge, but the Anaconda
+   Terms-of-Service plugin (conda >= 25.x) still gates `conda env create` on the configured
+   channels: it prompts in a terminal and raises `CondaToSNonInteractiveError` when stdin is
+   not a terminal (scripts, IDE tasks, Claude Code).
+   ```bash
+   conda config --show channels                 # is 'defaults' listed?
+   conda config --remove channels defaults
+   conda config --add channels conda-forge
+   conda config --set channel_priority strict
+   # if 'defaults' comes from the install's own .condarc:
+   conda config --file "$(conda info --base)/.condarc" --remove channels defaults
+   ```
+   [Miniforge](https://github.com/conda-forge/miniforge) ships conda-forge-only and needs none of this.
+2. **Flexible channel priority** (the Miniconda default; Miniforge sets `strict`). With
+   `channel_priority: flexible`, conda 26.7 + libmamba solved the pinned `env-linux.yml`
+   in 79 s once and was still solving a repeat run after 18 minutes; with `strict` the
+   same solve took 93 s and 48 s in two runs. The unpinned file never finished within
+   32 minutes.
+   ```bash
+   conda config --set channel_priority strict
+   ```
+3. **Classic solver** (conda < 23.10, or `solver: classic` in `.condarc`):
+   ```bash
+   conda install -n base conda-libmamba-solver
+   conda config --set solver libmamba
+   ```
+4. **Skip the solver.** `envs/env-linux.lock.txt` is an explicit, md5-pinned package list
+   generated from `envs/env-linux.yml`; conda installs it without solving (about 90 s):
+   ```bash
+   conda create -n KINTSUGI --file envs/env-linux.lock.txt
+   conda activate KINTSUGI
+   pip install -e ".[workflow]"
+   ```
+   For the YAML route, `git pull` first: `envs/env-linux.yml` now pins numpy, pandas,
+   packaging and zarr and bounds the large packages. micromamba 2.9 (the solver core
+   behind Miniforge's `mamba`) solved both the old and the new file in under 75 s.
+
+`./scripts/install.sh` checks 1 to 3 and uses the lock file by default (`--solve` to solve
+the YAML instead).
 
 ### HPC/SLURM Issues
 

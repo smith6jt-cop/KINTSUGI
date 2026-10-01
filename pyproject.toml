@@ -60,7 +60,7 @@ dependencies = [
     "stackview>=0.18.0",
 
     # Data handling
-    "zarr>=2.16.0",
+    "zarr>=2.16.0,<3",  # zarr_io.py uses the v2 API (zarr.storage.DirectoryStore, zarr.Blosc)
     "h5py>=3.9.0",
     "dask>=2023.7.0",
     "dask-image>=0.6.0",

@@ -1,8 +1,11 @@
 name: KINTSUGI
 channels:
   - conda-forge
-  # NOTE: Do NOT add 'defaults' here. Miniforge uses conda-forge only.
-  # Adding defaults causes solver hangs due to cross-channel conflicts.
+  # nodefaults: stop conda from merging the user's .condarc channels (Miniconda and
+  # Anaconda ship `channels: [defaults]`) into this solve. Without it, 'defaults' is
+  # still used even though it is not listed here, and the cross-channel solve did not
+  # finish within 25 minutes in testing. Miniforge is unaffected (conda-forge only).
+  - nodefaults
 
 # =============================================================================
 # KINTSUGI Base Environment for Linux
@@ -32,37 +35,44 @@ dependencies:
   - wheel
 
   # Core Scientific Computing
-  - numpy>=1.24,<2.0
-  - scipy
-  - pandas
-  - scikit-learn
-  - scikit-image
-  - matplotlib
-  - seaborn
+  # Version bounds below are solver pins, not feature requirements. Unbounded
+  # specs let the solver consider every historical build of these packages: with
+  # conda 26.7 + libmamba the unpinned file never solved within 32 minutes. With
+  # the bounds and `channel_priority: strict` (Miniforge default) conda solved
+  # it in 93 s and 48 s; with `flexible` (Miniconda default) one run took 79 s
+  # and a repeat was still solving after 18 minutes. micromamba: under 75 s.
+  # env-linux.lock.txt skips the solver entirely. numpy stays <2 (constraints.txt).
+  - numpy=1.26.*
+  - scipy>=1.11,<2
+  - pandas>=2.2,<3        # snakemake-executor-plugin-slurm requires pandas<3
+  - scikit-learn>=1.3
+  - scikit-image>=0.22
+  - matplotlib>=3.8
+  - seaborn-base>=0.13    # the 'seaborn' metapackage adds statsmodels, which nothing here uses
 
   # Image Processing
-  - tifffile
-  - imagecodecs
+  - tifffile>=2024
+  - imagecodecs>=2024,<2026.2   # >=2026.2 declares numpy>=2 on PyPI; pip would replace the conda build
   - imageio
   - pillow
-  - libvips
+  - libvips>=8.15
 
   # Jupyter Environment
-  - jupyterlab
-  - ipywidgets
+  - jupyterlab>=4,<5
+  - ipywidgets>=8
   - ipykernel
 
   # Data Handling
-  - h5py
-  - zarr
-  - dask-core
+  - h5py>=3.9
+  - zarr>=2.16,<3        # zarr_io.py uses the v2 API (zarr.storage.DirectoryStore, zarr.Blosc)
+  - dask-core>=2024
   - tqdm
   - pyyaml
   - openpyxl
 
   # Utilities
   - click
-  - packaging
+  - packaging>=24,<26     # snakemake requires packaging<26 (see constraints.txt)
   - requests
   - psutil
   - natsort
