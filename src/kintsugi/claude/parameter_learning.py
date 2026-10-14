@@ -310,6 +310,11 @@ class ParameterRecord:
         return d
 
 
+# Score multiplier for records that were not user-approved (e.g. ``kintsugi mcp pretrain``
+# bootstrap rows): they inform recommendations but never outrank approved evidence.
+BOOTSTRAP_WEIGHT = 0.6
+
+
 class ParameterLearningEngine:
     """
     Learns and recommends processing parameters based on tissue type and marker.
@@ -539,12 +544,18 @@ class ParameterLearningEngine:
         operation: str,
         characteristics: ImageCharacteristics | None = None,
         min_quality_improvement: float = 0.0,
-        approved_only: bool = True,
+        approved_only: bool = False,
         max_results: int = 5,
         algorithm_version: str | None = None,
     ) -> dict[str, Any]:
         """
         Recommend parameters based on similar tissue/marker combinations.
+
+        Records that were not user-approved (for example the bootstrap rows written by
+        ``kintsugi mcp pretrain``) are included by default but down-weighted: they score
+        at ``BOOTSTRAP_WEIGHT`` of an approved record and the confidence of a
+        recommendation is scaled by ``0.5 + 0.5 * approved_fraction``, so a result that
+        rests only on bootstrap data never exceeds 0.5 (the "learned" tier threshold).
 
         Args:
             tissue_type: Target tissue type
@@ -552,7 +563,8 @@ class ParameterLearningEngine:
             operation: Operation to get parameters for
             characteristics: Current image characteristics for similarity matching
             min_quality_improvement: Minimum quality improvement to consider
-            approved_only: Only use user-approved records
+            approved_only: Only use user-approved records (default: include bootstrap
+                records at reduced weight)
             max_results: Maximum number of similar records to consider
 
         Returns:
@@ -618,8 +630,10 @@ class ParameterLearningEngine:
         # Aggregate parameters with weighted voting
         recommended_params = self._aggregate_parameters(top_records)
 
-        # Calculate confidence
+        # Calculate confidence; bootstrap-only evidence is capped at 0.5.
         confidence = self._calculate_confidence(top_records, tissue_norm, marker_norm)
+        approved_count = sum(1 for r in top_records if r.get("user_approved"))
+        confidence *= 0.5 + 0.5 * (approved_count / len(top_records))
 
         return {
             "status": "success",
@@ -632,6 +646,8 @@ class ParameterLearningEngine:
             "confidence": round(confidence, 3),
             "confidence_level": self._confidence_level(confidence),
             "based_on_records": len(top_records),
+            "approved_records": approved_count,
+            "bootstrap_records": len(top_records) - approved_count,
             "similar_records": [
                 {
                     "tissue": r["tissue_type"],
@@ -768,6 +784,8 @@ class ParameterLearningEngine:
 
             # Apply source weight
             score *= record.get("weight", 1.0)
+            if not record.get("user_approved"):
+                score *= BOOTSTRAP_WEIGHT
 
             record["score"] = score
 

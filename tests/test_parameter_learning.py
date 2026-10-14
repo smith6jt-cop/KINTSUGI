@@ -71,3 +71,53 @@ def test_normalize_marker_name(marker, expected):
 )
 def test_normalize_tissue_type(tissue, expected):
     assert normalize_tissue_type(tissue) == expected
+
+
+def _record(engine, *, approved, scale, improvement=0.3):
+    return engine.record_parameters(
+        tissue_type="tonsil",
+        marker_name="CD3",
+        operation="blank_subtraction",
+        parameters={"blank_scale_factor": scale, "erosion": 1},
+        quality_before=0.5,
+        quality_after=0.5 + improvement,
+        user_approved=approved,
+        user_notes="bootstrap" if not approved else "",
+        to_global=False,
+    )
+
+
+def test_bootstrap_records_are_visible_but_capped(isolated_home, tmp_path):
+    """Rows written by `kintsugi mcp pretrain` (user_approved=False) inform recommendations."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    engine = ParameterLearningEngine(str(project))
+    for scale in (0.8, 0.82, 0.78):
+        _record(engine, approved=False, scale=scale)
+
+    rec = engine.recommend_parameters("tonsil", "CD3", "blank_subtraction")
+    assert rec["status"] == "success"
+    assert rec["bootstrap_records"] == 3
+    assert rec["approved_records"] == 0
+    assert rec["recommended_parameters"]["blank_scale_factor"] == pytest.approx(0.8, abs=0.02)
+    # Bootstrap-only evidence never reaches the "learned" tier (> 0.5).
+    assert 0 < rec["confidence"] <= 0.5
+
+    strict = engine.recommend_parameters("tonsil", "CD3", "blank_subtraction", approved_only=True)
+    assert strict["status"] == "no_history"
+
+
+def test_approved_records_outrank_bootstrap(isolated_home, tmp_path):
+    project = tmp_path / "proj"
+    project.mkdir()
+    engine = ParameterLearningEngine(str(project))
+    _record(engine, approved=False, scale=0.3)
+    _record(engine, approved=True, scale=0.9)
+
+    rec = engine.recommend_parameters("tonsil", "CD3", "blank_subtraction", max_results=5)
+    assert rec["approved_records"] == 1 and rec["bootstrap_records"] == 1
+    top = rec["similar_records"][0]
+    assert top["parameters"]["blank_scale_factor"] == 0.9
+    # The weighted aggregate leans towards the approved value.
+    assert rec["recommended_parameters"]["blank_scale_factor"] > 0.6
+    assert 0 < BOOTSTRAP_WEIGHT < 1
