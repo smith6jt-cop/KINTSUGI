@@ -1385,3 +1385,35 @@ class TestAuditedDefects:
         # auto-suggested scale moves towards it once the project history exists.
         assert learned_scale != plain_scale
         assert abs(learned_scale - 0.33) < abs(plain_scale - 0.33)
+
+    async def test_cluster_then_propagate(self, tmp_path, clear_mcp_state):
+        """cluster_channels tags members with cluster_id so propagate_parameters finds them."""
+        pytest.importorskip("sklearn")
+        tifffile = pytest.importorskip("tifffile")
+        from kintsugi.mcp.tools.signal_isolation import (
+            _loaded_images,
+            cluster_channels_tool,
+            propagate_parameters_tool,
+        )
+
+        project = tmp_path / "proj"
+        edf = project / "data" / "processed" / "edf"
+        edf.mkdir(parents=True)
+        rng = np.random.default_rng(1)
+        for name, level in (("CD3", 200), ("CD4", 220), ("DAPI", 3000), ("CD8", 210)):
+            img = rng.integers(0, level, (96, 96), dtype=np.uint16)
+            tifffile.imwrite(edf / f"{name}.tif", img)
+
+        clustered = await cluster_channels_tool(project_path=str(project), n_clusters=2)
+        assert clustered.get("status") == "success", clustered
+        assert set(clustered["loaded_channels"]) == {"CD3", "CD4", "DAPI", "CD8"}
+        cid = clustered["assignments"]["CD3"]
+        assert _loaded_images["CD3"]["metadata"]["cluster_id"] == cid
+
+        propagated = await propagate_parameters_tool(
+            project_path=str(project),
+            cluster_id=cid,
+            params={"clean_params": {"background_threshold": 10}},
+        )
+        assert propagated.get("status") == "success", propagated
+        assert propagated["total"] >= 1

@@ -293,7 +293,7 @@ async def suggest_subtraction_parameters(
                 tissue_type=tissue_type,
                 marker_name=marker_name,
             )
-            if recommendation.get("found"):
+            if recommendation.get("status") == "success":
                 learned_params = recommendation.get("recommended_parameters", {})
                 learned_confidence = recommendation.get("confidence", 0)
         except Exception as e:
@@ -1560,18 +1560,27 @@ async def cluster_channels_tool(
     ]
 
     marker_dict: dict[str, Any] = {}
+    path_by_name: dict[str, Path] = {}
     for search_dir in search_dirs:
         if not search_dir.exists():
             continue
         for tif in sorted(search_dir.rglob("*.tif")):
             name = tif.stem
-            if name not in marker_dict:
-                try:
-                    import tifffile
+            if name in marker_dict:
+                continue
+            try:
+                # rglob follows symlinks; keep every file inside the project.
+                tif = ensure_within(tif, project_path_obj, "channel file")
+            except PathSafetyError as e:
+                logger.warning(str(e))
+                continue
+            try:
+                import tifffile
 
-                    marker_dict[name] = tifffile.imread(str(tif))
-                except Exception as e:
-                    logger.warning(f"Failed to load {tif}: {e}")
+                marker_dict[name] = tifffile.imread(str(tif))
+                path_by_name[name] = tif
+            except Exception as e:
+                logger.warning(f"Failed to load {tif}: {e}")
         if marker_dict:
             break
 
@@ -1595,6 +1604,20 @@ async def cluster_channels_tool(
     except Exception as e:
         return {"error": f"Clustering failed: {e}"}
 
+    # Keep every clustered channel in the session, tagged with its cluster, so
+    # propagate_parameters can find the members (it filters on metadata.cluster_id).
+    for name, cid in assignments.items():
+        _store_image(
+            name,
+            marker_dict[name],
+            {
+                "cluster_id": int(cid),
+                "source_path": str(path_by_name[name]),
+                "project": str(project_path_obj),
+                "wavelength_group": features[name].get("wavelength_group"),
+            },
+        )
+
     # Format result
     cluster_info = {}
     for cid, (rep_name, count) in representatives.items():
@@ -1610,8 +1633,9 @@ async def cluster_channels_tool(
         "status": "success",
         "n_channels": len(assignments),
         "n_clusters": len(representatives),
-        "assignments": assignments,
+        "assignments": {name: int(cid) for name, cid in assignments.items()},
         "clusters": cluster_info,
+        "loaded_channels": sorted(assignments),
     }
 
 
