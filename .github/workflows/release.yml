@@ -45,6 +45,8 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -73,6 +75,11 @@ jobs:
         run: |
           kintsugi --version
           kintsugi check --quiet
+
+      - name: Smoke-test the MCP server over stdio
+        run: |
+          pip install "mcp>=2.0,<3" pytest pytest-asyncio
+          pytest tests/test_mcp_stdio.py -q
 
   publish-testpypi:
     name: Publish to TestPyPI

@@ -121,7 +121,7 @@ KINTSUGI includes an MCP server for Claude Code integration, enabling AI-assiste
 
 ```bash
 # Install Claude Code dependencies
-pip install kintsugi[claude]
+pip install -e ".[claude]"   # or: kintsugi install claude
 ```
 
 **If creating a new project:** Use `kintsugi init` - Claude Code configuration is created automatically.

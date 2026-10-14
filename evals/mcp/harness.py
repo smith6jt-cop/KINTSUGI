@@ -57,25 +57,50 @@ def estimate_tokens(text: str) -> int:
 
 
 def load_tools() -> list[dict[str, Any]]:
-    """Build the live FastMCP server and return its advertised tool definitions."""
+    """Build the live MCP server and return its advertised tool definitions.
+
+    Tools are read through the SDK's in-process client, so what the harness
+    measures is exactly what a connected Claude Code session receives.
+    """
     try:
-        from kintsugi.mcp.server import MCP_AVAILABLE, create_server
+        from kintsugi.mcp._sdk import MCP_AVAILABLE, unavailable_message
+        from kintsugi.mcp.server import create_server
     except Exception as exc:  # pragma: no cover
         raise SystemExit(f"Could not import the MCP server: {exc}")
     if not MCP_AVAILABLE:
-        raise SystemExit("mcp is not installed. Install with: pip install 'mcp>=1.10.0,<2'")
+        raise SystemExit(unavailable_message())
 
-    server = create_server()
-    tools = asyncio.run(server.list_tools())
+    async def _list() -> list[Any]:
+        from mcp.client import Client
+
+        async with Client(create_server()) as client:
+            return list((await client.list_tools()).tools)
+
     return [
         {
             "name": t.name,
+            "title": t.title,
             "description": t.description or "",
-            "input_schema": t.inputSchema or {},
-            "output_schema": t.outputSchema,
+            "input_schema": t.input_schema or {},
+            "output_schema": t.output_schema,
+            "annotations": (
+                t.annotations.model_dump(by_alias=True, exclude_none=True)
+                if t.annotations
+                else None
+            ),
         }
-        for t in tools
+        for t in tools_sorted(await_(_list()))
     ]
+
+
+def await_(coro: Any) -> Any:
+    """Run a coroutine to completion from synchronous code."""
+    return asyncio.run(coro)
+
+
+def tools_sorted(tools: list[Any]) -> list[Any]:
+    """Stable order for reports."""
+    return sorted(tools, key=lambda t: t.name)
 
 
 def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> dict[str, Any]:

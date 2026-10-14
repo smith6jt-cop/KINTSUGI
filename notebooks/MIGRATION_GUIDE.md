@@ -35,7 +35,7 @@ Open `notebooks/3_Signal_Isolation_QC.ipynb` and follow the step-by-step workflo
 
 1. **Install dependencies:**
    ```bash
-   pip install kintsugi[claude]
+   pip install -e ".[claude]"   # or: kintsugi install claude
    ```
 
 2. **Configure Claude Code:**

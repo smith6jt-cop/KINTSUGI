@@ -79,7 +79,7 @@ The Claude Code MCP integration provides an interactive, AI-assisted workflow. C
 
 **Setup:**
 ```bash
-pip install kintsugi[claude]
+pip install -e ".[claude]"   # or: kintsugi install claude
 kintsugi mcp config /path/to/project  # If not using kintsugi init
 ```
 

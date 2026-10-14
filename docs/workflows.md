@@ -104,7 +104,7 @@ Use Claude Code with the KINTSUGI MCP server for interactive, AI-assisted signal
 
 **Setup:**
 ```bash
-pip install kintsugi[claude]
+pip install -e ".[claude]"   # or: kintsugi install claude
 # If using kintsugi init, Claude config is automatic
 # For existing projects: kintsugi mcp config /path/to/project
 ```

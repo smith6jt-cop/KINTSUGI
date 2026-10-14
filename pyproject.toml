@@ -41,6 +41,9 @@ dependencies = [
     "pandas>=2.0.0",
     "scikit-learn>=1.3.0",
     "scikit-image>=0.21.0",
+    # Tool signatures in kintsugi.mcp.tools use pydantic.Field metadata; the
+    # modules are also imported by the notebook tuners without the claude extra.
+    "pydantic>=2.7,<3",
 
     # Image processing
     "opencv-contrib-python-headless>=4.8.0",
@@ -142,10 +145,10 @@ bio = [
 
 # Claude Code MCP integration
 claude = [
-    # >=1.10 is required for structured tool output (Tool.outputSchema /
-    # CallToolResult.structuredContent / FastMCP structured_output), which the
-    # server relies on. <2 guards against the next major SDK revision.
-    "mcp>=1.10.0,<2",
+    # The server targets the 2.x line of the official SDK (MCPServer, structured
+    # output, tool annotations, in-process test client). 1.x is not supported:
+    # its mcp.server.fastmcp import path no longer exists in 2.x.
+    "mcp>=2.0,<3",
     "httpx>=0.27.0",
     "optuna>=3.0",
     "smo>=0.7",
@@ -194,9 +197,9 @@ dev = [
     "pytest-asyncio>=0.23.0,<1.0",
     "pytest-cov>=4.1.0",
     "pytest-xdist>=3.3.0",
-    # MCP stack so the MCP server/tool tests can construct the FastMCP server
-    # and exercise the protocol (tools/list, tools/call, structured output).
-    "mcp>=1.10.0,<2",
+    # MCP stack so the MCP server/tool tests can construct the server and
+    # exercise the protocol (tools/list, tools/call, structured output).
+    "mcp>=2.0,<3",
     "black==26.1.0",
     "ruff>=0.1.0",
     "mypy>=1.5.0",

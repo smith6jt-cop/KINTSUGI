@@ -264,5 +264,5 @@ def test_committed_mcp_json_is_portable():
 
     assert server["command"] == "kintsugi", "command should be a PATH-resolvable name"
     assert not Path(server["command"]).is_absolute()
-    # No hardcoded absolute cwd that ties the repo to one machine/account.
-    assert "cwd" not in server or not Path(server["cwd"]).is_absolute()
+    # Claude Code ignores cwd (servers start in the project dir); never write it.
+    assert "cwd" not in server
