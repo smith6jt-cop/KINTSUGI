@@ -10,9 +10,10 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import numpy as np
+from pydantic import Field
 
 from kintsugi.mcp.path_safety import (
     PathSafetyError,
@@ -31,8 +32,14 @@ logger = logging.getLogger("kintsugi.mcp.workflow")
 
 
 async def list_channels(
-    project_path: str,
-    cycle: str | None = None,
+    project_path: Annotated[str, Field(description="Path to the KINTSUGI project directory")],
+    cycle: Annotated[
+        str | None,
+        Field(
+            description="Cycle directory name such as 'cyc001', or a bare number; None lists "
+            "the channels of every cycle"
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
     List all available channels in the current project.
@@ -141,10 +148,28 @@ def _extract_channel_name(filename: str) -> str:
 
 
 async def save_processed(
-    channel: str,
-    output_name: str | None = None,
-    format: str = "tiff",
-    project_path: str | None = None,
+    channel: Annotated[str, Field(description="Name of the loaded processed channel to save")],
+    output_name: Annotated[
+        str | None,
+        Field(
+            description="Bare filename without extension or directory; None auto-generates "
+            "'<channel>_<YYYYmmdd_HHMMSS>'"
+        ),
+    ] = None,
+    format: Annotated[
+        Literal["tiff", "tif", "ome-tiff", "zarr"],
+        Field(
+            description="Output format; 'tiff' and 'tif' both write a plain 16-bit .tiff, "
+            "'ome-tiff' adds OME-XML metadata, 'zarr' writes a chunked .zarr store"
+        ),
+    ] = "tiff",
+    project_path: Annotated[
+        str | None,
+        Field(
+            description="KINTSUGI project whose data/processed/signal_isolated directory "
+            "receives the file; defaults to the project the channel was loaded from"
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Save the processed channel to the project output directory.
@@ -256,7 +281,11 @@ async def save_processed(
         return {"error": f"Failed to save: {e}"}
 
 
-async def get_processing_history(channel: str) -> dict[str, Any]:
+async def get_processing_history(
+    channel: Annotated[
+        str, Field(description="Name of a loaded channel whose recorded operations to return")
+    ],
+) -> dict[str, Any]:
     """
     Get the processing history for a channel.
 
@@ -279,8 +308,14 @@ async def get_processing_history(channel: str) -> dict[str, Any]:
 
 
 async def suggest_parameters(
-    channel: str,
-    blank_channel: str | None = None,
+    channel: Annotated[str, Field(description="Name of the loaded channel to analyze")],
+    blank_channel: Annotated[
+        str | None,
+        Field(
+            description="Name of a loaded blank/autofluorescence channel used to estimate "
+            "blank-subtraction parameters; None omits the blank-subtraction recommendation"
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Analyze channel and suggest processing parameters.
@@ -388,9 +423,20 @@ async def suggest_parameters(
 
 
 async def generate_jupyter_cell(
-    operation: str,
-    channel: str,
-    initial_params: dict[str, Any] | None = None,
+    operation: Annotated[
+        Literal[
+            "blank_subtraction", "denoise", "clahe", "clean", "gaussian_subtract", "full_pipeline"
+        ],
+        Field(description="Processing operation to generate an interactive Kview2 tuner cell for"),
+    ],
+    channel: Annotated[str, Field(description="Name of the loaded channel to tune")],
+    initial_params: Annotated[
+        dict[str, Any] | None,
+        Field(
+            description="Initial widget values keyed by parameter name (e.g. 'blank_channel', "
+            "'sigma'); None starts the tuner from its built-in defaults"
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Generate a Jupyter notebook cell for interactive parameter tuning.

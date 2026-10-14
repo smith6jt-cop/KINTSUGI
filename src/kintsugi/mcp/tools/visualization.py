@@ -9,9 +9,10 @@ from __future__ import annotations
 import base64
 import io
 import logging
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import numpy as np
+from pydantic import Field
 
 from kintsugi.mcp.path_safety import clamp_int, validate_choice
 
@@ -28,7 +29,9 @@ def _get_image(name: str) -> Any:
     return _loaded_images[name]["data"]
 
 
-async def get_image_stats(channel: str) -> dict[str, Any]:
+async def get_image_stats(
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+) -> dict[str, Any]:
     """
     Get comprehensive statistics for a loaded image.
 
@@ -100,10 +103,23 @@ async def get_image_stats(channel: str) -> dict[str, Any]:
 
 
 async def get_thumbnail(
-    channel: str,
-    max_size: int = 512,
-    normalize: bool = True,
-    format: str = "png",
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+    max_size: Annotated[
+        int,
+        Field(
+            description="Maximum dimension of thumbnail in pixels (default: 512)", ge=16, le=4096
+        ),
+    ] = 512,
+    normalize: Annotated[
+        bool,
+        Field(description="Percentile-stretch 1-99% to 8-bit before encoding (default: true)"),
+    ] = True,
+    format: Annotated[
+        Literal["png", "jpeg", "jpg"],
+        Field(
+            description="Encoding of the returned image; 'jpg' is an alias of 'jpeg' (default: png)"
+        ),
+    ] = "png",
 ) -> dict[str, Any]:
     """
     Get a downsampled thumbnail of the image.
@@ -111,7 +127,7 @@ async def get_thumbnail(
     Returns base64-encoded image data that Claude can view.
     """
     try:
-        clamp_int(max_size, "max_size", minimum=1, maximum=20000)
+        clamp_int(max_size, "max_size", minimum=16, maximum=4096)
         validate_choice(format.lower(), {"png", "jpeg", "jpg"}, "format")
     except ValueError as e:
         return {"error": str(e)}

@@ -7,9 +7,10 @@ Provides channel quality assessment using the kintsugi.qc module.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any
 
 import numpy as np
+from pydantic import Field
 
 # Import session state from signal_isolation
 from kintsugi.mcp.tools.signal_isolation import _add_history, _loaded_images
@@ -25,14 +26,29 @@ def _get_image(name: str) -> Any:
 
 
 async def assess_quality(
-    channel: str,
-    use_dl_model: bool = False,
-    model_path: str | None = None,
-    confidence_threshold: float = 0.85,
-    tile_size: int = 512,
+    channel: Annotated[str, Field(description="Name of loaded channel to assess")],
+    use_dl_model: Annotated[
+        bool,
+        Field(
+            description="Also run the kintsugi.qc.ImageQC heuristic assessor (not a deep-learning "
+            "model) and blend its score 70/30 with the built-in metrics; falls back to the "
+            "built-in metrics alone if the qc module is unavailable (default: False)"
+        ),
+    ] = False,
+    confidence_threshold: Annotated[
+        float,
+        Field(
+            description="Quality score on a 0.0-1.0 scale below which the channel is flagged "
+            "for manual review (default: 0.85)",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ] = 0.85,
 ) -> dict[str, Any]:
     """
-    Assess channel quality using heuristic and/or deep learning metrics.
+    Assess channel quality using heuristic metrics, optionally blended with the
+    ``kintsugi.qc.ImageQC`` assessor.
 
     Returns comprehensive quality metrics including SNR, contrast, and
     whether the channel requires manual review.
@@ -235,7 +251,9 @@ def _generate_recommendations(metrics: dict[str, float], score: float) -> list[s
     return recommendations
 
 
-async def compute_snr(channel: str) -> dict[str, Any]:
+async def compute_snr(
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+) -> dict[str, Any]:
     """
     Compute Signal-to-Noise Ratio for a channel.
 

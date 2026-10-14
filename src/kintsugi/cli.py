@@ -942,16 +942,69 @@ def start():
 
 
 @mcp.command()
-def tools():
-    """List available MCP tools."""
+@click.option(
+    "--markdown", is_flag=True, help="Print the tool table as Markdown instead of a Rich table"
+)
+@click.option(
+    "--write",
+    "write_files",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Regenerate the <!-- mcp-tools:* --> blocks in FILE (repeatable)",
+)
+@click.option(
+    "--check",
+    "check_files",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Fail if the <!-- mcp-tools:* --> blocks in FILE are stale (repeatable)",
+)
+def tools(markdown: bool, write_files: tuple[str, ...], check_files: tuple[str, ...]):
+    """List available MCP tools, or sync the generated tool reference in the docs.
+
+    The registry (kintsugi.mcp.tool_specs) is the single source of truth. The
+    documentation embeds blocks between <!-- mcp-tools:table:begin/end --> (or
+    :list:) markers; --write regenerates them and --check verifies them, which CI
+    runs so the documented tool surface cannot drift from the server.
+    """
+    from kintsugi.mcp import docs_sync
     from kintsugi.mcp.tool_specs import TOOL_SPECS
+
+    if check_files:
+        problems = docs_sync.check_files(list(check_files))
+        if problems:
+            for problem in problems:
+                console.print(f"[red]{problem}[/red]")
+            console.print("Regenerate with: kintsugi mcp tools --write <file>...")
+            raise SystemExit(1)
+        console.print(
+            f"[green]Generated MCP tool blocks are current in {len(check_files)} file(s)[/green]"
+        )
+        return
+
+    if write_files:
+        for path in write_files:
+            status = docs_sync.sync_file(path, write=True)
+            changed = [kind for kind, ok in status.items() if not ok]
+            if changed:
+                console.print(f"[green]Updated {path}: {', '.join(changed)}[/green]")
+            else:
+                console.print(f"[dim]{path}: already current[/dim]")
+        return
+
+    if markdown:
+        click.echo(docs_sync.render_tool_table())
+        return
 
     table = Table(title="KINTSUGI MCP Tools")
     table.add_column("Tool", style="cyan")
+    table.add_column("Title", style="bold")
+    table.add_column("Read-only", justify="center")
     table.add_column("Description", style="white")
 
     for spec in TOOL_SPECS:
-        table.add_row(spec["name"], spec["description"])
+        read_only = "yes" if spec["annotations"].get("readOnlyHint") else "no"
+        table.add_row(spec["name"], spec["title"], read_only, spec["description"])
 
     console.print(table)
     console.print(

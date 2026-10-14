@@ -8,9 +8,10 @@ based on tissue type and marker name.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import numpy as np
+from pydantic import Field
 
 # Import session state from signal_isolation
 from kintsugi.mcp.tools.signal_isolation import _loaded_images
@@ -95,17 +96,62 @@ async def get_learned_parameters(
 
 
 async def record_successful_parameters(
-    tissue_type: str,
-    marker_name: str,
-    operation: str,
-    parameters: dict[str, Any],
-    quality_before: float = 0.0,
-    quality_after: float = 0.0,
-    user_approved: bool = True,
-    user_notes: str = "",
-    channel: str | None = None,
-    project_path: str | None = None,
-    algorithm_version: str | None = None,
+    tissue_type: Annotated[str, Field(description="Type of tissue processed (e.g., 'tonsil')")],
+    marker_name: Annotated[str, Field(description="Marker name (e.g., 'CD3', 'DAPI')")],
+    operation: Annotated[
+        Literal["blank_subtraction", "denoise", "clahe", "clean_background", "gaussian_subtract"],
+        Field(description="Processing operation the parameters belong to"),
+    ],
+    parameters: Annotated[
+        dict[str, Any], Field(description="Parameter dictionary that was used for the operation")
+    ],
+    quality_before: Annotated[
+        float,
+        Field(
+            description="Quality score before processing on a 0.0-1.0 scale",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ] = 0.0,
+    quality_after: Annotated[
+        float,
+        Field(
+            description="Quality score after processing on a 0.0-1.0 scale",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ] = 0.0,
+    user_approved: Annotated[
+        bool,
+        Field(
+            description="Whether the user approved the result; only approved records "
+            "influence future recommendations"
+        ),
+    ] = True,
+    user_notes: Annotated[str, Field(description="Optional free-text notes from the user")] = "",
+    channel: Annotated[
+        str | None,
+        Field(
+            description="Name of a loaded channel whose image characteristics are stored with "
+            "the record; None stores the record without characteristics"
+        ),
+    ] = None,
+    project_path: Annotated[
+        str | None,
+        Field(
+            description="KINTSUGI project directory holding a project-specific learning "
+            "database; None records to the user-wide global database only"
+        ),
+    ] = None,
+    algorithm_version: Annotated[
+        str | None,
+        Field(
+            description="Free-form tag of the algorithm variant, e.g. 'weighted_v1'; None "
+            "falls back to parameters['algorithm_version'] when present"
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Record a successful parameter set for future learning.
@@ -123,6 +169,7 @@ async def record_successful_parameters(
         user_notes: Optional notes from user
         channel: Channel name (for characteristics)
         project_path: Project path
+        algorithm_version: Free-form tag of the algorithm variant (e.g. "weighted_v1")
 
     Returns:
         Confirmation with record ID
@@ -173,7 +220,13 @@ async def record_successful_parameters(
 
 
 async def get_learning_statistics(
-    project_path: str | None = None,
+    project_path: Annotated[
+        str | None,
+        Field(
+            description="KINTSUGI project directory holding a project-specific learning "
+            "database to summarize; None summarizes the user-wide global database only"
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Get statistics about the parameter learning database.
@@ -195,11 +248,23 @@ async def get_learning_statistics(
 
 
 async def suggest_with_learning(
-    channel: str,
-    tissue_type: str,
-    marker_name: str,
-    blank_channel: str | None = None,
-    project_path: str | None = None,
+    channel: Annotated[str, Field(description="Name of the loaded channel to analyze")],
+    tissue_type: Annotated[str, Field(description="Tissue type (e.g., 'tonsil', 'lymph node')")],
+    marker_name: Annotated[str, Field(description="Marker name (e.g., 'CD3', 'DAPI')")],
+    blank_channel: Annotated[
+        str | None,
+        Field(
+            description="Name of a loaded blank/autofluorescence channel used to estimate "
+            "blank-subtraction parameters; None uses default blank-subtraction heuristics"
+        ),
+    ] = None,
+    project_path: Annotated[
+        str | None,
+        Field(
+            description="KINTSUGI project directory holding a project-specific learning "
+            "database; None consults the user-wide global database only"
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Suggest processing parameters combining image analysis and learned history.
@@ -224,6 +289,7 @@ async def suggest_with_learning(
 
     try:
         from kintsugi.claude.parameter_learning import (
+            LEARNING_OPERATIONS,
             ImageCharacteristics,
             normalize_marker_name,
             normalize_tissue_type,
@@ -250,7 +316,7 @@ async def suggest_with_learning(
     noise_estimate = float(np.std(sample[sample < p10]))
 
     # Get learned parameters for each operation
-    operations = ["blank_subtraction", "denoise", "clahe", "clean_background", "gaussian_subtract"]
+    operations = list(LEARNING_OPERATIONS)
 
     recommendations = {
         "channel": channel,
@@ -543,14 +609,44 @@ def _suggest_processing_order(
 
 
 async def approve_and_learn(
-    channel: str,
-    tissue_type: str,
-    marker_name: str,
-    operations_params: dict[str, dict[str, Any]],
-    quality_before: float,
-    quality_after: float,
-    notes: str = "",
-    project_path: str | None = None,
+    channel: Annotated[str, Field(description="Name of the loaded channel that was processed")],
+    tissue_type: Annotated[str, Field(description="Tissue type (e.g., 'tonsil', 'lymph node')")],
+    marker_name: Annotated[str, Field(description="Marker name (e.g., 'CD3', 'DAPI')")],
+    operations_params: Annotated[
+        dict[str, dict[str, Any]],
+        Field(
+            description="Mapping of operation name to the parameter dict that was used; keys may "
+            "be learning operations (blank_subtraction, denoise, clahe, clean_background, "
+            "gaussian_subtract) or the tool names recorded in the session history "
+            "(subtract_blank, subtract_blank_weighted, denoise_advanced, ...)"
+        ),
+    ],
+    quality_before: Annotated[
+        float,
+        Field(
+            description="Quality score before all processing on a 0.0-1.0 scale",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ],
+    quality_after: Annotated[
+        float,
+        Field(
+            description="Quality score after all processing on a 0.0-1.0 scale",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ],
+    notes: Annotated[str, Field(description="Free-text user notes stored with every record")] = "",
+    project_path: Annotated[
+        str | None,
+        Field(
+            description="KINTSUGI project directory holding a project-specific learning "
+            "database; None records to the user-wide global database only"
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Approve processing results and record all parameters for learning.
@@ -561,7 +657,9 @@ async def approve_and_learn(
         channel: Channel name
         tissue_type: Tissue type
         marker_name: Marker name
-        operations_params: Dict mapping operation names to their parameters
+        operations_params: Dict mapping operation names to their parameters. Keys may
+            be learning operations or session-history tool names (e.g. "subtract_blank"),
+            which are mapped through HISTORY_TO_LEARNING_OP before recording.
         quality_before: Quality score before all processing
         quality_after: Quality score after all processing
         notes: User notes
@@ -570,9 +668,33 @@ async def approve_and_learn(
     Returns:
         Confirmation with learning status
     """
+    try:
+        from kintsugi.claude.parameter_learning import (
+            HISTORY_TO_LEARNING_OP,
+            LEARNING_OPERATIONS,
+        )
+    except ImportError as e:
+        return {"error": f"Learning module not available: {e}"}
+
+    # The session history records tool names (e.g. "subtract_blank") while the
+    # learning database is keyed by operation names; map every key before any
+    # record is written so an unknown key cannot leave a partial set behind.
+    mapped_operations: list[tuple[str, dict[str, Any]]] = []
+    for operation, parameters in operations_params.items():
+        learning_op = HISTORY_TO_LEARNING_OP.get(operation, operation)
+        if learning_op not in LEARNING_OPERATIONS:
+            return {
+                "error": (
+                    f"Unknown operation '{operation}'. Allowed operations: "
+                    f"{', '.join(LEARNING_OPERATIONS)}; history tool names "
+                    f"{', '.join(sorted(HISTORY_TO_LEARNING_OP))} are also accepted"
+                )
+            }
+        mapped_operations.append((learning_op, parameters))
+
     results = []
 
-    for operation, parameters in operations_params.items():
+    for operation, parameters in mapped_operations:
         result = await record_successful_parameters(
             tissue_type=tissue_type,
             marker_name=marker_name,

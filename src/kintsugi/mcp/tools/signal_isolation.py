@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import numpy as np
+from pydantic import Field
 
 from kintsugi.mcp.path_safety import (
     PathSafetyError,
@@ -60,9 +61,9 @@ def _add_history(name: str, operation: str, params: dict[str, Any]):
 
 
 async def load_channel(
-    project_path: str,
-    cycle: str,
-    channel: str,
+    project_path: Annotated[str, Field(description="Path to the KINTSUGI project directory")],
+    cycle: Annotated[str, Field(description="Cycle name or number (e.g., 'cyc001' or '1')")],
+    channel: Annotated[str, Field(description="Channel name (e.g., 'CD3', 'DAPI')")],
 ) -> dict[str, Any]:
     """
     Load a channel image from a KINTSUGI project.
@@ -388,12 +389,21 @@ def _basic_parameter_suggestion(signal: np.ndarray, blank: np.ndarray) -> dict:
 
 
 async def analyze_weighted_subtraction(
-    signal_channel: str,
-    blank_channel: str,
-    n_ranges: int = 5,
-    range_method: str = "percentile",
-    tissue_type: str = "unknown",
-    marker_name: str | None = None,
+    signal_channel: Annotated[str, Field(description="Name of loaded signal channel")],
+    blank_channel: Annotated[str, Field(description="Name of loaded blank channel")],
+    n_ranges: Annotated[
+        int, Field(description="Number of intensity ranges (default: 5)", ge=3, le=10)
+    ] = 5,
+    range_method: Annotated[
+        Literal["percentile", "otsu"],
+        Field(description="Range boundary method (default: percentile)"),
+    ] = "percentile",
+    tissue_type: Annotated[
+        str, Field(description="Tissue type for context (optional)")
+    ] = "unknown",
+    marker_name: Annotated[
+        str | None, Field(description="Marker name for context (optional)")
+    ] = None,
 ) -> dict[str, Any]:
     """
     Preview range assignments and suggested weights without performing subtraction.
@@ -409,6 +419,11 @@ async def analyze_weighted_subtraction(
     - tissue_type: Tissue type for context
     - marker_name: Marker name for context
     """
+    try:
+        clamp_int(n_ranges, "n_ranges", minimum=3, maximum=10)
+    except ValueError as e:
+        return {"error": str(e)}
+
     try:
         signal_data = _get_image(signal_channel)
         blank_data = _get_image(blank_channel)
@@ -461,27 +476,128 @@ async def analyze_weighted_subtraction(
 
 
 async def subtract_blank(
-    signal_channel: str,
-    blank_channel: str,
-    blank_clip_factor: int | None = None,
-    blank_scale_factor: float | None = None,
-    smooth_low: bool | None = None,
-    low_size: int | None = None,
-    low_percentile: int | None = None,
-    smooth_high: bool | None = None,
-    high_size: int | None = None,
-    high_percentile: int | None = None,
-    erosion: int | None = None,
-    auto_suggest: bool = True,
-    tissue_type: str = "unknown",
-    marker_name: str | None = None,
-    project_path: str | None = None,
-    record_success: bool = True,
-    quality_threshold: float = 0.5,
-    method: str = "global",
-    n_ranges: int = 5,
-    range_method: str = "percentile",
-    transition_width: float = 0.1,
+    signal_channel: Annotated[str, Field(description="Name of loaded signal channel")],
+    blank_channel: Annotated[str, Field(description="Name of loaded blank channel")],
+    blank_clip_factor: Annotated[
+        int | None,
+        Field(
+            description="Clip blank values below this threshold to 0; None = auto-suggest "
+            "(default: 0)",
+            ge=0,
+        ),
+    ] = None,
+    blank_scale_factor: Annotated[
+        float | None,
+        Field(
+            description="Scale factor applied to the blank before subtraction; None = "
+            "auto-suggest (default: 1.0)",
+            ge=0.0,
+            allow_inf_nan=False,
+        ),
+    ] = None,
+    smooth_low: Annotated[
+        bool | None,
+        Field(description="Apply smoothing to low-intensity regions; None = auto-suggest"),
+    ] = None,
+    low_size: Annotated[
+        int | None,
+        Field(
+            description="Uniform filter size in pixels for low-intensity smoothing; None = "
+            "auto-suggest (default: 2)",
+            ge=1,
+        ),
+    ] = None,
+    low_percentile: Annotated[
+        int | None,
+        Field(
+            description="Intensity percentile (0-100) below which pixels count as low-intensity; "
+            "None = auto-suggest (default: 60)",
+            ge=0,
+            le=100,
+        ),
+    ] = None,
+    smooth_high: Annotated[
+        bool | None,
+        Field(description="Apply smoothing to high-intensity regions; None = auto-suggest"),
+    ] = None,
+    high_size: Annotated[
+        int | None,
+        Field(
+            description="Uniform filter size in pixels for high-intensity smoothing; None = "
+            "auto-suggest (default: 2)",
+            ge=1,
+        ),
+    ] = None,
+    high_percentile: Annotated[
+        int | None,
+        Field(
+            description="Intensity percentile (0-100) above which pixels count as "
+            "high-intensity; None = auto-suggest (default: 90)",
+            ge=0,
+            le=100,
+        ),
+    ] = None,
+    erosion: Annotated[
+        int | None,
+        Field(
+            description="Erosion disk size in pixels for void removal; None = auto-suggest "
+            "(default: 0)",
+            ge=0,
+            le=50,
+        ),
+    ] = None,
+    auto_suggest: Annotated[
+        bool,
+        Field(
+            description="Auto-suggest every parameter left as None from image analysis and "
+            "learned history (default: true)"
+        ),
+    ] = True,
+    tissue_type: Annotated[
+        str,
+        Field(
+            description="Tissue type (e.g., 'tonsil') used to look up learned parameters "
+            "(default: 'unknown')"
+        ),
+    ] = "unknown",
+    marker_name: Annotated[
+        str | None,
+        Field(description="Marker name (e.g., 'CD3') used to look up learned parameters"),
+    ] = None,
+    project_path: Annotated[
+        str | None,
+        Field(description="KINTSUGI project directory used for parameter learning"),
+    ] = None,
+    method: Annotated[
+        Literal["global", "weighted"],
+        Field(
+            description="'global' applies one scale factor everywhere; 'weighted' applies "
+            "per-intensity-range weights, which analyze_weighted_subtraction previews "
+            "(default: global)"
+        ),
+    ] = "global",
+    n_ranges: Annotated[
+        int,
+        Field(
+            description="Number of intensity ranges for method='weighted' (default: 5)",
+            ge=3,
+            le=10,
+        ),
+    ] = 5,
+    range_method: Annotated[
+        Literal["percentile", "otsu"],
+        Field(description="Range boundary method for method='weighted' (default: percentile)"),
+    ] = "percentile",
+    transition_width: Annotated[
+        float,
+        Field(
+            description="Fractional width of the blend between adjacent intensity ranges for "
+            "method='weighted' (default: 0.1)",
+            ge=0.0,
+            le=0.5,
+            allow_inf_nan=False,
+        ),
+    ] = 0.1,
 ) -> dict[str, Any]:
     """
     Subtract autofluorescence/blank channel from signal.
@@ -507,8 +623,10 @@ async def subtract_blank(
     - tissue_type: Tissue type for parameter suggestion
     - marker_name: Marker name for parameter suggestion
     - project_path: Project path for parameter learning
-    - record_success: Record successful parameters to learning database
-    - quality_threshold: Minimum quality score to consider successful
+    - method: "global" (single scale factor) or "weighted" (per-intensity-range weights)
+    - n_ranges: Number of intensity ranges for the weighted method
+    - range_method: Range boundary method for the weighted method
+    - transition_width: Blend width between adjacent ranges for the weighted method
     """
     # Validate untrusted arguments (the low-level server does not enforce schema).
     try:
@@ -811,11 +929,25 @@ async def subtract_blank(
 
 
 async def denoise(
-    channel: str,
-    method: str = "median",
-    filter_size: int = 3,
-    percentile: int = 10,
-    upper: bool = False,
+    channel: Annotated[str, Field(description="Name of loaded channel to denoise")],
+    method: Annotated[
+        Literal["percentile", "uniform", "median"],
+        Field(description="Denoising method (default: median)"),
+    ] = "median",
+    filter_size: Annotated[
+        int, Field(description="Filter kernel size in pixels (default: 3)", ge=1, le=99)
+    ] = 3,
+    percentile: Annotated[
+        int,
+        Field(description="Percentile value for percentile filter (default: 10)", ge=0, le=100),
+    ] = 10,
+    upper: Annotated[
+        bool,
+        Field(
+            description="Use the upper percentile band instead of the lower one; only affects "
+            "method='percentile' (default: false)"
+        ),
+    ] = False,
 ) -> dict[str, Any]:
     """
     Apply denoising filters to reduce noise.
@@ -889,10 +1021,29 @@ async def denoise(
 
 
 async def apply_clahe(
-    channel: str,
-    clip_limit: float = 0.01,
-    tile_grid_size: int = 70,
-    nbins: int = 128,
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+    clip_limit: Annotated[
+        float,
+        Field(
+            description="Clip limit for contrast limiting, as a fraction of the histogram "
+            "(default: 0.01)",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ] = 0.01,
+    tile_grid_size: Annotated[
+        int,
+        Field(
+            description="Size of grid for histogram equalization; the kernel is image height "
+            "divided by this value (default: 70)",
+            ge=1,
+            le=10000,
+        ),
+    ] = 70,
+    nbins: Annotated[
+        int, Field(description="Number of histogram bins (default: 128)", ge=2, le=65536)
+    ] = 128,
 ) -> dict[str, Any]:
     """
     Apply Contrast Limited Adaptive Histogram Equalization.
@@ -968,12 +1119,35 @@ async def apply_clahe(
 
 
 async def clean_background(
-    channel: str,
-    background_threshold: int = 100,
-    smooth: bool = False,
-    smooth_threshold: int = 100,
-    remove_small_objects: bool = False,
-    min_object_size: int = 30,
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+    background_threshold: Annotated[
+        int,
+        Field(
+            description="Intensity threshold below which pixels are set to 0 (default: 100)",
+            ge=0,
+        ),
+    ] = 100,
+    smooth: Annotated[
+        bool,
+        Field(
+            description="Apply a 3x3 median filter to pixels below smooth_threshold to soften "
+            "transition zones after thresholding (default: false)"
+        ),
+    ] = False,
+    smooth_threshold: Annotated[
+        int,
+        Field(
+            description="Intensity below which pixels are median-smoothed when smooth=True "
+            "(default: 100)",
+            ge=0,
+        ),
+    ] = 100,
+    remove_small_objects: Annotated[
+        bool, Field(description="Whether to remove small connected components")
+    ] = False,
+    min_object_size: Annotated[
+        int, Field(description="Minimum object size in pixels to keep (default: 30)", ge=1)
+    ] = 30,
 ) -> dict[str, Any]:
     """
     Remove background and small objects from the image.
@@ -1051,11 +1225,34 @@ async def clean_background(
 
 
 async def gaussian_subtract(
-    channel: str,
-    sigma: int = 10,
-    scale_factor: float = 0.1,
-    low_clip: int = 0,
-    high_clip: int = 65535,
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+    sigma: Annotated[
+        int, Field(description="Gaussian sigma value in pixels (default: 10)", ge=1, le=1000)
+    ] = 10,
+    scale_factor: Annotated[
+        float,
+        Field(
+            description="Scale factor for subtraction (default: 0.1)",
+            ge=0.0,
+            allow_inf_nan=False,
+        ),
+    ] = 0.1,
+    low_clip: Annotated[
+        int,
+        Field(
+            description="Lower intensity clip bound on the Gaussian-blurred background: blurred "
+            "values at or below it are zeroed before subtraction (16-bit range, default: 0)",
+            ge=0,
+        ),
+    ] = 0,
+    high_clip: Annotated[
+        int,
+        Field(
+            description="Upper intensity clip bound on the Gaussian-blurred background: blurred "
+            "values at or above it are zeroed before subtraction (16-bit range, default: 65535)",
+            ge=0,
+        ),
+    ] = 65535,
 ) -> dict[str, Any]:
     """
     Subtract Gaussian-blurred version to remove structured background.
@@ -1121,12 +1318,25 @@ async def gaussian_subtract(
 
 
 async def denoise_advanced(
-    channel: str,
-    method: str = "adaptive",
-    strength: str = "auto",
-    preserve_edges: bool = True,
-    n2v_epochs: int = 50,
-    model_path: str | None = None,
+    channel: Annotated[str, Field(description="Name of loaded channel to denoise")],
+    method: Annotated[
+        Literal["adaptive", "bilateral", "nlm", "bm3d", "n2v", "patch_svd"],
+        Field(description="Advanced denoising method (default: adaptive)"),
+    ] = "adaptive",
+    strength: Annotated[
+        Literal["light", "medium", "strong", "auto"],
+        Field(description="Denoising strength (default: auto)"),
+    ] = "auto",
+    preserve_edges: Annotated[
+        bool, Field(description="Prioritize edge preservation (default: true)")
+    ] = True,
+    n2v_epochs: Annotated[
+        int, Field(description="Training epochs for N2V method (default: 50)", ge=1, le=10000)
+    ] = 50,
+    model_path: Annotated[
+        str | None,
+        Field(description="Path to a pre-trained N2V checkpoint (.pt); skips training"),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Apply advanced denoising using N2V, CARE, or adaptive methods.
@@ -1305,9 +1515,13 @@ def clear_session():
 
 
 async def cluster_channels_tool(
-    project_path: str,
-    n_clusters: int | None = None,
-    wavelength_aware: bool = True,
+    project_path: Annotated[str, Field(description="Path to KINTSUGI project directory")],
+    n_clusters: Annotated[
+        int | None, Field(description="Number of clusters; None = auto-select", ge=2)
+    ] = None,
+    wavelength_aware: Annotated[
+        bool, Field(description="Enforce same-wavelength clustering (default: true)")
+    ] = True,
 ) -> dict[str, Any]:
     """
     Cluster project channels by image feature similarity.
@@ -1387,10 +1601,19 @@ async def cluster_channels_tool(
 
 
 async def propagate_parameters_tool(
-    project_path: str,
-    cluster_id: int,
-    params: dict,
-    output_dir: str | None = None,
+    project_path: Annotated[str, Field(description="Path to KINTSUGI project directory")],
+    cluster_id: Annotated[int, Field(description="Cluster ID to propagate parameters to", ge=0)],
+    params: Annotated[
+        dict[str, Any],
+        Field(description="Processing parameters (blank_params and/or clean_params dicts)"),
+    ],
+    output_dir: Annotated[
+        str | None,
+        Field(
+            description="Output directory, which must lie inside the project; None = the "
+            "project's data/processed/signal_isolated directory"
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Propagate tuned parameters to all members of a cluster.
@@ -1459,13 +1682,27 @@ async def propagate_parameters_tool(
 
 
 async def optimize_parameters(
-    signal_channel: str,
-    blank_channel: str,
-    n_trials: int = 80,
-    timeout: int = 300,
-    optimize_clean: bool = True,
-    warm_start_params: dict | None = None,
-    project_path: str | None = None,
+    signal_channel: Annotated[str, Field(description="Name of loaded signal channel")],
+    blank_channel: Annotated[str, Field(description="Name of loaded blank channel")],
+    n_trials: Annotated[
+        int, Field(description="Maximum optimization trials (default: 80)", ge=1, le=1000)
+    ] = 80,
+    timeout: Annotated[
+        int,
+        Field(description="Maximum seconds for optimization (default: 300)", ge=1, le=86400),
+    ] = 300,
+    optimize_clean: Annotated[
+        bool,
+        Field(description="Also optimize background cleaning parameters (default: true)"),
+    ] = True,
+    warm_start_params: Annotated[
+        dict[str, Any] | None,
+        Field(description="Initial parameter guess for faster convergence (optional)"),
+    ] = None,
+    project_path: Annotated[
+        str | None,
+        Field(description="Project path for storing optimization study (optional)"),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Find optimal signal isolation parameters via Bayesian optimization (Optuna).
@@ -1545,10 +1782,16 @@ async def optimize_parameters(
 
 
 async def predict_parameters(
-    signal_channel: str,
-    blank_channel: str | None = None,
-    project_path: str | None = None,
-    model_path: str | None = None,
+    signal_channel: Annotated[str, Field(description="Name of loaded signal channel")],
+    blank_channel: Annotated[
+        str | None, Field(description="Name of loaded blank channel (optional)")
+    ] = None,
+    project_path: Annotated[
+        str | None, Field(description="Project path containing predictor model (optional)")
+    ] = None,
+    model_path: Annotated[
+        str | None, Field(description="Path to a trained predictor .joblib (optional)")
+    ] = None,
 ) -> dict[str, Any]:
     """
     Predict signal isolation parameters from image features using a trained model.
@@ -1634,9 +1877,19 @@ async def predict_parameters(
 
 
 async def estimate_background(
-    channel: str,
-    kernel_size: int = 7,
-    return_background: bool = False,
+    channel: Annotated[str, Field(description="Name of loaded channel image")],
+    kernel_size: Annotated[
+        int,
+        Field(
+            description="SMO kernel size in pixels (default: 7, robust across 5-15)",
+            ge=1,
+            le=999,
+        ),
+    ] = 7,
+    return_background: Annotated[
+        bool,
+        Field(description="Store estimated background as a loaded image (default: false)"),
+    ] = False,
 ) -> dict[str, Any]:
     """
     Estimate and subtract background using SMO (Silver Mountain Operator).

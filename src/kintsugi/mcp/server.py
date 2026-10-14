@@ -8,8 +8,10 @@ official ``mcp`` SDK (2.x).
 Each tool returns a plain ``dict`` which the SDK emits as **structured content**
 (``structuredContent``) alongside the human-readable JSON text block, so Claude
 receives machine-readable results rather than only a serialized string. The tool
-implementations live in :mod:`kintsugi.mcp.tools` and are registered from the
-declarative :data:`kintsugi.mcp.tool_specs.TOOL_SPECS` registry.
+implementations live in :mod:`kintsugi.mcp.tools`; their input schemas are
+derived from the handlers' ``Annotated``/``Literal`` signatures (and enforced by
+the SDK), while names, titles, descriptions and behaviour annotations come from
+the declarative :data:`kintsugi.mcp.tool_specs.TOOL_SPECS` registry.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ import asyncio
 import logging
 import sys
 
-from kintsugi.mcp._sdk import MCP_AVAILABLE, MCPServer, unavailable_message
+from kintsugi.mcp._sdk import MCP_AVAILABLE, MCPServer, ToolAnnotations, unavailable_message
 from kintsugi.mcp.tool_specs import TOOL_SPECS
 
 # Configure logging. The stdio transport uses stdout for the JSON-RPC stream,
@@ -102,37 +104,18 @@ def _register_tools(server: MCPServer) -> None:
 
     for spec in TOOL_SPECS:
         handler = getattr(modules[spec["module"]], spec["attr"])
+        # The input schema (descriptions, enums, ranges) is derived from the
+        # handler's Annotated/Literal signature and enforced by the SDK.
         # structured_output=True makes the SDK emit the returned dict as
         # ``structuredContent`` (plus the JSON text block) for every tool.
         server.add_tool(
             handler,
             name=spec["name"],
+            title=spec["title"],
             description=spec["description"],
+            annotations=ToolAnnotations(**spec["annotations"]),
             structured_output=True,
         )
-        _advertise_schema(server, spec["name"], spec["input_schema"])
-
-
-def _advertise_schema(server: MCPServer, name: str, schema: dict) -> None:
-    """Advertise the curated input schema for ``name`` verbatim.
-
-    The SDK derives an input schema from the handler's type hints, which drops
-    the per-parameter descriptions and ``enum`` constraints the KINTSUGI tools
-    rely on. We overwrite the advertised schema with the curated one from
-    :data:`TOOL_SPECS`; argument *validation* still runs from the handler's
-    signature, so this only changes the contract clients read.
-
-    This touches an SDK internal (the tool manager), so it is wrapped
-    defensively: if a future ``mcp`` release changes the internals the server
-    still starts, falling back to the auto-generated schema (and the dedicated
-    test in ``tests/test_mcp_tools.py`` flags the regression).
-    """
-    try:
-        tool = server._tool_manager.get_tool(name)
-        if tool is not None:
-            tool.parameters = schema
-    except Exception as exc:  # pragma: no cover - depends on mcp internals
-        logger.warning("Could not advertise curated input schema for tool %r: %s", name, exc)
 
 
 async def run_server() -> None:

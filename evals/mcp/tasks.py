@@ -3,7 +3,7 @@
 Each task is a natural-language request a scientist might make to Claude while
 driving the MCP server. ``expected`` is the set of *acceptable* first tool calls
 (more than one is allowed where genuinely ambiguous). Several tasks are
-deliberately chosen to probe confusable pairs on the 26-tool surface
+deliberately chosen to probe confusable pairs on the tool surface
 (``denoise`` vs ``denoise_advanced``; the three background-removal tools;
 ``assess_quality`` vs ``compute_snr``; the learning-recall vs record tools).
 
@@ -122,5 +122,74 @@ TASKS: list[EvalTask] = [
         "prompt": "Save the processed CD8 channel as an OME-TIFF.",
         "expected": {"save_processed"},
         "rationale": "Persist a processed channel to disk.",
+    },
+    {
+        "id": "clahe",
+        "prompt": "The tissue structures are hard to see. Boost the local contrast of the loaded CD31 channel.",
+        "expected": {"apply_clahe"},
+        "rationale": "Local contrast enhancement = CLAHE.",
+    },
+    {
+        "id": "clean_background",
+        "prompt": (
+            "Zero out the dim background pixels below 100 counts and drop the tiny specks "
+            "smaller than 30 pixels from the loaded channel."
+        ),
+        "expected": {"clean_background"},
+        "rationale": "Threshold + small-object removal = clean_background.",
+    },
+    {
+        "id": "jupyter_tuner",
+        "prompt": (
+            "Give me a notebook cell with sliders so I can tune the blank-subtraction "
+            "parameters for CD3 interactively."
+        ),
+        "expected": {"generate_jupyter_cell"},
+        "rationale": "Interactive widget code for a notebook = generate_jupyter_cell.",
+    },
+    {
+        "id": "image_stats",
+        "prompt": "What are the min, max, mean and intensity histogram of the loaded DAPI channel?",
+        "expected": {"get_image_stats"},
+        "rationale": "Numeric statistics (not a visual preview, not a quality score).",
+    },
+    {
+        "id": "learning_stats",
+        "prompt": "How many parameter records does the learning database hold, and for which tissues?",
+        "expected": {"get_learning_statistics"},
+        "rationale": "Database-level statistics, not a recommendation.",
+    },
+    {
+        "id": "history",
+        "prompt": "List every processing step that has been applied to the CD8 channel so far.",
+        "expected": {"get_processing_history"},
+        "rationale": "Session provenance for one channel.",
+    },
+    {
+        "id": "predict",
+        "prompt": (
+            "Use the trained predictor model to estimate the signal-isolation parameters for "
+            "the loaded CD4 channel from its image features."
+        ),
+        "expected": {"predict_parameters"},
+        "rationale": "Model-based prediction (Random Forest), not heuristic suggestion or search.",
+    },
+    {
+        "id": "propagate",
+        "prompt": (
+            "Apply the parameters I tuned on the representative channel to every other "
+            "channel in cluster 2."
+        ),
+        "expected": {"propagate_parameters"},
+        "rationale": "Apply tuned parameters across a cluster's members.",
+    },
+    {
+        "id": "suggest_heuristic",
+        "prompt": (
+            "Based only on the image itself (no learned history), what processing parameters "
+            "would you start with for the loaded CD68 channel?"
+        ),
+        "expected": {"suggest_parameters"},
+        "rationale": "Image-analysis heuristic suggestion without the learning database.",
     },
 ]

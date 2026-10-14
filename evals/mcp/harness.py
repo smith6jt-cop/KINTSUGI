@@ -115,6 +115,8 @@ def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> 
 
     # Schema quality.
     missing_tool_desc = [t["name"] for t in tools if len(t["description"].strip()) < 20]
+    missing_title = [t["name"] for t in tools if not (t.get("title") or "").strip()]
+    missing_annotations = [t["name"] for t in tools if not t.get("annotations")]
     params_missing_desc: list[str] = []
     have_output_schema = 0
     for t in tools:
@@ -125,12 +127,15 @@ def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> 
             if not (pschema.get("description") or "").strip():
                 params_missing_desc.append(f"{t['name']}.{pname}")
 
-    # Task coverage.
+    # Task coverage, both directions: tasks that name absent tools, and tools no
+    # task ever targets (which the agentic pass can therefore never measure).
     coverage_gaps = [
         {"task": task["id"], "missing": sorted(set(task["expected"]) - names)}
         for task in tasks
         if not set(task["expected"]) & names
     ]
+    targeted = set().union(*(set(task["expected"]) for task in tasks)) if tasks else set()
+    untargeted_tools = sorted(names - targeted)
 
     report = {
         "tool_count": len(tools),
@@ -141,7 +146,10 @@ def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> 
             :5
         ],
         "tools_missing_description": missing_tool_desc,
+        "tools_missing_title": missing_title,
+        "tools_missing_annotations": missing_annotations,
         "params_missing_description_count": len(params_missing_desc),
+        "untargeted_tools": untargeted_tools,
         "confusable_groups": [
             {"theme": theme, "tools": [m for m in members if m in names]}
             for theme, members in CONFUSABLE_GROUPS
@@ -162,6 +170,9 @@ def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> 
     )
     print(f"Params missing a description:     {report['params_missing_description_count']}")
     print(f"Tools with weak/no description:   {missing_tool_desc or 'none'}")
+    print(f"Tools missing a title:            {missing_title or 'none'}")
+    print(f"Tools missing annotations:        {missing_annotations or 'none'}")
+    print(f"Tools no eval task targets:       {untargeted_tools or 'none'}")
     print("\nHeaviest tools (token est.):")
     for name, tok in report["top_tools_by_tokens"]:
         print(f"   {tok:>5}  {name}")
@@ -241,7 +252,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Exit non-zero on structural problems (coverage gaps, missing descriptions).",
+        help=(
+            "Exit non-zero on structural problems (coverage gaps, untargeted tools, "
+            "missing descriptions/titles/annotations)."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -255,13 +269,19 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.json).write_text(json.dumps(report, indent=2))
         print(f"\nWrote report to {args.json}")
 
-    if args.strict and (
-        structural["task_coverage_gaps"]
-        or structural["tools_missing_description"]
-        or structural["params_missing_description_count"]
-    ):
-        print("\nstrict: structural problems detected — failing.", file=sys.stderr)
-        return 1
+    if args.strict:
+        problems = {
+            "task_coverage_gaps": structural["task_coverage_gaps"],
+            "tools_missing_description": structural["tools_missing_description"],
+            "tools_missing_title": structural["tools_missing_title"],
+            "tools_missing_annotations": structural["tools_missing_annotations"],
+            "params_missing_description_count": structural["params_missing_description_count"],
+            "untargeted_tools": structural["untargeted_tools"],
+        }
+        failing = {k: v for k, v in problems.items() if v}
+        if failing:
+            print(f"\nstrict: structural problems detected — failing: {failing}", file=sys.stderr)
+            return 1
     return 0
 
 

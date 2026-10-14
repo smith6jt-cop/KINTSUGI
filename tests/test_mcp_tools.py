@@ -1195,12 +1195,16 @@ class TestMCPServer:
         assert len(names) == len(set(names))
         assert set(names) == EXPECTED_TOOL_NAMES
 
-        # Each spec points at a real async handler in kintsugi.mcp.tools.
+        # Each spec points at a real async handler in kintsugi.mcp.tools and
+        # carries a title plus the four MCP behaviour hints.
+        hint_keys = {"readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"}
         for spec in tool_specs.TOOL_SPECS:
             module = importlib.import_module(f"kintsugi.mcp.tools.{spec['module']}")
             handler = getattr(module, spec["attr"])
             assert inspect.iscoroutinefunction(handler), spec["name"]
-            assert isinstance(spec["input_schema"], dict)
+            assert spec["title"].strip(), spec["name"]
+            assert set(spec["annotations"]) == hint_keys, spec["name"]
+            assert spec["annotations"]["openWorldHint"] is False, spec["name"]
 
 
 # =============================================================================
@@ -1228,17 +1232,6 @@ class TestStructuredOutput:
         assert set(tools) == EXPECTED_TOOL_NAMES
         for name, tool in tools.items():
             assert tool.output_schema is not None, f"{name} missing outputSchema"
-
-    async def test_curated_input_schema_advertised(self):
-        """The curated input schema (enums + descriptions) is advertised verbatim."""
-        tools = await self._tools()
-
-        # enum constraint preserved (a signature-derived schema would drop it)
-        method = tools["denoise"].input_schema["properties"]["method"]
-        assert method.get("enum") == ["percentile", "uniform", "median"]
-        # per-parameter description preserved
-        channel = tools["load_channel"].input_schema["properties"]["channel"]
-        assert "description" in channel
 
     async def test_call_returns_structured_content(self):
         """A tool call returns structuredContent plus a human-readable text block."""
