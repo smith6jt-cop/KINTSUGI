@@ -9,10 +9,10 @@ failure shape every tool shares. Handler bodies keep returning plain dicts.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any
 
 from pydantic import ConfigDict
-from typing_extensions import NotRequired
+from typing_extensions import NotRequired, TypedDict
 
 
 class Histogram(TypedDict, total=False):
