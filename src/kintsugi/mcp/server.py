@@ -126,13 +126,103 @@ def _register_tools(server: MCPServer) -> None:
         # structured_output=True makes the SDK emit the returned dict as
         # ``structuredContent`` (plus the JSON text block) for every tool.
         server.add_tool(
-            handler,
+            _wrap_handler(handler),
             name=spec["name"],
             title=spec["title"],
             description=spec["description"],
             annotations=ToolAnnotations(**spec["annotations"]),
             structured_output=True,
         )
+
+
+def _wrap_handler(handler: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Report a handler's in-band failure as an MCP tool error.
+
+    Handlers return ``{"error": ...}`` dicts (so direct Python callers and the
+    unit tests see plain data). On the wire the MCP spec reports execution
+    failures with ``isError: true``; raising :class:`ToolError` here makes the SDK
+    do that, with the JSON-encoded error dict as the message so the model still
+    gets the next-step hint. ``functools.wraps`` preserves the handler signature
+    (and, through ``__wrapped__``, its module globals) so the SDK still derives
+    the schema from the handler's own annotations.
+    """
+
+    @functools.wraps(handler)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        result = await handler(*args, **kwargs)
+        if isinstance(result, dict) and "error" in result:
+            raise ToolError(json.dumps(result))
+        return result
+
+    return wrapper
+
+
+def _register_resources(server: MCPServer) -> None:
+    """Expose session and project state as read-only resources.
+
+    Resources are the cheap, parameter-free way for a client to look at state
+    without spending a tool call; each is backed by the same function as the
+    corresponding tool.
+    """
+    from kintsugi.mcp.tools import learning, workflow
+
+    @server.resource(
+        "kintsugi://session/images",
+        name="session_images",
+        title="Loaded channels",
+        description="Channels held in server memory for this session, with shape, dtype, "
+        "metadata, processing step counts and memory usage.",
+        mime_type="application/json",
+    )
+    async def session_images() -> str:
+        return json.dumps(await workflow.get_session_state(), default=str)
+
+    @server.resource(
+        "kintsugi://session/history/{channel}",
+        name="session_history",
+        title="Processing history of a channel",
+        description="Every operation (with parameters) applied to the named loaded channel.",
+        mime_type="application/json",
+    )
+    async def session_history(channel: str) -> str:
+        return json.dumps(await workflow.get_processing_history(channel), default=str)
+
+    @server.resource(
+        "kintsugi://learning/stats",
+        name="learning_statistics",
+        title="Parameter learning statistics",
+        description="Record counts, tissues and markers in the user-wide and project "
+        "parameter-learning databases.",
+        mime_type="application/json",
+    )
+    async def learning_statistics() -> str:
+        from kintsugi.mcp.session import default_project_root
+
+        root = default_project_root()
+        project = str(root) if (root / "kintsugi_project.json").exists() else None
+        return json.dumps(await learning.get_learning_statistics(project_path=project), default=str)
+
+    @server.resource(
+        "kintsugi://project/channels",
+        name="project_channels",
+        title="Channels in the project",
+        description="Image files found in the project's raw, registered and processed "
+        "directories (the project is CLAUDE_PROJECT_DIR or the working directory).",
+        mime_type="application/json",
+    )
+    async def project_channels() -> str:
+        return json.dumps(await workflow.list_channels(), default=str)
+
+
+def _register_prompts(server: MCPServer) -> None:
+    """Register the guided signal-isolation prompt."""
+    from kintsugi.mcp import prompts
+
+    server.prompt(
+        name=prompts.PROMPT_NAME,
+        title=prompts.PROMPT_TITLE,
+        description=prompts.PROMPT_DESCRIPTION,
+    )(prompts.signal_isolation_workflow)
 
 
 async def run_server() -> None:

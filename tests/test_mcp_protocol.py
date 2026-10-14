@@ -249,3 +249,30 @@ def clear_session_state():
 
 
 # =============================================================================
+# In-band errors are MCP tool errors on the wire
+# =============================================================================
+
+
+async def test_in_band_error_is_reported_as_tool_error():
+    """Handlers return {"error": ...}; on the wire that becomes isError with the JSON text."""
+    import json
+
+    from mcp.client import Client
+
+    from kintsugi.mcp.server import create_server
+
+    async with Client(create_server()) as client:
+        result = await client.call_tool("unload_channel", {"channel": "never-loaded"})
+    assert result.is_error is True
+    text = result.content[0].text
+    payload = json.loads(text[text.index("{") :])
+    assert payload["error"] == "Channel not loaded: never-loaded"
+
+
+async def test_direct_call_keeps_in_band_error_contract():
+    """The same handler, called from Python, still returns the plain error dict."""
+    from kintsugi.mcp.tools.workflow import unload_channel
+
+    assert (await unload_channel(channel="never-loaded")) == {
+        "error": "Channel not loaded: never-loaded"
+    }
