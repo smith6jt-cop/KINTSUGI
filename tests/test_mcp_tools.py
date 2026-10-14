@@ -1498,3 +1498,73 @@ class TestAuditedDefects:
             and "\nimport os" not in cell
         )
         compile(cell, "<jupyter_cell>", "exec")
+
+
+# =============================================================================
+# Deterministic file matching (results must not depend on directory order)
+# =============================================================================
+
+
+def _write_raw(root: Path, cycle: str, names: list[str]) -> Path:
+    import tifffile
+
+    raw = root / "data" / "raw" / cycle
+    raw.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        tifffile.imwrite(str(raw / name), np.full((8, 8), 100, dtype=np.uint16))
+    return raw
+
+
+class TestDeterministicFileMatching:
+    """list_channels and load_channel give the same answer on every filesystem."""
+
+    async def test_list_channels_is_sorted(self, tmp_path, clear_mcp_state):
+        from kintsugi.mcp.tools.workflow import list_channels
+
+        # Written in a deliberately unsorted order.
+        _write_raw(tmp_path, "cyc002", ["Zeta.tif"])
+        _write_raw(tmp_path, "cyc001", ["Zeta.tif", "Alpha.tif", "CD3.tif"])
+
+        result = await list_channels(project_path=str(tmp_path))
+
+        assert result["status"] == "success"
+        assert [(c["cycle"], c["channel"]) for c in result["channels"]] == [
+            ("cyc001", "Alpha"),
+            ("cyc001", "CD3"),
+            ("cyc001", "Zeta"),
+            ("cyc002", "Zeta"),
+        ]
+
+    @requires_zarr
+    async def test_load_channel_prefers_exact_stem_over_substring(self, tmp_path, clear_mcp_state):
+        from kintsugi.mcp.tools.signal_isolation import load_channel
+
+        _write_raw(tmp_path, "cyc001", ["CD31.tif", "CD3.tif"])
+
+        cd3 = await load_channel(project_path=str(tmp_path), cycle="1", channel="CD3")
+        cd31 = await load_channel(project_path=str(tmp_path), cycle="1", channel="CD31")
+
+        assert cd3["status"] == "loaded" and cd3["source"].endswith("CD3.tif")
+        assert cd31["status"] == "loaded" and cd31["source"].endswith("CD31.tif")
+
+    @requires_zarr
+    async def test_load_channel_prefers_whole_token_over_substring(self, tmp_path, clear_mcp_state):
+        from kintsugi.mcp.tools.signal_isolation import load_channel
+
+        _write_raw(tmp_path, "cyc001", ["CD31.tif", "cyc001_cd3_registered.tif"])
+
+        result = await load_channel(project_path=str(tmp_path), cycle="1", channel="CD3")
+
+        assert result["status"] == "loaded"
+        assert result["source"].endswith("cyc001_cd3_registered.tif")
+
+    @requires_zarr
+    async def test_load_channel_reports_ambiguous_match(self, tmp_path, clear_mcp_state):
+        from kintsugi.mcp.tools.signal_isolation import load_channel
+
+        _write_raw(tmp_path, "cyc001", ["CD3_b.tif", "CD3_a.tif"])
+
+        result = await load_channel(project_path=str(tmp_path), cycle="1", channel="CD3")
+
+        assert "ambiguous" in result["error"]
+        assert [Path(c).name for c in result["candidates"]] == ["CD3_a.tif", "CD3_b.tif"]

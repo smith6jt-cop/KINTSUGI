@@ -276,16 +276,16 @@ Server `kintsugi` 1.2.3, 29 tools, project `<project>`.
   "channels": [
     {
       "cycle": "cyc001",
-      "channel": "CD3",
+      "channel": "Blank",
       "source": "raw",
-      "path": "<project>/data/raw/cyc001/CD3.tif",
+      "path": "<project>/data/raw/cyc001/Blank.tif",
       "size_mb": 0.125
     },
     {
       "cycle": "cyc001",
-      "channel": "Blank",
+      "channel": "CD3",
       "source": "raw",
-      "path": "<project>/data/raw/cyc001/Blank.tif",
+      "path": "<project>/data/raw/cyc001/CD3.tif",
       "size_mb": 0.125
     }
   ],

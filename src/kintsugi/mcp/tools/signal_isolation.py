@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -122,6 +123,54 @@ def _thread_progress_reporter(
     return report
 
 
+_IMAGE_SUFFIXES = (".ome.tif", ".ome.tiff", ".tif", ".tiff", ".zarr")
+
+
+def _match_rank(channel: str, path: Path) -> int | None:
+    """Rank how well ``path`` names ``channel`` (case-insensitive).
+
+    0 = the file stem is exactly the channel, 1 = the channel is a whole token of
+    the stem (``cyc001_CD3_registered``), 2 = plain substring (``CD3`` in ``CD31``),
+    None = no match.
+    """
+    stem = path.name.lower()
+    for suffix in _IMAGE_SUFFIXES:
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    needle = channel.lower()
+    if stem == needle:
+        return 0
+    if needle in re.split(r"[^a-z0-9]+", stem):
+        return 1
+    if needle in stem:
+        return 2
+    return None
+
+
+def _find_channel_file(search_dir: Path, channel: str) -> tuple[Path | None, list[Path]]:
+    """Return the best-ranked image file for ``channel`` and every file tied with it.
+
+    Files are visited in sorted order and ranked by :func:`_match_rank`, so the
+    result never depends on filesystem iteration order and ``CD3`` prefers
+    ``CD3.tif`` over ``CD31.tif``. A tie at the best rank is reported back to the
+    caller as an ambiguity instead of being resolved silently.
+    """
+    ranked: list[tuple[int, Path]] = []
+    for path in sorted(search_dir.iterdir()):
+        name = path.name.lower()
+        if not (name.endswith((".tif", ".tiff")) or (name.endswith(".zarr") and path.is_dir())):
+            continue
+        rank = _match_rank(channel, path)
+        if rank is not None:
+            ranked.append((rank, path))
+    if not ranked:
+        return None, []
+    best = min(rank for rank, _ in ranked)
+    candidates = [path for rank, path in ranked if rank == best]
+    return candidates[0], candidates
+
+
 async def load_channel(
     cycle: Annotated[str, Field(description="Cycle name or number (e.g., 'cyc001' or '1')")],
     channel: Annotated[str, Field(description="Channel name (e.g., 'CD3', 'DAPI')")],
@@ -145,8 +194,9 @@ async def load_channel(
 
     project_path = resolve_project_path(project_path)
 
-    # cycle and channel become path/glob components below, so reject any value
-    # that could traverse out of the project tree or broaden the glob search.
+    # cycle and channel become path components below, so reject any value that
+    # could traverse out of the project tree. Wildcards are rejected too so a
+    # pattern can never be mistaken for a channel name.
     # Validate cheap inputs before importing heavy optional dependencies.
     try:
         cycle = safe_filename(str(cycle), "cycle")
@@ -197,22 +247,18 @@ async def load_channel(
         if not search_dir.exists():
             continue
 
-        # Look for files matching the channel name
-        patterns = [
-            f"*{channel}*.tif*",
-            f"*{channel}*.zarr",
-            f"*{channel.upper()}*.tif*",
-            f"*{channel.lower()}*.tif*",
-        ]
-
-        for pattern in patterns:
-            matches = list(search_dir.glob(pattern))
-            if matches:
-                image_path = matches[0]
-                break
-
-        if image_path:
-            break
+        best, candidates = _find_channel_file(search_dir, channel)
+        if best is None:
+            continue
+        if len(candidates) > 1:
+            names = ", ".join(c.name for c in candidates)
+            return {
+                "error": f"Channel '{channel}' is ambiguous in {search_dir}: {names}. "
+                "Pass the exact file stem as the channel name.",
+                "candidates": [str(c) for c in candidates],
+            }
+        image_path = best
+        break
 
     if image_path is None:
         return {

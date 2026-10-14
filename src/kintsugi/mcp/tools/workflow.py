@@ -96,7 +96,7 @@ async def list_channels(
             if cycle.isdigit():
                 cycle_dirs.append(search_dir / f"cyc{int(cycle):03d}")
         else:
-            cycle_dirs = [d for d in search_dir.iterdir() if d.is_dir()]
+            cycle_dirs = sorted(d for d in search_dir.iterdir() if d.is_dir())
 
         for cycle_dir in cycle_dirs:
             if not cycle_dir.exists():
@@ -104,10 +104,11 @@ async def list_channels(
 
             cycle_name = cycle_dir.name
 
-            # Find image files - single directory scan instead of multiple glob calls
+            # Find image files - single directory scan instead of multiple glob calls.
+            # Sorted so the listing does not depend on filesystem iteration order.
             valid_extensions = {".tif", ".tiff", ".zarr"}
             valid_suffixes = {".ome.tif", ".ome.tiff"}
-            for f in cycle_dir.iterdir():
+            for f in sorted(cycle_dir.iterdir()):
                 # Check if file matches our patterns
                 name_lower = f.name.lower()
                 suffix_lower = f.suffix.lower()

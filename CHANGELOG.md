@@ -110,6 +110,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **mcp**: `list_channels` joined the `cycle` argument onto the search directory
   unchecked, so `cycle="../.."` listed files outside the project; path components
   are now rejected.
+- **mcp**: `load_channel` took the first unsorted glob hit for `*CD3*`, so whether
+  `CD3` loaded `CD3.tif` or `CD31.tif` depended on filesystem order; it now ranks
+  matches (exact stem, whole token, substring) and reports a tie as an in-band
+  `candidates` error. `list_channels` output is sorted for the same reason.
 - **mcp**: `denoise_advanced` passed any existing `model_path` to `torch.load` and
   `predict_parameters` passed any path to `joblib.load`; checkpoints are now
   confined and loaded safely (see Security).
