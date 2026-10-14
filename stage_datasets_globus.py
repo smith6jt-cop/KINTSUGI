@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Stage HuBMAP CODEX datasets from PATH lab share to HiPerGator via Globus.
+"""Stage HuBMAP CODEX datasets from a lab file share to HPC storage via Globus.
 
-Source: PATH lab SMB share (path.ahc.ufl.edu) via Globus Connect Personal
-Destination: HiPerGator /blue storage
+Source: lab SMB share (e.g. storage.example.org) exposed via Globus Connect Personal
+Destination: HPC project storage (the KINTSUGI_Projects directory)
 
-The PATH share organizes datasets under release folders:
+The source share organizes datasets under release folders:
   Release1/  → Cases 1-4  (CX_19-001 through CX_19-004)
   Release2/  → Cases 5-9  (CX_20-005 through CX_20-009)
   Release3/  → Cases 10-14 (CX_21-010 through CX_21-015)
@@ -27,26 +27,45 @@ Usage:
 import argparse
 import csv
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
+# ── Configuration (environment variables, with defaults) ───────────────────────
+#   GLOBUS_SOURCE_ENDPOINT    UUID of the Globus endpoint that serves the lab share
+#   GLOBUS_SOURCE_BASE        Path on the source endpoint holding the release folders
+#                             (default: /path/to/share/)
+#   GLOBUS_DEST_ENDPOINT      UUID of the Globus endpoint for the HPC storage
+#   GLOBUS_DEST_BASE          Projects directory as seen by the destination endpoint
+#                             (default: KINTSUGI_PROJECTS_ROOT + "/")
+#   KINTSUGI_MANIFEST         Dataset manifest CSV (default: /path/to/dataset_manifest.csv)
+#   KINTSUGI_PROJECTS_ROOT    Local projects directory (default: /path/to/KINTSUGI_Projects)
+#   KINTSUGI_GLOBUS_TASK_LOG  Transfer task log JSON (default: /path/to/globus_transfers.json)
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
-SRC_ENDPOINT = "f1b69b9e-f07a-11ef-8c40-0e26ca329435"
-# Use cifs mount, NOT GVFS — GVFS causes EOF errors / Path-not-allowed under load
-SRC_BASE = "/mnt/ahc_share/SHARE/HuBMAP/"
+SRC_ENDPOINT = os.environ.get("GLOBUS_SOURCE_ENDPOINT", "<source-endpoint-uuid>")
+# Use a cifs mount, NOT GVFS — GVFS causes EOF errors / Path-not-allowed under load
+SRC_BASE = os.environ.get("GLOBUS_SOURCE_BASE", "/path/to/share/").rstrip("/") + "/"
 
-DST_ENDPOINT = "5dbaf795-8a7e-4dca-91aa-6e10d610c2b3"
-DST_BASE = "/blue/maigan/smith6jt/KINTSUGI_Projects/"
+DST_ENDPOINT = os.environ.get("GLOBUS_DEST_ENDPOINT", "<destination-endpoint-uuid>")
 
-# Release folder names on the PATH share
+# ── Local paths ────────────────────────────────────────────────────────────────
+MANIFEST = Path(os.environ.get("KINTSUGI_MANIFEST", "/path/to/dataset_manifest.csv"))
+PROJECTS_DIR = Path(os.environ.get("KINTSUGI_PROJECTS_ROOT", "/path/to/KINTSUGI_Projects"))
+TASK_LOG = Path(os.environ.get("KINTSUGI_GLOBUS_TASK_LOG", "/path/to/globus_transfers.json"))
+
+# Destination path on the destination endpoint (trailing slash required)
+DST_BASE = os.environ.get("GLOBUS_DEST_BASE", str(PROJECTS_DIR)).rstrip("/") + "/"
+
+# Release folder names on the source share
 RELEASE1 = "Codex_dataset_hubmap_Case1-4_Release1_D2019-2020"
 RELEASE2 = "CODEX_dataset_hubmap_Case5-9_Release2"
 RELEASE3 = "Codex_dataset_HuBMAP_cases10-14_release3"
 
 # ── Source path mapping ────────────────────────────────────────────────────────
 # Maps manifest dataset name → relative path from SRC_BASE to the src_* directory
-# containing cycle dirs. Built from manual inspection of the PATH share structure.
+# containing cycle dirs. Built from manual inspection of the source share structure.
 SOURCE_PATHS = {
     # ── Release 1 (Cases 1-4) ──────────────────────────────────────────────
     "CX_19-001_SP_CC2-A28":
@@ -150,11 +169,6 @@ SOURCE_PATHS = {
     "CX_21-011_L-B_TH_reg1-2":
         f"{RELEASE3}/CX_21-011 L-B_TH_reg1-2/src_CX_21-011 L-B_TH_reg1-2",
 }
-
-# ── Local paths ────────────────────────────────────────────────────────────────
-MANIFEST = Path("/blue/maigan/smith6jt/dataset_manifest.csv")
-PROJECTS_DIR = Path("/blue/maigan/smith6jt/KINTSUGI_Projects")
-TASK_LOG = Path("/blue/maigan/smith6jt/globus_transfers.json")
 
 
 def run_globus(*args, check=True):
