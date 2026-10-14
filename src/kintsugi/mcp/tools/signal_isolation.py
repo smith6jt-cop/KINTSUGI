@@ -15,9 +15,11 @@ from pydantic import Field
 
 from kintsugi.mcp.path_safety import (
     PathSafetyError,
+    allowed_model_roots,
     clamp_float,
     clamp_int,
     ensure_within,
+    ensure_within_any,
     safe_filename,
     validate_choice,
 )
@@ -1335,7 +1337,14 @@ async def denoise_advanced(
     ] = 50,
     model_path: Annotated[
         str | None,
-        Field(description="Path to a pre-trained N2V checkpoint (.pt); skips training"),
+        Field(
+            description="Path to a pre-trained N2V checkpoint (.pt/.pth); skips training. Must "
+            "lie inside project_path, the Claude Code project, or ~/.kintsugi/models"
+        ),
+    ] = None,
+    project_path: Annotated[
+        str | None,
+        Field(description="KINTSUGI project directory that model_path may be loaded from"),
     ] = None,
 ) -> dict[str, Any]:
     """
@@ -1363,11 +1372,17 @@ async def denoise_advanced(
     try:
         clamp_int(n2v_epochs, "n2v_epochs", minimum=1, maximum=10000)
         if model_path is not None:
-            resolved_model = Path(model_path).resolve()
+            # Loading a checkpoint deserializes a file the model chose: confine it
+            # to directories the user controls before torch sees it.
+            resolved_model = ensure_within_any(
+                model_path, allowed_model_roots(project_path), "model_path"
+            )
+            if resolved_model.suffix.lower() not in {".pt", ".pth"}:
+                return {"error": f"model_path must be a .pt/.pth checkpoint: {model_path}"}
             if not resolved_model.is_file():
                 return {"error": f"model_path does not exist or is not a file: {model_path}"}
             model_path = str(resolved_model)
-    except ValueError as e:
+    except ValueError as e:  # PathSafetyError is a ValueError
         return {"error": str(e)}
 
     try:
@@ -1844,10 +1859,18 @@ async def predict_parameters(
     )
     fv = features_to_vector(features)
 
-    # Find model path
+    # Find model path. joblib.load unpickles arbitrary objects, so an explicit
+    # path must lie in a directory the user controls.
     predictor_path = None
     if model_path:
-        predictor_path = Path(model_path)
+        try:
+            predictor_path = ensure_within_any(
+                model_path, allowed_model_roots(project_path), "model_path"
+            )
+        except PathSafetyError as e:
+            return {"error": str(e)}
+        if predictor_path.suffix.lower() != ".joblib":
+            return {"error": f"model_path must be a .joblib predictor model: {model_path}"}
     elif project_path:
         predictor_path = Path(project_path) / "configs" / "parameter_predictor.joblib"
 

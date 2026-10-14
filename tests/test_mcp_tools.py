@@ -1295,3 +1295,44 @@ class TestAuditedDefects:
 
         result = await list_channels(project_path=str(tmp_path), cycle="../..")
         assert "error" in result and "cycle" in result["error"]
+
+    async def test_denoise_advanced_confines_model_path(
+        self, sample_uint16_image, tmp_path, clear_mcp_state
+    ):
+        from kintsugi.mcp.tools.signal_isolation import _store_image, denoise_advanced
+
+        _store_image("ch", sample_uint16_image)
+        outside = tmp_path / "outside" / "model.pt"
+        outside.parent.mkdir()
+        outside.write_bytes(b"not a checkpoint")
+        project = tmp_path / "proj"
+        project.mkdir()
+
+        result = await denoise_advanced(
+            channel="ch", method="n2v", model_path=str(outside), project_path=str(project)
+        )
+        assert "error" in result and "outside the allowed directories" in result["error"]
+
+        inside = project / "model.txt"
+        inside.write_bytes(b"")
+        result = await denoise_advanced(
+            channel="ch", method="n2v", model_path=str(inside), project_path=str(project)
+        )
+        assert "error" in result and ".pt/.pth" in result["error"]
+
+    async def test_predict_parameters_confines_model_path(
+        self, sample_uint16_image, tmp_path, clear_mcp_state
+    ):
+        pytest.importorskip("sklearn")
+        from kintsugi.mcp.tools.signal_isolation import _store_image, predict_parameters
+
+        _store_image("sig", sample_uint16_image)
+        outside = tmp_path / "evil.joblib"
+        outside.write_bytes(b"")
+        project = tmp_path / "proj"
+        project.mkdir()
+
+        result = await predict_parameters(
+            signal_channel="sig", model_path=str(outside), project_path=str(project)
+        )
+        assert "error" in result and "outside the allowed directories" in result["error"]

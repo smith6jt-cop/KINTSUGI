@@ -266,3 +266,42 @@ def test_committed_mcp_json_is_portable():
     assert not Path(server["command"]).is_absolute()
     # Claude Code ignores cwd (servers start in the project dir); never write it.
     assert "cwd" not in server
+
+
+# =============================================================================
+# Model-path confinement
+# =============================================================================
+
+
+def test_ensure_within_any_accepts_any_listed_root(tmp_path):
+    from kintsugi.mcp.path_safety import ensure_within_any
+
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    target = b / "model.pt"
+    target.write_bytes(b"")
+    assert ensure_within_any(target, [a, b]) == target.resolve()
+
+
+def test_ensure_within_any_rejects_outside_paths(tmp_path):
+    from kintsugi.mcp.path_safety import PathSafetyError, ensure_within_any
+
+    a = tmp_path / "a"
+    a.mkdir()
+    with pytest.raises(PathSafetyError, match="outside the allowed directories"):
+        ensure_within_any(tmp_path / "elsewhere.pt", [a])
+
+
+def test_allowed_model_roots_uses_project_claude_dir_and_user_dir(tmp_path, monkeypatch):
+    from kintsugi.mcp.path_safety import allowed_model_roots
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "claude"))
+    monkeypatch.setenv("KINTSUGI_MODEL_DIR", str(tmp_path / "models"))
+    roots = allowed_model_roots(tmp_path / "proj")
+    assert roots == [tmp_path / "proj", tmp_path / "claude", tmp_path / "models"]
+
+    monkeypatch.delenv("CLAUDE_PROJECT_DIR")
+    monkeypatch.delenv("KINTSUGI_MODEL_DIR")
+    roots = allowed_model_roots(None)
+    assert roots == [Path.home() / ".kintsugi" / "models"]

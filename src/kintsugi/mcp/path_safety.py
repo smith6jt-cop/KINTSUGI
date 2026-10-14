@@ -1,17 +1,24 @@
 """
 Path-safety and input-validation helpers for the KINTSUGI MCP server.
 
-The low-level ``mcp.server.Server`` does not validate tool arguments against
-their declared ``inputSchema``, so every argument that reaches a tool handler
-must be treated as untrusted (the values originate from an LLM). These helpers
-guard against the two highest-risk classes:
+The SDK validates argument *types*, enums and numeric ranges from each handler's
+``Annotated``/``Literal`` signature before the handler runs. Every argument is
+still untrusted (the values originate from an LLM), and some checks cannot be
+expressed as a schema, so these helpers guard against the two highest-risk
+classes:
 
 1. **Path traversal** — filenames/paths supplied by the model escaping the
    project tree (``../``, absolute paths, symlink escapes). This is the most
    common MCP-server vulnerability class.
 2. **Out-of-range / wrong-type arguments** — numeric parameters that could
-   exhaust memory or hang (huge filter sizes, unbounded trial counts) and enum
-   values the schema cannot enforce on its own.
+   exhaust memory or hang (huge filter sizes, unbounded trial counts). Pydantic
+   runs in lax mode (``True`` -> ``1``, ``"7"`` -> ``7``), so the clamps below
+   stay as the strict, in-body line of defence.
+
+A third class, **deserialization of model files** chosen by the model
+(``torch.load``/``joblib.load``), is handled by :func:`allowed_model_roots` and
+:func:`ensure_within_any`: a checkpoint path must live under the project or the
+user's model directory before anything is loaded.
 
 Helpers raise ``PathSafetyError`` / ``ValueError`` on violation. Tool handlers
 catch these and return the existing in-band ``{"error": ...}`` dict, so Claude
@@ -21,6 +28,7 @@ sees the failure and can self-correct.
 from __future__ import annotations
 
 import math
+import os
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -68,6 +76,39 @@ def ensure_within(path: str | Path, root: str | Path, param: str = "path") -> Pa
     if not resolved.is_relative_to(root_resolved):
         raise PathSafetyError(f"{param} {resolved} escapes the allowed directory {root_resolved}")
     return resolved
+
+
+def ensure_within_any(path: str | Path, roots: Iterable[str | Path], param: str = "path") -> Path:
+    """Resolve ``path`` and require it to stay inside at least one of ``roots``."""
+    resolved = Path(path).resolve()
+    root_list = [Path(r).resolve() for r in roots]
+    for root in root_list:
+        if resolved.is_relative_to(root):
+            return resolved
+    allowed = ", ".join(str(r) for r in root_list) or "(none)"
+    raise PathSafetyError(f"{param} {resolved} is outside the allowed directories: {allowed}")
+
+
+USER_MODEL_DIR_ENV = "KINTSUGI_MODEL_DIR"
+
+
+def allowed_model_roots(project_path: str | Path | None = None) -> list[Path]:
+    """Directories a tool may load model checkpoints from.
+
+    Loading a checkpoint executes a deserializer on a file the model chose, so the
+    file must come from somewhere the user controls: the project directory (when
+    given), the Claude Code project (``CLAUDE_PROJECT_DIR``), and the user's model
+    directory (``~/.kintsugi/models`` or ``$KINTSUGI_MODEL_DIR``).
+    """
+    roots: list[Path] = []
+    if project_path:
+        roots.append(Path(project_path))
+    claude_project = os.environ.get("CLAUDE_PROJECT_DIR")
+    if claude_project:
+        roots.append(Path(claude_project))
+    user_dir = os.environ.get(USER_MODEL_DIR_ENV)
+    roots.append(Path(user_dir) if user_dir else Path.home() / ".kintsugi" / "models")
+    return roots
 
 
 def validate_choice(value: object, choices: Iterable[object], param: str) -> object:
