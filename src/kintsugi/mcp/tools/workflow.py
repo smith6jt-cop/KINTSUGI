@@ -21,6 +21,7 @@ from kintsugi.mcp.path_safety import (
     safe_filename,
     validate_choice,
 )
+from kintsugi.mcp.schemas import SessionStateResult
 
 # Import session state from signal_isolation
 from kintsugi.mcp.tools.signal_isolation import (
@@ -32,7 +33,13 @@ logger = logging.getLogger("kintsugi.mcp.workflow")
 
 
 async def list_channels(
-    project_path: Annotated[str, Field(description="Path to the KINTSUGI project directory")],
+    project_path: Annotated[
+        str | None,
+        Field(
+            description="KINTSUGI project directory; None = the Claude Code project "
+            "(CLAUDE_PROJECT_DIR) or the server's working directory"
+        ),
+    ] = None,
     cycle: Annotated[
         str | None,
         Field(
@@ -46,7 +53,9 @@ async def list_channels(
 
     Searches raw and processed directories for image files.
     """
-    project_path = Path(project_path)
+    from kintsugi.mcp.session import resolve_project_path
+
+    project_path = Path(resolve_project_path(project_path))
 
     # Try to load project configuration
     try:
@@ -212,7 +221,9 @@ async def save_processed(
         if src_project:
             output_dir = Path(src_project) / "data" / "processed" / "signal_isolated"
         else:
-            output_dir = Path.cwd() / "output"
+            from kintsugi.mcp.session import default_project_root
+
+            output_dir = default_project_root() / "data" / "processed" / "signal_isolated"
 
     output_dir.mkdir(parents=True, exist_ok=True)
     output_dir = output_dir.resolve()
@@ -629,29 +640,77 @@ async def set_project_context(project_path: str) -> dict[str, Any]:
         return {"error": str(e)}
 
 
-async def get_session_state() -> dict[str, Any]:
+async def get_session_state() -> SessionStateResult:
     """
     Get the current session state.
 
-    Shows loaded images, processing history, and session info.
+    Shows the project root the server serves, loaded images (shape, dtype,
+    metadata), per-channel processing history counts, and memory usage.
     """
+    from kintsugi.mcp.session import default_project_root
+
     loaded = {
         name: {
-            "shape": info["shape"],
-            "dtype": info["dtype"],
+            "shape": [int(x) for x in info["shape"]] if info.get("shape") else [],
+            "dtype": str(info["dtype"]),
             "metadata": info.get("metadata", {}),
         }
         for name, info in _loaded_images.items()
     }
 
     history_summary = {channel: len(steps) for channel, steps in _processing_history.items()}
+    memory = _estimate_memory_usage()
 
     return {
         "status": "success",
+        "project_root": str(default_project_root()),
         "loaded_images": loaded,
         "total_loaded": len(loaded),
         "processing_history": history_summary,
-        "memory_usage": _estimate_memory_usage(),
+        "memory_usage": {
+            "total_mb": float(memory["total_mb"]),
+            "total_gb": float(memory["total_gb"]),
+        },
+    }
+
+
+async def unload_channel(
+    channel: Annotated[
+        str | None,
+        Field(description="Name of the loaded channel to drop from the session"),
+    ] = None,
+    clear_all: Annotated[
+        bool,
+        Field(description="Drop every loaded channel and all processing history (default: false)"),
+    ] = False,
+) -> dict[str, Any]:
+    """
+    Free session memory by dropping loaded channels.
+
+    Loaded images live in server memory for the whole session; call this when
+    a channel (or everything) is no longer needed. Files on disk are untouched.
+    """
+    from kintsugi.mcp.tools.signal_isolation import clear_session
+
+    before = _estimate_memory_usage()["total_mb"]
+    if clear_all:
+        dropped = sorted(_loaded_images)
+        clear_session()
+    elif channel is None:
+        return {"error": "Pass a channel name, or clear_all=true to drop everything."}
+    elif channel not in _loaded_images:
+        return {"error": f"Channel not loaded: {channel}"}
+    else:
+        dropped = [channel]
+        del _loaded_images[channel]
+        _processing_history.pop(channel, None)
+    after = _estimate_memory_usage()["total_mb"]
+
+    return {
+        "status": "success",
+        "unloaded": dropped,
+        "remaining": sorted(_loaded_images),
+        "freed_mb": round(float(before - after), 2),
     }
 
 

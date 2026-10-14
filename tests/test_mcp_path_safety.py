@@ -232,12 +232,18 @@ async def test_load_channel_rejects_glob_wildcards(tmp_path, channel):
 
 async def test_get_thumbnail_canonicalizes_jpg(loaded_channel):
     pytest.importorskip("PIL")
+    from kintsugi.mcp._sdk import MCP_AVAILABLE
+
+    if not MCP_AVAILABLE:
+        pytest.skip("mcp 2.x not installed (get_thumbnail builds a CallToolResult)")
     from kintsugi.mcp.tools import visualization as vis
 
     result = await vis.get_thumbnail(channel=loaded_channel, format="jpg")
     # "jpg" alias must be canonicalized to JPEG and succeed (not error in Pillow).
-    assert result.get("status") == "success", result
-    assert result["thumbnail"]["format"] == "jpeg"
+    assert not result.is_error, result.structured_content
+    assert result.content[0].type == "image"
+    assert result.content[0].mime_type == "image/jpeg"
+    assert result.structured_content["thumbnail"]["format"] == "jpeg"
 
 
 # =============================================================================

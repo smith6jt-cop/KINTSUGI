@@ -132,9 +132,9 @@ async def test_missing_required_argument_is_a_tool_error():
     from kintsugi.mcp.server import create_server
 
     async with Client(create_server()) as client:
-        result = await client.call_tool("load_channel", {"cycle": "1", "channel": "CD3"})
+        result = await client.call_tool("load_channel", {"cycle": "1"})
     assert result.is_error is True
-    assert "project_path" in result.content[0].text
+    assert "channel" in result.content[0].text
 
 
 async def test_structured_content_round_trip():
@@ -148,3 +148,104 @@ async def test_structured_content_round_trip():
     assert result.structured_content["status"] == "success"
     assert result.structured_content["channel"] == "nope"
     assert result.content[0].type == "text"
+
+
+# =============================================================================
+# Errors, resources, prompts, session tools
+# =============================================================================
+
+
+async def test_resources_and_templates_are_advertised_and_readable(tmp_path, monkeypatch):
+    import json
+
+    from mcp.client import Client
+
+    from kintsugi.mcp.server import create_server
+
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    async with Client(create_server()) as client:
+        uris = {r.uri for r in (await client.list_resources()).resources}
+        templates = {
+            t.uri_template for t in (await client.list_resource_templates()).resource_templates
+        }
+        images = await client.read_resource("kintsugi://session/images")
+        history = await client.read_resource("kintsugi://session/history/CD3")
+        channels = await client.read_resource("kintsugi://project/channels")
+
+    assert uris == {
+        "kintsugi://session/images",
+        "kintsugi://learning/stats",
+        "kintsugi://project/channels",
+    }
+    assert templates == {"kintsugi://session/history/{channel}"}
+    state = json.loads(images.contents[0].text)
+    assert state["project_root"] == str(tmp_path.resolve())
+    assert json.loads(history.contents[0].text)["channel"] == "CD3"
+    assert json.loads(channels.contents[0].text)["project"] == str(tmp_path.resolve())
+
+
+async def test_prompt_is_advertised_and_renders():
+    from mcp.client import Client
+
+    from kintsugi.mcp.server import create_server
+
+    async with Client(create_server()) as client:
+        prompts = {p.name: p for p in (await client.list_prompts()).prompts}
+        rendered = await client.get_prompt(
+            "signal_isolation_workflow",
+            {"channel": "CD3", "blank_channel": "Blank", "tissue_type": "tonsil"},
+        )
+
+    prompt = prompts["signal_isolation_workflow"]
+    assert prompt.title == "Guided signal isolation"
+    assert {a.name for a in prompt.arguments} == {
+        "channel",
+        "blank_channel",
+        "tissue_type",
+        "project_path",
+    }
+    text = rendered.messages[0].content.text
+    assert "subtract_blank" in text and "approve_and_learn" in text and "tonsil" in text
+
+
+async def test_session_tools_round_trip(sample_numpy_image, clear_session_state):
+    from mcp.client import Client
+
+    from kintsugi.mcp.server import create_server
+    from kintsugi.mcp.tools.signal_isolation import _store_image
+
+    _store_image("CD3", sample_numpy_image)
+    async with Client(create_server()) as client:
+        state = await client.call_tool("get_session_state", {})
+        unloaded = await client.call_tool("unload_channel", {"channel": "CD3"})
+        after = await client.call_tool("get_session_state", {})
+
+    assert state.is_error is False
+    assert "CD3" in state.structured_content["loaded_images"]
+    assert state.structured_content["memory_usage"]["total_mb"] > 0
+    assert unloaded.structured_content["unloaded"] == ["CD3"]
+    assert after.structured_content["total_loaded"] == 0
+
+
+def test_session_state_has_a_typed_output_schema(surface):
+    schema = surface["tools"]["get_session_state"].output_schema
+    assert {"status", "project_root", "loaded_images", "memory_usage"} <= set(schema["properties"])
+
+
+@pytest.fixture
+def sample_numpy_image():
+    import numpy as np
+
+    return np.random.default_rng(0).integers(0, 4096, (64, 64), dtype=np.uint16)
+
+
+@pytest.fixture
+def clear_session_state():
+    from kintsugi.mcp.tools.signal_isolation import clear_session
+
+    clear_session()
+    yield
+    clear_session()
+
+
+# =============================================================================

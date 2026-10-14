@@ -6,13 +6,16 @@ Wraps Kutils functions for blank subtraction, denoising, and signal enhancement.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import numpy as np
 from pydantic import Field
 
+from kintsugi.mcp._sdk import Context
 from kintsugi.mcp.path_safety import (
     PathSafetyError,
     allowed_model_roots,
@@ -62,16 +65,85 @@ def _add_history(name: str, operation: str, params: dict[str, Any]):
     )
 
 
+def _as_numpy(data: Any) -> np.ndarray:
+    """Materialize a loaded image (dask or array-like) as a NumPy array.
+
+    Runs the (possibly heavy) ``compute()`` so callers can push it onto a
+    worker thread with :func:`asyncio.to_thread`.
+    """
+    if hasattr(data, "compute"):
+        return data.compute()
+    return np.array(data)
+
+
+async def _report_progress(
+    ctx: Context | None, progress: float, total: float, message: str
+) -> None:
+    """Send a progress notification when the call carries a request context.
+
+    Direct in-process calls pass no ``ctx`` and get no notifications. The SDK
+    itself drops the notification when the client sent no progress token, so
+    this is safe to call unconditionally inside a handler.
+    """
+    if ctx is None:
+        return
+    try:
+        await ctx.report_progress(progress, total, message)
+    except Exception:  # progress is advisory; never fail the tool over it
+        logger.debug("progress notification failed", exc_info=True)
+
+
+def _log_progress_failure(future: Any) -> None:
+    if not future.cancelled() and future.exception() is not None:
+        logger.debug("progress notification failed: %s", future.exception())
+
+
+def _thread_progress_reporter(
+    ctx: Context | None, loop: asyncio.AbstractEventLoop
+) -> Callable[[float, float, str], None]:
+    """Build a plain callable that a worker thread can use to report progress.
+
+    ``ctx.report_progress`` is a coroutine that must run on the event loop, so
+    the callable hands it back to ``loop`` with
+    :func:`asyncio.run_coroutine_threadsafe` instead of awaiting in the thread.
+    """
+
+    def report(progress: float, total: float, message: str) -> None:
+        if ctx is None:
+            return
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                ctx.report_progress(progress, total, message), loop
+            )
+        except RuntimeError:  # loop already closed (request cancelled/finished)
+            return
+        future.add_done_callback(_log_progress_failure)
+
+    return report
+
+
 async def load_channel(
-    project_path: Annotated[str, Field(description="Path to the KINTSUGI project directory")],
     cycle: Annotated[str, Field(description="Cycle name or number (e.g., 'cyc001' or '1')")],
     channel: Annotated[str, Field(description="Channel name (e.g., 'CD3', 'DAPI')")],
+    project_path: Annotated[
+        str | None,
+        Field(
+            description="KINTSUGI project directory; None = the Claude Code project "
+            "(CLAUDE_PROJECT_DIR) or the current directory"
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Load a channel image from a KINTSUGI project.
 
-    Returns image metadata and prepares it for processing.
+    Returns image metadata and prepares it for processing. When ``project_path``
+    is omitted the server's own project (``CLAUDE_PROJECT_DIR``, else the
+    working directory) is used.
     """
+    # Imported lazily so this module imports without the session helper.
+    from kintsugi.mcp.session import resolve_project_path
+
+    project_path = resolve_project_path(project_path)
 
     # cycle and channel become path/glob components below, so reject any value
     # that could traverse out of the project tree or broaden the glob search.
@@ -600,6 +672,7 @@ async def subtract_blank(
             allow_inf_nan=False,
         ),
     ] = 0.1,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """
     Subtract autofluorescence/blank channel from signal.
@@ -652,13 +725,10 @@ async def subtract_blank(
 
     # ---- Weighted method path ----
     if method == "weighted":
-        # Convert to numpy for weighted processing
-        if hasattr(signal_data, "compute"):
-            signal_np = signal_data.compute()
-            blank_np = blank_data.compute()
-        else:
-            signal_np = np.array(signal_data)
-            blank_np = np.array(blank_data)
+        await _report_progress(ctx, 0, 3, "loading images")
+        # Materialize on a worker thread so the event loop keeps serving pings.
+        signal_np = await asyncio.to_thread(_as_numpy, signal_data)
+        blank_np = await asyncio.to_thread(_as_numpy, blank_data)
 
         try:
             from kintsugi.signal.autofluorescence import (
@@ -683,7 +753,9 @@ async def subtract_blank(
             blank_clip_factor = blank_clip_factor or 0
             base_scale = blank_scale_factor if blank_scale_factor is not None else 1.0
 
-            result_np = subtract_autofluorescence_weighted(
+            await _report_progress(ctx, 1, 3, "weighted subtraction")
+            result_np = await asyncio.to_thread(
+                subtract_autofluorescence_weighted,
                 signal_np,
                 blank_np,
                 blank_clip_factor=blank_clip_factor,
@@ -699,6 +771,7 @@ async def subtract_blank(
                 high_percentile=high_percentile or 90,
                 erosion=erosion or 0,
             )
+            await _report_progress(ctx, 2, 3, "scoring result")
 
             # Compute quality with ranges
             signal_f = signal_np.astype(np.float32)
@@ -749,6 +822,7 @@ async def subtract_blank(
                 "std": float(np.std(result_np)),
             }
 
+            await _report_progress(ctx, 3, 3, "done")
             return {
                 "status": "success",
                 "output_name": output_name,
@@ -780,6 +854,8 @@ async def subtract_blank(
         from skimage import morphology
     except ImportError as e:
         return {"error": f"Missing dependency: {e}"}
+
+    await _report_progress(ctx, 0, 2, "preparing subtraction")
 
     # Auto-suggest parameters if needed
     suggested_params = None
@@ -901,9 +977,10 @@ async def subtract_blank(
         },
     )
 
-    # Compute stats for result
+    # Compute stats for result (this evaluates the dask graph, so keep it off
+    # the event loop).
     try:
-        sample = result[::10, ::10].compute()
+        sample = await asyncio.to_thread(result[::10, ::10].compute)
         stats = {
             "min": float(np.min(sample)),
             "max": float(np.max(sample)),
@@ -912,7 +989,9 @@ async def subtract_blank(
         }
     except Exception:
         stats = {}
+    await _report_progress(ctx, 1, 2, "subtraction computed")
 
+    await _report_progress(ctx, 2, 2, "done")
     return {
         "status": "success",
         "output_name": output_name,
@@ -1346,6 +1425,7 @@ async def denoise_advanced(
         str | None,
         Field(description="KINTSUGI project directory that model_path may be loaded from"),
     ] = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """
     Apply advanced denoising using N2V, CARE, or adaptive methods.
@@ -1390,14 +1470,13 @@ async def denoise_advanced(
     except ValueError as e:
         return {"error": str(e)}
 
-    # Convert to numpy if needed
-    if hasattr(data, "compute"):
+    await _report_progress(ctx, 0, 3, "loading image")
+
+    # Convert to numpy if needed (off the event loop: compute() can be heavy)
+    if hasattr(data, "compute") and (data.shape[0] > 4000 or data.shape[1] > 4000):
         # For large images, process a reasonable subset or use tiled approach
-        if data.shape[0] > 4000 or data.shape[1] > 4000:
-            logger.warning("Large image detected, computing full array...")
-        img = data.compute()
-    else:
-        img = np.array(data)
+        logger.warning("Large image detected, computing full array...")
+    img = await asyncio.to_thread(_as_numpy, data)
 
     # Estimate noise level before denoising
     try:
@@ -1407,53 +1486,63 @@ async def denoise_advanced(
     except ImportError:
         noise_before = float(np.std(img[img < np.percentile(img, 20)]))
 
-    # Apply denoising based on method
+    # Pick the denoiser, then run it on a worker thread so the server keeps
+    # answering pings/cancellation while it works.
+    await _report_progress(ctx, 1, 3, f"denoising ({method})")
     try:
+        denoiser: Callable[..., np.ndarray]
+        kwargs: dict[str, Any]
         if method == "adaptive":
             from kintsugi.denoise.filters import adaptive_denoise
 
-            result = adaptive_denoise(img, strength=strength, preserve_edges=preserve_edges)
+            denoiser = adaptive_denoise
+            kwargs = {"strength": strength, "preserve_edges": preserve_edges}
 
         elif method == "bilateral":
             from kintsugi.denoise.filters import denoise_bilateral
 
             sigma_spatial = 1.0 if strength == "light" else (2.0 if strength == "medium" else 3.0)
-            result = denoise_bilateral(img, sigma_spatial=sigma_spatial)
+            denoiser = denoise_bilateral
+            kwargs = {"sigma_spatial": sigma_spatial}
 
         elif method == "nlm":
             from kintsugi.denoise.filters import denoise_nlm
 
             patch_size = 5 if strength in ("light", "auto") else 7
-            result = denoise_nlm(img, patch_size=patch_size)
+            denoiser = denoise_nlm
+            kwargs = {"patch_size": patch_size}
 
         elif method == "bm3d":
             from kintsugi.denoise.patch_based import denoise_bm3d_lite
 
-            result = denoise_bm3d_lite(img, sigma=noise_before if strength == "auto" else None)
+            denoiser = denoise_bm3d_lite
+            kwargs = {"sigma": noise_before if strength == "auto" else None}
 
         elif method == "n2v":
             from kintsugi.denoise.n2v import denoise_n2v
 
-            result = denoise_n2v(
-                img,
-                n_epochs=n2v_epochs,
-                model_path=model_path,
-            )
+            denoiser = denoise_n2v
+            kwargs = {"n_epochs": n2v_epochs, "model_path": model_path}
 
         elif method == "patch_svd":
             from kintsugi.denoise.patch_based import denoise_svd_patch
 
             rank = None if strength == "auto" else (5 if strength == "light" else 10)
-            result = denoise_svd_patch(img, rank=rank)
+            denoiser = denoise_svd_patch
+            kwargs = {"rank": rank}
 
         else:
             return {"error": f"Unknown advanced denoise method: {method}"}
+
+        result = await asyncio.to_thread(denoiser, img, **kwargs)
 
     except ImportError as e:
         return {
             "error": f"Required module not available: {e}",
             "hint": "Install with: pip install kintsugi[denoise] for N2V/CARE support",
         }
+
+    await _report_progress(ctx, 2, 3, "estimating residual noise")
 
     # Estimate noise after
     try:
@@ -1487,6 +1576,7 @@ async def denoise_advanced(
         },
     )
 
+    await _report_progress(ctx, 3, 3, "done")
     return {
         "status": "success",
         "output_name": output_name,
@@ -1537,6 +1627,7 @@ async def cluster_channels_tool(
     wavelength_aware: Annotated[
         bool, Field(description="Enforce same-wavelength clustering (default: true)")
     ] = True,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """
     Cluster project channels by image feature similarity.
@@ -1551,6 +1642,8 @@ async def cluster_channels_tool(
         return {"error": f"Missing module: {e}"}
 
     project_path_obj = Path(project_path).resolve()
+
+    await _report_progress(ctx, 0, 3, "discovering channel images")
 
     # Discover channel images
     search_dirs = [
@@ -1587,13 +1680,15 @@ async def cluster_channels_tool(
     if not marker_dict:
         return {"error": "No channel images found in project"}
 
-    # Extract features
+    # Extract features (heavy, CPU-bound: run on a worker thread)
+    await _report_progress(ctx, 1, 3, f"extracting features from {len(marker_dict)} channels")
     try:
-        features = batch_extract_features(marker_dict, progress=False)
+        features = await asyncio.to_thread(batch_extract_features, marker_dict, progress=False)
     except Exception as e:
         return {"error": f"Feature extraction failed: {e}"}
 
     # Cluster
+    await _report_progress(ctx, 2, 3, "clustering channels")
     try:
         assignments = cluster_channels(
             features,
@@ -1629,6 +1724,7 @@ async def cluster_channels_tool(
             "wavelength_group": features[rep_name]["wavelength_group"],
         }
 
+    await _report_progress(ctx, 3, 3, "done")
     return {
         "status": "success",
         "n_channels": len(assignments),
@@ -1653,6 +1749,7 @@ async def propagate_parameters_tool(
             "project's data/processed/signal_isolated directory"
         ),
     ] = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """
     Propagate tuned parameters to all members of a cluster.
@@ -1696,10 +1793,14 @@ async def propagate_parameters_tool(
         if name in members
     }
 
+    await _report_progress(ctx, 0, 2, f"propagating parameters to {len(members)} channels")
     try:
-        results = propagate_cluster_parameters(marker_dict_local, members, params, blank_map, out)
+        results = await asyncio.to_thread(
+            propagate_cluster_parameters, marker_dict_local, members, params, blank_map, out
+        )
     except Exception as e:
         return {"error": f"Propagation failed: {e}"}
+    await _report_progress(ctx, 1, 2, "propagation complete")
 
     summary = {
         name: {
@@ -1711,6 +1812,7 @@ async def propagate_parameters_tool(
     }
 
     successes = sum(1 for r in results.values() if r["status"] == "success")
+    await _report_progress(ctx, 2, 2, "done")
     return {
         "status": "success",
         "cluster_id": cluster_id,
@@ -1742,6 +1844,7 @@ async def optimize_parameters(
         str | None,
         Field(description="Project path for storing optimization study (optional)"),
     ] = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """
     Find optimal signal isolation parameters via Bayesian optimization (Optuna).
@@ -1778,13 +1881,11 @@ async def optimize_parameters(
     except ValueError as e:
         return {"error": str(e)}
 
-    # Convert to numpy
-    if hasattr(signal_data, "compute"):
-        signal_np = signal_data.compute()
-        blank_np = blank_data.compute()
-    else:
-        signal_np = np.array(signal_data)
-        blank_np = np.array(blank_data)
+    await _report_progress(ctx, 0, n_trials, f"trial 0/{n_trials}")
+
+    # Convert to numpy (off the event loop)
+    signal_np = await asyncio.to_thread(_as_numpy, signal_data)
+    blank_np = await asyncio.to_thread(_as_numpy, blank_data)
 
     # Storage path
     storage_path = None
@@ -1793,8 +1894,16 @@ async def optimize_parameters(
         storage_dir.mkdir(parents=True, exist_ok=True)
         storage_path = storage_dir / f"{signal_channel}_optimization.db"
 
+    # Optuna runs on a worker thread; each finished trial schedules a progress
+    # notification back onto the event loop (never awaited from the thread).
+    report = _thread_progress_reporter(ctx, asyncio.get_running_loop())
+
+    def _on_trial(completed: int, total: int) -> None:
+        report(completed, total, f"trial {completed}/{total}")
+
     try:
-        result = optimize_signal_isolation(
+        result = await asyncio.to_thread(
+            optimize_signal_isolation,
             signal=signal_np,
             blank=blank_np,
             n_trials=n_trials,
@@ -1803,9 +1912,17 @@ async def optimize_parameters(
             optimize_clean=optimize_clean,
             storage_path=storage_path,
             show_progress=False,
+            trial_callback=_on_trial if ctx is not None else None,
         )
     except Exception as e:
         return {"error": f"Optimization failed: {e}"}
+
+    await _report_progress(
+        ctx,
+        n_trials,
+        n_trials,
+        f"optimization complete ({result['n_trials_completed']} trials)",
+    )
 
     _add_history(
         signal_channel,

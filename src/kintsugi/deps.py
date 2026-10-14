@@ -708,6 +708,10 @@ class DependencyChecker:
             ("bioio", "1.0.0", "bio"),
             ("ome-zarr", None, "bio"),
             ("slideio", None, "bio"),
+            # Claude Code MCP server (mcp 2.x required: the 1.x API is not supported)
+            ("mcp", "2.0.0", "claude"),
+            ("optuna", "3.0", "claude"),
+            ("smo", None, "claude"),
         ]
 
         for package, min_version, group in optional_packages:

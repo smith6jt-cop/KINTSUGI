@@ -192,4 +192,16 @@ TASKS: list[EvalTask] = [
         "expected": {"suggest_parameters"},
         "rationale": "Image-analysis heuristic suggestion without the learning database.",
     },
+    {
+        "id": "session_state",
+        "prompt": "Which channels are currently loaded in this session, and how much memory do they use?",
+        "expected": {"get_session_state"},
+        "rationale": "Session introspection (not the project's channel list on disk).",
+    },
+    {
+        "id": "unload",
+        "prompt": "I'm done with the DAPI channel; free its memory on the server.",
+        "expected": {"unload_channel"},
+        "rationale": "Drop a loaded channel from the session.",
+    },
 ]

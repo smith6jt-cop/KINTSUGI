@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 import numpy as np
 from pydantic import Field
 
+from kintsugi.mcp.schemas import LearningSuggestion
+
 # Import session state from signal_isolation
 from kintsugi.mcp.tools.signal_isolation import _loaded_images
 
@@ -20,6 +22,20 @@ if TYPE_CHECKING:
     from kintsugi.claude.parameter_learning import ImageCharacteristics
 
 logger = logging.getLogger("kintsugi.mcp.learning")
+
+
+def _plain(value: Any) -> Any:
+    """Recursively turn numpy scalars/arrays into JSON-serialisable Python values."""
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
+
 
 # Learning engines, one per project (key "" = the user-wide database only). A single
 # cached instance used to be reused across projects when project_path was omitted,
@@ -287,7 +303,7 @@ async def suggest_with_learning(
             "database; None consults the user-wide global database only"
         ),
     ] = None,
-) -> dict[str, Any]:
+) -> LearningSuggestion:
     """
     Suggest processing parameters combining image analysis and learned history.
 
@@ -295,6 +311,10 @@ async def suggest_with_learning(
     1. Analyzes the current image
     2. Queries learned parameters for tissue/marker
     3. Combines both sources with confidence weighting
+
+    The return annotation is the advertised ``outputSchema``: keys outside it
+    are dropped on the wire and non-conforming values turn the whole result
+    into an opaque error, so every value is coerced to a plain Python type.
 
     Args:
         channel: Loaded channel name
@@ -340,17 +360,18 @@ async def suggest_with_learning(
     # Get learned parameters for each operation
     operations = list(LEARNING_OPERATIONS)
 
-    recommendations = {
+    recommendations: dict[str, Any] = {
+        "status": "success",
         "channel": channel,
         "tissue_type": tissue_type,
         "tissue_type_normalized": normalize_tissue_type(tissue_type),
         "marker_name": marker_name,
         "marker_name_normalized": normalize_marker_name(marker_name),
         "image_characteristics": {
-            "snr": round(characteristics.snr, 2),
-            "dynamic_range": round(characteristics.dynamic_range, 0),
-            "sparsity": round(characteristics.sparsity, 3),
-            "background_level": round(characteristics.background_level, 0),
+            "snr": round(float(characteristics.snr), 2),
+            "dynamic_range": round(float(characteristics.dynamic_range), 0),
+            "sparsity": round(float(characteristics.sparsity), 3),
+            "background_level": round(float(characteristics.background_level), 0),
         },
         "operations": {},
     }
@@ -423,18 +444,17 @@ async def suggest_with_learning(
             confidence = 0.3
 
         recommendations["operations"][operation] = {
-            "recommended_parameters": combined_params,
-            "confidence": round(confidence, 3),
+            "recommended_parameters": _plain(combined_params),
+            "confidence": round(float(confidence), 3),
             "source": source,
-            "rationale": heuristic.get("rationale", ""),
-            "learned_records": learned.get("based_on_records", 0),
+            "rationale": str(heuristic.get("rationale", "")),
+            "learned_records": int(learned.get("based_on_records", 0) or 0),
         }
 
     # Suggest processing order based on image
-    recommendations["suggested_order"] = _suggest_processing_order(
-        characteristics,
-        recommendations["operations"],
-    )
+    recommendations["suggested_order"] = [
+        str(op) for op in _suggest_processing_order(characteristics, recommendations["operations"])
+    ]
 
     return recommendations
 

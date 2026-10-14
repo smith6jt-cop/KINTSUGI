@@ -240,6 +240,29 @@ TOOL_SPECS: list[dict[str, Any]] = [
         ),
         "annotations": _WRITES_FILES,
     },
+    {
+        "name": "get_session_state",
+        "module": "workflow",
+        "attr": "get_session_state",
+        "title": "Session state",
+        "description": (
+            "Show what this server session holds: the project root it serves, every loaded "
+            "channel with shape/dtype/metadata, per-channel processing step counts, and memory "
+            "usage."
+        ),
+        "annotations": _READ_ONLY,
+    },
+    {
+        "name": "unload_channel",
+        "module": "workflow",
+        "attr": "unload_channel",
+        "title": "Unload channel",
+        "description": (
+            "Free server memory by dropping a loaded channel (or everything with clear_all). "
+            "Files on disk are untouched."
+        ),
+        "annotations": _PROCESSING,
+    },
     # ---- Parameter learning ----
     {
         "name": "get_learned_parameters",

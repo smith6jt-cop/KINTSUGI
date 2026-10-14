@@ -17,10 +17,20 @@ the declarative :data:`kintsugi.mcp.tool_specs.TOOL_SPECS` registry.
 from __future__ import annotations
 
 import asyncio
+import functools
+import json
 import logging
 import sys
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from kintsugi.mcp._sdk import MCP_AVAILABLE, MCPServer, ToolAnnotations, unavailable_message
+from kintsugi.mcp._sdk import (
+    MCP_AVAILABLE,
+    MCPServer,
+    ToolAnnotations,
+    ToolError,
+    unavailable_message,
+)
 from kintsugi.mcp.tool_specs import TOOL_SPECS
 
 # Configure logging. The stdio transport uses stdout for the JSON-RPC stream,
@@ -38,10 +48,12 @@ SERVER_WEBSITE = "https://kintsugi.readthedocs.io/en/latest/mcp.html"
 # Sent to the client at initialize time; this is the model's orientation.
 SERVER_INSTRUCTIONS = """\
 KINTSUGI processes multiplex immunofluorescence images. Tools act on a KINTSUGI
-project directory (project_path) and keep loaded images in server memory for the
-session.
+project directory; project_path defaults to the Claude Code project
+(CLAUDE_PROJECT_DIR), so it can usually be omitted. Loaded images stay in server
+memory for the session: get_session_state shows them, unload_channel frees them.
 
-Typical signal-isolation session:
+Typical signal-isolation session (also available as the
+signal_isolation_workflow prompt):
 1. list_channels -> load_channel for the signal channel and its blank
    (autofluorescence) channel.
 2. get_image_stats / get_thumbnail to inspect them.
@@ -52,7 +64,10 @@ Typical signal-isolation session:
 5. assess_quality / compute_snr, then save_processed.
 6. approve_and_learn so the next session starts from what worked.
 
-Failures are returned as tool errors with a next-step hint.
+Resources: kintsugi://session/images, kintsugi://session/history/{channel},
+kintsugi://learning/stats, kintsugi://project/channels.
+Failures are reported as tool errors (isError) whose text is a JSON object with
+an "error" message and, where possible, the next step to take.
 """
 
 
@@ -75,6 +90,8 @@ def create_server() -> MCPServer:
         version=_server_version(),
     )
     _register_tools(server)
+    _register_resources(server)
+    _register_prompts(server)
     return server
 
 

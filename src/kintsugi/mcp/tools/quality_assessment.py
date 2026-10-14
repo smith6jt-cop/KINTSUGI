@@ -12,6 +12,8 @@ from typing import Annotated, Any
 import numpy as np
 from pydantic import Field
 
+from kintsugi.mcp.schemas import QualityResult
+
 # Import session state from signal_isolation
 from kintsugi.mcp.tools.signal_isolation import _add_history, _loaded_images
 
@@ -23,6 +25,13 @@ def _get_image(name: str) -> Any:
     if name not in _loaded_images:
         raise ValueError(f"Image not loaded: {name}. Use load_channel first.")
     return _loaded_images[name]["data"]
+
+
+def _plain(value: Any) -> Any:
+    """Turn numpy scalars into Python scalars so the typed result serialises."""
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
 
 
 async def assess_quality(
@@ -45,13 +54,15 @@ async def assess_quality(
             allow_inf_nan=False,
         ),
     ] = 0.85,
-) -> dict[str, Any]:
+) -> QualityResult:
     """
     Assess channel quality using heuristic metrics, optionally blended with the
     ``kintsugi.qc.ImageQC`` assessor.
 
     Returns comprehensive quality metrics including SNR, contrast, and
-    whether the channel requires manual review.
+    whether the channel requires manual review. The return annotation is the
+    advertised ``outputSchema``, so every value is coerced to a plain Python
+    type before returning.
     """
     try:
         data = _get_image(channel)
@@ -80,7 +91,7 @@ async def assess_quality(
 
             qc = ImageQC()
             qc_result = qc.assess(data_sample, marker=channel)
-            qc_score = qc_result.quality_score
+            qc_score = float(qc_result.quality_score)
             metrics["qc_confidence"] = qc_score
             metrics["issues"] = len(qc_result.issues) if qc_result.issues else 0
 
@@ -91,12 +102,12 @@ async def assess_quality(
 
     # Combined score
     if qc_score is not None:
-        final_score = 0.7 * qc_score + 0.3 * heuristic_score
+        final_score = float(0.7 * qc_score + 0.3 * heuristic_score)
     else:
-        final_score = heuristic_score
+        final_score = float(heuristic_score)
 
     # Determine if review is needed
-    requires_review = final_score < confidence_threshold
+    requires_review = bool(final_score < confidence_threshold)
 
     # Generate recommendations
     recommendations = _generate_recommendations(metrics, final_score)
@@ -110,14 +121,17 @@ async def assess_quality(
         },
     )
 
+    plain_metrics = {k: _plain(v) for k, v in metrics.items()}
     return {
         "status": "success",
         "channel": channel,
         "quality_score": round(final_score, 3),
         "requires_review": requires_review,
-        "metrics": {k: round(v, 3) if isinstance(v, float) else v for k, v in metrics.items()},
-        "recommendations": recommendations,
-        "threshold_used": confidence_threshold,
+        "metrics": {
+            k: round(v, 3) if isinstance(v, float) else v for k, v in plain_metrics.items()
+        },
+        "recommendations": [str(r) for r in recommendations],
+        "threshold_used": float(confidence_threshold),
     }
 
 

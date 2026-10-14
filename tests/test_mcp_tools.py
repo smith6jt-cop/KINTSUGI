@@ -53,6 +53,8 @@ EXPECTED_TOOL_NAMES = {
     "get_processing_history",
     "suggest_parameters",
     "generate_jupyter_cell",
+    "get_session_state",
+    "unload_channel",
     "cluster_channels",
     "propagate_parameters",
     "get_learned_parameters",
@@ -683,9 +685,11 @@ class TestVisualization:
         assert "histogram" in stats
         assert "zero_pixels" in stats
 
+    @requires_mcp
     @pytest.mark.asyncio
     async def test_get_thumbnail(self, sample_uint16_image, clear_mcp_state):
-        """Test thumbnail generation."""
+        """Thumbnail arrives as an image content block plus structured metadata."""
+        pytest.importorskip("PIL")
         from kintsugi.mcp.tools.signal_isolation import _store_image
         from kintsugi.mcp.tools.visualization import get_thumbnail
 
@@ -697,13 +701,22 @@ class TestVisualization:
             normalize=True,
         )
 
-        assert result["status"] == "success"
-        assert "thumbnail" in result
-        assert "data_uri" in result["thumbnail"]
-        assert result["thumbnail"]["format"] == "png"
+        assert not result.is_error
+        # The renderable image block comes first, followed by the JSON text block.
+        assert result.content[0].type == "image"
+        assert result.content[0].mime_type == "image/png"
+        assert result.content[1].type == "text"
+
+        meta = result.structured_content
+        assert meta["status"] == "success"
+        assert meta["channel"] == "test_ch"
+        assert meta["thumbnail"]["format"] == "png"
+        # The base64 data: URI is opt-in (include_data_uri) and off by default.
+        assert "data_uri" not in meta["thumbnail"]
         # Thumbnail should be smaller or equal to max_size
-        assert result["thumbnail"]["width"] <= 256
-        assert result["thumbnail"]["height"] <= 256
+        assert meta["thumbnail"]["width"] <= 256
+        assert meta["thumbnail"]["height"] <= 256
+        assert meta["original_shape"] == [512, 512]
 
     @pytest.mark.asyncio
     async def test_compare_channels(self, sample_uint16_image, sample_blank_image, clear_mcp_state):

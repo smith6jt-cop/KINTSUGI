@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
 from typing import Annotated, Any, Literal
 
 import numpy as np
 from pydantic import Field
 
+from kintsugi.mcp._sdk import CallToolResult, ImageContent, TextContent
 from kintsugi.mcp.path_safety import clamp_int, validate_choice
+from kintsugi.mcp.schemas import ImageStatsResult
 
 # Import session state from signal_isolation
 from kintsugi.mcp.tools.signal_isolation import _loaded_images
@@ -31,11 +34,14 @@ def _get_image(name: str) -> Any:
 
 async def get_image_stats(
     channel: Annotated[str, Field(description="Name of loaded channel")],
-) -> dict[str, Any]:
+) -> ImageStatsResult:
     """
     Get comprehensive statistics for a loaded image.
 
-    Returns intensity distribution, percentiles, and histogram data.
+    Returns intensity distribution, percentiles, and histogram data. The return
+    annotation is the advertised ``outputSchema``; every value must be a plain
+    Python scalar/list so the SDK's output validation and JSON serialisation
+    accept it (numpy integers are not JSON-serialisable by pydantic).
     """
     try:
         data = _get_image(channel)
@@ -51,8 +57,8 @@ async def get_image_stats(
         data_sample = data
 
     # Basic statistics
-    stats = {
-        "shape": list(data.shape) if hasattr(data, "shape") else None,
+    stats: dict[str, Any] = {
+        "shape": [int(s) for s in data.shape] if hasattr(data, "shape") else None,
         "dtype": str(data.dtype) if hasattr(data, "dtype") else None,
         "min": float(np.min(data_sample)),
         "max": float(np.max(data_sample)),
@@ -74,13 +80,13 @@ async def get_image_stats(
     }
 
     # Zero and saturation counts
-    total_pixels = data_sample.size
+    total_pixels = int(data_sample.size)
     stats["zero_pixels"] = int(np.sum(data_sample == 0))
-    stats["zero_ratio"] = stats["zero_pixels"] / total_pixels
+    stats["zero_ratio"] = float(stats["zero_pixels"] / total_pixels)
 
     max_val = 65535 if data_sample.dtype == np.uint16 else 255
     stats["saturated_pixels"] = int(np.sum(data_sample >= max_val * 0.99))
-    stats["saturation_ratio"] = stats["saturated_pixels"] / total_pixels
+    stats["saturation_ratio"] = float(stats["saturated_pixels"] / total_pixels)
 
     # Non-zero statistics (for sparse markers)
     nonzero = data_sample[data_sample > 0]
@@ -88,12 +94,12 @@ async def get_image_stats(
         stats["nonzero_mean"] = float(np.mean(nonzero))
         stats["nonzero_std"] = float(np.std(nonzero))
         stats["nonzero_median"] = float(np.median(nonzero))
-        stats["nonzero_ratio"] = len(nonzero) / total_pixels
+        stats["nonzero_ratio"] = float(len(nonzero) / total_pixels)
     else:
-        stats["nonzero_mean"] = 0
-        stats["nonzero_std"] = 0
-        stats["nonzero_median"] = 0
-        stats["nonzero_ratio"] = 0
+        stats["nonzero_mean"] = 0.0
+        stats["nonzero_std"] = 0.0
+        stats["nonzero_median"] = 0.0
+        stats["nonzero_ratio"] = 0.0
 
     return {
         "status": "success",
@@ -102,49 +108,35 @@ async def get_image_stats(
     }
 
 
-async def get_thumbnail(
-    channel: Annotated[str, Field(description="Name of loaded channel")],
-    max_size: Annotated[
-        int,
-        Field(
-            description="Maximum dimension of thumbnail in pixels (default: 512)", ge=16, le=4096
-        ),
-    ] = 512,
-    normalize: Annotated[
-        bool,
-        Field(description="Percentile-stretch 1-99% to 8-bit before encoding (default: true)"),
-    ] = True,
-    format: Annotated[
-        Literal["png", "jpeg", "jpg"],
-        Field(
-            description="Encoding of the returned image; 'jpg' is an alias of 'jpeg' (default: png)"
-        ),
-    ] = "png",
-) -> dict[str, Any]:
-    """
-    Get a downsampled thumbnail of the image.
+def _error_result(message: str) -> CallToolResult:
+    """In-band error in the ``CallToolResult`` shape (never raised to the SDK)."""
+    err = {"error": message}
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(err))],
+        structuredContent=err,
+        isError=True,
+    )
 
-    Returns base64-encoded image data that Claude can view.
+
+def _render_thumbnail(
+    data: Any,
+    max_size: int,
+    normalize: bool,
+    fmt: str,
+) -> tuple[bytes, dict[str, Any]]:
+    """Downsample, normalise and encode an image for display.
+
+    Pure helper behind :func:`get_thumbnail`: it reads nothing from the session
+    state and raises (``ImportError`` without Pillow, ``ValueError`` on bad
+    input) instead of returning in-band errors. ``data`` may be a numpy or dask
+    array; ``fmt`` is ``"png"`` or ``"jpeg"`` (``"jpg"`` is accepted as an
+    alias). Returns the encoded bytes and ``{"width", "height", "format"}``.
     """
-    try:
-        clamp_int(max_size, "max_size", minimum=16, maximum=4096)
-        validate_choice(format.lower(), {"png", "jpeg", "jpg"}, "format")
-    except ValueError as e:
-        return {"error": str(e)}
+    from PIL import Image
 
     # Canonicalize so the accepted "jpg" alias does not fail in Pillow, which
     # only recognizes "JPEG" for that format.
-    format = "jpeg" if format.lower() == "jpg" else format.lower()
-
-    try:
-        from PIL import Image
-    except ImportError:
-        return {"error": "PIL/Pillow not installed"}
-
-    try:
-        data = _get_image(channel)
-    except ValueError as e:
-        return {"error": str(e)}
+    fmt = "jpeg" if fmt.lower() == "jpg" else fmt.lower()
 
     # Compute if dask array
     if hasattr(data, "compute"):
@@ -193,22 +185,83 @@ async def get_thumbnail(
     else:
         img = Image.fromarray(data)
 
-    # Convert to base64
     buffer = io.BytesIO()
-    img.save(buffer, format=format.upper())
-    img_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    img.save(buffer, format=fmt.upper())
+    return buffer.getvalue(), {"width": int(img.width), "height": int(img.height), "format": fmt}
 
-    return {
+
+async def get_thumbnail(
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+    max_size: Annotated[
+        int,
+        Field(
+            description="Maximum dimension of thumbnail in pixels (default: 512)", ge=16, le=4096
+        ),
+    ] = 512,
+    normalize: Annotated[
+        bool,
+        Field(description="Percentile-stretch 1-99% to 8-bit before encoding (default: true)"),
+    ] = True,
+    format: Annotated[
+        Literal["png", "jpeg", "jpg"],
+        Field(
+            description="Encoding of the returned image; 'jpg' is an alias of 'jpeg' (default: png)"
+        ),
+    ] = "png",
+    include_data_uri: Annotated[
+        bool,
+        Field(
+            description="Also embed the image as a data: URI in the structured result "
+            "(large; off by default)"
+        ),
+    ] = False,
+) -> Annotated[CallToolResult, dict[str, Any]]:
+    """
+    Get a downsampled thumbnail of the image.
+
+    The thumbnail is delivered as a renderable ``image`` content block (so the
+    client can display it) followed by a JSON text block; the structured
+    result carries the thumbnail dimensions, format and the original shape, and
+    the base64 ``data_uri`` only when ``include_data_uri`` is set. Errors are
+    returned in-band as ``{"error": ...}`` with ``isError`` set.
+    """
+    try:
+        clamp_int(max_size, "max_size", minimum=16, maximum=4096)
+        validate_choice(format.lower(), {"png", "jpeg", "jpg"}, "format")
+    except ValueError as e:
+        return _error_result(str(e))
+
+    fmt = "jpeg" if format.lower() == "jpg" else format.lower()
+
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        return _error_result("PIL/Pillow not installed")
+
+    try:
+        data = _get_image(channel)
+    except ValueError as e:
+        return _error_result(str(e))
+
+    original_shape = [int(s) for s in data.shape]
+    encoded, thumbnail = _render_thumbnail(data, max_size, normalize, fmt)
+    img_base64 = base64.b64encode(encoded).decode("ascii")
+    if include_data_uri:
+        thumbnail["data_uri"] = f"data:image/{fmt};base64,{img_base64}"
+
+    meta: dict[str, Any] = {
         "status": "success",
         "channel": channel,
-        "thumbnail": {
-            "width": img.width,
-            "height": img.height,
-            "format": format,
-            "data_uri": f"data:image/{format};base64,{img_base64}",
-        },
-        "original_shape": list(_loaded_images[channel]["data"].shape),
+        "thumbnail": thumbnail,
+        "original_shape": original_shape,
     }
+    return CallToolResult(
+        content=[
+            ImageContent(type="image", data=img_base64, mimeType=f"image/{fmt}"),
+            TextContent(type="text", text=json.dumps(meta)),
+        ],
+        structuredContent=meta,
+    )
 
 
 async def compare_channels(
