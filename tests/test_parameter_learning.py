@@ -121,3 +121,21 @@ def test_approved_records_outrank_bootstrap(isolated_home, tmp_path):
     # The weighted aggregate leans towards the approved value.
     assert rec["recommended_parameters"]["blank_scale_factor"] > 0.6
     assert 0 < BOOTSTRAP_WEIGHT < 1
+
+
+def test_mcp_engine_cache_is_per_project(isolated_home, tmp_path):
+    from kintsugi.mcp.tools import learning
+
+    learning._learning_engines.clear()
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    engine_a = learning._get_learning_engine(str(a))
+    engine_global = learning._get_learning_engine(None)
+    engine_b = learning._get_learning_engine(str(b))
+
+    assert engine_a.project_path == a.resolve() or engine_a.project_path == a
+    assert engine_b.project_path != engine_a.project_path
+    assert engine_global.project_path is None
+    assert learning._get_learning_engine(str(a)) is engine_a
+    learning._learning_engines.clear()

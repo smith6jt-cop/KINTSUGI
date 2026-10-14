@@ -21,30 +21,52 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("kintsugi.mcp.learning")
 
-# Global learning engine instance
-_learning_engine = None
+# Learning engines, one per project (key "" = the user-wide database only). A single
+# cached instance used to be reused across projects when project_path was omitted,
+# which silently wrote records into the previous project's database.
+_learning_engines: dict[str, Any] = {}
+
+
+def _engine_key(project_path: str | None) -> str:
+    from pathlib import Path
+
+    return str(Path(project_path).resolve()) if project_path else ""
 
 
 def _get_learning_engine(project_path: str | None = None):
-    """Get or create the learning engine."""
-    global _learning_engine
-
-    if _learning_engine is None or (
-        project_path and str(_learning_engine.project_path) != project_path
-    ):
+    """Get or create the learning engine for ``project_path`` (or the global one)."""
+    key = _engine_key(project_path)
+    engine = _learning_engines.get(key)
+    if engine is None:
         from kintsugi.claude.parameter_learning import ParameterLearningEngine
 
-        _learning_engine = ParameterLearningEngine(project_path)
-
-    return _learning_engine
+        engine = _learning_engines[key] = ParameterLearningEngine(project_path)
+    return engine
 
 
 async def get_learned_parameters(
-    tissue_type: str,
-    marker_name: str,
-    operation: str,
-    project_path: str | None = None,
-    channel: str | None = None,
+    tissue_type: Annotated[
+        str, Field(description="Type of tissue (e.g., 'tonsil', 'lymph node', 'pancreas')")
+    ],
+    marker_name: Annotated[str, Field(description="Marker name (e.g., 'CD3', 'CD20', 'DAPI')")],
+    operation: Annotated[
+        Literal["blank_subtraction", "denoise", "clahe", "clean_background", "gaussian_subtract"],
+        Field(description="Processing operation whose learned parameters to look up"),
+    ],
+    project_path: Annotated[
+        str | None,
+        Field(
+            description="KINTSUGI project directory holding a project-specific learning "
+            "database; None consults the user-wide global database only"
+        ),
+    ] = None,
+    channel: Annotated[
+        str | None,
+        Field(
+            description="Name of a loaded channel whose image characteristics (SNR, dynamic "
+            "range, sparsity) refine the match; None matches on tissue and marker only"
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
     Get recommended parameters based on learned history.
