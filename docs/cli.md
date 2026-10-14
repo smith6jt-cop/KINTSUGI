@@ -140,7 +140,7 @@ placeholder line between them and run `--write` — never hand-edit the table.
 **Available tools** (generated):
 
 <!-- mcp-tools:table:begin -->
-| Tool | Title | Category | Read-only | Writes files | Description |
+| Tool | Title | Category | Read-only | Destructive | Description |
 |------|-------|----------|:---------:|:------------:|-------------|
 | `load_channel` | Load channel | Signal isolation | no | no | Load a channel image from a KINTSUGI project. Returns image metadata and prepares it for processing. |
 | `subtract_blank` | Subtract blank (autofluorescence) | Signal isolation | no | no | Subtract autofluorescence/blank channel from signal. Uses optimized Dask operations for large images. |
@@ -150,7 +150,7 @@ placeholder line between them and run `--write` — never hand-edit the table.
 | `clean_background` | Clean background | Signal isolation | no | no | Remove background and small objects from the image. |
 | `gaussian_subtract` | Gaussian background subtraction | Signal isolation | no | no | Subtract Gaussian-blurred version to remove structured background/autofluorescence. |
 | `denoise_advanced` | Denoise (advanced) | Signal isolation | no | no | Apply advanced denoising: adaptive (auto-select best filter), bilateral (edge- preserving), nlm (non-local means), bm3d (block matching 3D), n2v (self-supervised Noise2Void), or patch_svd. |
-| `assess_quality` | Assess quality | Quality assessment | yes | no | Assess channel quality using heuristic and/or deep learning metrics. Returns SNR, contrast, and confidence scores. |
+| `assess_quality` | Assess quality | Quality assessment | yes | no | Assess channel quality with heuristic metrics (SNR, contrast, dynamic range, background) and flag channels that need manual review. Returns a 0-1 quality score, the metrics and recommendations. |
 | `compute_snr` | Compute SNR | Quality assessment | yes | no | Compute Signal-to-Noise Ratio for a channel. |
 | `get_image_stats` | Image statistics | Visualization | yes | no | Get statistics for a loaded image (min, max, mean, std, histogram). |
 | `get_thumbnail` | Thumbnail preview | Visualization | yes | no | Get a downsampled thumbnail of the image for preview. |

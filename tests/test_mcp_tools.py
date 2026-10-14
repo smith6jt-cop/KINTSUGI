@@ -1320,9 +1320,16 @@ class TestAuditedDefects:
         outside.write_bytes(b"not a checkpoint")
         project = tmp_path / "proj"
         project.mkdir()
+        (project / "kintsugi_project.json").write_text("{}")
 
         result = await denoise_advanced(
             channel="ch", method="n2v", model_path=str(outside), project_path=str(project)
+        )
+        assert "error" in result and "outside the allowed directories" in result["error"]
+
+        # A caller cannot widen the sandbox by naming a bare directory as the project.
+        result = await denoise_advanced(
+            channel="ch", method="n2v", model_path=str(outside), project_path=str(tmp_path)
         )
         assert "error" in result and "outside the allowed directories" in result["error"]
 
@@ -1430,3 +1437,64 @@ class TestAuditedDefects:
         )
         assert propagated.get("status") == "success", propagated
         assert propagated["total"] >= 1
+
+    async def test_cluster_state_is_scoped_per_project(self, tmp_path, clear_mcp_state):
+        """Clustering replaces earlier cluster state and propagate ignores other projects."""
+        pytest.importorskip("sklearn")
+        tifffile = pytest.importorskip("tifffile")
+        from kintsugi.mcp.tools.signal_isolation import (
+            _loaded_images,
+            _store_image,
+            cluster_channels_tool,
+            propagate_parameters_tool,
+        )
+
+        project_b = tmp_path / "b"
+        edf = project_b / "data" / "processed" / "edf"
+        edf.mkdir(parents=True)
+        rng = np.random.default_rng(2)
+        for name, level in (("CD3", 200), ("CD4", 220), ("DAPI", 3000), ("CD8", 210)):
+            tifffile.imwrite(edf / f"{name}.tif", rng.integers(0, level, (64, 64), dtype=np.uint16))
+
+        # A stale channel clustered for another project with a colliding cluster id.
+        _store_image(
+            "stale_from_a",
+            rng.integers(0, 100, (64, 64), dtype=np.uint16),
+            {"cluster_id": 0, "project": str(tmp_path / "a")},
+        )
+
+        clustered = await cluster_channels_tool(project_path=str(project_b), n_clusters=2)
+        assert clustered.get("status") == "success", clustered
+        assert "stale_from_a" not in _loaded_images  # previous cluster state is replaced
+
+        # Even if a foreign entry survives, propagate only touches this project's members.
+        _store_image(
+            "foreign",
+            rng.integers(0, 100, (64, 64), dtype=np.uint16),
+            {"cluster_id": clustered["assignments"]["CD3"], "project": str(tmp_path / "a")},
+        )
+        propagated = await propagate_parameters_tool(
+            project_path=str(project_b),
+            cluster_id=clustered["assignments"]["CD3"],
+            params={"clean_params": {"background_threshold": 10}},
+        )
+        assert propagated.get("status") == "success", propagated
+        assert "foreign" not in propagated["results"]
+
+    async def test_generate_jupyter_cell_neutralises_newlines_in_names(
+        self, sample_uint16_image, clear_mcp_state, tmp_path
+    ):
+        from kintsugi.mcp.tools.signal_isolation import _store_image
+        from kintsugi.mcp.tools.workflow import generate_jupyter_cell
+
+        evil = "CD3\nimport os; os.system('id')  # "
+        _store_image(evil, sample_uint16_image, {"source_path": str(tmp_path / "CD3.tif")})
+        result = await generate_jupyter_cell(operation="denoise", channel=evil)
+        assert result["status"] == "success"
+        cell = result["jupyter_cell"]
+        assert (
+            "os.system"
+            not in [line.strip() for line in cell.splitlines() if not line.strip().startswith("#")]
+            and "\nimport os" not in cell
+        )
+        compile(cell, "<jupyter_cell>", "exec")

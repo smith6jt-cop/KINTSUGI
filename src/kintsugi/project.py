@@ -70,7 +70,7 @@ def _resolve_kintsugi_executable() -> str:
     return "kintsugi"
 
 
-def write_claude_config(root: str | Path, *, force: bool = False) -> dict[str, Path]:
+def write_claude_config(root: str | Path, *, force: bool = False) -> dict[str, Any]:
     """Write the Claude Code MCP configuration for a project.
 
     Creates (or merges into) two files under ``root``:
@@ -89,8 +89,8 @@ def write_claude_config(root: str | Path, *, force: bool = False) -> dict[str, P
     Existing entries for other servers and other settings keys are preserved.
     An existing ``kintsugi`` entry is left alone unless ``force`` is true.
 
-    Returns a mapping with the ``mcp_json`` and ``settings`` paths and the
-    ``server`` entry that was written (or found).
+    Returns ``{"mcp_json": Path, "settings": Path, "server": dict}``: the two file
+    paths and the ``kintsugi`` server entry that was written (or found).
     """
     root = Path(root).resolve()
     server_entry = {

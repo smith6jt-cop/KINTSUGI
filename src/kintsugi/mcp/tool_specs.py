@@ -144,8 +144,9 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "attr": "assess_quality",
         "title": "Assess quality",
         "description": (
-            "Assess channel quality using heuristic and/or deep learning metrics. Returns SNR, "
-            "contrast, and confidence scores."
+            "Assess channel quality with heuristic metrics (SNR, contrast, dynamic range, "
+            "background) and flag channels that need manual review. Returns a 0-1 quality "
+            "score, the metrics and recommendations."
         ),
         "annotations": _READ_ONLY,
     },

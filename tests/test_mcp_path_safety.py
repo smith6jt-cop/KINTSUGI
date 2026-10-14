@@ -304,8 +304,14 @@ def test_allowed_model_roots_uses_project_claude_dir_and_user_dir(tmp_path, monk
 
     monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path / "claude"))
     monkeypatch.setenv("KINTSUGI_MODEL_DIR", str(tmp_path / "models"))
-    roots = allowed_model_roots(tmp_path / "proj")
-    assert roots == [tmp_path / "proj", tmp_path / "claude", tmp_path / "models"]
+    project = tmp_path / "proj"
+    project.mkdir()
+    # A bare directory supplied as project_path does not widen the sandbox...
+    assert allowed_model_roots(project) == [tmp_path / "claude", tmp_path / "models"]
+    assert allowed_model_roots("/") == [tmp_path / "claude", tmp_path / "models"]
+    # ...only a real KINTSUGI project (with its marker file) does.
+    (project / "kintsugi_project.json").write_text("{}")
+    assert allowed_model_roots(project) == [project, tmp_path / "claude", tmp_path / "models"]
 
     monkeypatch.delenv("CLAUDE_PROJECT_DIR")
     monkeypatch.delenv("KINTSUGI_MODEL_DIR")

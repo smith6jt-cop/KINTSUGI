@@ -164,8 +164,9 @@ async def record_successful_parameters(
     user_approved: Annotated[
         bool,
         Field(
-            description="Whether the user approved the result; only approved records "
-            "influence future recommendations"
+            description="Whether the user approved the result; approved records carry full "
+            "weight in recommendations, unapproved (bootstrap) records are included at "
+            "reduced weight"
         ),
     ] = True,
     user_notes: Annotated[str, Field(description="Optional free-text notes from the user")] = "",

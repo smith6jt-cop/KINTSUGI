@@ -482,6 +482,12 @@ async def generate_jupyter_cell(
         """repr() keeps the generated code valid for any parameter value."""
         return repr(initial_params.get(key, default))
 
+    def comment(text: str) -> str:
+        """Collapse whitespace so a name can never break out of a ``#`` comment."""
+        return " ".join(str(text).split())
+
+    channel_note = comment(channel)
+
     if operation == "blank_subtraction":
         blank_channel = initial_params.get("blank_channel", "")
         blank_source = ""
@@ -492,8 +498,8 @@ async def generate_jupyter_cell(
 from kintsugi.claude.param_tuner import blank_subtraction_tuner
 
 # Image files (the tuner loads them; MCP session names are not visible here)
-signal = {source!r}  # {channel}
-blank = {blank_source!r}  # {blank_channel or "set the blank/AF channel file"}
+signal = {source!r}  # {channel_note}
+blank = {blank_source!r}  # {comment(blank_channel) or "set the blank/AF channel file"}
 
 # Interactive tuner - adjust sliders and see results in real-time
 result = blank_subtraction_tuner(
@@ -516,7 +522,7 @@ print("Final parameters:", result.get_params())
         code = f"""# Interactive Denoising Parameter Tuning
 from kintsugi.claude.param_tuner import denoise_tuner
 
-channel = {source!r}  # {channel}
+channel = {source!r}  # {channel_note}
 
 # Interactive tuner
 result = denoise_tuner(
@@ -535,7 +541,7 @@ print("Final parameters:", result.get_params())
         code = f"""# Interactive CLAHE Parameter Tuning
 from kintsugi.claude.param_tuner import clahe_tuner
 
-channel = {source!r}  # {channel}
+channel = {source!r}  # {channel_note}
 
 # Interactive tuner
 result = clahe_tuner(
@@ -554,7 +560,7 @@ print("Final parameters:", result.get_params())
         code = f"""# Interactive Background Cleaning
 from kintsugi.claude.param_tuner import clean_tuner
 
-channel = {source!r}  # {channel}
+channel = {source!r}  # {channel_note}
 
 # Interactive tuner
 result = clean_tuner(
@@ -573,7 +579,7 @@ print("Final parameters:", result.get_params())
         code = f"""# Interactive Gaussian Subtraction
 from kintsugi.claude.param_tuner import gaussian_subtract_tuner
 
-channel = {source!r}  # {channel}
+channel = {source!r}  # {channel_note}
 
 # Interactive tuner
 result = gaussian_subtract_tuner(

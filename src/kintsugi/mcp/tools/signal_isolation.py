@@ -1699,8 +1699,14 @@ async def cluster_channels_tool(
     except Exception as e:
         return {"error": f"Clustering failed: {e}"}
 
-    # Keep every clustered channel in the session, tagged with its cluster, so
-    # propagate_parameters can find the members (it filters on metadata.cluster_id).
+    # Keep every clustered channel in the session, tagged with its cluster and
+    # project, so propagate_parameters can find the members. Earlier clustering
+    # results are dropped first: cluster ids are only meaningful per run.
+    for stale in [
+        n for n, info in _loaded_images.items() if "cluster_id" in info.get("metadata", {})
+    ]:
+        del _loaded_images[stale]
+        _processing_history.pop(stale, None)
     for name, cid in assignments.items():
         _store_image(
             name,
@@ -1774,11 +1780,13 @@ async def propagate_parameters_tool(
     if not loaded:
         return {"error": "No images loaded. Use cluster_channels first to load images."}
 
-    # Get member channels for this cluster
+    # Get member channels for this cluster, scoped to this project so channels
+    # clustered for another project can never be processed into this one.
     members = [
         name
         for name, info in loaded.items()
         if info.get("metadata", {}).get("cluster_id") == cluster_id
+        and info.get("metadata", {}).get("project") == str(project_path_obj)
     ]
 
     if not members:

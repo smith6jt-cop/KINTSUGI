@@ -42,9 +42,13 @@ def _hint(spec: dict, key: str) -> str:
 
 
 def render_tool_table() -> str:
-    """Markdown table of every registered tool (name, title, category, hints, description)."""
+    """Markdown table of every registered tool (name, title, category, hints, description).
+
+    "Read-only" and "Destructive" are the MCP ``readOnlyHint`` / ``destructiveHint``
+    annotations: destructive tools may overwrite files or append persistent state.
+    """
     lines = [
-        "| Tool | Title | Category | Read-only | Writes files | Description |",
+        "| Tool | Title | Category | Read-only | Destructive | Description |",
         "|------|-------|----------|:---------:|:------------:|-------------|",
     ]
     for spec in TOOL_SPECS:

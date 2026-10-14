@@ -90,18 +90,30 @@ def ensure_within_any(path: str | Path, roots: Iterable[str | Path], param: str 
 
 
 USER_MODEL_DIR_ENV = "KINTSUGI_MODEL_DIR"
+PROJECT_MARKER = "kintsugi_project.json"
+
+
+def is_kintsugi_project(path: str | Path) -> bool:
+    """True when ``path`` is a KINTSUGI project directory (has the project marker file)."""
+    try:
+        return (Path(path).resolve() / PROJECT_MARKER).is_file()
+    except OSError:
+        return False
 
 
 def allowed_model_roots(project_path: str | Path | None = None) -> list[Path]:
     """Directories a tool may load model checkpoints from.
 
     Loading a checkpoint executes a deserializer on a file the model chose, so the
-    file must come from somewhere the user controls: the project directory (when
-    given), the Claude Code project (``CLAUDE_PROJECT_DIR``), and the user's model
-    directory (``~/.kintsugi/models`` or ``$KINTSUGI_MODEL_DIR``).
+    file must come from somewhere the user controls: the Claude Code project
+    (``CLAUDE_PROJECT_DIR``) and the user's model directory (``~/.kintsugi/models``
+    or ``$KINTSUGI_MODEL_DIR``). An explicit ``project_path`` is itself a
+    model-supplied argument, so it only counts when it really is a KINTSUGI project
+    (contains ``kintsugi_project.json``); ``project_path="/"`` or any other bare
+    directory does not widen the sandbox.
     """
     roots: list[Path] = []
-    if project_path:
+    if project_path and is_kintsugi_project(project_path):
         roots.append(Path(project_path))
     claude_project = os.environ.get("CLAUDE_PROJECT_DIR")
     if claude_project:

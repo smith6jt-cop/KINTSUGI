@@ -76,10 +76,13 @@ jobs:
           kintsugi --version
           kintsugi check --quiet
 
-      - name: Smoke-test the MCP server over stdio
+      - name: Smoke-test the installed MCP server over stdio
+        # Runs from outside the checkout so the installed wheel (not src/) is
+        # exercised, and fails hard if the mcp SDK gate is unavailable.
         run: |
-          pip install "mcp>=2.0,<3" pytest pytest-asyncio
-          pytest tests/test_mcp_stdio.py -q
+          pip install "mcp>=2.0,<3"
+          cp scripts/mcp_stdio_smoke.py "$RUNNER_TEMP/mcp_stdio_smoke.py"
+          cd "$RUNNER_TEMP" && python mcp_stdio_smoke.py
 
   publish-testpypi:
     name: Publish to TestPyPI
