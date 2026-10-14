@@ -37,7 +37,9 @@ my_project/
 │   └── CHANNELNAMES.txt   ← Channel/marker names (user-provided)
 ├── notebooks/         ← Working copies of processing notebooks
 ├── configs/           ← Processing configuration files
-└── .claude/           ← Claude Code MCP config (auto-generated)
+├── .mcp.json          ← Claude Code MCP server definition (auto-generated, absolute path)
+└── .claude/
+    └── settings.local.json  ← {"enabledMcpjsonServers": ["kintsugi"]} (auto-generated)
 ```
 
 ### Channel Names
@@ -120,16 +122,18 @@ KINTSUGI includes an MCP server for Claude Code integration, enabling AI-assiste
 ### Setup
 
 ```bash
-# Install Claude Code dependencies
+# Install Claude Code dependencies (mcp>=2.0,<3)
 pip install -e ".[claude]"   # or: kintsugi install claude
 ```
 
-**If creating a new project:** Use `kintsugi init` - Claude Code configuration is created automatically.
+**If creating a new project:** Use `kintsugi init` - Claude Code configuration (`.mcp.json` + `.claude/settings.local.json`) is created automatically.
 
 **If adding to an existing project:**
 ```bash
 kintsugi mcp config /path/to/your/project
 ```
+
+Open the project in Claude Code and run `/mcp` to confirm the `kintsugi` server is connected.
 
 ### Usage
 
@@ -139,11 +143,15 @@ Once configured, Claude Code can:
 - Apply denoising, CLAHE, and background subtraction
 - Learn from successful parameters for future recommendations
 
-Example interaction:
+Illustrative interaction (paraphrased, not a recorded transcript):
 ```
 User: "Load the CD3 channel and suggest denoising parameters"
-Claude: [Analyzes image and provides recommendations based on learned history]
+Claude: [calls load_channel, then suggest_with_learning, and reports the recommendation]
 ```
+
+For a real, recorded transcript of the server driven end to end, see
+[A recorded session](mcp.md#a-recorded-session) in the MCP guide, which also lists every
+tool (`kintsugi mcp tools`), the resources and the prompt.
 
 See `notebooks/MIGRATION_GUIDE.md` for transitioning from legacy notebooks.
 
@@ -168,9 +176,9 @@ Combined signal isolation and QC with Claude Code integration.
 InstanSeg segmentation, feature extraction, and spatial analysis.
 - `notebooks/4_Segmentation_Analysis.ipynb`
 
-### 5. Vessel Analysis
-Specialized analysis for vessel structures.
-- `notebooks/Vessel_Analysis.ipynb`
+### 2.5. 3D Vessel Segmentation
+Frangi vesselness, marker discovery, skeletonization and graph morphometry on z-stacks.
+- `notebooks/2.5_Vessel_3D_Segmentation.ipynb`
 
 > **Note:** Old notebooks 3 and 5 are deprecated. Use `3_Signal_Isolation_QC.ipynb`.
 

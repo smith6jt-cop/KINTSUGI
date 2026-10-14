@@ -17,6 +17,7 @@ This guide covers common issues and their solutions when installing or running K
   - [Stitched Image Quality Issues](#stitched-image-quality-issues)
   - [Registration Failures](#registration-failures)
 - [HPC/SLURM Issues](#hpcslurm-issues)
+- [MCP Server (Claude Code)](#mcp-server-claude-code)
 - [Platform-Specific Issues](#platform-specific-issues)
   - [Windows](#windows)
   - [Linux](#linux)
@@ -544,6 +545,51 @@ tail /path/to/project/slurm/logs/snakemake/stitch_cyc01.log
 
 ---
 
+## MCP Server (Claude Code)
+
+The KINTSUGI MCP server is started by Claude Code from the project's `.mcp.json`
+(written by `kintsugi init` or `kintsugi mcp config`). Run `/mcp` inside Claude Code to see
+the server's state and its tools. Full guide: [Claude Code Integration (MCP Server)](mcp.md).
+
+### "Executable not found in $PATH: kintsugi"
+
+Claude Code could not find the `kintsugi` command — typically because the `.mcp.json` entry
+uses a bare `kintsugi` and Claude Code was launched outside the conda/venv environment.
+Regenerate the entry so it carries the absolute path of the executable:
+
+```bash
+conda activate KINTSUGI             # the environment where kintsugi is installed
+kintsugi mcp config /path/to/project --force
+cat /path/to/project/.mcp.json      # "command" is now e.g. /home/you/envs/KINTSUGI/bin/kintsugi
+```
+
+The generated entry is `{"type": "stdio", "command": "<absolute path>", "args": ["mcp", "start"]}`
+with no `cwd` (Claude Code runs the server in the project directory and sets
+`CLAUDE_PROJECT_DIR`). Then restart Claude Code or run `/mcp` to reconnect.
+
+### Server shows "Pending approval"
+
+Project-scoped servers run only in a trusted folder. Accept the workspace trust dialog when
+Claude Code opens the project; the approval written by `kintsugi mcp config` is
+`.claude/settings.local.json` → `{"enabledMcpjsonServers": ["kintsugi"]}`. If an earlier
+decision rejected the server, clear it with `claude mcp reset-project-choices` and reopen
+the project.
+
+### "mcp 1.x is installed but KINTSUGI requires mcp>=2.0,<3"
+
+The server targets the 2.x SDK (`mcp.server.mcpserver.MCPServer`); the 1.x
+`mcp.server.fastmcp` API is not supported. Upgrade in the environment the server starts from:
+
+```bash
+pip install "mcp>=2.0,<3"           # or: pip install -e ".[claude]"  /  kintsugi install claude
+kintsugi check                      # should list the MCP server as available
+```
+
+`kintsugi mcp start` prints the same message to stderr (stdout is reserved for JSON-RPC).
+Never run `pip install kintsugi[claude]` — it installs an unrelated PyPI package.
+
+---
+
 ## Platform-Specific Issues
 
 ### Windows
@@ -668,3 +714,6 @@ If you're still experiencing issues:
 | Snakemake not found | `pip install "snakemake>=8.0" snakemake-executor-plugin-slurm` |
 | SLURM OOM kill | GPU: 48 GB RAM; CPU: 128 GB RAM — increase in config.yaml |
 | SLURM_TRES_PER_TASK error | Patch jobstep plugin (see HPC section above) |
+| `Executable not found in $PATH: kintsugi` (MCP) | `kintsugi mcp config /path/to/project --force` from the activated env |
+| MCP server "Pending approval" | Accept the trust dialog; `claude mcp reset-project-choices` |
+| `mcp 1.x is installed` (MCP) | `pip install "mcp>=2.0,<3"` |

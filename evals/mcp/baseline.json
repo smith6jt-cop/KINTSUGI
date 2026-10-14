@@ -1,0 +1,75 @@
+{
+  "structural": {
+    "tool_count": 29,
+    "total_definition_tokens_est": 7467,
+    "mean_tokens_per_tool_est": 257.5,
+    "tools_with_output_schema": 29,
+    "top_tools_by_tokens": [
+      [
+        "subtract_blank",
+        1042
+      ],
+      [
+        "record_successful_parameters",
+        580
+      ],
+      [
+        "approve_and_learn",
+        456
+      ],
+      [
+        "denoise_advanced",
+        388
+      ],
+      [
+        "optimize_parameters",
+        355
+      ]
+    ],
+    "tools_missing_description": [],
+    "tools_missing_title": [],
+    "tools_missing_annotations": [],
+    "params_missing_description_count": 0,
+    "untargeted_tools": [],
+    "confusable_groups": [
+      {
+        "theme": "denoising",
+        "tools": [
+          "denoise",
+          "denoise_advanced"
+        ]
+      },
+      {
+        "theme": "background removal",
+        "tools": [
+          "subtract_blank",
+          "gaussian_subtract",
+          "estimate_background"
+        ]
+      },
+      {
+        "theme": "quality",
+        "tools": [
+          "assess_quality",
+          "compute_snr"
+        ]
+      },
+      {
+        "theme": "parameter suggestion",
+        "tools": [
+          "suggest_parameters",
+          "suggest_with_learning",
+          "get_learned_parameters"
+        ]
+      },
+      {
+        "theme": "record learning",
+        "tools": [
+          "record_successful_parameters",
+          "approve_and_learn"
+        ]
+      }
+    ],
+    "task_coverage_gaps": []
+  }
+}

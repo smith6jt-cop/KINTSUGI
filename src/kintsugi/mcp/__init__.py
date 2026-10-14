@@ -5,6 +5,10 @@ Model Context Protocol server for Claude Code integration, providing image
 processing tools for signal isolation, quality assessment, and parameter
 learning.
 
+Requires the 2.x Python SDK (``mcp>=2.0,<3``); install it with
+``pip install -e ".[claude]"`` or ``kintsugi install claude`` (never
+``pip install kintsugi[claude]``, an unrelated PyPI package).
+
 Usage:
     # Start the server (stdio transport; stdout carries JSON-RPC only)
     kintsugi mcp start
@@ -31,6 +35,9 @@ Claude Code starts the server in the project directory and sets
 
     claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start
 
+The registry is :data:`kintsugi.mcp.tool_specs.TOOL_SPECS` (``kintsugi mcp tools``
+lists it); the learning engine is
+:class:`kintsugi.claude.parameter_learning.ParameterLearningEngine`.
 See ``docs/mcp.md`` for the full guide.
 """
 

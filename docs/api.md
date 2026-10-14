@@ -282,3 +282,36 @@ from kintsugi.cli import main
 ```
 
 Click-based CLI with command groups: `main`, `mcp`, `slurm`, `workflow`. See [CLI Reference](cli.md) for full command documentation.
+
+## mcp Module (Claude Code MCP server)
+
+```python
+from kintsugi.mcp import create_server          # build the MCPServer (needs mcp>=2.0,<3)
+from kintsugi.mcp.tool_specs import TOOL_SPECS  # registry: name, handler, title, description, annotations
+from kintsugi.mcp import path_safety            # ensure_within / allowed_model_roots / numeric clamps
+from kintsugi.mcp import docs_sync              # render + splice the <!-- mcp-tools:* --> doc blocks
+from kintsugi.claude.parameter_learning import ParameterLearningEngine
+```
+
+- `kintsugi.mcp.create_server()` — returns the configured `mcp.server.mcpserver.MCPServer`
+  (tools, resources, the `signal_isolation_workflow` prompt, server instructions). Raises
+  `ImportError` with an explanatory message when `mcp` is missing or an unsupported 1.x is
+  installed (`kintsugi.mcp._sdk`). `kintsugi mcp start` calls `run_server()` over stdio.
+- `kintsugi.mcp.tool_specs.TOOL_SPECS` — the declarative, SDK-free registry that
+  `create_server()`, `kintsugi mcp tools` and the docs generator all read. Parameter
+  descriptions, enums and ranges live in the handler signatures
+  (`Annotated[..., Field(...)]`, `Literal[...]`), from which the SDK derives and enforces
+  the input schema.
+- `kintsugi.mcp.path_safety` — `ensure_within()` / `ensure_within_any()` confine every
+  model-supplied path to the project (symlinks resolved); `allowed_model_roots()` limits
+  checkpoints to the project, `CLAUDE_PROJECT_DIR` or `~/.kintsugi/models`.
+- `kintsugi.mcp.docs_sync` — `render_tool_table()`, `render_tool_list()`, `sync_file()` and
+  `check_files()` behind `kintsugi mcp tools --markdown/--write/--check`.
+- `kintsugi.claude.parameter_learning.ParameterLearningEngine` — the SQLite learning
+  engine (`<project>/.claude_workflow/parameter_learning.db` and
+  `~/.kintsugi/parameter_learning.db`) used by the learning tools: `record_parameters()`,
+  `recommend_parameters()` and `get_statistics()`.
+
+See [Claude Code Integration (MCP Server)](mcp.md) for the tool reference, resources,
+prompt, security model and a recorded session.
+

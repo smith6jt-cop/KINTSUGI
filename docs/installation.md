@@ -215,6 +215,22 @@ accelerator = get_multi_gpu_accelerator(tile_shape)
 For GPU-accelerated single-cell analysis (clustering, UMAP, spatial analysis with RAPIDS),
 see the dedicated repository: [rapids_singlecell](https://github.com/smith6jt-cop/rapids_singlecell)
 
+## Claude Code (MCP server)
+
+KINTSUGI's MCP server lets Claude Code drive signal isolation. It needs the 2.x Python SDK
+(`mcp>=2.0,<3`), installed through the `claude` group — from a clone of the repository:
+
+```bash
+pip install -e ".[claude]"      # or: kintsugi install claude
+kintsugi init /path/to/project --name "My Experiment"   # new project: writes .mcp.json + .claude/settings.local.json
+kintsugi mcp config /path/to/project                    # existing project
+```
+
+Do **not** run `pip install kintsugi[claude]` — that installs an unrelated package from PyPI.
+`kintsugi check` reports the server as unavailable when `mcp` is missing or a 1.x release is
+installed (`pip install "mcp>=2.0,<3"` upgrades it). Setup, the tool reference and
+troubleshooting are in [Claude Code Integration (MCP Server)](mcp.md).
+
 ## External Dependencies
 
 | Dependency | Purpose | Installation |
