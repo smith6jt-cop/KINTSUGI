@@ -61,6 +61,13 @@ async def list_channels(
         processed_dir = project_path / "data" / "processed"
         registered_dir = processed_dir / "registered"
 
+    # A cycle is a bare directory name, never a path (rejects "../..").
+    if cycle:
+        try:
+            safe_filename(cycle, "cycle")
+        except PathSafetyError as e:
+            return {"error": str(e)}
+
     channels = {}
 
     # Search directories

@@ -1285,3 +1285,13 @@ class TestStructuredOutput:
 # =============================================================================
 # Regression tests for audited defects
 # =============================================================================
+
+
+class TestAuditedDefects:
+    """Each test pins one defect found in the MCP audit."""
+
+    async def test_list_channels_rejects_cycle_traversal(self, tmp_path, clear_mcp_state):
+        from kintsugi.mcp.tools.workflow import list_channels
+
+        result = await list_channels(project_path=str(tmp_path), cycle="../..")
+        assert "error" in result and "cycle" in result["error"]
