@@ -850,23 +850,51 @@ class TestWorkflow:
         assert "recommendations" in suggestions
 
     @pytest.mark.asyncio
-    async def test_generate_jupyter_cell(self, sample_uint16_image, clear_mcp_state):
-        """Test Jupyter cell generation."""
+    async def test_generate_jupyter_cell(self, sample_uint16_image, clear_mcp_state, tmp_path):
+        """The generated cell loads the channel from its file and is valid Python."""
         from kintsugi.mcp.tools.signal_isolation import _store_image
         from kintsugi.mcp.tools.workflow import generate_jupyter_cell
 
-        _store_image("test_ch", sample_uint16_image)
+        signal_file = tmp_path / "test_ch.tif"
+        blank_file = tmp_path / "it's blank.tif"
+        _store_image("test_ch", sample_uint16_image, {"source_path": str(signal_file)})
+        _store_image("blank_ch", sample_uint16_image, {"source_path": str(blank_file)})
 
         result = await generate_jupyter_cell(
             operation="blank_subtraction",
             channel="test_ch",
-            initial_params={"blank_channel": "blank_ch"},
+            initial_params={"blank_channel": "blank_ch", "blank_scale_factor": 0.75},
         )
 
         assert result["status"] == "success"
-        assert "jupyter_cell" in result
-        assert "test_ch" in result["jupyter_cell"]
-        assert "blank_ch" in result["jupyter_cell"]
+        assert result["source_file"] == str(signal_file)
+        cell = result["jupyter_cell"]
+        assert str(signal_file) in cell and str(blank_file) in cell
+        assert "0.75" in cell
+        compile(cell, "<jupyter_cell>", "exec")  # quotes in paths/values stay valid
+
+    @pytest.mark.parametrize("operation", ["denoise", "clahe", "clean", "gaussian_subtract"])
+    async def test_generate_jupyter_cell_every_operation_compiles(
+        self, operation, sample_uint16_image, clear_mcp_state, tmp_path
+    ):
+        from kintsugi.mcp.tools.signal_isolation import _store_image
+        from kintsugi.mcp.tools.workflow import generate_jupyter_cell
+
+        _store_image("ch", sample_uint16_image, {"source_path": str(tmp_path / "ch.tif")})
+        result = await generate_jupyter_cell(
+            operation=operation, channel="ch", initial_params={"method": 'x"y'}
+        )
+        assert result["status"] == "success"
+        compile(result["jupyter_cell"], "<jupyter_cell>", "exec")
+
+    async def test_generate_jupyter_cell_needs_a_file(self, sample_uint16_image, clear_mcp_state):
+        """An in-memory-only channel cannot be reached from a notebook kernel."""
+        from kintsugi.mcp.tools.signal_isolation import _store_image
+        from kintsugi.mcp.tools.workflow import generate_jupyter_cell
+
+        _store_image("mem_only", sample_uint16_image)
+        result = await generate_jupyter_cell(operation="denoise", channel="mem_only")
+        assert "error" in result and "save_processed" in result["error"]
 
     @pytest.mark.asyncio
     async def test_get_session_state(self, sample_uint16_image, clear_mcp_state):
@@ -1252,3 +1280,8 @@ class TestStructuredOutput:
         }
         # Backward-compatible text block is still present.
         assert result.content and result.content[0].type == "text"
+
+
+# =============================================================================
+# Regression tests for audited defects
+# =============================================================================

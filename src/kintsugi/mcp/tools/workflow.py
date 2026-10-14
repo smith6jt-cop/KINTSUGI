@@ -269,6 +269,8 @@ async def save_processed(
         with open(history_path, "w") as f:
             json.dump(history, f, indent=2)
 
+        _loaded_images[channel].setdefault("metadata", {})["saved_path"] = str(output_path)
+
         return {
             "status": "success",
             "output_path": str(output_path),
@@ -424,9 +426,7 @@ async def suggest_parameters(
 
 async def generate_jupyter_cell(
     operation: Annotated[
-        Literal[
-            "blank_subtraction", "denoise", "clahe", "clean", "gaussian_subtract", "full_pipeline"
-        ],
+        Literal["blank_subtraction", "denoise", "clahe", "clean", "gaussian_subtract"],
         Field(description="Processing operation to generate an interactive Kview2 tuner cell for"),
     ],
     channel: Annotated[str, Field(description="Name of the loaded channel to tune")],
@@ -446,29 +446,47 @@ async def generate_jupyter_cell(
     if channel not in _loaded_images:
         return {"error": f"Channel not loaded: {channel}"}
 
-    _loaded_images[channel].get("metadata", {})
+    # The notebook kernel is a different process from this server, so the cell
+    # cannot see the session's in-memory images: it loads the channel from the
+    # file it came from (or was saved to with save_processed).
+    metadata = _loaded_images[channel].get("metadata", {})
+    source = metadata.get("saved_path") or metadata.get("source_path")
+    if not source:
+        return {
+            "error": (
+                f"Channel {channel!r} exists only in server memory. Call save_processed "
+                "first, then generate the cell for the saved channel."
+            )
+        }
     initial_params = initial_params or {}
 
-    # Generate code based on operation
+    def value(key: str, default: Any) -> str:
+        """repr() keeps the generated code valid for any parameter value."""
+        return repr(initial_params.get(key, default))
+
     if operation == "blank_subtraction":
         blank_channel = initial_params.get("blank_channel", "")
+        blank_source = ""
+        if blank_channel in _loaded_images:
+            blank_meta = _loaded_images[blank_channel].get("metadata", {})
+            blank_source = blank_meta.get("saved_path") or blank_meta.get("source_path") or ""
         code = f"""# Interactive Blank Subtraction Parameter Tuning
 from kintsugi.claude.param_tuner import blank_subtraction_tuner
 
-# Load your channels first if not already loaded
-signal = "{channel}"  # Signal channel
-blank = "{blank_channel}"  # Blank/AF channel
+# Image files (the tuner loads them; MCP session names are not visible here)
+signal = {source!r}  # {channel}
+blank = {blank_source!r}  # {blank_channel or "set the blank/AF channel file"}
 
 # Interactive tuner - adjust sliders and see results in real-time
 result = blank_subtraction_tuner(
     signal_channel=signal,
     blank_channel=blank,
     initial_params={{
-        "blank_clip_factor": {initial_params.get("blank_clip_factor", 0)},
-        "blank_scale_factor": {initial_params.get("blank_scale_factor", 0.8)},
-        "smooth_low": {initial_params.get("smooth_low", False)},
-        "smooth_high": {initial_params.get("smooth_high", False)},
-        "erosion": {initial_params.get("erosion", 0)},
+        "blank_clip_factor": {value("blank_clip_factor", 0)},
+        "blank_scale_factor": {value("blank_scale_factor", 0.8)},
+        "smooth_low": {value("smooth_low", False)},
+        "smooth_high": {value("smooth_high", False)},
+        "erosion": {value("erosion", 0)},
     }}
 )
 
@@ -480,15 +498,15 @@ print("Final parameters:", result.get_params())
         code = f"""# Interactive Denoising Parameter Tuning
 from kintsugi.claude.param_tuner import denoise_tuner
 
-channel = "{channel}"
+channel = {source!r}  # {channel}
 
 # Interactive tuner
 result = denoise_tuner(
     channel=channel,
     initial_params={{
-        "method": "{initial_params.get("method", "median")}",
-        "filter_size": {initial_params.get("filter_size", 3)},
-        "percentile": {initial_params.get("percentile", 10)},
+        "method": {value("method", "median")},
+        "filter_size": {value("filter_size", 3)},
+        "percentile": {value("percentile", 10)},
     }}
 )
 
@@ -499,15 +517,15 @@ print("Final parameters:", result.get_params())
         code = f"""# Interactive CLAHE Parameter Tuning
 from kintsugi.claude.param_tuner import clahe_tuner
 
-channel = "{channel}"
+channel = {source!r}  # {channel}
 
 # Interactive tuner
 result = clahe_tuner(
     channel=channel,
     initial_params={{
-        "clip_limit": {initial_params.get("clip_limit", 0.01)},
-        "tile_grid_size": {initial_params.get("tile_grid_size", 70)},
-        "nbins": {initial_params.get("nbins", 128)},
+        "clip_limit": {value("clip_limit", 0.01)},
+        "tile_grid_size": {value("tile_grid_size", 70)},
+        "nbins": {value("nbins", 128)},
     }}
 )
 
@@ -518,15 +536,15 @@ print("Final parameters:", result.get_params())
         code = f"""# Interactive Background Cleaning
 from kintsugi.claude.param_tuner import clean_tuner
 
-channel = "{channel}"
+channel = {source!r}  # {channel}
 
 # Interactive tuner
 result = clean_tuner(
     channel=channel,
     initial_params={{
-        "background_threshold": {initial_params.get("background_threshold", 100)},
-        "remove_small_objects": {initial_params.get("remove_small_objects", False)},
-        "min_object_size": {initial_params.get("min_object_size", 30)},
+        "background_threshold": {value("background_threshold", 100)},
+        "remove_small_objects": {value("remove_small_objects", False)},
+        "min_object_size": {value("min_object_size", 30)},
     }}
 )
 
@@ -537,44 +555,18 @@ print("Final parameters:", result.get_params())
         code = f"""# Interactive Gaussian Subtraction
 from kintsugi.claude.param_tuner import gaussian_subtract_tuner
 
-channel = "{channel}"
+channel = {source!r}  # {channel}
 
 # Interactive tuner
 result = gaussian_subtract_tuner(
     channel=channel,
     initial_params={{
-        "sigma": {initial_params.get("sigma", 10)},
-        "scale_factor": {initial_params.get("scale_factor", 0.1)},
+        "sigma": {value("sigma", 10)},
+        "scale_factor": {value("scale_factor", 0.1)},
     }}
 )
 
 print("Final parameters:", result.get_params())
-"""
-
-    elif operation == "full_pipeline":
-        code = f"""# Full Signal Isolation Pipeline with Interactive Review
-from kintsugi.claude.pipeline import SignalIsolationPipeline
-from kintsugi.claude.param_tuner import pipeline_tuner
-
-channel = "{channel}"
-blank_channel = "{initial_params.get("blank_channel", "")}"
-
-# Create pipeline with suggested parameters
-pipeline = SignalIsolationPipeline(
-    signal_channel=channel,
-    blank_channel=blank_channel,
-)
-
-# Run with interactive review at each step
-result = pipeline.run_interactive()
-
-# Final result
-print("Pipeline complete!")
-print("Quality score:", result.quality_score)
-print("All parameters:", result.get_all_params())
-
-# Save if satisfied
-# result.save("output_name")
 """
 
     else:
@@ -584,6 +576,7 @@ print("All parameters:", result.get_all_params())
         "status": "success",
         "operation": operation,
         "channel": channel,
+        "source_file": source,
         "jupyter_cell": code,
         "instructions": [
             "Copy this code to a Jupyter notebook cell",
