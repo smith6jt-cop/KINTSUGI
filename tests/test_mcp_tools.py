@@ -1336,3 +1336,52 @@ class TestAuditedDefects:
             signal_channel="sig", model_path=str(outside), project_path=str(project)
         )
         assert "error" in result and "outside the allowed directories" in result["error"]
+
+    async def test_subtract_blank_uses_learned_parameters(
+        self, tmp_path, monkeypatch, clear_mcp_state
+    ):
+        """The learned-parameter merge was dead: wrong import and wrong status key."""
+        pytest.importorskip("dask_image")
+        from kintsugi.claude.parameter_learning import ParameterLearningEngine
+        from kintsugi.mcp.tools.signal_isolation import _store_image, subtract_blank
+
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        (tmp_path / "home").mkdir()
+        project = tmp_path / "proj"
+        project.mkdir()
+        engine = ParameterLearningEngine(str(project))
+        for _ in range(3):
+            engine.record_parameters(
+                tissue_type="tonsil",
+                marker_name="CD3",
+                operation="blank_subtraction",
+                parameters={"blank_scale_factor": 0.33, "blank_clip_factor": 7, "erosion": 2},
+                quality_before=0.4,
+                quality_after=0.9,
+                user_approved=True,
+                to_global=False,
+            )
+
+        rng = np.random.default_rng(0)
+        signal = rng.integers(100, 2000, (128, 128), dtype=np.uint16)
+        blank = rng.integers(50, 500, (128, 128), dtype=np.uint16)
+        _store_image("sig", signal)
+        _store_image("blk", blank)
+
+        plain = await subtract_blank(
+            signal_channel="sig", blank_channel="blk", tissue_type="tonsil", marker_name="CD3"
+        )
+        learned = await subtract_blank(
+            signal_channel="sig",
+            blank_channel="blk",
+            tissue_type="tonsil",
+            marker_name="CD3",
+            project_path=str(project),
+        )
+        assert plain.get("status") == "success" and learned.get("status") == "success"
+        plain_scale = plain["parameters_used"]["blank_scale_factor"]
+        learned_scale = learned["parameters_used"]["blank_scale_factor"]
+        # The learned value (0.33) is blended in with up to 60% weight, so the
+        # auto-suggested scale moves towards it once the project history exists.
+        assert learned_scale != plain_scale
+        assert abs(learned_scale - 0.33) < abs(plain_scale - 0.33)
