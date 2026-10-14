@@ -39,6 +39,7 @@ Quick Links
    :caption: User Guide
 
    workflows
+   mcp
    signal_isolation
    cli
    api
@@ -48,6 +49,8 @@ Quick Links
    :caption: Reference
 
    TROUBLESHOOTING
+   HPC_TROUBLESHOOTING
+   DEPENDENCY_GUIDE
    DEPENDENCY_ANALYSIS
 
 .. toctree::
