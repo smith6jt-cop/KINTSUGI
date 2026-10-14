@@ -1,0 +1,16 @@
+# Matches the CI lint job (.github/workflows/ci.yml): ruff check + ruff format.
+# Enable with:  pre-commit install && pre-commit install --hook-type commit-msg
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.1
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(src|tests|evals)/
+      - id: ruff-format
+        files: ^(src|tests|evals)/
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.4.1
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
