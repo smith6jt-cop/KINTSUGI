@@ -92,31 +92,103 @@ MARKER_ALIASES = {
     "blank": ["blank", "af", "autofluorescence", "auto", "empty"],
 }
 
+# Operation names the learning database is keyed by (``parameter_records.operation``).
+LEARNING_OPERATIONS: tuple[str, ...] = (
+    "blank_subtraction",
+    "denoise",
+    "clahe",
+    "clean_background",
+    "gaussian_subtract",
+)
+
+# The MCP session history (``_add_history`` in ``kintsugi.mcp.tools.signal_isolation``)
+# records *tool* names such as ``subtract_blank`` or ``denoise_advanced``, whereas the
+# learning database is keyed by the *operation* names in ``LEARNING_OPERATIONS``.
+# This maps history tool names onto learning operations (identity for names that are
+# already operations) so ``approve_and_learn`` can record straight from the history.
+HISTORY_TO_LEARNING_OP: dict[str, str] = {
+    "subtract_blank": "blank_subtraction",
+    "subtract_blank_weighted": "blank_subtraction",
+    "denoise": "denoise",
+    "denoise_advanced": "denoise",
+    "clahe": "clahe",
+    "clean_background": "clean_background",
+    "gaussian_subtract": "gaussian_subtract",
+}
+
+
+def _clean(name: str) -> str:
+    """Lowercase and collapse every non-alphanumeric run to a single space."""
+    return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+
+
+def _build_alias_index(
+    aliases: dict[str, list[str]],
+) -> tuple[dict[str, str], list[tuple[tuple[str, ...], str]]]:
+    """Precompute exact-match and token-sequence lookups for an alias table.
+
+    Returns ``(exact, sequences)``: ``exact`` maps both the spaced ("pd l1") and the
+    compact ("pdl1") cleaned form of every alias to its canonical name; ``sequences``
+    lists ``(alias_tokens, canonical)`` longest-first for whole-token matching.
+    """
+    exact: dict[str, str] = {}
+    sequences: list[tuple[tuple[str, ...], str]] = []
+    for canonical, names in aliases.items():
+        for alias in names:
+            spaced = _clean(alias)
+            if not spaced:
+                continue
+            exact.setdefault(spaced, canonical)
+            exact.setdefault(spaced.replace(" ", ""), canonical)
+            sequences.append((tuple(spaced.split()), canonical))
+    sequences.sort(key=lambda item: len(item[0]), reverse=True)
+    return exact, sequences
+
+
+_TISSUE_EXACT, _TISSUE_SEQUENCES = _build_alias_index(TISSUE_ALIASES)
+_MARKER_EXACT, _MARKER_SEQUENCES = _build_alias_index(MARKER_ALIASES)
+
+
+def _normalize(
+    name: str, exact: dict[str, str], sequences: list[tuple[tuple[str, ...], str]]
+) -> str:
+    """Map ``name`` to a canonical alias key, or to a cleaned fallback.
+
+    Matching is deliberately token-based, never substring-based: ``CD31`` must not
+    become ``cd3`` and ``smooth muscle actin`` must not become ``cd4`` via the ``th``
+    alias, which the previous bidirectional ``in`` test allowed.
+
+    1. The whole cleaned name (spaced or compact) equals an alias.
+    2. An alias appears as a complete token sequence inside the name
+       (``DAPI-01`` -> ``dapi``, ``anti CD20 B cell`` -> ``cd20``), longest alias first.
+    3. Otherwise the cleaned name with ``_`` separators.
+    """
+    spaced = _clean(name)
+    if not spaced:
+        return ""
+    compact = spaced.replace(" ", "")
+    if spaced in exact:
+        return exact[spaced]
+    if compact in exact:
+        return exact[compact]
+    tokens = spaced.split()
+    for alias_tokens, canonical in sequences:
+        n = len(alias_tokens)
+        if n > len(tokens):
+            continue
+        if any(tuple(tokens[i : i + n]) == alias_tokens for i in range(len(tokens) - n + 1)):
+            return canonical
+    return spaced.replace(" ", "_")
+
 
 def normalize_tissue_type(tissue: str) -> str:
-    """Normalize tissue type to canonical form."""
-    tissue_lower = tissue.lower().strip()
-
-    for canonical, aliases in TISSUE_ALIASES.items():
-        for alias in aliases:
-            if alias in tissue_lower or tissue_lower in alias:
-                return canonical
-
-    # Return cleaned version if no match
-    return re.sub(r"[^a-z0-9]", "_", tissue_lower)
+    """Normalize tissue type to canonical form (see :func:`_normalize`)."""
+    return _normalize(tissue, _TISSUE_EXACT, _TISSUE_SEQUENCES)
 
 
 def normalize_marker_name(marker: str) -> str:
-    """Normalize marker name to canonical form."""
-    marker_lower = marker.lower().strip()
-
-    for canonical, aliases in MARKER_ALIASES.items():
-        for alias in aliases:
-            if alias in marker_lower or marker_lower in alias:
-                return canonical
-
-    # Return cleaned version if no match
-    return re.sub(r"[^a-z0-9]", "_", marker_lower)
+    """Normalize marker name to canonical form (see :func:`_normalize`)."""
+    return _normalize(marker, _MARKER_EXACT, _MARKER_SEQUENCES)
 
 
 @dataclass
@@ -674,7 +746,8 @@ class ParameterLearningEngine:
             # Quality improvement bonus
             score += min(2.0, record["quality_improvement"] * 2)
 
-            # User approved bonus
+            # User approved bonus; unapproved (bootstrap) records are down-weighted
+            # below, so approved evidence always ranks first.
             if record.get("user_approved"):
                 score += 1.0
 
