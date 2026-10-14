@@ -240,6 +240,18 @@ def run_agentic(
     }
 
 
+DOCS_WITH_TOOL_BLOCKS = ("docs/mcp.md", "docs/cli.md", "README.md", "CLAUDE.md")
+
+
+def _docs_drift() -> list[str]:
+    """Documented tool tables that no longer match the registry (see kintsugi.mcp.docs_sync)."""
+    from kintsugi.mcp import docs_sync
+
+    repo = Path(__file__).resolve().parents[2]
+    present = [repo / rel for rel in DOCS_WITH_TOOL_BLOCKS if (repo / rel).exists()]
+    return docs_sync.check_files(present)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Evaluate the KINTSUGI MCP tool surface.")
     parser.add_argument(
@@ -270,7 +282,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nWrote report to {args.json}")
 
     if args.strict:
+        docs_drift = _docs_drift()
         problems = {
+            "docs_drift": docs_drift,
             "task_coverage_gaps": structural["task_coverage_gaps"],
             "tools_missing_description": structural["tools_missing_description"],
             "tools_missing_title": structural["tools_missing_title"],
