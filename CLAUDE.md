@@ -31,12 +31,14 @@ my_project/
 │   └── CHANNELNAMES.txt   ← Channel/marker names (user-provided)
 ├── notebooks/         ← Working copies of processing notebooks
 ├── configs/           ← Processing configuration files
-├── .mcp.json          ← MCP server config (auto-generated, absolute path)
+├── AGENTS.md          ← Guidance for AI assistants (auto-generated if absent)
+├── .mcp.json          ← MCP server config for Claude Code (auto-generated, absolute path)
 ├── .claude/           ← Claude Code settings (auto-generated)
-└── .vscode/           ← VS Code settings (auto-generated)
+├── .vscode/           ← VS Code settings and mcp.json (auto-generated)
+└── .cursor/ .gemini/ .agents/ .codex/ .zed/  ← other MCP clients' configs
 ```
 
-`kintsugi init` (and `kintsugi mcp config`) writes two Claude Code files. `.mcp.json` holds the server definition — `{"mcpServers": {"kintsugi": {"type": "stdio", "command": "<absolute path to kintsugi>", "args": ["mcp", "start", "--project-dir", "<absolute project root>"]}}}` — the project travels in `args` because MCP clients differ in the working directory and environment they give a server. `.claude/settings.local.json` approves only that server: `{"enabledMcpjsonServers": ["kintsugi"]}`. The equivalent CLI form is `claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start --project-dir /path/to/project`. See `docs/mcp.md`.
+`kintsugi init` (and `kintsugi mcp config`) writes the configuration of every MCP client that keeps it in the project (Claude Code, VS Code, Cursor, Gemini CLI, Antigravity, Codex, Zed; `kintsugi mcp clients` lists them), `AGENTS.md`, and `.gitignore` lines for the generated files; `--mcp-client NAME` / `--client NAME` restricts the set. For Claude Code, `.mcp.json` holds the server definition — `{"mcpServers": {"kintsugi": {"type": "stdio", "command": "<absolute path to kintsugi>", "args": ["mcp", "start", "--project-dir", "<absolute project root>"]}}}` — the project travels in `args` because MCP clients differ in the working directory and environment they give a server. `.claude/settings.local.json` approves only that server: `{"enabledMcpjsonServers": ["kintsugi"]}`. The equivalent CLI form is `claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start --project-dir /path/to/project`. See `docs/mcp.md`.
 
 ### Experiment Metadata
 
@@ -186,7 +188,7 @@ If you're not using `kintsugi init`, or need to add MCP support to an existing p
 kintsugi mcp config /path/to/project
 ```
 
-This creates `.mcp.json` at the project root with the MCP server definition (using an absolute path to the `kintsugi` executable) and `.claude/settings.local.json` with `{"enabledMcpjsonServers": ["kintsugi"]}`. If `.mcp.json` already exists, it adds the KINTSUGI server to your existing configuration (`--force` overwrites an existing `kintsugi` entry).
+This writes or merges the configuration of every project-scoped MCP client (for Claude Code: `.mcp.json` with an absolute path to the `kintsugi` executable and `.claude/settings.local.json` with `{"enabledMcpjsonServers": ["kintsugi"]}`), writes `AGENTS.md` if absent, and prints snippets for user- or IDE-configured clients (Claude Desktop, Windsurf, Cline, JetBrains). Existing entries for other servers are kept (`--force` overwrites an existing `kintsugi` entry); `--client NAME` restricts to one client; a directory without `kintsugi_project.json` is refused unless `--force`.
 
 Use `--print-only` to display the configuration without creating files:
 ```bash
@@ -203,7 +205,8 @@ kintsugi mcp start --project-dir /path/to/project
 kintsugi mcp tools
 kintsugi mcp tools --markdown                      # Markdown table
 kintsugi mcp tools --write CLAUDE.md docs/cli.md   # Regenerate the <!-- mcp-tools:* --> blocks in docs
-kintsugi mcp tools --check CLAUDE.md docs/cli.md   # Fail if those blocks drifted (CI runs this)
+kintsugi mcp tools --check CLAUDE.md AGENTS.md docs/cli.md   # Fail if those blocks drifted (CI runs this)
+kintsugi mcp clients                               # MCP clients 'mcp config' can configure
 
 # Bootstrap the learning database from existing processed data
 kintsugi mcp pretrain /path/to/project --tissue-type tonsil [--dry-run] [--verbose]

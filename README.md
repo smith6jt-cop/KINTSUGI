@@ -363,7 +363,7 @@ kintsugi init /path/to/project --name "My Experiment"   # new project: config is
 kintsugi mcp config /path/to/project                    # existing project
 ```
 
-This writes `.mcp.json` (the server definition, with the absolute path of the `kintsugi` executable) and `.claude/settings.local.json` (approves the `kintsugi` server only):
+This writes the configuration of every MCP client that keeps it in the project (Claude Code, VS Code, Cursor, Gemini CLI, Antigravity, Codex, Zed), an `AGENTS.md` for the assistant, and prints the entry to paste for Claude Desktop, Windsurf, Cline and JetBrains (`--client NAME` restricts; `kintsugi mcp clients` lists them). For Claude Code that is `.mcp.json` (the server definition, with the absolute path of the `kintsugi` executable) and `.claude/settings.local.json` (approves the `kintsugi` server only):
 
 ```json
 {"mcpServers": {"kintsugi": {"type": "stdio", "command": "/path/to/env/bin/kintsugi", "args": ["mcp", "start", "--project-dir", "/path/to/project"]}}}

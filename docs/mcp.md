@@ -52,8 +52,35 @@ kintsugi init /path/to/project --name "My Experiment"   # new project
 kintsugi mcp config /path/to/project                    # existing project
 ```
 
-`kintsugi init` and `kintsugi mcp config` write two files at the project root (and add
-`.claude/settings.local.json`, a per-user file, to the project's `.gitignore`):
+`kintsugi init` and `kintsugi mcp config` write the configuration of every MCP
+client that keeps it in the project, an `AGENTS.md` for the assistant, and print
+the entry to paste for clients configured per user or in the IDE.
+`kintsugi mcp config <project> --client NAME` restricts to one client (repeat the
+option for several), `--print-only` shows everything without writing, and
+`kintsugi mcp clients` lists the registry:
+
+| Client | Written / printed | Servers key |
+|--------|-------------------|-------------|
+| Claude Code (`claude-code`) | `.mcp.json` + `.claude/settings.local.json` (approves only `kintsugi`) | `mcpServers` |
+| VS Code / Copilot (`vscode`) | `.vscode/mcp.json` | `servers` |
+| Cursor (`cursor`) | `.cursor/mcp.json` | `mcpServers` |
+| Gemini CLI (`gemini-cli`) | `.gemini/settings.json` (+ `context.fileName` = `AGENTS.md`, `GEMINI.md`) | `mcpServers` |
+| Antigravity (`antigravity`) | `.agents/mcp_config.json` | `mcpServers` |
+| OpenAI Codex CLI (`codex`) | `.codex/config.toml` (trusted projects only) | `[mcp_servers.kintsugi]` |
+| Zed (`zed`) | `.zed/settings.json` | `context_servers` |
+| Claude Desktop, Windsurf / Devin Desktop, Cline | snippet for the user's configuration file | `mcpServers` |
+| JetBrains AI Assistant | snippet for Settings > Tools > AI Assistant > MCP | `mcpServers` |
+
+Existing files are merged (other servers and settings are kept; an existing
+`kintsugi` entry is replaced only with `--force`), nothing is written outside the
+project, and the generated files are added to the project's `.gitignore` because
+they hold machine-specific absolute paths: collaborators run `kintsugi mcp config`
+on their own machine. `AGENTS.md` is created only when absent; an existing one only
+has its generated tool list refreshed. Both commands refuse a directory without
+`kintsugi_project.json` (the server would refuse it as `--project-dir`);
+`kintsugi init --mcp-client NAME` (or `none`) chooses the clients for a new project.
+
+For Claude Code the two files are:
 
 ```json
 // .mcp.json — the server definition Claude Code reads
@@ -790,7 +817,7 @@ content: image block (image/png, 3996 base64 chars) + text
 |-----------|-----------|
 | `mcp` Python SDK | 2.x (`mcp>=2.0,<3`); 1.x is not supported |
 | Python | 3.10, 3.11, 3.12 |
-| Client | Claude Code (project-scoped `.mcp.json`); any MCP client that speaks stdio |
+| Client | Any MCP client that speaks stdio; `kintsugi mcp clients` lists those `kintsugi mcp config` writes or prints configuration for |
 | Transport | stdio only |
 
 ## Troubleshooting
