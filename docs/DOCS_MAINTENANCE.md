@@ -23,8 +23,7 @@ docs/
 ├── TROUBLESHOOTING.md   # Troubleshooting guide
 ├── DEPENDENCY_ANALYSIS.md # Dependency analysis
 ├── DOCS_MAINTENANCE.md  # This file
-├── CD3e.gif             # Demo animation
-└── CD31_curtain.gif     # Demo animation
+└── CD3e.gif             # Demo animation
 ```
 
 ## Building Documentation Locally

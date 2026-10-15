@@ -169,51 +169,10 @@ print(f"libvips version: {pyvips.version(0)}.{pyvips.version(1)}.{pyvips.version
 > **Note:** Java, Maven, and FIJI/CLIJ2 are no longer required. KINTSUGI now uses pure Python
 > implementations for all processing. This section is kept for users of older versions.
 
-**Symptom**: `java.lang.Exception` or `JVMNotFoundException`.
-
-#### Check Java Installation
-
-```bash
-java -version
-echo $JAVA_HOME  # Linux/macOS
-echo %JAVA_HOME%  # Windows
-```
-
-#### Fix Missing Java
-
-1. **Install via conda** (recommended):
-   ```bash
-   conda install openjdk=11
-   ```
-
-2. **Download from Zenodo** (Windows):
-   - Download java-jdk21 from Zenodo
-   - Extract to KINTSUGI folder
-
-3. **Set JAVA_HOME**:
-   ```bash
-   # Linux/macOS
-   export JAVA_HOME=/path/to/java
-   export PATH=$JAVA_HOME/bin:$PATH
-
-   # Windows PowerShell
-   $env:JAVA_HOME = "C:\Users\[username]\KINTSUGI\java-jdk21"
-   $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
-   ```
-
-#### JVM Already Started Error
-
-**Symptom**: `JVMAlreadyStarted` exception.
-
-This occurs when trying to start JVM multiple times. Solutions:
-
-1. **Restart Python kernel** (in Jupyter)
-2. **Single JVM initialization**:
-   ```python
-   import jpype
-   if not jpype.isJVMStarted():
-       jpype.startJVM()
-   ```
+If an older notebook, environment file or error message still mentions `jpype`,
+`scyjava`, `JAVA_HOME` or Maven, you are running code from a pre-1.0 release:
+update to the current version and recreate the environment from `envs/`. No
+current KINTSUGI component installs or starts a JVM.
 
 ---
 

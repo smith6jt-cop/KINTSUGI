@@ -17,7 +17,7 @@ Citation
 
 Smith, J. A. et al. Protocol for processing and analyzing multiplexed images
 improves lymphatic cell identification and spatial architecture in human tissue.
-STAR Protocols 6, 103976 (2025).
+STAR Protocols 6, 103976 (2025). https://doi.org/10.1016/j.xpro.2025.103976
 
 Quick Links
 -----------

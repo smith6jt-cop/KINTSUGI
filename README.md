@@ -6,7 +6,7 @@
 
 Citation Information:
 
-Smith, J. A. et al. Protocol for processing and analyzing multiplexed images improves lymphatic cell identification and spatial architecture in human tissue. STAR Protocols 6, 103976 (2025).
+Smith, J. A. et al. Protocol for processing and analyzing multiplexed images improves lymphatic cell identification and spatial architecture in human tissue. STAR Protocols 6, 103976 (2025). [doi:10.1016/j.xpro.2025.103976](https://doi.org/10.1016/j.xpro.2025.103976)
 
 [![CI](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/ci.yml/badge.svg)](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/ci.yml)
 [![MCP Eval](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/mcp-eval.yml/badge.svg)](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/mcp-eval.yml)
@@ -940,12 +940,18 @@ See [License.txt](License.txt) for license information.
 ```bibtex
 @article{smith2025protocol,
   title={Protocol for processing and analyzing multiplexed images improves lymphatic cell identification and spatial architecture in human tissue},
-  author={Smith, J. A. and others},
+  author={Smith, Justin A. and Bloss, Drew T. and Williams, MacKenzie D. and Posgai, Amanda L. and Brusko, Todd M. and Atkinson, Mark A. and Wasserfall, Clive H. and Brusko, Maigan A.},
   journal={STAR Protocols},
   volume={6},
+  number={3},
   pages={103976},
-  year={2025}
+  year={2025},
+  doi={10.1016/j.xpro.2025.103976}
 }
+```
+
+A machine-readable `CITATION.cff` is included; GitHub's "Cite this repository"
+button renders it.
 ```
 <p align="center">
   <img src="docs/CD3e.gif" alt="CD3e signal before and after autofluorescence removal">

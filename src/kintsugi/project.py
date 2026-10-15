@@ -89,8 +89,12 @@ def write_claude_config(root: str | Path, *, force: bool = False) -> dict[str, A
     Existing entries for other servers and other settings keys are preserved.
     An existing ``kintsugi`` entry is left alone unless ``force`` is true.
 
-    Returns ``{"mcp_json": Path, "settings": Path, "server": dict}``: the two file
-    paths and the ``kintsugi`` server entry that was written (or found).
+    ``.claude/settings.local.json`` is a per-user file (Claude Code itself adds it
+    to ``.gitignore`` when it creates one), so the project's ``.gitignore`` gains a
+    line for it unless an equivalent entry already exists.
+
+    Returns ``{"mcp_json": Path, "settings": Path, "gitignore": Path, "server": dict}``:
+    the file paths and the ``kintsugi`` server entry that was written (or found).
     """
     root = Path(root).resolve()
     server_entry = {
@@ -126,7 +130,27 @@ def write_claude_config(root: str | Path, *, force: bool = False) -> dict[str, A
             json.dump(settings, f, indent=2)
             f.write("\n")
 
-    return {"mcp_json": mcp_file, "settings": settings_file, "server": servers["kintsugi"]}
+    gitignore = _ensure_gitignored(root, ".claude/settings.local.json")
+
+    return {
+        "mcp_json": mcp_file,
+        "settings": settings_file,
+        "gitignore": gitignore,
+        "server": servers["kintsugi"],
+    }
+
+
+def _ensure_gitignored(root: Path, pattern: str) -> Path:
+    """Add ``pattern`` to ``root/.gitignore`` unless an equivalent line is present."""
+    gitignore = root / ".gitignore"
+    lines = gitignore.read_text().splitlines() if gitignore.exists() else []
+    if any(line.strip().lstrip("/") == pattern for line in lines):
+        return gitignore
+    with open(gitignore, "a") as f:
+        if lines and lines[-1].strip():
+            f.write("\n")
+        f.write(f"# Per-user Claude Code settings written by kintsugi\n{pattern}\n")
+    return gitignore
 
 
 # Common image file extensions

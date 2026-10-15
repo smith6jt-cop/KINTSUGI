@@ -98,3 +98,24 @@ def test_project_load_writes_nothing_to_stdout(tmp_path, capsys):
     project = KintsugiProject.load(tmp_path)
     assert project.config.name == "quiet"
     assert capsys.readouterr().out == ""
+
+
+def test_write_claude_config_gitignores_the_local_settings(tmp_path):
+    (tmp_path / ".gitignore").write_text("data/raw/\n")
+
+    first = write_claude_config(tmp_path)
+    write_claude_config(tmp_path)  # idempotent
+    write_claude_config(tmp_path, force=True)
+
+    text = (tmp_path / ".gitignore").read_text()
+    assert first["gitignore"] == tmp_path / ".gitignore"
+    assert text.startswith("data/raw/\n")  # existing rules untouched
+    assert text.count(".claude/settings.local.json") == 1
+
+
+def test_write_claude_config_respects_an_existing_equivalent_rule(tmp_path):
+    (tmp_path / ".gitignore").write_text("/.claude/settings.local.json\n")
+
+    write_claude_config(tmp_path)
+
+    assert (tmp_path / ".gitignore").read_text() == "/.claude/settings.local.json\n"

@@ -41,6 +41,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   smoke-tests the built wheel over stdio; the MCP eval workflow also triggers on
   pin and CLI changes.
 - **docs**: `docs/mcp.md` is the canonical MCP page; the other pages link to it.
+- **mcp**: `compare_channels`, `get_intensity_profile` and `batch_assess_quality`
+  (implemented and tested but never registered) are now on the tool surface with
+  titles, annotations and eval tasks; 32 tools in total.
+- **project**: `kintsugi init` and `kintsugi mcp config` add
+  `.claude/settings.local.json` (a per-user file) to the project's `.gitignore`.
+- **docs**: `CITATION.cff` with the STAR Protocols article as the preferred
+  citation; the README BibTeX entry now carries the full author list and DOI.
 
 ### Changed
 - **mcp**: the server now requires the 2.x Python SDK (`mcp>=2.0,<3`,
@@ -85,6 +92,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Tool tables are generated from the registry; stale file references
   (`kintsugi-dev.code-workspace`, `test_data/mini_project`, `scripts/release.py`),
   install-group counts, test counts and the denoise method lists were corrected.
+- **mcp**: the in-memory session (`_loaded_images`, `_processing_history` and
+  their accessors) lives in `kintsugi.mcp.session`; the tool modules import it from
+  there instead of from each other, and the three private copies of `_get_image`
+  are gone. `signal_isolation` re-exports the names for existing imports.
+- **mcp**: `suggest_parameters` and `suggest_with_learning` share one rule set
+  (`kintsugi.mcp.heuristics`) instead of two diverging copies; the blank channel is
+  sampled at the same stride as the signal, and a blank channel that is named but
+  not loaded is an error rather than silently ignored.
+- **learning**: `ParameterLearningEngine.recommend_parameters_many()` answers all
+  operations with one query per database (a window function ranks the top 50 per
+  operation) and `record_parameters_many()` writes every operation of an approval
+  in one transaction per database. `suggest_with_learning` and `approve_and_learn`
+  use them; `approve_and_learn` now reports each `record_id`.
+
+### Removed
+- **mcp**: the unregistered, untested `set_project_context` handler and the
+  `_basic_parameter_suggestion` fallback (its only trigger, `kintsugi.signal`
+  failing to import, cannot happen with the core dependencies).
+- **docs**: four zero-byte files (`docs/-r`, `docs/2.0.0`, `docs/2024.0.0`,
+  `docs/7.0.0`) and the unreferenced `docs/CD31_curtain.gif`; the stale Java/JVM
+  instructions in `TROUBLESHOOTING.md`.
 
 ### Fixed
 - **mcp**: the server imported `mcp.server.fastmcp.FastMCP`, which does not exist
@@ -128,6 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so the pair always failed with "No channels found". Clustered channels are now
   kept in the session with `cluster_id`, `source_path` and `wavelength_group`, and
   the result lists `loaded_channels`.
+- **mcp**: `get_intensity_profile` with `position=1.0` indexed one row/column past
+  the image; the last row/column is now returned.
 
 ### Security
 - **mcp**: model checkpoint paths given to `denoise_advanced` (`model_path`) and
