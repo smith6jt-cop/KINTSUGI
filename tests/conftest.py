@@ -20,6 +20,25 @@ if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
 
+@pytest.fixture(autouse=True)
+def _no_configured_mcp_project(monkeypatch):
+    """Start every test without a configured MCP project.
+
+    The MCP server's default project comes from ``kintsugi mcp start
+    --project-dir`` (module state) or ``KINTSUGI_PROJECT_DIR``; neither may leak
+    from the developer's shell or from one test into the next.
+    """
+    monkeypatch.delenv("KINTSUGI_PROJECT_DIR", raising=False)
+    try:
+        from kintsugi.mcp.session import set_project_root
+    except ImportError:  # pragma: no cover - package not importable
+        yield
+        return
+    set_project_root(None)
+    yield
+    set_project_root(None)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _require_mcp_when_demanded():
     """Turn MCP skips into a hard failure when CI demands the SDK.

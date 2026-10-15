@@ -80,7 +80,7 @@ re-describing a tool without regenerating the docs fails the build
 - **32 tools**, **32/32 carry an output schema** (structured output on every tool;
   `get_image_stats`, `assess_quality`, `suggest_with_learning` and
   `get_session_state` declare typed schemas).
-- **~8.0k tokens** of tool definitions injected on every call (~250/tool). This is
+- **~8.1k tokens** of tool definitions injected on every call (~253/tool). This is
   up from ~3.9k before the schema work because 25 previously hidden parameters are
   now advertised (with descriptions, enums and ranges) and every tool carries a
   title and annotations. Heaviest: `subtract_blank` (~1.0k, the weighted-method

@@ -48,9 +48,10 @@ SERVER_WEBSITE = "https://kintsugi.readthedocs.io/en/latest/mcp.html"
 # Sent to the client at initialize time; this is the model's orientation.
 SERVER_INSTRUCTIONS = """\
 KINTSUGI processes multiplex immunofluorescence images. Tools act on a KINTSUGI
-project directory; project_path defaults to the Claude Code project
-(CLAUDE_PROJECT_DIR), so it can usually be omitted. Loaded images stay in server
-memory for the session: get_session_state shows them, unload_channel frees them.
+project directory; project_path defaults to the project the server was started
+for (get_session_state shows it as project_root), so pass it only to work on
+another project. Loaded images stay in server memory for the session:
+get_session_state shows them, unload_channel frees them.
 
 Typical signal-isolation session (also available as the
 signal_isolation_workflow prompt):
@@ -196,18 +197,19 @@ def _register_resources(server: MCPServer) -> None:
         mime_type="application/json",
     )
     async def learning_statistics() -> str:
-        from kintsugi.mcp.session import default_project_root
+        from kintsugi.mcp.session import learning_project_root
 
-        root = default_project_root()
-        project = str(root) if (root / "kintsugi_project.json").exists() else None
-        return json.dumps(await learning.get_learning_statistics(project_path=project), default=str)
+        return json.dumps(
+            await learning.get_learning_statistics(project_path=learning_project_root()),
+            default=str,
+        )
 
     @server.resource(
         "kintsugi://project/channels",
         name="project_channels",
         title="Channels in the project",
-        description="Image files found in the project's raw, registered and processed "
-        "directories (the project is CLAUDE_PROJECT_DIR or the working directory).",
+        description="Image files found in the raw, registered and processed directories "
+        "of the project the server was started for.",
         mime_type="application/json",
     )
     async def project_channels() -> str:

@@ -21,7 +21,7 @@ def signal_isolation_workflow(
     project_path: str | None = None,
 ) -> str:
     """Render the guided signal-isolation checklist for a marker/blank pair."""
-    project = project_path or "the Claude Code project (CLAUDE_PROJECT_DIR)"
+    project = project_path or "the project the server was started for"
     return f"""Isolate the {channel} signal from autofluorescence using the blank channel \
 {blank_channel} in {project} (tissue: {tissue_type}). Work through these steps, \
 reporting what you see after each, and stop for confirmation before step 6.

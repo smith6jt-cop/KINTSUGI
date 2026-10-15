@@ -25,15 +25,19 @@ resolved absolute path to the ``kintsugi`` executable)::
             "kintsugi": {
                 "type": "stdio",
                 "command": "/path/to/env/bin/kintsugi",
-                "args": ["mcp", "start"]
+                "args": ["mcp", "start", "--project-dir", "/path/to/project"]
             }
         }
     }
 
-Claude Code starts the server in the project directory and sets
-``CLAUDE_PROJECT_DIR`` in its environment. The equivalent CLI form is::
+``--project-dir`` tells the server which project ``project_path`` defaults to,
+because MCP clients differ in the working directory and environment they give a
+server; ``KINTSUGI_PROJECT_DIR`` does the same where a client can set environment
+variables. Without either, the working directory is used only if it is a
+KINTSUGI project. The equivalent Claude Code command is::
 
-    claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start
+    claude mcp add --scope project --transport stdio kintsugi -- \
+        kintsugi mcp start --project-dir /path/to/project
 
 The registry is :data:`kintsugi.mcp.tool_specs.TOOL_SPECS` (``kintsugi mcp tools``
 lists it); the learning engine is

@@ -522,9 +522,15 @@ kintsugi mcp config /path/to/project --force
 cat /path/to/project/.mcp.json      # "command" is now e.g. /home/you/envs/KINTSUGI/bin/kintsugi
 ```
 
-The generated entry is `{"type": "stdio", "command": "<absolute path>", "args": ["mcp", "start"]}`
-with no `cwd` (Claude Code runs the server in the project directory and sets
-`CLAUDE_PROJECT_DIR`). Then restart Claude Code or run `/mcp` to reconnect.
+The generated entry is `{"type": "stdio", "command": "<absolute path>", "args": ["mcp", "start",
+"--project-dir", "<project>"]}`. Then restart your MCP client (in Claude Code, `/mcp` reconnects).
+
+### "No project configured"
+
+The server was started without `--project-dir`, without `KINTSUGI_PROJECT_DIR`, and in a
+working directory that is not a KINTSUGI project, so it cannot guess which project a tool
+means. Regenerate the client configuration (`kintsugi mcp config /path/to/project --force`,
+which adds `--project-dir`), or pass `project_path` in the tool call.
 
 ### Server shows "Pending approval"
 

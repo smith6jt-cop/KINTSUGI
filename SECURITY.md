@@ -13,17 +13,20 @@ release of the current minor version; older minors are not maintained.
 
 ## Scope and trust model of the MCP server
 
-`kintsugi mcp start` is a **local, single-user stdio server**: Claude Code spawns
-it as a subprocess in the project directory, talks JSON-RPC over stdin/stdout,
-and it has no network listener, no authentication, and no multi-tenant state.
-It runs with the permissions of the user who started Claude Code. Everything the
+`kintsugi mcp start` is a **local, single-user stdio server**: an MCP client
+spawns it as a subprocess, talks JSON-RPC over stdin/stdout, and it has no
+network listener, no authentication, and no multi-tenant state. It runs with the
+permissions of the user who started the client. Its project comes from
+`--project-dir` or `KINTSUGI_PROJECT_DIR` (or a working directory that is a
+KINTSUGI project); without one, tools that need a project refuse rather than
+write under an arbitrary directory. Everything the
 model sends as a tool argument is treated as untrusted input:
 
 - **Path traversal** - filenames must be bare names (`safe_filename`), and
   every resolved path must stay inside the project directory
   (`ensure_within`, which follows symlinks so a symlink escape is rejected).
 - **Model checkpoints** - `denoise_advanced` and `predict_parameters` only load
-  files under the project, the Claude Code project (`CLAUDE_PROJECT_DIR`), or
+  files under a KINTSUGI `project_path`, the server's project, or
   `~/.kintsugi/models` (`allowed_model_roots`); PyTorch checkpoints are loaded
   with `weights_only=True`.
 - **Resource limits** - numeric arguments carry schema bounds that the SDK

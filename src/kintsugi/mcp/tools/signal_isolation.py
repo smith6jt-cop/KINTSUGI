@@ -27,7 +27,9 @@ from kintsugi.mcp.path_safety import (
     safe_filename,
     validate_choice,
 )
-from kintsugi.mcp.session import (  # noqa: F401  (re-exported for the other modules/tests)
+from kintsugi.mcp.session import (  # noqa: F401  (some names re-exported for other modules/tests)
+    PROJECT_PATH_HELP,
+    ProjectNotConfigured,
     _add_history,
     _as_numpy,
     _get_image,
@@ -35,6 +37,8 @@ from kintsugi.mcp.session import (  # noqa: F401  (re-exported for the other mod
     _processing_history,
     _store_image,
     clear_session,
+    learning_project_root,
+    resolve_project_path,
 )
 
 logger = logging.getLogger("kintsugi.mcp.signal_isolation")
@@ -137,25 +141,18 @@ def _find_channel_file(search_dir: Path, channel: str) -> tuple[Path | None, lis
 async def load_channel(
     cycle: Annotated[str, Field(description="Cycle name or number (e.g., 'cyc001' or '1')")],
     channel: Annotated[str, Field(description="Channel name (e.g., 'CD3', 'DAPI')")],
-    project_path: Annotated[
-        str | None,
-        Field(
-            description="KINTSUGI project directory; None = the Claude Code project "
-            "(CLAUDE_PROJECT_DIR) or the current directory"
-        ),
-    ] = None,
+    project_path: Annotated[str | None, Field(description=PROJECT_PATH_HELP)] = None,
 ) -> dict[str, Any]:
     """
     Load a channel image from a KINTSUGI project.
 
     Returns image metadata and prepares it for processing. When ``project_path``
-    is omitted the server's own project (``CLAUDE_PROJECT_DIR``, else the
-    working directory) is used.
+    is omitted the project the server was started for is used.
     """
-    # Imported lazily so this module imports without the session helper.
-    from kintsugi.mcp.session import resolve_project_path
-
-    project_path = resolve_project_path(project_path)
+    try:
+        project_path = resolve_project_path(project_path)
+    except ProjectNotConfigured as e:
+        return {"error": str(e)}
 
     # cycle and channel become path components below, so reject any value that
     # could traverse out of the project tree. Wildcards are rejected too so a
@@ -358,11 +355,12 @@ async def suggest_subtraction_parameters(
     # Try to get learned parameters
     learned_params = None
     learned_confidence = 0
-    if use_learning and project_path and marker_name:
+    learning_root = project_path or learning_project_root()
+    if use_learning and learning_root and marker_name:
         try:
             from kintsugi.assist.parameter_learning import ParameterLearningEngine
 
-            engine = ParameterLearningEngine(project_path)
+            engine = ParameterLearningEngine(learning_root)
             recommendation = engine.recommend_parameters(
                 operation="blank_subtraction",
                 tissue_type=tissue_type,
@@ -1390,7 +1388,7 @@ async def denoise_advanced(
         str | None,
         Field(
             description="Path to a pre-trained N2V checkpoint (.pt/.pth); skips training. Must "
-            "lie inside project_path, the Claude Code project, or ~/.kintsugi/models"
+            "lie inside project_path, the server's project, or ~/.kintsugi/models"
         ),
     ] = None,
     project_path: Annotated[

@@ -162,7 +162,7 @@ async def test_resources_and_templates_are_advertised_and_readable(tmp_path, mon
 
     from kintsugi.mcp.server import create_server
 
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("KINTSUGI_PROJECT_DIR", str(tmp_path))
     async with Client(create_server()) as client:
         uris = {r.uri for r in (await client.list_resources()).resources}
         templates = {

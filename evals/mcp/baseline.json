@@ -1,8 +1,8 @@
 {
   "structural": {
     "tool_count": 32,
-    "total_definition_tokens_est": 8005,
-    "mean_tokens_per_tool_est": 250.2,
+    "total_definition_tokens_est": 8087,
+    "mean_tokens_per_tool_est": 252.7,
     "tools_with_output_schema": 32,
     "top_tools_by_tokens": [
       [
@@ -11,15 +11,15 @@
       ],
       [
         "record_successful_parameters",
-        596
+        606
       ],
       [
         "approve_and_learn",
-        456
+        465
       ],
       [
         "denoise_advanced",
-        388
+        387
       ],
       [
         "optimize_parameters",

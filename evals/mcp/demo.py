@@ -180,16 +180,21 @@ async def record(root: Path) -> str:
 def run() -> str:
     """Record the transcript in an isolated HOME/project and return it."""
     tmp = Path(tempfile.mkdtemp(prefix="kintsugi-mcp-demo-"))
-    env_backup = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE", "CLAUDE_PROJECT_DIR")}
+    from kintsugi.mcp.session import set_project_root
+
+    env_backup = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE", "KINTSUGI_PROJECT_DIR")}
     try:
         home = tmp / "home"
         home.mkdir()
         os.environ["HOME"] = str(home)
         os.environ["USERPROFILE"] = str(home)
         root = make_project(tmp / "demo_project")
-        os.environ["CLAUDE_PROJECT_DIR"] = str(root)
+        os.environ.pop("KINTSUGI_PROJECT_DIR", None)
+        # What `kintsugi mcp start --project-dir <root>` does.
+        set_project_root(root)
         return asyncio.run(record(root))
     finally:
+        set_project_root(None)
         for key, value in env_backup.items():
             if value is None:
                 os.environ.pop(key, None)

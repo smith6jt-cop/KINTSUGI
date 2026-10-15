@@ -304,7 +304,10 @@ from kintsugi.assist.parameter_learning import ParameterLearningEngine
   the input schema.
 - `kintsugi.mcp.path_safety` — `ensure_within()` / `ensure_within_any()` confine every
   model-supplied path to the project (symlinks resolved); `allowed_model_roots()` limits
-  checkpoints to the project, `CLAUDE_PROJECT_DIR` or `~/.kintsugi/models`.
+  checkpoints to a KINTSUGI `project_path`, the server's project or `~/.kintsugi/models`.
+- `kintsugi.mcp.session` — `configured_project_root()` (`--project-dir` >
+  `KINTSUGI_PROJECT_DIR` > a project working directory), `resolve_project_path()` and
+  `set_project_root()`.
 - `kintsugi.mcp.docs_sync` — `render_tool_table()`, `render_tool_list()`, `sync_file()` and
   `check_files()` behind `kintsugi mcp tools --markdown/--write/--check`.
 - `kintsugi.assist.parameter_learning.ParameterLearningEngine` — the SQLite learning

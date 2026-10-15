@@ -111,13 +111,15 @@ loop, security model and troubleshooting — is [Claude Code Integration (MCP Se
 Start the MCP server for Claude Code integration.
 
 ```bash
-kintsugi mcp start
+kintsugi mcp start                                   # project from KINTSUGI_PROJECT_DIR or a project cwd
+kintsugi mcp start --project-dir /path/to/project    # what generated client configs pass
 ```
 
 The server speaks JSON-RPC over stdio, so this command writes nothing to stdout itself;
-status and errors go to stderr. Claude Code starts it automatically from the project's
-`.mcp.json` in the project directory and sets `CLAUDE_PROJECT_DIR`, which `project_path`
-arguments default to.
+status and errors go to stderr. MCP clients start it from their configuration (see
+`kintsugi mcp config`). `--project-dir` (which must contain `kintsugi_project.json`) sets the
+project that `project_path` arguments default to; `KINTSUGI_PROJECT_DIR` does the same, and
+without either the working directory is used only if it is a KINTSUGI project.
 
 ### kintsugi mcp tools
 
@@ -197,21 +199,22 @@ This writes two files and adds `.claude/settings.local.json` to the project's `.
     "kintsugi": {
       "type": "stdio",
       "command": "/absolute/path/to/kintsugi",
-      "args": ["mcp", "start"]
+      "args": ["mcp", "start", "--project-dir", "/path/to/project"]
     }
   }
 }
 ```
 
-There is no `cwd` entry — Claude Code starts project servers in the project directory and
-sets `CLAUDE_PROJECT_DIR`. `.claude/settings.local.json` approves only that server:
+The project travels in `args` rather than a `cwd` entry, because several clients ignore
+`cwd`. `.claude/settings.local.json` approves only that server:
 `{"enabledMcpjsonServers": ["kintsugi"]}`. If `.mcp.json` already exists, the KINTSUGI
 server is added alongside the other entries (use `--force` to replace an existing
 `kintsugi` entry). `kintsugi init` writes the same files. The equivalent Claude Code
 CLI command is:
 
 ```bash
-claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start
+claude mcp add --scope project --transport stdio kintsugi -- \
+  kintsugi mcp start --project-dir /path/to/project
 ```
 
 ### kintsugi mcp pretrain

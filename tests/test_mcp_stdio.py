@@ -79,38 +79,37 @@ def stdio_project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_stdio_stream_is_pure_json_rpc(stdio_project: Path):
-    requests = [
-        {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-06-18",
-                "capabilities": {},
-                "clientInfo": {"name": "kintsugi-stdio-test", "version": "0"},
-            },
+_INIT = [
+    {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "kintsugi-stdio-test", "version": "0"},
         },
-        {"jsonrpc": "2.0", "method": "notifications/initialized"},
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
-        {
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {
-                "name": "list_channels",
-                "arguments": {"project_path": str(stdio_project)},
-            },
-        },
-    ]
-    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(stdio_project), "PYTHONUNBUFFERED": "1"}
+    },
+    {"jsonrpc": "2.0", "method": "notifications/initialized"},
+    {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+]
+
+
+def _converse(extra_args: list[str], cwd: Path, requests: list[dict]) -> dict:
+    """Run ``kintsugi mcp start`` with ``extra_args``, send ``requests``, return frames by id.
+
+    The child gets no project environment variable, so only ``--project-dir`` (or
+    the working directory) can tell it its project, as with most MCP clients.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in ("KINTSUGI_PROJECT_DIR",)}
+    env["PYTHONUNBUFFERED"] = "1"
     proc = subprocess.Popen(
-        [sys.executable, "-m", "kintsugi.cli", "mcp", "start"],
+        [sys.executable, "-m", "kintsugi.cli", "mcp", "start", *extra_args],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        cwd=stdio_project,
+        cwd=cwd,
         env=env,
     )
     assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
@@ -126,7 +125,7 @@ def test_stdio_stream_is_pure_json_rpc(stdio_project: Path):
         proc.stdin.flush()
         # Keep stdin open until the last response arrives: the server shuts
         # down on EOF and would otherwise drop the in-flight tools/call.
-        stdout_lines = _read_until_id(proc, wanted_id=3, timeout=180)
+        stdout_lines = _read_until_id(proc, wanted_id=requests[-1]["id"], timeout=180)
     finally:
         proc.stdin.close()
         try:
@@ -149,7 +148,24 @@ def test_stdio_stream_is_pure_json_rpc(stdio_project: Path):
             frames.append(json.loads(line))
         except json.JSONDecodeError:
             pytest.fail(f"non-JSON line on stdout: {line!r}\nstderr:\n{stderr}")
-    by_id = {f.get("id"): f for f in frames if "id" in f}
+    return {f.get("id"): f for f in frames if "id" in f}
+
+
+def _list_channels_call(arguments: dict) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {"name": "list_channels", "arguments": arguments},
+    }
+
+
+def test_stdio_stream_is_pure_json_rpc(stdio_project: Path, tmp_path_factory):
+    """--project-dir alone (no env var, unrelated cwd) gives tools their default project."""
+    elsewhere = tmp_path_factory.mktemp("elsewhere")
+    by_id = _converse(
+        ["--project-dir", str(stdio_project)], elsewhere, [*_INIT, _list_channels_call({})]
+    )
 
     init = by_id[1]["result"]
     assert init["serverInfo"]["name"] == "kintsugi"
@@ -161,5 +177,17 @@ def test_stdio_stream_is_pure_json_rpc(stdio_project: Path):
     call = by_id[3]["result"]
     assert not call.get("isError"), call
     assert call["structuredContent"]["status"] == "success"
+    assert call["structuredContent"]["project"] == str(stdio_project.resolve())
     names = {ch["channel"] for ch in call["structuredContent"]["channels"]}
     assert "CD3" in names
+
+
+def test_stdio_without_a_project_lists_tools_and_explains(tmp_path: Path):
+    """No --project-dir, no env var, a non-project cwd: tools work, defaults are refused."""
+    by_id = _converse([], tmp_path, [*_INIT, _list_channels_call({})])
+
+    assert {t["name"] for t in by_id[2]["result"]["tools"]} == {s["name"] for s in TOOL_SPECS}
+    call = by_id[3]["result"]
+    assert call.get("isError"), call
+    assert "No project configured" in call["content"][0]["text"]
+    assert list(tmp_path.iterdir()) == [], "the server wrote into its working directory"

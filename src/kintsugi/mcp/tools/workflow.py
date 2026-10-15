@@ -30,23 +30,22 @@ from kintsugi.mcp.path_safety import (
 )
 from kintsugi.mcp.schemas import SessionStateResult
 from kintsugi.mcp.session import (
+    NO_PROJECT_MESSAGE,
+    PROJECT_PATH_HELP,
+    ProjectNotConfigured,
     _loaded_images,
     _processing_history,
     clear_session,
+    configured_project_root,
     estimate_memory_usage,
+    resolve_project_path,
 )
 
 logger = logging.getLogger("kintsugi.mcp.workflow")
 
 
 async def list_channels(
-    project_path: Annotated[
-        str | None,
-        Field(
-            description="KINTSUGI project directory; None = the Claude Code project "
-            "(CLAUDE_PROJECT_DIR) or the server's working directory"
-        ),
-    ] = None,
+    project_path: Annotated[str | None, Field(description=PROJECT_PATH_HELP)] = None,
     cycle: Annotated[
         str | None,
         Field(
@@ -60,9 +59,10 @@ async def list_channels(
 
     Searches raw and processed directories for image files.
     """
-    from kintsugi.mcp.session import resolve_project_path
-
-    project_path = Path(resolve_project_path(project_path))
+    try:
+        project_path = Path(resolve_project_path(project_path))
+    except ProjectNotConfigured as e:
+        return {"error": str(e)}
 
     # Try to load project configuration
     try:
@@ -191,7 +191,8 @@ async def save_processed(
         str | None,
         Field(
             description="KINTSUGI project whose data/processed/signal_isolated directory "
-            "receives the file; defaults to the project the channel was loaded from"
+            "receives the file; defaults to the project the channel was loaded from, else "
+            "the project the server was started for"
         ),
     ] = None,
 ) -> dict[str, Any]:
@@ -225,13 +226,12 @@ async def save_processed(
             output_dir = project_path / "data" / "processed" / "signal_isolated"
     else:
         # Use metadata to find project
-        src_project = metadata.get("project")
-        if src_project:
-            output_dir = Path(src_project) / "data" / "processed" / "signal_isolated"
-        else:
-            from kintsugi.mcp.session import default_project_root
-
-            output_dir = default_project_root() / "data" / "processed" / "signal_isolated"
+        src_project = metadata.get("project") or configured_project_root()
+        if not src_project:
+            # Never create data/processed/... under whatever directory the client
+            # happened to start the server in.
+            return {"error": NO_PROJECT_MESSAGE}
+        output_dir = Path(src_project) / "data" / "processed" / "signal_isolated"
 
     output_dir.mkdir(parents=True, exist_ok=True)
     output_dir = output_dir.resolve()
@@ -562,8 +562,7 @@ async def get_session_state() -> SessionStateResult:
     Shows the project root the server serves, loaded images (shape, dtype,
     metadata), per-channel processing history counts, and memory usage.
     """
-    from kintsugi.mcp.session import default_project_root
-
+    root = configured_project_root()
     loaded = {
         name: {
             "shape": [int(x) for x in info["shape"]] if info.get("shape") else [],
@@ -578,7 +577,7 @@ async def get_session_state() -> SessionStateResult:
 
     return {
         "status": "success",
-        "project_root": str(default_project_root()),
+        "project_root": str(root) if root is not None else None,
         "loaded_images": loaded,
         "total_loaded": len(loaded),
         "processing_history": history_summary,

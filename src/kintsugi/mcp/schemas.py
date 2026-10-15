@@ -94,7 +94,7 @@ class SessionStateResult(TypedDict, total=False):
     """Result of ``get_session_state``."""
 
     status: str
-    project_root: str
+    project_root: str | None
     loaded_images: dict[str, LoadedImage]
     total_loaded: int
     processing_history: dict[str, int]

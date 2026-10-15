@@ -6,13 +6,17 @@ tests see the *same* objects without importing each other:
 * the in-memory session: ``_loaded_images`` (name -> data, metadata, dtype,
   shape) and ``_processing_history`` (name -> recorded operations), with the
   accessors the tool modules use;
-* the project root the server serves. Claude Code starts a project's MCP server
-  in the project directory and sets ``CLAUDE_PROJECT_DIR`` in its environment,
-  so tools default their ``project_path`` to that directory instead of requiring
-  the model to repeat it on every call. The same root anchors the path-safety
-  checks.
+* the project root the server serves, so tools can default ``project_path``
+  instead of requiring the model to repeat it on every call. MCP clients differ
+  in what they tell a server about the workspace (only some set a working
+  directory, few export an environment variable), so the root is configured
+  explicitly: ``kintsugi mcp start --project-dir PATH`` (what the generated client
+  configs pass), else ``KINTSUGI_PROJECT_DIR``, else the working directory when it
+  is a KINTSUGI project. Without any of these there is no default project: tools
+  that need one say so instead of guessing, and nothing is written under an
+  arbitrary working directory. The same root anchors the path-safety checks.
 
-Nothing here imports ``mcp``; the module is importable without the ``claude``
+Nothing here imports ``mcp``; the module is importable without the ``mcp``
 extra.
 """
 
@@ -24,10 +28,23 @@ from typing import Any
 
 import numpy as np
 
-PROJECT_DIR_ENV = "CLAUDE_PROJECT_DIR"
+PROJECT_DIR_ENV = "KINTSUGI_PROJECT_DIR"
+PROJECT_MARKER = "kintsugi_project.json"
+
+#: Shared description of every tool's optional ``project_path`` argument.
+PROJECT_PATH_HELP = (
+    "KINTSUGI project directory; None = the project the server was started for "
+    "(--project-dir / KINTSUGI_PROJECT_DIR, or the working directory if it is a "
+    "KINTSUGI project)"
+)
+
+NO_PROJECT_MESSAGE = (
+    "No project configured: pass project_path, or start the server with "
+    "`kintsugi mcp start --project-dir PATH` (or set KINTSUGI_PROJECT_DIR)"
+)
 
 # ---------------------------------------------------------------------------
-# Session state (process-wide; one MCP server serves one Claude Code session)
+# Session state (process-wide; one MCP server serves one client session)
 # ---------------------------------------------------------------------------
 
 _loaded_images: dict[str, dict[str, Any]] = {}
@@ -98,19 +115,66 @@ def estimate_memory_usage() -> dict[str, float]:
 # ---------------------------------------------------------------------------
 
 
-def default_project_root() -> Path:
-    """The project directory this server serves.
+class ProjectNotConfigured(ValueError):
+    """No ``project_path`` was given and the server has no configured project."""
 
-    ``CLAUDE_PROJECT_DIR`` (set by Claude Code for project-scoped servers) wins;
-    otherwise the server's working directory, which is where Claude Code starts
-    project servers anyway.
+    def __init__(self, message: str = NO_PROJECT_MESSAGE) -> None:
+        super().__init__(message)
+
+
+_explicit_root: Path | None = None
+
+
+def set_project_root(path: str | os.PathLike[str] | None) -> None:
+    """Set (or with ``None`` clear) the project given by ``mcp start --project-dir``."""
+    global _explicit_root
+    _explicit_root = Path(path).resolve() if path else None
+
+
+def is_kintsugi_project(path: str | os.PathLike[str]) -> bool:
+    """True when ``path`` is a KINTSUGI project directory (has the project marker file)."""
+    try:
+        return (Path(path).resolve() / PROJECT_MARKER).is_file()
+    except OSError:
+        return False
+
+
+def configured_project_root() -> Path | None:
+    """The project directory this server serves, or ``None`` if there is none.
+
+    Precedence: the ``--project-dir`` given to ``kintsugi mcp start``, then a
+    non-empty ``KINTSUGI_PROJECT_DIR``, then the working directory but only when
+    it holds ``kintsugi_project.json`` (clients start servers in all kinds of
+    directories, including ``/`` and the user's home).
     """
-    env = os.environ.get(PROJECT_DIR_ENV)
-    return Path(env).resolve() if env else Path.cwd().resolve()
+    if _explicit_root is not None:
+        return _explicit_root
+    env = os.environ.get(PROJECT_DIR_ENV, "").strip()
+    if env:
+        return Path(env).resolve()
+    cwd = Path.cwd()
+    return cwd.resolve() if is_kintsugi_project(cwd) else None
 
 
 def resolve_project_path(project_path: str | os.PathLike[str] | None) -> str:
-    """Return ``project_path`` as a string, defaulting to :func:`default_project_root`."""
+    """Return ``project_path``, defaulting to the configured project.
+
+    Raises :class:`ProjectNotConfigured` when neither is available; tools turn
+    that into an in-band error the model can act on.
+    """
     if project_path:
         return str(Path(project_path))
-    return str(default_project_root())
+    root = configured_project_root()
+    if root is None:
+        raise ProjectNotConfigured()
+    return str(root)
+
+
+def learning_project_root() -> str | None:
+    """Project whose learning database the learning tools use by default.
+
+    The configured project when it is a KINTSUGI project, else ``None`` (the
+    user-wide database only).
+    """
+    root = configured_project_root()
+    return str(root) if root is not None and is_kintsugi_project(root) else None

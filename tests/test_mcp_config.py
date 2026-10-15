@@ -20,10 +20,10 @@ def test_write_claude_config_creates_both_files(tmp_path):
     mcp_json = _read(tmp_path / ".mcp.json")
     server = mcp_json["mcpServers"]["kintsugi"]
     assert server["type"] == "stdio"
-    assert server["args"] == ["mcp", "start"]
+    # The project travels in args: clients differ in the working directory and
+    # environment they give a server, and several ignore a cwd field.
+    assert server["args"] == ["mcp", "start", "--project-dir", str(tmp_path.resolve())]
     assert isinstance(server["command"], str) and server["command"]
-    # Claude Code does not honour cwd (it starts project servers in the project
-    # directory and sets CLAUDE_PROJECT_DIR), so it must not be written.
     assert "cwd" not in server
 
     settings = _read(tmp_path / ".claude" / "settings.local.json")

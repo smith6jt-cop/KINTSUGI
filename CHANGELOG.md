@@ -50,6 +50,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   citation; the README BibTeX entry now carries the full author list and DOI.
 
 ### Changed
+- **BREAKING**: the MCP server no longer reads `CLAUDE_PROJECT_DIR`. Its default
+  project comes from `kintsugi mcp start --project-dir PATH` (the directory must contain
+  `kintsugi_project.json`), else `KINTSUGI_PROJECT_DIR`, else the working
+  directory only if it is a KINTSUGI project. Without one, `load_channel`,
+  `list_channels`, `save_processed` and the `kintsugi://project/channels` resource
+  return an error asking for `project_path`, and `save_processed` never creates
+  directories under an arbitrary working directory. Learning tools default to the
+  configured project's database plus the user-wide one (previously user-wide
+  only), and `get_session_state` reports `project_root: null` when no project is
+  configured. `kintsugi mcp config` / `kintsugi init` now write
+  `"args": ["mcp", "start", "--project-dir", "<project>"]`; regenerate existing
+  entries with `kintsugi mcp config PROJECT --force`.
 - **BREAKING**: the package `kintsugi.claude` is now `kintsugi.assist` (parameter
   learning, Jupyter tuners, workflow state), and the optional dependency group /
   pip extra `claude` is now `mcp` (`pip install -e ".[mcp]"` or `kintsugi install
@@ -129,6 +141,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instructions in `TROUBLESHOOTING.md`.
 
 ### Fixed
+- **learning**: a record mirrored into both the project and the user-wide
+  database is counted once in recommendations (it was counted twice, inflating
+  confidence).
 - **mcp**: the server imported `mcp.server.fastmcp.FastMCP`, which does not exist
   in the 2.x SDK that `pip install mcp` resolves, while the project pinned
   `mcp<2`; it now targets `mcp>=2.0,<3` and starts.

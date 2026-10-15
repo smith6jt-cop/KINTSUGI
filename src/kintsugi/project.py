@@ -77,10 +77,11 @@ def write_claude_config(root: str | Path, *, force: bool = False) -> dict[str, A
 
     * ``.mcp.json`` with the ``kintsugi`` stdio server entry. ``command`` is the
       absolute path to the ``kintsugi`` executable (see
-      :func:`_resolve_kintsugi_executable`) so Claude Code can start the server
-      even when the environment's ``bin/`` is not on PATH. No ``cwd`` is written:
-      Claude Code does not honour that field and always starts project servers in
-      the project directory (it also sets ``CLAUDE_PROJECT_DIR`` for the server).
+      :func:`_resolve_kintsugi_executable`) so the client can start the server
+      even when the environment's ``bin/`` is not on PATH, and ``args`` pass
+      ``--project-dir <root>`` so the server knows its project whatever working
+      directory or environment the client gives it (no ``cwd`` is written:
+      several clients ignore that field).
     * ``.claude/settings.local.json`` with ``enabledMcpjsonServers: ["kintsugi"]``,
       which approves exactly this server. ``enableAllProjectMcpServers`` is
       deliberately not set because it would auto-approve every server anyone
@@ -100,7 +101,7 @@ def write_claude_config(root: str | Path, *, force: bool = False) -> dict[str, A
     server_entry = {
         "type": "stdio",
         "command": _resolve_kintsugi_executable(),
-        "args": ["mcp", "start"],
+        "args": ["mcp", "start", "--project-dir", str(root)],
     }
 
     mcp_file = root / ".mcp.json"

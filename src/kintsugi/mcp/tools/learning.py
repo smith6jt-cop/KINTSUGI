@@ -54,7 +54,15 @@ def _engine_key(project_path: str | None) -> str:
 
 
 def _get_learning_engine(project_path: str | None = None):
-    """Get or create the learning engine for ``project_path`` (or the global one)."""
+    """Get or create the learning engine for ``project_path``.
+
+    ``None`` means the project the server was started for, when that is a KINTSUGI
+    project, else the user-wide database only.
+    """
+    if not project_path:
+        from kintsugi.mcp.session import learning_project_root
+
+        project_path = learning_project_root()
     key = _engine_key(project_path)
     engine = _learning_engines.get(key)
     if engine is None:
@@ -96,7 +104,8 @@ async def get_learned_parameters(
         str | None,
         Field(
             description="KINTSUGI project directory holding a project-specific learning "
-            "database; None consults the user-wide global database only"
+            "database; None = the server's project (when one is configured) plus the user-wide "
+            "database"
         ),
     ] = None,
     channel: Annotated[
@@ -204,7 +213,8 @@ async def record_successful_parameters(
         str | None,
         Field(
             description="KINTSUGI project directory holding a project-specific learning "
-            "database; None records to the user-wide global database only"
+            "database; None records to the server's project (when one is configured) and the "
+            "user-wide database"
         ),
     ] = None,
     algorithm_version: Annotated[
@@ -274,7 +284,8 @@ async def get_learning_statistics(
         str | None,
         Field(
             description="KINTSUGI project directory holding a project-specific learning "
-            "database to summarize; None summarizes the user-wide global database only"
+            "database to summarize; None = the server's project (when one is configured) plus "
+            "the user-wide database"
         ),
     ] = None,
 ) -> dict[str, Any]:
@@ -312,7 +323,8 @@ async def suggest_with_learning(
         str | None,
         Field(
             description="KINTSUGI project directory holding a project-specific learning "
-            "database; None consults the user-wide global database only"
+            "database; None = the server's project (when one is configured) plus the user-wide "
+            "database"
         ),
     ] = None,
 ) -> LearningSuggestion:
@@ -529,7 +541,8 @@ async def approve_and_learn(
         str | None,
         Field(
             description="KINTSUGI project directory holding a project-specific learning "
-            "database; None records to the user-wide global database only"
+            "database; None records to the server's project (when one is configured) and the "
+            "user-wide database"
         ),
     ] = None,
 ) -> dict[str, Any]:

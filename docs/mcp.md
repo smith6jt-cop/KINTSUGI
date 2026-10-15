@@ -62,7 +62,7 @@ kintsugi mcp config /path/to/project                    # existing project
     "kintsugi": {
       "type": "stdio",
       "command": "/path/to/env/bin/kintsugi",
-      "args": ["mcp", "start"]
+      "args": ["mcp", "start", "--project-dir", "/path/to/project"]
     }
   }
 }
@@ -74,14 +74,20 @@ kintsugi mcp config /path/to/project                    # existing project
 ```
 
 `command` is the absolute path of the `kintsugi` executable in the environment
-you ran the command from, so Claude Code can start the server even when that
-environment's `bin/` is not on `PATH`. No `cwd` is written: Claude Code always
-starts project servers in the project directory and sets
-`CLAUDE_PROJECT_DIR` in the server's environment, which the tools use as the
-default `project_path`. The equivalent Claude Code command is:
+you ran the command from, so the client can start the server even when that
+environment's `bin/` is not on `PATH`. `--project-dir` tells the server which
+project `project_path` defaults to. MCP clients differ in the working directory
+and environment they give a server (several ignore a `cwd` field, and some pass
+on almost no environment variables), so the project travels in `args`, which
+every client supports. Where a client can set environment variables,
+`KINTSUGI_PROJECT_DIR` does the same; without either, the working directory is
+used only if it contains `kintsugi_project.json`, and tools that need a project
+otherwise ask for `project_path` instead of guessing. The equivalent Claude Code
+command is:
 
 ```bash
-claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start
+claude mcp add --scope project --transport stdio kintsugi -- \
+  kintsugi mcp start --project-dir /path/to/project
 ```
 
 Then open the project folder in Claude Code, accept the workspace trust dialog,
@@ -184,7 +190,7 @@ schemas' size and quality.
 | resource | `kintsugi://session/images` | Loaded channels, shape/dtype/metadata, history counts, memory |
 | resource template | `kintsugi://session/history/{channel}` | Every operation applied to a channel |
 | resource | `kintsugi://learning/stats` | Learning database statistics |
-| resource | `kintsugi://project/channels` | Image files in the project (`CLAUDE_PROJECT_DIR`) |
+| resource | `kintsugi://project/channels` | Image files in the project the server was started for |
 | prompt | `signal_isolation_workflow` | Guided checklist for one marker/blank pair |
 
 ### Progress and images
@@ -229,10 +235,11 @@ the project.
 | Risk | Control |
 |------|---------|
 | Path traversal / symlink escape | `safe_filename` (bare names only), `ensure_within` (resolves symlinks, must stay under the project) on every path argument; `cycle` and `output_name` are validated the same way |
-| Loading a model file the model chose | `denoise_advanced` and `predict_parameters` only accept checkpoints under the project, `CLAUDE_PROJECT_DIR` or `~/.kintsugi/models` (`allowed_model_roots`); PyTorch checkpoints load with `weights_only=True` |
+| Loading a model file the model chose | `denoise_advanced` and `predict_parameters` only accept checkpoints under `project_path` (if it is a KINTSUGI project), the server's project or `~/.kintsugi/models` (`allowed_model_roots`); PyTorch checkpoints load with `weights_only=True` |
 | Resource exhaustion | Schema bounds (`filter_size` 1–99, `n_trials` ≤ 1000, `max_size` ≤ 4096, ...) enforced by the SDK, plus stricter in-body clamps that reject NaN, inf and booleans |
 | Over-broad approval | The generated `settings.local.json` approves only the `kintsugi` server; `enableAllProjectMcpServers` is never written |
 | Stdout corruption | The CLI banner and project loader write to stderr/logging; `tests/test_mcp_stdio.py` asserts the stream is pure JSON-RPC |
+| Writing where the client happened to start the server | Without `--project-dir`, `KINTSUGI_PROJECT_DIR` or a project working directory, tools that need a project return an error asking for `project_path`; nothing is written under an arbitrary working directory |
 
 Not applicable to this server, and deliberately absent: OAuth or API keys, rate
 limiting, DNS-rebinding protection, streamable HTTP. See `SECURITY.md` for how
@@ -703,7 +710,7 @@ content: image block (image/png, 3996 base64 chars) + text
       "tissue": "tonsil",
       "marker": "CD3",
       "quality_improvement": 0.4,
-      "score": 8.3,
+      "score": 12.45,
       "parameters": {
         "method": "weighted",
         "n_ranges": 3

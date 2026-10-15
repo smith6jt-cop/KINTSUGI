@@ -290,8 +290,9 @@ Two SQLite databases are used — a per-project one and a user-wide one:
 <project_dir>/.claude_workflow/parameter_learning.db   # project-local (records here weigh 1.5x)
 ~/.kintsugi/parameter_learning.db                       # user-wide, shared across projects
 ```
-MCP tools resolve `<project_dir>` from their `project_path` argument, which defaults to
-`CLAUDE_PROJECT_DIR` (set by Claude Code) or the server's working directory.
+MCP learning tools use `<project_dir>` from their `project_path` argument; when it is
+omitted they use the project the server was started for (`kintsugi mcp start
+--project-dir` or `KINTSUGI_PROJECT_DIR`), and with no project only the user-wide database.
 
 ### Checking learning statistics
 

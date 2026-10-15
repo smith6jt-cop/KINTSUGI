@@ -688,6 +688,7 @@ class ParameterLearningEngine:
         marker_norm = normalize_marker_name(marker_name)
 
         by_operation: dict[str, list[dict[str, Any]]] = {op: [] for op in operations}
+        seen: dict[str, set[tuple[Any, ...]]] = {op: set() for op in operations}
         for db_path, source, weight in (
             (self.project_db_path, "project", 1.5),  # project records get higher weight
             (self.global_db_path, "global", 1.0),
@@ -705,9 +706,22 @@ class ParameterLearningEngine:
             )
             for op, records in found.items():
                 for r in records:
+                    # record_parameters() mirrors every project record into the
+                    # user-wide database; count each recording once, keeping the
+                    # (higher-weighted) project copy that is read first.
+                    key = (
+                        r["timestamp"],
+                        r["tissue_type"],
+                        r["marker_name"],
+                        r["quality_improvement"],
+                        json.dumps(r["parameters"], sort_keys=True),
+                    )
+                    if key in seen[op]:
+                        continue
+                    seen[op].add(key)
                     r["source"] = source
                     r["weight"] = weight
-                by_operation[op].extend(records)
+                    by_operation[op].append(r)
 
         return {
             op: self._build_recommendation(

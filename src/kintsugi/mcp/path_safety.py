@@ -21,8 +21,8 @@ A third class, **deserialization of model files** chosen by the model
 user's model directory before anything is loaded.
 
 Helpers raise ``PathSafetyError`` / ``ValueError`` on violation. Tool handlers
-catch these and return the existing in-band ``{"error": ...}`` dict, so Claude
-sees the failure and can self-correct.
+catch these and return the existing in-band ``{"error": ...}`` dict, so the
+model sees the failure and can self-correct.
 """
 
 from __future__ import annotations
@@ -31,6 +31,13 @@ import math
 import os
 from collections.abc import Iterable
 from pathlib import Path
+
+# Project resolution lives in the session module; re-exported for existing imports.
+from kintsugi.mcp.session import (  # noqa: F401
+    PROJECT_MARKER,
+    configured_project_root,
+    is_kintsugi_project,
+)
 
 
 class PathSafetyError(ValueError):
@@ -90,34 +97,25 @@ def ensure_within_any(path: str | Path, roots: Iterable[str | Path], param: str 
 
 
 USER_MODEL_DIR_ENV = "KINTSUGI_MODEL_DIR"
-PROJECT_MARKER = "kintsugi_project.json"
-
-
-def is_kintsugi_project(path: str | Path) -> bool:
-    """True when ``path`` is a KINTSUGI project directory (has the project marker file)."""
-    try:
-        return (Path(path).resolve() / PROJECT_MARKER).is_file()
-    except OSError:
-        return False
 
 
 def allowed_model_roots(project_path: str | Path | None = None) -> list[Path]:
     """Directories a tool may load model checkpoints from.
 
     Loading a checkpoint executes a deserializer on a file the model chose, so the
-    file must come from somewhere the user controls: the Claude Code project
-    (``CLAUDE_PROJECT_DIR``) and the user's model directory (``~/.kintsugi/models``
-    or ``$KINTSUGI_MODEL_DIR``). An explicit ``project_path`` is itself a
-    model-supplied argument, so it only counts when it really is a KINTSUGI project
-    (contains ``kintsugi_project.json``); ``project_path="/"`` or any other bare
-    directory does not widen the sandbox.
+    file must come from somewhere the user controls: the project the server was
+    started for (``--project-dir`` / ``KINTSUGI_PROJECT_DIR``) and the user's model
+    directory (``~/.kintsugi/models`` or ``$KINTSUGI_MODEL_DIR``). An explicit
+    ``project_path`` is itself a model-supplied argument, so it only counts when it
+    really is a KINTSUGI project (contains ``kintsugi_project.json``);
+    ``project_path="/"`` or any other bare directory does not widen the sandbox.
     """
     roots: list[Path] = []
     if project_path and is_kintsugi_project(project_path):
         roots.append(Path(project_path))
-    claude_project = os.environ.get("CLAUDE_PROJECT_DIR")
-    if claude_project:
-        roots.append(Path(claude_project))
+    configured = configured_project_root()
+    if configured is not None:
+        roots.append(configured)
     user_dir = os.environ.get(USER_MODEL_DIR_ENV)
     roots.append(Path(user_dir) if user_dir else Path.home() / ".kintsugi" / "models")
     return roots

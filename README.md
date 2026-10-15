@@ -366,10 +366,10 @@ kintsugi mcp config /path/to/project                    # existing project
 This writes `.mcp.json` (the server definition, with the absolute path of the `kintsugi` executable) and `.claude/settings.local.json` (approves the `kintsugi` server only):
 
 ```json
-{"mcpServers": {"kintsugi": {"type": "stdio", "command": "/path/to/env/bin/kintsugi", "args": ["mcp", "start"]}}}
+{"mcpServers": {"kintsugi": {"type": "stdio", "command": "/path/to/env/bin/kintsugi", "args": ["mcp", "start", "--project-dir", "/path/to/project"]}}}
 ```
 
-Open the project in Claude Code, accept the trust dialog, and `/mcp` lists the server with its tools, resources and prompt. Claude Code starts the server in the project directory and sets `CLAUDE_PROJECT_DIR`, which the tools use as the default `project_path`.
+Open the project in Claude Code, accept the trust dialog, and `/mcp` lists the server with its tools, resources and prompt. `--project-dir` sets the project that `project_path` defaults to (`KINTSUGI_PROJECT_DIR` does the same), whatever working directory the client starts the server in.
 
 **Tools** (generated from the registry by `kintsugi mcp tools --write README.md`; CI fails on drift)
 

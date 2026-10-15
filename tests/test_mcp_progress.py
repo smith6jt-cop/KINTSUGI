@@ -293,8 +293,8 @@ async def test_cluster_and_propagate_report_progress(tmp_path, seeded_images):
 # =============================================================================
 
 
-async def test_load_channel_defaults_to_claude_project_dir(tmp_path, monkeypatch, seeded_images):
-    """Without project_path, load_channel reads CLAUDE_PROJECT_DIR."""
+async def test_load_channel_defaults_to_configured_project(tmp_path, monkeypatch, seeded_images):
+    """Without project_path, load_channel uses KINTSUGI_PROJECT_DIR."""
     pytest.importorskip("zarr")
     tifffile = pytest.importorskip("tifffile")
     from kintsugi.mcp.tools.signal_isolation import _loaded_images, load_channel
@@ -305,7 +305,7 @@ async def test_load_channel_defaults_to_claude_project_dir(tmp_path, monkeypatch
     rng = np.random.default_rng(5)
     tifffile.imwrite(raw / "CD3_cyc001.tif", rng.integers(0, 500, (64, 64), dtype=np.uint16))
 
-    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(project))
+    monkeypatch.setenv("KINTSUGI_PROJECT_DIR", str(project))
     result = await load_channel(cycle="1", channel="CD3")
 
     assert result.get("status") == "loaded", result

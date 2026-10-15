@@ -903,29 +903,49 @@ def workspace_set_project(
 
 
 # ============================================================================
-# MCP Server Commands for Claude Code Integration
+# MCP Server Commands (any MCP client)
 # ============================================================================
 
 
 @main.group()
 def mcp():
-    """Claude Code MCP server commands."""
+    """MCP server commands (works with any MCP client)."""
     pass
 
 
 @mcp.command()
-def start():
+@click.option(
+    "--project-dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=None,
+    help="KINTSUGI project that project_path defaults to (must contain kintsugi_project.json).",
+)
+def start(project_dir: Path | None):
     """
-    Start the KINTSUGI MCP server for Claude Code integration.
+    Start the KINTSUGI MCP server (stdio; works with any MCP client).
 
-    The MCP server exposes image processing tools that Claude can use
-    for signal isolation and quality assessment. It speaks JSON-RPC over
-    stdio, so this command writes nothing to stdout itself; status and
-    errors go to stderr.
+    The server exposes image processing tools for signal isolation, quality
+    assessment and parameter learning. It speaks JSON-RPC over stdio, so this
+    command writes nothing to stdout itself; status and errors go to stderr.
 
-    Run 'kintsugi mcp config <project_path>' to generate the .mcp.json
-    configuration file, or use 'kintsugi init' which creates it automatically.
+    --project-dir sets the project that tools use when project_path is omitted;
+    KINTSUGI_PROJECT_DIR does the same. Without either, the working directory is
+    used only if it is a KINTSUGI project.
+
+    Run 'kintsugi mcp config <project_path>' to generate client configuration,
+    or use 'kintsugi init', which creates it automatically.
     """
+    if project_dir is not None:
+        from kintsugi.mcp.session import PROJECT_MARKER, is_kintsugi_project, set_project_root
+
+        if not is_kintsugi_project(project_dir):
+            err_console.print(
+                f"[red]--project-dir {project_dir} is not a KINTSUGI project "
+                f"(no {PROJECT_MARKER}). Create one with 'kintsugi init'.[/red]"
+            )
+            raise SystemExit(2)
+        set_project_root(project_dir)
+
     try:
         import asyncio
 

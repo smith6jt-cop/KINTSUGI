@@ -204,3 +204,22 @@ def test_record_parameters_many_writes_every_entry_in_order(isolated_home, tmp_p
     assert global_only.record_parameters_many(
         entries[:1], tissue_type="tonsil", marker_name="CD3"
     ) == [3]
+
+
+def test_a_mirrored_record_counts_once(isolated_home, tmp_path):
+    """record_parameters writes to the project and the user-wide DB; recall counts it once."""
+    engine = ParameterLearningEngine(str(tmp_path / "proj"))
+    engine.record_parameters(
+        "tonsil", "CD3", "denoise", {"filter_size": 2}, 0.4, 0.8, user_approved=True
+    )
+
+    rec = engine.recommend_parameters("tonsil", "CD3", "denoise")
+
+    assert rec["based_on_records"] == 1
+    assert rec["approved_records"] == 1
+    assert len(rec["similar_records"]) == 1
+    # A different recording with identical parameters is still a separate record.
+    engine.record_parameters(
+        "tonsil", "CD3", "denoise", {"filter_size": 2}, 0.3, 0.9, user_approved=True
+    )
+    assert engine.recommend_parameters("tonsil", "CD3", "denoise")["based_on_records"] == 2

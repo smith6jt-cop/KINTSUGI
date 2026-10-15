@@ -10,7 +10,7 @@ KINTSUGI (Knowledge Integration with New Technologies for Simplified User-Guided
 
 KINTSUGI includes an MCP (Model Context Protocol) server that exposes image processing tools to Claude Code. This enables Claude to act as an AI image processing assistant.
 
-**MCP server** (`src/kintsugi/mcp/`, canonical guide: `docs/mcp.md`): requires `mcp>=2.0,<3` — install with `pip install -e ".[mcp]"` or `kintsugi install mcp` (never `pip install kintsugi[mcp]`, which installs an unrelated PyPI package). Every tool carries a title and behaviour annotations (readOnly/destructive/idempotent/openWorld); the server publishes instructions; input schemas are derived from the handler signatures and enforced (bad enums/ranges are rejected with `isError` before the handler runs) and in-band errors are reported as `isError`; resources `kintsugi://session/images`, `kintsugi://session/history/{channel}`, `kintsugi://learning/stats` and `kintsugi://project/channels`; the `signal_isolation_workflow` prompt; progress notifications on long tools; `get_thumbnail` returns the preview as image content; typed output schemas for `get_image_stats`, `assess_quality`, `suggest_with_learning` and `get_session_state`; new tools `get_session_state` and `unload_channel`; model checkpoints are confined to the project, `CLAUDE_PROJECT_DIR` or `~/.kintsugi/models` and loaded with torch `weights_only=True`. `project_path` arguments default to `CLAUDE_PROJECT_DIR` (or the server's working directory).
+**MCP server** (`src/kintsugi/mcp/`, canonical guide: `docs/mcp.md`): requires `mcp>=2.0,<3` — install with `pip install -e ".[mcp]"` or `kintsugi install mcp` (never `pip install kintsugi[mcp]`, which installs an unrelated PyPI package). Every tool carries a title and behaviour annotations (readOnly/destructive/idempotent/openWorld); the server publishes instructions; input schemas are derived from the handler signatures and enforced (bad enums/ranges are rejected with `isError` before the handler runs) and in-band errors are reported as `isError`; resources `kintsugi://session/images`, `kintsugi://session/history/{channel}`, `kintsugi://learning/stats` and `kintsugi://project/channels`; the `signal_isolation_workflow` prompt; progress notifications on long tools; `get_thumbnail` returns the preview as image content; typed output schemas for `get_image_stats`, `assess_quality`, `suggest_with_learning` and `get_session_state`; new tools `get_session_state` and `unload_channel`; model checkpoints are confined to the project, the server's project or `~/.kintsugi/models` and loaded with torch `weights_only=True`. `project_path` arguments default to the project the server was started for: `kintsugi mcp start --project-dir PATH` (what generated configs pass), else `KINTSUGI_PROJECT_DIR`, else the working directory if it is a KINTSUGI project; otherwise tools that need a project return an error instead of guessing.
 
 ### Creating a Project
 
@@ -36,7 +36,7 @@ my_project/
 └── .vscode/           ← VS Code settings (auto-generated)
 ```
 
-`kintsugi init` (and `kintsugi mcp config`) writes two Claude Code files. `.mcp.json` holds the server definition — `{"mcpServers": {"kintsugi": {"type": "stdio", "command": "<absolute path to kintsugi>", "args": ["mcp", "start"]}}}` — with no `cwd`: Claude Code starts project servers in the project directory and sets `CLAUDE_PROJECT_DIR`. `.claude/settings.local.json` approves only that server: `{"enabledMcpjsonServers": ["kintsugi"]}`. The equivalent CLI form is `claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start`. See `docs/mcp.md`.
+`kintsugi init` (and `kintsugi mcp config`) writes two Claude Code files. `.mcp.json` holds the server definition — `{"mcpServers": {"kintsugi": {"type": "stdio", "command": "<absolute path to kintsugi>", "args": ["mcp", "start", "--project-dir", "<absolute project root>"]}}}` — the project travels in `args` because MCP clients differ in the working directory and environment they give a server. `.claude/settings.local.json` approves only that server: `{"enabledMcpjsonServers": ["kintsugi"]}`. The equivalent CLI form is `claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start --project-dir /path/to/project`. See `docs/mcp.md`.
 
 ### Experiment Metadata
 
@@ -196,8 +196,8 @@ kintsugi mcp config /path/to/project --print-only
 ### MCP Server Commands
 
 ```bash
-# Start the MCP server (usually called by Claude Code automatically; stdout is the JSON-RPC stream)
-kintsugi mcp start
+# Start the MCP server (normally launched by your MCP client; stdout is the JSON-RPC stream)
+kintsugi mcp start --project-dir /path/to/project
 
 # List available tools (the registry is the source of truth)
 kintsugi mcp tools
@@ -305,7 +305,7 @@ python -m build
 - `tool_specs.py` - Declarative `TOOL_SPECS` registry (name, handler, title, description, annotations); feeds `kintsugi mcp tools`
 - `docs_sync.py` - Renders the tool table/list into `<!-- mcp-tools:* -->` doc blocks (`--write`/`--check`)
 - `path_safety.py` - Path confinement (`ensure_within`, model checkpoint roots, numeric clamps)
-- `session.py` - Loaded-channel state and `CLAUDE_PROJECT_DIR` project resolution
+- `session.py` - Loaded-channel state and project resolution (`--project-dir` > `KINTSUGI_PROJECT_DIR` > a project working directory)
 - `schemas.py` / `prompts.py` - Typed output schemas and the `signal_isolation_workflow` prompt
 - `tools/signal_isolation.py` - Signal processing tools
 - `tools/quality_assessment.py` - QC tools
