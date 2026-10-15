@@ -952,7 +952,7 @@ See [License.txt](License.txt) for license information.
 
 A machine-readable `CITATION.cff` is included; GitHub's "Cite this repository"
 button renders it.
-```
+
 <p align="center">
   <img src="docs/CD3e.gif" alt="CD3e signal before and after autofluorescence removal">
 </p>

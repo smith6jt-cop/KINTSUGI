@@ -157,6 +157,22 @@ def test_recommend_parameters_many_matches_single_queries(isolated_home, tmp_pat
     assert many["denoise"]["recommended_parameters"] == {"filter_size": 2}
     assert many["gaussian_subtract"]["status"] == "no_history"
 
+    # The batched window-function query returns the same rows in the same order as
+    # the single-operation query it replaces (recommend_parameters delegates to the
+    # batched path, so this is the comparison that catches a divergence).
+    rows_many = engine._query_similar_records_many(
+        engine.project_db_path, "tonsil", "cd3", operations, 0.0, False
+    )
+    for op in operations:
+        rows_single = engine._query_similar_records(
+            engine.project_db_path, "tonsil", "cd3", op, 0.0, False
+        )
+        assert [r["id"] for r in rows_many[op]] == [r["id"] for r in rows_single]
+    approved = engine._query_similar_records_many(
+        engine.project_db_path, "tonsil", "cd3", ["denoise"], 0.0, True
+    )["denoise"]
+    assert len(approved) == 1 and approved[0]["user_approved"] is True
+
 
 def test_record_parameters_many_writes_every_entry_in_order(isolated_home, tmp_path):
     engine = ParameterLearningEngine(str(tmp_path / "proj"))

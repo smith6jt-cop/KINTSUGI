@@ -19,6 +19,7 @@ from kintsugi.mcp.heuristics import (
     HEURISTIC_OPERATIONS,
     heuristic_suggestion,
     sample_image,
+    sample_step,
     summarize_intensity,
 )
 from kintsugi.mcp.path_safety import (
@@ -354,13 +355,15 @@ async def suggest_parameters(
     """
     if channel not in _loaded_images:
         return {"error": f"Channel not loaded: {channel}"}
+    data = _loaded_images[channel]["data"]
+    step = sample_step(data)
     blank_sample = None
     if blank_channel:
         if blank_channel not in _loaded_images:
             return {"error": f"Blank channel not loaded: {blank_channel}"}
-        blank_sample = sample_image(_loaded_images[blank_channel]["data"])
+        blank_sample = sample_image(_loaded_images[blank_channel]["data"], step=step)
 
-    sample = sample_image(_loaded_images[channel]["data"])
+    sample = sample_image(data, step=step)
     summary = summarize_intensity(sample)
 
     recommendations: dict[str, Any] = {}

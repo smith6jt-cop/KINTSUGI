@@ -13,7 +13,12 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 import numpy as np
 from pydantic import Field
 
-from kintsugi.mcp.heuristics import heuristic_suggestion, sample_image, summarize_intensity
+from kintsugi.mcp.heuristics import (
+    heuristic_suggestion,
+    sample_image,
+    sample_step,
+    summarize_intensity,
+)
 from kintsugi.mcp.schemas import LearningSuggestion
 from kintsugi.mcp.session import _loaded_images
 
@@ -348,14 +353,16 @@ async def suggest_with_learning(
 
     engine = _get_learning_engine(project_path)
 
-    sample = sample_image(_loaded_images[channel]["data"])
+    data = _loaded_images[channel]["data"]
+    step = sample_step(data)
+    sample = sample_image(data, step=step)
     characteristics = ImageCharacteristics.from_image(sample)
     summary = summarize_intensity(sample)
     blank_sample = None
     if blank_channel:
         if blank_channel not in _loaded_images:
             return {"error": f"Blank channel not loaded: {blank_channel}"}
-        blank_sample = sample_image(_loaded_images[blank_channel]["data"])
+        blank_sample = sample_image(_loaded_images[blank_channel]["data"], step=step)
 
     # Get learned parameters for each operation
     operations = list(LEARNING_OPERATIONS)

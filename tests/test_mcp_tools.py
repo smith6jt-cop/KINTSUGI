@@ -1610,6 +1610,53 @@ class TestNewlyRegisteredTools:
         assert "score" in by_name["good"] and "error" in by_name["missing"]
         assert isinstance(result["average_score"], float)
 
+    async def test_intensity_profile_caps_points_and_rejects_3d(self, clear_mcp_state):
+        from kintsugi.mcp.session import _store_image
+        from kintsugi.mcp.tools.visualization import get_intensity_profile
+
+        _store_image("wide", np.ones((4, 999), dtype=np.uint16))
+        _store_image("stack", np.ones((3, 20, 30), dtype=np.uint16))
+        _store_image("single_plane", np.ones((1, 5, 7), dtype=np.uint16))
+
+        wide = await get_intensity_profile(channel="wide")
+        assert len(wide["profile"]["values"]) == 500 == len(wide["profile"]["x"])
+        assert wide["profile"]["x"][0] == 0 and wide["profile"]["x"][-1] == 998
+
+        assert "2-D" in (await get_intensity_profile(channel="stack"))["error"]
+        plane = await get_intensity_profile(channel="single_plane", axis="vertical")
+        assert len(plane["profile"]["values"]) == 5
+
+    async def test_compare_channels_ssim_scales_with_dtype(self, clear_mcp_state):
+        from kintsugi.mcp.session import _store_image
+        from kintsugi.mcp.tools.visualization import compare_channels
+
+        rng = np.random.default_rng(0)
+        _store_image("a8", rng.integers(0, 255, (32, 32)).astype(np.uint8))
+        _store_image("b8", rng.integers(0, 255, (32, 32)).astype(np.uint8))
+        _store_image("stack", np.ones((3, 32, 32), dtype=np.uint8))
+
+        result = await compare_channels(channel1="a8", channel2="b8")
+        comparison = result["comparison"]
+        # Independent noise images are dissimilar; with 16-bit constants SSIM was ~1.
+        assert comparison["ssim"] < 0.5
+        assert comparison["ssim_intensity_range"] == 255.0
+        assert "2-D" in (await compare_channels(channel1="a8", channel2="stack"))["error"]
+
+    async def test_batch_assess_quality_results_are_sorted_worst_first(
+        self, sample_uint16_image, sample_noisy_image, clear_mcp_state
+    ):
+        from kintsugi.mcp.session import _store_image
+        from kintsugi.mcp.tools.quality_assessment import batch_assess_quality
+
+        _store_image("clean", sample_uint16_image)
+        _store_image("noisy", sample_noisy_image)
+
+        result = await batch_assess_quality(channels=["clean", "missing", "noisy"])
+
+        scores = [r["score"] for r in result["results"] if "score" in r]
+        assert scores == sorted(scores) and len(scores) == 2
+        assert result["results"][-1]["channel"] == "missing"
+
     def test_three_tools_are_registered_read_only(self):
         from kintsugi.mcp.tool_specs import TOOL_SPECS
 

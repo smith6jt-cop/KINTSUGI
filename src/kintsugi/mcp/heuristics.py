@@ -56,13 +56,19 @@ class IntensitySummary:
         }
 
 
-def sample_image(data: Any, target_rows: int = 2000) -> np.ndarray:
-    """Sub-sample a loaded image (dask or array) to about ``target_rows`` rows.
+def sample_step(data: Any, target_rows: int = 2000) -> int:
+    """Stride that brings ``data`` down to about ``target_rows`` rows."""
+    return max(1, int(data.shape[0]) // target_rows)
 
-    The same stride is used for the signal and its blank so paired statistics
-    (means, correlations, weighted-range analysis) are computed on matching grids.
+
+def sample_image(data: Any, target_rows: int = 2000, step: int | None = None) -> np.ndarray:
+    """Sub-sample a loaded image (dask or array) with stride ``step``.
+
+    ``step`` defaults to :func:`sample_step`. Pass the signal's step when sampling
+    its blank so paired statistics (means, correlations, weighted-range analysis)
+    are computed on matching grids.
     """
-    step = max(1, int(data.shape[0]) // target_rows)
+    step = step or sample_step(data, target_rows)
     sample = data[::step, ::step]
     return sample.compute() if hasattr(sample, "compute") else np.asarray(sample)
 
@@ -93,6 +99,22 @@ def heuristic_suggestion(
     noise_estimate = summary.noise_estimate
 
     if operation == "blank_subtraction" and method == "weighted":
+        default_weighted = {
+            "method": "weighted",
+            "base_scale_factor": 1.0,
+            "blank_clip_factor": 0,
+            "n_ranges": 5,
+            "range_method": "percentile",
+            "transition_width": 0.1,
+        }
+        if blank_sample is not None and blank_sample.shape != sample.shape:
+            return {
+                "parameters": default_weighted,
+                "rationale": (
+                    f"Default weighted parameters (blank shape {tuple(blank_sample.shape)} "
+                    f"does not match signal shape {tuple(sample.shape)})"
+                ),
+            }
         if blank_sample is not None:
             try:
                 from kintsugi.signal.autofluorescence import analyze_for_weighted_subtraction
@@ -121,15 +143,12 @@ def heuristic_suggestion(
                 }
             except Exception as e:
                 logger.warning(f"Weighted analysis failed, falling back: {e}")
+                return {
+                    "parameters": default_weighted,
+                    "rationale": f"Default weighted parameters (analysis failed: {e})",
+                }
         return {
-            "parameters": {
-                "method": "weighted",
-                "base_scale_factor": 1.0,
-                "blank_clip_factor": 0,
-                "n_ranges": 5,
-                "range_method": "percentile",
-                "transition_width": 0.1,
-            },
+            "parameters": default_weighted,
             "rationale": "Default weighted parameters (no blank loaded)",
         }
 

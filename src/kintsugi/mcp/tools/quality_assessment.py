@@ -371,9 +371,10 @@ async def batch_assess_quality(
                 }
             )
 
-    # Sort by score (lowest first - needs attention)
-    valid_results = [r for r in results if "score" in r]
-    valid_results.sort(key=lambda x: x["score"])
+    # Sort by score (lowest first - needs attention); channels that could not be
+    # assessed keep their error entry at the end.
+    valid_results = sorted((r for r in results if "score" in r), key=lambda x: x["score"])
+    results = valid_results + [r for r in results if "score" not in r]
 
     # Summary statistics
     scores = [r["score"] for r in valid_results]

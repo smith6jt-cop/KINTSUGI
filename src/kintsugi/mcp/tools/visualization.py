@@ -23,6 +23,30 @@ from kintsugi.mcp.session import _get_image
 logger = logging.getLogger("kintsugi.mcp.visualization")
 
 
+def _as_2d(data: Any, name: str) -> Any:
+    """Return ``data`` as a 2-D image (a leading singleton axis is dropped) or raise ValueError."""
+    ndim = getattr(data, "ndim", None)
+    if ndim == 3 and data.shape[0] == 1:
+        data = data[0]
+        ndim = 2
+    if ndim != 2:
+        shape = tuple(getattr(data, "shape", ()))
+        raise ValueError(f"{name} must be a 2-D image for this tool, got shape {shape}")
+    return data
+
+
+def _ssim_dynamic_range(*arrays: np.ndarray) -> float:
+    """The intensity range L that stabilises SSIM: the dtype maximum for integer
+    images, the observed maximum for float images."""
+    largest = 0.0
+    for a in arrays:
+        if np.issubdtype(a.dtype, np.integer):
+            largest = max(largest, float(np.iinfo(a.dtype).max))
+        elif a.size:
+            largest = max(largest, float(np.max(a)))
+    return largest if largest > 0 else 1.0
+
+
 async def get_image_stats(
     channel: Annotated[str, Field(description="Name of loaded channel")],
 ) -> ImageStatsResult:
@@ -272,8 +296,8 @@ async def compare_channels(
     before/after comparison or cross-channel analysis.
     """
     try:
-        data1 = _get_image(channel1)
-        data2 = _get_image(channel2)
+        data1 = _as_2d(_get_image(channel1), channel1)
+        data2 = _as_2d(_get_image(channel2), channel2)
     except ValueError as e:
         return {"error": str(e)}
 
@@ -328,13 +352,16 @@ async def compare_channels(
     std1, std2 = data1.std(), data2.std()
     cov = np.mean((data1 - mean1) * (data2 - mean2))
 
-    c1 = (0.01 * 65535) ** 2
-    c2 = (0.03 * 65535) ** 2
+    # Stabilisers scale with the image range (uint8, uint16 or float data alike).
+    intensity_range = _ssim_dynamic_range(data1, data2)
+    c1 = (0.01 * intensity_range) ** 2
+    c2 = (0.03 * intensity_range) ** 2
 
     ssim = ((2 * mean1 * mean2 + c1) * (2 * cov + c2)) / (
         (mean1**2 + mean2**2 + c1) * (std1**2 + std2**2 + c2)
     )
     comparison["ssim"] = float(ssim)
+    comparison["ssim_intensity_range"] = intensity_range
 
     # Interpretation
     if comparison["correlation"] > 0.95:
@@ -381,7 +408,7 @@ async def get_intensity_profile(
         validate_choice(axis, ("horizontal", "vertical"), "axis")
         if position is not None:
             clamp_float(position, "position", minimum=0.0, maximum=1.0)
-        data = _get_image(channel)
+        data = _as_2d(_get_image(channel), channel)
     except ValueError as e:
         return {"error": str(e)}
 
@@ -404,12 +431,12 @@ async def get_intensity_profile(
         profile = data[:, x].astype(float)
         x_coords = list(range(h))
 
-    # Downsample if too many points
+    # Down-sample long lines to exactly max_points evenly spaced positions.
     max_points = 500
     if len(profile) > max_points:
-        step = len(profile) // max_points
-        profile = profile[::step]
-        x_coords = x_coords[::step]
+        index = np.linspace(0, len(profile) - 1, max_points).round().astype(int)
+        profile = profile[index]
+        x_coords = index.tolist()
 
     return {
         "status": "success",

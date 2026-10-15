@@ -465,7 +465,7 @@ GPU_HARDWARE_AVAILABLE, _reason = check_gpu()
 @pytest.mark.skipif(not GPU_HARDWARE_AVAILABLE, reason="No GPU hardware available")
 ```
 
-**Dev dependencies**: `pytest-asyncio` and `mcp>=2.0,<3` are required for the MCP tests — 186 collected across `tests/test_mcp_tools.py`, `test_mcp_path_safety.py`, `test_mcp_protocol.py`, `test_mcp_config.py`, `test_mcp_stdio.py` and `test_mcp_docs_sync.py` (recount with `pytest --collect-only -q <those files> | tail -1`). Install with `pip install -e ".[dev]"`. `KINTSUGI_REQUIRE_MCP=1` turns MCP skips into failures (CI sets it).
+**Dev dependencies**: `pytest-asyncio` and `mcp>=2.0,<3` are required for the MCP tests — 206 collected across `tests/test_mcp_tools.py`, `test_mcp_path_safety.py`, `test_mcp_protocol.py`, `test_mcp_config.py`, `test_mcp_stdio.py` and `test_mcp_docs_sync.py` (recount with `pytest --collect-only -q <those files> | tail -1`). Install with `pip install -e ".[dev]"`. `KINTSUGI_REQUIRE_MCP=1` turns MCP skips into failures (CI sets it).
 
 ## Code Style
 
