@@ -73,7 +73,7 @@ def _resolve_kintsugi_executable() -> str:
 def write_claude_config(root: str | Path, *, force: bool = False) -> dict[str, Any]:
     """Write the Claude Code MCP configuration for a project.
 
-    Creates (or merges into) two files under ``root``:
+    Creates (or merges into) two files under ``root`` and adds a ``.gitignore`` line:
 
     * ``.mcp.json`` with the ``kintsugi`` stdio server entry. ``command`` is the
       absolute path to the ``kintsugi`` executable (see

@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failures in CI.
 - **evals**: the structural pass reads tools through the client and, under
   `--strict`, also fails on missing titles, missing annotations and untargeted
-  tools; 9 new tasks (26 in total) cover every tool.
+  tools; 12 new tasks (29 in total) cover every tool.
 - **ci**: the test job installs the `claude` extra; the release workflow
   smoke-tests the built wheel over stdio; the MCP eval workflow also triggers on
   pin and CLI changes.

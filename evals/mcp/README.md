@@ -100,7 +100,7 @@ re-describing a tool without regenerating the docs fails the build
   "Use this when …" descriptions, to be confirmed by the agentic pass:
   - background removal: `subtract_blank` / `gaussian_subtract` / `estimate_background`
   - denoising: `denoise` / `denoise_advanced`
-  - quality: `assess_quality` / `compute_snr`
+  - quality: `assess_quality` / `compute_snr` / `batch_assess_quality`
   - parameter suggestion: `suggest_parameters` / `suggest_with_learning` / `get_learned_parameters`
   - record learning: `record_successful_parameters` / `approve_and_learn`
 - **Resources and the prompt** (`kintsugi://session/images`,

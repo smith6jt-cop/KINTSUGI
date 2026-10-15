@@ -52,7 +52,8 @@ kintsugi init /path/to/project --name "My Experiment"   # new project
 kintsugi mcp config /path/to/project                    # existing project
 ```
 
-`kintsugi init` and `kintsugi mcp config` write two files at the project root:
+`kintsugi init` and `kintsugi mcp config` write two files at the project root (and add
+`.claude/settings.local.json`, a per-user file, to the project's `.gitignore`):
 
 ```json
 // .mcp.json — the server definition Claude Code reads

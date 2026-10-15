@@ -188,7 +188,8 @@ kintsugi mcp config /path/to/project --print-only   # Display the configuration 
 kintsugi mcp config /path/to/project --force        # Overwrite an existing kintsugi entry in .mcp.json
 ```
 
-This writes two files. `.mcp.json` at the project root holds the server definition:
+This writes two files and adds `.claude/settings.local.json` to the project's `.gitignore`.
+`.mcp.json` at the project root holds the server definition:
 
 ```json
 {
@@ -206,7 +207,7 @@ There is no `cwd` entry — Claude Code starts project servers in the project di
 sets `CLAUDE_PROJECT_DIR`. `.claude/settings.local.json` approves only that server:
 `{"enabledMcpjsonServers": ["kintsugi"]}`. If `.mcp.json` already exists, the KINTSUGI
 server is added alongside the other entries (use `--force` to replace an existing
-`kintsugi` entry). `kintsugi init` writes the same two files. The equivalent Claude Code
+`kintsugi` entry). `kintsugi init` writes the same files. The equivalent Claude Code
 CLI command is:
 
 ```bash
