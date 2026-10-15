@@ -216,8 +216,13 @@ def _union(existing: Any, wanted: Any) -> Any:
         for key, value in wanted.items():
             merged[key] = _union(existing[key], value) if key in existing else value
         return merged
-    if isinstance(existing, list) and isinstance(wanted, list):
-        return existing + [v for v in wanted if v not in existing]
+    if isinstance(wanted, list):
+        # A setting that accepts "a string or a list" (Gemini's context.fileName)
+        # may hold a single string; keep it as the first element.
+        if isinstance(existing, str):
+            existing = [existing]
+        if isinstance(existing, list):
+            return existing + [v for v in wanted if v not in existing]
     return existing
 
 
@@ -245,7 +250,33 @@ def _merge_json(
 
 # --------------------------------------------------------------------------- TOML
 
-_TOML_HEADER = re.compile(r"^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$")
+_TOML_HEADER = re.compile(r"^\s*\[\[?(.+?)\]\]?\s*(?:#.*)?$")
+_TOML_KEY_PART = re.compile(r"""\s*(?:"((?:[^"\\]|\\.)*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*(\.|$)""")
+
+try:  # Python 3.11+
+    import tomllib as _tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 without tomli
+    try:
+        import tomli as _tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        _tomllib = None  # type: ignore[assignment]
+
+
+def _toml_string(value: str) -> str:
+    """A TOML basic string: escape quote, backslash and control characters only.
+
+    Everything else (including characters outside the BMP) stays literal UTF-8;
+    JSON-style surrogate-pair escapes are not valid TOML.
+    """
+    out = []
+    for ch in value:
+        if ch in ('"', "\\"):
+            out.append("\\" + ch)
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append(f"\\u{ord(ch):04X}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
 
 
 def _toml_value(value: Any) -> str:
@@ -255,7 +286,37 @@ def _toml_value(value: Any) -> str:
         return str(value)
     if isinstance(value, list):
         return "[" + ", ".join(_toml_value(v) for v in value) + "]"
-    return json.dumps(str(value))  # a JSON string is a valid TOML basic string
+    return _toml_string(str(value))
+
+
+def _toml_key_parts(key: str) -> tuple[str, ...] | None:
+    """Split a TOML dotted key into its parts (quotes removed); None if unparseable."""
+    parts: list[str] = []
+    pos = 0
+    while pos < len(key):
+        match = _TOML_KEY_PART.match(key, pos)
+        if not match or match.end() == pos:
+            return None
+        basic, literal, bare, _sep = match.groups()
+        if basic is not None:
+            try:
+                parts.append(json.loads(f'"{basic}"'))
+            except json.JSONDecodeError:
+                return None
+        else:
+            parts.append(literal if literal is not None else bare)
+        pos = match.end()
+    return tuple(parts) or None
+
+
+def _toml_check(text: str, what: str) -> None:
+    """Raise ClientConfigError if ``text`` is not valid TOML (when a parser is available)."""
+    if _tomllib is None:
+        return
+    try:
+        _tomllib.loads(text)
+    except _tomllib.TOMLDecodeError as exc:
+        raise ClientConfigError(f"{what} is not valid TOML ({exc}); left unchanged") from exc
 
 
 def _render_toml(client: ClientSpec, entry: dict[str, Any]) -> str:
@@ -270,27 +331,31 @@ def _merge_toml(
     section = _render_toml(client, entry)
     if not text:
         return section
-    ours = f"{client.key}.{SERVER_NAME}"
+    _toml_check(text, f"the existing {client.path}")
+    ours = (client.key, SERVER_NAME)
     lines = text.splitlines(keepends=True)
     start = end = None
     for i, line in enumerate(lines):
         match = _TOML_HEADER.match(line)
         if not match:
             continue
-        name = match.group(1).replace(" ", "")
-        if start is None and name == ours:
+        parts = _toml_key_parts(match.group(1))
+        if start is None and parts == ours:
             start = i
-        elif start is not None and not name.startswith(ours + "."):
+        elif start is not None and (parts is None or parts[: len(ours)] != ours):
             end = i
             break
     if start is None:
         sep = "" if text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n")
-        return text + sep + section
-    if not force:
+        merged = text + sep + section
+    elif not force:
         return None
-    end = len(lines) if end is None else end
-    tail = "".join(lines[end:])
-    return "".join(lines[:start]) + section + ("\n" + tail if tail else "")
+    else:
+        end = len(lines) if end is None else end
+        tail = "".join(lines[end:])
+        merged = "".join(lines[:start]) + section + ("\n" + tail if tail else "")
+    _toml_check(merged, f"the merged {client.path}")
+    return merged
 
 
 # --------------------------------------------------------------------------- API

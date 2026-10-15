@@ -165,3 +165,60 @@ def test_init_writes_agents_md_and_the_selected_clients(tmp_path, monkeypatch):
 
     bad = runner.invoke(main, ["init", str(tmp_path / "bad"), "--mcp-client", "nope"])
     assert bad.exit_code == 2 and not (tmp_path / "bad").exists()
+
+
+def test_gemini_single_string_file_name_becomes_a_list(project):
+    gemini = mc.by_name()["gemini-cli"]
+    existing = json.dumps({"context": {"fileName": "GEMINI.md"}})
+    data = json.loads(mc.render(gemini, project, COMMAND, existing))
+    assert data["context"]["fileName"] == ["GEMINI.md", "AGENTS.md"]
+
+
+def test_toml_strings_outside_the_bmp_stay_valid(tmp_path):
+    codex = mc.by_name()["codex"]
+    root = tmp_path / 'proj "\U0001f52c" \\ dir'
+    data = tomllib.loads(mc.render(codex, root, COMMAND))
+    assert data["mcp_servers"]["kintsugi"]["args"][-1] == str(root)
+    assert data["mcp_servers"]["kintsugi"]["cwd"] == str(root)
+
+
+@pytest.mark.parametrize(
+    "header", ['[mcp_servers."kintsugi"]', "[ mcp_servers . 'kintsugi' ]"], ids=["basic", "literal"]
+)
+def test_codex_recognises_equivalent_header_keys(project, header):
+    codex = mc.by_name()["codex"]
+    existing = (
+        f'{header}\ncommand = "stale"\n\n'
+        '[mcp_servers."kintsugi".env]\nX = "1"\n\n'
+        '[mcp_servers.other]\ncommand = "other"\n'
+    )
+    assert mc.render(codex, project, COMMAND, existing) is None  # present, no force
+    data = tomllib.loads(mc.render(codex, project, COMMAND, existing, force=True))
+    assert data["mcp_servers"]["kintsugi"]["command"] == COMMAND
+    assert "env" not in data["mcp_servers"]["kintsugi"]
+    assert data["mcp_servers"]["other"] == {"command": "other"}
+
+
+def test_invalid_existing_toml_is_left_untouched(project):
+    (project / ".codex").mkdir()
+    (project / ".codex" / "config.toml").write_text("[mcp_servers\nbroken = \n")
+    with pytest.raises(mc.ClientConfigError, match="not valid TOML"):
+        write_mcp_config(project, ["codex"])
+    assert (project / ".codex" / "config.toml").read_text() == "[mcp_servers\nbroken = \n"
+
+
+def test_init_prints_snippets_for_user_scoped_clients(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+
+    from kintsugi.cli import main
+    from kintsugi.project import KintsugiProject
+
+    monkeypatch.setattr(KintsugiProject, "setup_notebooks", lambda self, **kw: None)
+    root = tmp_path / "desk"
+    result = CliRunner().invoke(
+        main, ["init", str(root), "--force", "--mcp-client", "claude-desktop"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "Claude Desktop: paste into" in result.output
+    assert '"mcpServers"' in result.output and "--project-dir" in result.output
+    assert not (root / ".mcp.json").exists()

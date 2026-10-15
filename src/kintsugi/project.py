@@ -2098,6 +2098,14 @@ class KintsugiProject:
         for path in [*result["written"], result["agents_md"]]:
             if path is not None:
                 print(f"  Wrote {path.relative_to(self.paths.root)}")
+        if result["snippets"]:
+            from kintsugi.mcp.clients import by_name
+
+            registry = by_name()
+            for name, text in result["snippets"].items():
+                client = registry[name]
+                print(f"  {client.display}: paste into {client.path}:")
+                print("\n".join(f"    {line}" for line in text.splitlines()))
 
     def _create_vscode_config(self) -> None:
         """Create VS Code configuration."""
