@@ -8,7 +8,8 @@ pipeline:
   signal-isolation parameters by eye;
 * ``parameter_learning`` - the SQLite-backed engine that records approved
   parameters per tissue and marker and recommends them for new channels;
-* ``workflow_state`` - per-project processing status and audit trail.
+* ``workflow_state`` - per-project processing status and audit trail;
+* ``state_dir`` - where a project's state lives (``<project>/.kintsugi/``).
 
 Names are resolved lazily, so ``from kintsugi.assist import
 ParameterLearningEngine`` does not import ipywidgets, IPython or stackview.
@@ -57,6 +58,10 @@ _EXPORTS = {
     "ParameterRecord": "parameter_learning",
     "normalize_tissue_type": "parameter_learning",
     "normalize_marker_name": "parameter_learning",
+    # Project state directory
+    "project_state_dir": "state_dir",
+    "STATE_DIR_NAME": "state_dir",
+    "LEGACY_STATE_DIR_NAME": "state_dir",
 }
 
 __all__ = list(_EXPORTS)

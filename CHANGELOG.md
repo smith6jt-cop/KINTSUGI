@@ -50,6 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   citation; the README BibTeX entry now carries the full author list and DOI.
 
 ### Changed
+- **BREAKING**: project state moved from `<project>/.claude_workflow/` to
+  `<project>/.kintsugi/` (`kintsugi.assist.state_dir.project_state_dir`). An existing
+  `.claude_workflow/` is read as is and renamed to `.kintsugi/` on the first write, so
+  learned parameters carry over; nothing writes to `.claude_workflow/` any more.
+  `kintsugi init` adds `.kintsugi/` to the project `.gitignore`.
 - **BREAKING**: the MCP server no longer reads `CLAUDE_PROJECT_DIR`. Its default
   project comes from `kintsugi mcp start --project-dir PATH` (the directory must contain
   `kintsugi_project.json`), else `KINTSUGI_PROJECT_DIR`, else the working
@@ -141,6 +146,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instructions in `TROUBLESHOOTING.md`.
 
 ### Fixed
+- **learning**: constructing `ParameterLearningEngine` no longer creates directories or
+  databases; they are created on the first recorded parameters, so read-only MCP tools
+  (`get_learned_parameters`, `suggest_with_learning`, `get_learning_statistics`, the
+  `kintsugi://learning/stats` resource) leave no files behind. A database written before
+  the `algorithm_version` column existed is upgraded when it is first read.
 - **learning**: a record mirrored into both the project and the user-wide
   database is counted once in recommendations (it was counted twice, inflating
   confidence).

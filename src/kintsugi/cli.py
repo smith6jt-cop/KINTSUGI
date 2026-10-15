@@ -4624,6 +4624,7 @@ def init(
 
             project.paths.create_all()
             project.setup_notebooks(overwrite=True)
+            project._ensure_state_gitignored()
             project._create_claude_config()
             project._create_vscode_config()
 

@@ -164,3 +164,57 @@ async def test_resources_without_a_project(bare_cwd):
     assert json.loads(images.contents[0].text)["project_root"] is None
     assert "No project configured" in json.loads(channels.contents[0].text)["error"]
     assert call.is_error and "No project configured" in call.content[0].text
+
+
+@pytest.mark.skipif(not MCP_AVAILABLE, reason="mcp 2.x not installed")
+async def test_learning_reads_create_no_files_and_approval_creates_state(
+    tmp_path, monkeypatch, bare_cwd
+):
+    from mcp.client import Client
+
+    from kintsugi.mcp.server import create_server
+    from kintsugi.mcp.session import _store_image, clear_session
+    from kintsugi.mcp.tools import learning
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    project = _project(tmp_path / "proj")
+    set_project_root(project)
+    learning._learning_engines.clear()
+    clear_session()
+    try:
+        _store_image("cyc001_CD3", np.random.default_rng(0).integers(0, 4000, (32, 32)))
+        lookup = {"tissue_type": "tonsil", "marker_name": "CD3"}
+        async with Client(create_server()) as client:
+            reads = [
+                await client.call_tool(
+                    "get_learned_parameters", {**lookup, "operation": "denoise"}
+                ),
+                await client.call_tool("get_learning_statistics", {}),
+                await client.call_tool(
+                    "suggest_with_learning", {"channel": "cyc001_CD3", **lookup}
+                ),
+            ]
+            await client.read_resource("kintsugi://learning/stats")
+            assert not any(r.is_error for r in reads), [r.content[0].text for r in reads]
+            assert not (project / ".kintsugi").exists()
+            assert list(home.iterdir()) == []
+
+            approved = await client.call_tool(
+                "approve_and_learn",
+                {
+                    "channel": "cyc001_CD3",
+                    **lookup,
+                    "operations_params": {"denoise": {"filter_size": 3}},
+                    "quality_before": 0.3,
+                    "quality_after": 0.8,
+                },
+            )
+        assert not approved.is_error, approved.content[0].text
+        assert (project / ".kintsugi" / "parameter_learning.db").exists()
+        assert (home / ".kintsugi" / "parameter_learning.db").exists()
+    finally:
+        learning._learning_engines.clear()
+        clear_session()

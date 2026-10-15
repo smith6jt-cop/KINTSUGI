@@ -17,13 +17,17 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import numpy as np
+
+from kintsugi.assist.state_dir import project_state_dir
+
+T = TypeVar("T")
 
 # Common tissue type aliases for normalization
 TISSUE_ALIASES = {
@@ -341,6 +345,8 @@ class ParameterLearningEngine:
         )
     """
 
+    DB_NAME = "parameter_learning.db"
+
     def __init__(self, project_path: str | None = None, global_db: bool = True):
         """
         Initialize the learning engine.
@@ -352,21 +358,69 @@ class ParameterLearningEngine:
         self.project_path = Path(project_path) if project_path else None
         self.global_db = global_db
 
-        # Project-specific database
-        if self.project_path:
-            self.project_db_path = self.project_path / ".claude_workflow" / "parameter_learning.db"
-            self.project_db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._init_db(self.project_db_path)
-        else:
-            self.project_db_path = None
+        # Global database (user-wide learning). Nothing is created here: both
+        # databases are created on the first write (see _writable_db), so reading
+        # recommendations or statistics never leaves files behind.
+        self.global_db_path = Path.home() / ".kintsugi" / self.DB_NAME if global_db else None
+        self._schema_ready: set[Path] = set()
 
-        # Global database (user-wide learning)
-        if global_db:
-            self.global_db_path = Path.home() / ".kintsugi" / "parameter_learning.db"
-            self.global_db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._init_db(self.global_db_path)
+    @property
+    def project_db_path(self) -> Path | None:
+        """The project database: ``<project>/.kintsugi/parameter_learning.db``.
+
+        Before the first write this may point at a legacy ``.claude_workflow/``
+        database, which is read as is. It is recomputed on every access, so a
+        cached engine follows a migration done by another engine or process.
+        """
+        if self.project_path is None:
+            return None
+        return project_state_dir(self.project_path) / self.DB_NAME
+
+    def _writable_db(self, scope: str) -> Path:
+        """Create (if needed) and return the project or global database for writing."""
+        if scope == "project":
+            assert self.project_path is not None
+            db_path = project_state_dir(self.project_path, create=True) / self.DB_NAME
         else:
-            self.global_db_path = None
+            assert self.global_db_path is not None
+            db_path = self.global_db_path
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_schema(db_path)
+        return db_path
+
+    def _readable_db(self, db_path: Path | None) -> Path | None:
+        """``db_path`` with an up-to-date schema if the database exists, else ``None``."""
+        if db_path is None or not db_path.exists():
+            return None
+        self._ensure_schema(db_path)
+        return db_path
+
+    def _read_db(self, scope: str, read: Callable[[Path], T]) -> T | None:
+        """Run ``read(path)`` on the project or global database if it exists.
+
+        Returns ``None`` (and creates nothing) when the database does not exist.
+        If another engine or process moves a legacy ``.claude_workflow/`` to
+        ``.kintsugi/`` between resolving the path and opening it, the open fails
+        on the vanished path; the path is then resolved again and read once more.
+        """
+        db_path = self.project_db_path if scope == "project" else self.global_db_path
+        for attempt in range(2):
+            try:
+                path = self._readable_db(db_path)
+                if path is None:
+                    return None
+                return read(path)
+            except sqlite3.OperationalError:
+                if scope != "project" or attempt or db_path is None or db_path.exists():
+                    raise
+                db_path = self.project_db_path  # moved by a concurrent first write
+        return None  # pragma: no cover - the loop returns or raises
+
+    def _ensure_schema(self, db_path: Path) -> None:
+        """Run :meth:`_init_db` once per database (it is idempotent)."""
+        if db_path not in self._schema_ready:
+            self._init_db(db_path)
+            self._schema_ready.add(db_path)
 
     def _init_db(self, db_path: Path):
         """Initialize SQLite database schema."""
@@ -523,10 +577,10 @@ class ParameterLearningEngine:
         if not records:
             return []
         ids: list[int] = []
-        if self.project_db_path:
-            ids = self._insert_records(self.project_db_path, records)
+        if self.project_path is not None:
+            ids = self._insert_records(self._writable_db("project"), records)
         if to_global and self.global_db_path:
-            global_ids = self._insert_records(self.global_db_path, records)
+            global_ids = self._insert_records(self._writable_db("global"), records)
             ids = ids or global_ids
         return ids or [0] * len(records)
 
@@ -689,21 +743,21 @@ class ParameterLearningEngine:
 
         by_operation: dict[str, list[dict[str, Any]]] = {op: [] for op in operations}
         seen: dict[str, set[tuple[Any, ...]]] = {op: set() for op in operations}
-        for db_path, source, weight in (
-            (self.project_db_path, "project", 1.5),  # project records get higher weight
-            (self.global_db_path, "global", 1.0),
-        ):
-            if not (db_path and db_path.exists()):
-                continue
-            found = self._query_similar_records_many(
-                db_path,
-                tissue_norm,
-                marker_norm,
-                operations,
-                min_quality_improvement,
-                approved_only,
-                algorithm_version=algorithm_version,
+        for source, weight in (("project", 1.5), ("global", 1.0)):  # project weighs more
+            found = self._read_db(
+                source,
+                lambda path: self._query_similar_records_many(
+                    path,
+                    tissue_norm,
+                    marker_norm,
+                    operations,
+                    min_quality_improvement,
+                    approved_only,
+                    algorithm_version=algorithm_version,
+                ),
             )
+            if found is None:
+                continue
             for op, records in found.items():
                 for r in records:
                     # record_parameters() mirrors every project record into the
@@ -1227,32 +1281,38 @@ class ParameterLearningEngine:
             "operations": {},
         }
 
-        for db_path, key in [(self.project_db_path, "project"), (self.global_db_path, "global")]:
-            if db_path and db_path.exists():
-                conn = sqlite3.connect(str(db_path))
+        def summarize(db_path: Path) -> tuple[int, list[Any], list[Any], list[Any]]:
+            conn = sqlite3.connect(str(db_path))
+            try:
                 cursor = conn.cursor()
-
                 cursor.execute("SELECT COUNT(*) FROM parameter_records")
-                stats[f"{key}_records"] = cursor.fetchone()[0]
-
+                count = cursor.fetchone()[0]
                 cursor.execute("SELECT DISTINCT tissue_type_normalized FROM parameter_records")
-                stats["unique_tissues"].update(r[0] for r in cursor.fetchall() if r[0])
-
+                tissues = [r[0] for r in cursor.fetchall() if r[0]]
                 cursor.execute("SELECT DISTINCT marker_name_normalized FROM parameter_records")
-                stats["unique_markers"].update(r[0] for r in cursor.fetchall() if r[0])
-
+                markers = [r[0] for r in cursor.fetchall() if r[0]]
                 cursor.execute("""
                     SELECT operation, COUNT(*), AVG(quality_improvement)
                     FROM parameter_records
                     GROUP BY operation
                 """)
-                for op, count, avg_improvement in cursor.fetchall():
-                    if op not in stats["operations"]:
-                        stats["operations"][op] = {"count": 0, "avg_improvement": 0}
-                    stats["operations"][op]["count"] += count
-                    stats["operations"][op]["avg_improvement"] = avg_improvement or 0
-
+                return count, tissues, markers, cursor.fetchall()
+            finally:
                 conn.close()
+
+        for key in ("project", "global"):
+            summary = self._read_db(key, summarize)
+            if summary is None:
+                continue
+            count, tissues, markers, operations = summary
+            stats[f"{key}_records"] = count
+            stats["unique_tissues"].update(tissues)
+            stats["unique_markers"].update(markers)
+            for op, op_count, avg_improvement in operations:
+                if op not in stats["operations"]:
+                    stats["operations"][op] = {"count": 0, "avg_improvement": 0}
+                stats["operations"][op]["count"] += op_count
+                stats["operations"][op]["avg_improvement"] = avg_improvement or 0
 
         stats["unique_tissues"] = list(stats["unique_tissues"])
         stats["unique_markers"] = list(stats["unique_markers"])
@@ -1266,27 +1326,29 @@ class ParameterLearningEngine:
 
         all_records = []
 
-        for db_path, source in [(self.project_db_path, "project"), (self.global_db_path, "global")]:
-            if db_path and db_path.exists():
-                conn = sqlite3.connect(str(db_path))
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-
-                cursor.execute("SELECT * FROM parameter_records WHERE user_approved = 1")
-                for row in cursor.fetchall():
-                    all_records.append(
-                        {
-                            "source": source,
-                            "tissue_type": row["tissue_type"],
-                            "marker_name": row["marker_name"],
-                            "operation": row["operation"],
-                            "parameters": json.loads(row["parameters_json"]),
-                            "quality_improvement": row["quality_improvement"],
-                            "timestamp": row["timestamp"],
-                        }
-                    )
-
+        def approved_rows(db_path: Path) -> list[sqlite3.Row]:
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            try:
+                return conn.execute(
+                    "SELECT * FROM parameter_records WHERE user_approved = 1"
+                ).fetchall()
+            finally:
                 conn.close()
+
+        for source in ("project", "global"):
+            for row in self._read_db(source, approved_rows) or []:
+                all_records.append(
+                    {
+                        "source": source,
+                        "tissue_type": row["tissue_type"],
+                        "marker_name": row["marker_name"],
+                        "operation": row["operation"],
+                        "parameters": json.loads(row["parameters_json"]),
+                        "quality_improvement": row["quality_improvement"],
+                        "timestamp": row["timestamp"],
+                    }
+                )
 
         export_data = {
             "exported": datetime.now().isoformat(),
