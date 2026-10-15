@@ -2,12 +2,19 @@
 
 ## Multiplex image processing for challenging datasets with a focus on user integration rather than automation.  This pipeline includes 2D/3D GPU/CPU illumination correction, stitching, deconvolution, extended depth of focus, registration, autofluorescence removal, segmentation, clustering, and spatial analysis.
 
+**AI-assisted signal isolation:** KINTSUGI ships a [Model Context Protocol (MCP) server](docs/mcp.md) that lets Claude Code drive the toolbox interactively (load, inspect, suggest, apply, assess, save, learn), with enforced tool schemas, path-safe file access, a parameter-learning loop, and an evaluation gate in CI.
+
 Citation Information:
 
-Smith, J. A. et al. Protocol for processing and analyzing multiplexed images improves lymphatic cell identification and spatial architecture in human tissue. STAR Protocols 6, 103976 (2025).
+Smith, J. A. et al. Protocol for processing and analyzing multiplexed images improves lymphatic cell identification and spatial architecture in human tissue. STAR Protocols 6, 103976 (2025). [doi:10.1016/j.xpro.2025.103976](https://doi.org/10.1016/j.xpro.2025.103976)
 
 [![CI](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/ci.yml/badge.svg)](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/ci.yml)
+[![MCP Eval](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/mcp-eval.yml/badge.svg)](https://github.com/smith6jt-cop/KINTSUGI/actions/workflows/mcp-eval.yml)
 [![Documentation Status](https://readthedocs.org/projects/kintsugi/badge/?version=latest)](https://kintsugi.readthedocs.io/en/latest/?badge=latest)
+[![codecov](https://codecov.io/gh/smith6jt-cop/KINTSUGI/branch/main/graph/badge.svg)](https://codecov.io/gh/smith6jt-cop/KINTSUGI)
+[![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](License.txt)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14984518.svg)](https://doi.org/10.5281/zenodo.14984518)
 
 ## Table of Contents
 
@@ -22,6 +29,7 @@ Smith, J. A. et al. Protocol for processing and analyzing multiplexed images imp
 - [Usage](#usage)
   - [Command Line Interface](#command-line-interface)
   - [Python API](#python-api)
+  - [Claude Code Integration (MCP server)](#claude-code-integration-mcp-server)
 - [Notebooks](#notebooks)
 - [HPC/SLURM Job Submission](#hpcslurm-job-submission)
   - [Prerequisites](#prerequisites-hpc)
@@ -42,6 +50,7 @@ The documentation includes:
 - [Installation Guide](https://kintsugi.readthedocs.io/en/latest/installation.html) - Detailed setup instructions for all platforms
 - [Quick Start](https://kintsugi.readthedocs.io/en/latest/quickstart.html) - Get up and running quickly
 - [Processing Workflows](https://kintsugi.readthedocs.io/en/latest/workflows.html) - Step-by-step workflow guides
+- [Claude Code Integration (MCP)](https://kintsugi.readthedocs.io/en/latest/mcp.html) - The MCP server: setup, tools, security model, evaluation
 - [CLI Reference](https://kintsugi.readthedocs.io/en/latest/cli.html) - Command line interface documentation
 - [API Reference](https://kintsugi.readthedocs.io/en/latest/api.html) - Python API documentation
 - [Troubleshooting](https://kintsugi.readthedocs.io/en/latest/TROUBLESHOOTING.html) - Common issues and solutions
@@ -133,7 +142,7 @@ kintsugi install dl               # Deep learning segmentation (InstanSeg)
 kintsugi install analysis         # Spatial analysis (scanpy, scimap)
 kintsugi install viz              # Napari interactive visualization
 kintsugi install bio              # Bio formats I/O (OME-TIFF, LIF)
-kintsugi install claude           # Claude Code MCP integration
+kintsugi install mcp              # MCP server for AI assistants
 kintsugi install dev              # Development tools (pytest, ruff, black)
 
 # Or install everything at once (resolves all constraints together)
@@ -262,7 +271,7 @@ kintsugi template -o my_config.json
 | **libvips** | High-performance image I/O | `conda install libvips` (Linux), `brew install vips` (macOS), or Zenodo (Windows) |
 | **VALIS** | Image registration | Included in base install |
 | **CuPy** | GPU acceleration (optional) | `kintsugi install gpu` |
-| **PyTorch** | Deep learning (optional) | `kintsugi install torch` |
+| **PyTorch** | Deep learning (optional) | `kintsugi install gpu` (CUDA build) |
 | **RAPIDS** | GPU data science (optional) | See [installation docs](docs/installation.md#rapids-gpu-accelerated-data-science-optional) |
 
 > **Note:** Java, Maven, and FIJI/CLIJ2 are no longer required. KINTSUGI now uses pure Python
@@ -342,50 +351,46 @@ from kintsugi.denoise import adaptive_denoise, denoise_n2v
 denoised = adaptive_denoise(image, strength="auto")
 ```
 
-### Claude Code Integration
+### Claude Code Integration (MCP server)
 
-KINTSUGI includes an MCP (Model Context Protocol) server that enables Claude Code to act as an AI-powered image processing assistant.
+KINTSUGI includes a [Model Context Protocol](https://modelcontextprotocol.io) server that lets Claude Code act as an image-processing assistant: it can load channels, inspect them, suggest and apply autofluorescence subtraction, score the result, save it, and record what worked for next time. Full guide: [docs/mcp.md](docs/mcp.md).
 
-**Setup:**
+**Setup**
 
 ```bash
-# Install Claude Code dependencies
-pip install kintsugi[claude]
+pip install -e ".[mcp]"   # or: kintsugi install mcp   (requires mcp>=2.0)
+kintsugi init /path/to/project --name "My Experiment"   # new project: config is generated
+kintsugi mcp config /path/to/project                    # existing project
 ```
 
-**If creating a new project:** Use `kintsugi init` - Claude Code configuration is created automatically.
+This writes `.mcp.json` (the server definition, with the absolute path of the `kintsugi` executable) and `.claude/settings.local.json` (approves the `kintsugi` server only):
 
-**If adding to an existing project:**
-```bash
-kintsugi mcp config /path/to/your/project
+```json
+{"mcpServers": {"kintsugi": {"type": "stdio", "command": "/path/to/env/bin/kintsugi", "args": ["mcp", "start", "--project-dir", "/path/to/project"]}}}
 ```
 
-**Available Tools:**
+Open the project in Claude Code, accept the trust dialog, and `/mcp` lists the server with its tools, resources and prompt. `--project-dir` sets the project that `project_path` defaults to (`KINTSUGI_PROJECT_DIR` does the same), whatever working directory the client starts the server in.
 
-| Category | Tools |
-|----------|-------|
-| Signal Isolation | `load_channel`, `subtract_blank`, `denoise`, `denoise_advanced`, `apply_clahe`, `clean_background` |
-| Quality Assessment | `assess_quality`, `compute_snr` |
-| Workflow | `list_channels`, `save_processed`, `suggest_parameters` |
-| Parameter Learning | `get_learned_parameters`, `approve_and_learn`, `suggest_with_learning` |
+**Tools** (generated from the registry by `kintsugi mcp tools --write README.md`; CI fails on drift)
 
-**Parameter Learning:**
+<!-- mcp-tools:list:begin -->
+- **Signal isolation:** `load_channel`, `subtract_blank`, `analyze_weighted_subtraction`, `denoise`, `apply_clahe`, `clean_background`, `gaussian_subtract`, `denoise_advanced`, `cluster_channels`, `propagate_parameters`, `optimize_parameters`, `predict_parameters`, `estimate_background`
+- **Quality assessment:** `assess_quality`, `compute_snr`, `batch_assess_quality`
+- **Visualization:** `get_image_stats`, `get_thumbnail`, `compare_channels`, `get_intensity_profile`
+- **Workflow:** `list_channels`, `save_processed`, `get_processing_history`, `suggest_parameters`, `generate_jupyter_cell`, `get_session_state`, `unload_channel`
+- **Parameter learning:** `get_learned_parameters`, `record_successful_parameters`, `suggest_with_learning`, `approve_and_learn`, `get_learning_statistics`
 
-The system learns from successful parameter choices:
-- Parameters are stored in SQLite databases indexed by tissue type and marker name
-- Future recommendations are weighted by past success
-- Use `approve_and_learn` to record successful parameters
+32 tools. Generated by `kintsugi mcp tools --write`; do not edit by hand.
+<!-- mcp-tools:list:end -->
 
-**Example Claude Interaction:**
+Plus four resources (`kintsugi://session/images`, `kintsugi://session/history/{channel}`, `kintsugi://learning/stats`, `kintsugi://project/channels`) and a `signal_isolation_workflow` prompt.
 
-```
-User: "Load the CD3 channel and suggest denoising parameters"
-Claude: [Uses load_channel and suggest_with_learning tools]
-Claude: "Based on the image analysis and learned history for tonsil tissue,
-         I recommend NLM denoising with patch_size=7, strength=0.15..."
-```
+**What is distinctive**
 
-See `notebooks/MIGRATION_GUIDE.md` for detailed migration instructions from legacy notebooks.
+- Tool schemas are derived from the handler signatures and enforced by the SDK (bad enums or out-of-range values are rejected before the handler runs); every tool returns structured content, and the ones the model reasons over most declare typed output schemas.
+- Every path the model supplies is confined to the project; model checkpoints load only from user-controlled directories, with `weights_only=True`.
+- A parameter-learning loop (`suggest_with_learning` → process → `assess_quality` → `approve_and_learn`) stores approved parameters in SQLite, keyed by normalised tissue and marker, and recommends them back with a confidence score.
+- The tool surface is measured, not assumed: `python evals/mcp/harness.py --strict` runs in CI and `evals/mcp/demo.py` records a real session into the docs.
 
 ### Notebook Dependency Checking
 
@@ -517,16 +522,16 @@ kintsugi workflow run /path/to/project
 
 #### Multi-Account Architecture
 
-KINTSUGI distributes jobs across non-blocked SLURM accounts, each with its own GPU and CPU pools. As of Apr 8 2026, `clive` is in `BLOCKED_ACCOUNTS` (its QOS pool was throttled and is regularly saturated by other group members), so the active configuration is **maigan only**:
+KINTSUGI distributes jobs across non-blocked SLURM accounts, each with its own GPU and CPU pools. Accounts whose QOS pool is throttled or regularly saturated by other users can be listed in `BLOCKED_ACCOUNTS` (`src/kintsugi/hpc.py`) so scheduling uses the remaining accounts. Example with a single active account:
 
 | Account | GPUs | GPU Slots | CPUs | CPU Slots | Calculation |
 |---------|------|-----------|------|-----------|-------------|
-| `maigan` | 2 | 2 | 80 | 8 | floor(0.85 * 80 / 8) |
+| `<account>` | 2 | 2 | 80 | 8 | floor(0.85 * 80 / 8) |
 | **Total** | | **2** | | **8** | **10 concurrent jobs** |
 
 Cycles are **pre-assigned** to accounts at DAG creation time via `_build_cycle_assignment()` for deterministic scheduling. Each rule uses lambda resource functions to route jobs to the correct account, partition, and resource allocation. GPU jobs use `gres="gpu:1"` (not `gpus=1`, which triggers SLURM_TRES_PER_TASK conflicts on SLURM >= 24.11).
 
-**Live-aware routing** (Apr 8 2026): `kintsugi workflow run` queries `detect_live_multi_account()` and forwards per-account `gpu_avail`/`cpu_avail`/`mem_avail_gb` to Snakemake via `--config live_accounts=<json>`. The Snakefile assignment helpers use the live data to skip accounts saturated by **other users on the same QOS investment pool**, which is the failure mode that previously caused jobs to get stuck on `QOSGrpMemLimit`. Hard-fails if every account has zero live availability instead of queueing forever.
+**Live-aware routing:** `kintsugi workflow run` queries `detect_live_multi_account()` and forwards per-account `gpu_avail`/`cpu_avail`/`mem_avail_gb` to Snakemake via `--config live_accounts=<json>`. The Snakefile assignment helpers use the live data to skip accounts saturated by **other users on the same QOS investment pool**, which is the failure mode that previously caused jobs to get stuck on `QOSGrpMemLimit`. Hard-fails if every account has zero live availability instead of queueing forever.
 
 #### Workflow Configuration (`workflow/config.yaml`)
 
@@ -545,9 +550,9 @@ tile_overlap: 0.3
 
 resources:
   accounts:
-    - name: maigan
-      partition_gpu: "hpg-b200,hpg-turin"
-      partition_cpu: hpg-default
+    - name: <account>
+      partition_gpu: "<gpu-partition>"
+      partition_cpu: <cpu-partition>
       gpu_slots: 2
       cpu_slots: 8
   total_gpu_slots: 2
@@ -935,12 +940,19 @@ See [License.txt](License.txt) for license information.
 ```bibtex
 @article{smith2025protocol,
   title={Protocol for processing and analyzing multiplexed images improves lymphatic cell identification and spatial architecture in human tissue},
-  author={Smith, J. A. and others},
+  author={Smith, Justin A. and Bloss, Drew T. and Williams, MacKenzie D. and Posgai, Amanda L. and Brusko, Todd M. and Atkinson, Mark A. and Wasserfall, Clive H. and Brusko, Maigan A.},
   journal={STAR Protocols},
   volume={6},
+  number={3},
   pages={103976},
-  year={2025}
+  year={2025},
+  doi={10.1016/j.xpro.2025.103976}
 }
 ```
+
+A machine-readable `CITATION.cff` is included; GitHub's "Cite this repository"
+button renders it.
+
 <p align="center">
-  <img src="/docs/CD3e.gif" alt="CD31 Autofluorescence Removal" style="float: right; margin-left: 20px;">
+  <img src="docs/CD3e.gif" alt="CD3e signal before and after autofluorescence removal">
+</p>

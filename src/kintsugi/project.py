@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 import shutil
@@ -32,6 +33,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, Literal
+
+logger = logging.getLogger(__name__)
 
 # Project configuration filename
 PROJECT_CONFIG_FILE = "kintsugi_project.json"
@@ -65,6 +68,90 @@ def _resolve_kintsugi_executable() -> str:
 
     # Last resort: bare command name (resolved from PATH at launch time).
     return "kintsugi"
+
+
+def write_claude_config(root: str | Path, *, force: bool = False) -> dict[str, Any]:
+    """Write the Claude Code MCP configuration for a project.
+
+    Creates (or merges into) two files under ``root`` and adds a ``.gitignore`` line:
+
+    * ``.mcp.json`` with the ``kintsugi`` stdio server entry. ``command`` is the
+      absolute path to the ``kintsugi`` executable (see
+      :func:`_resolve_kintsugi_executable`) so the client can start the server
+      even when the environment's ``bin/`` is not on PATH, and ``args`` pass
+      ``--project-dir <root>`` so the server knows its project whatever working
+      directory or environment the client gives it (no ``cwd`` is written:
+      several clients ignore that field).
+    * ``.claude/settings.local.json`` with ``enabledMcpjsonServers: ["kintsugi"]``,
+      which approves exactly this server. ``enableAllProjectMcpServers`` is
+      deliberately not set because it would auto-approve every server anyone
+      later adds to ``.mcp.json``.
+
+    Existing entries for other servers and other settings keys are preserved.
+    An existing ``kintsugi`` entry is left alone unless ``force`` is true.
+
+    ``.claude/settings.local.json`` is a per-user file (Claude Code itself adds it
+    to ``.gitignore`` when it creates one), so the project's ``.gitignore`` gains a
+    line for it unless an equivalent entry already exists.
+
+    Returns ``{"mcp_json": Path, "settings": Path, "gitignore": Path, "server": dict}``:
+    the file paths and the ``kintsugi`` server entry that was written (or found).
+    """
+    root = Path(root).resolve()
+    server_entry = {
+        "type": "stdio",
+        "command": _resolve_kintsugi_executable(),
+        "args": ["mcp", "start", "--project-dir", str(root)],
+    }
+
+    mcp_file = root / ".mcp.json"
+    config: dict = {}
+    if mcp_file.exists():
+        with open(mcp_file) as f:
+            config = json.load(f) or {}
+    servers = config.setdefault("mcpServers", {})
+    if force or "kintsugi" not in servers:
+        servers["kintsugi"] = server_entry
+        with open(mcp_file, "w") as f:
+            json.dump(config, f, indent=2)
+            f.write("\n")
+
+    claude_dir = root / ".claude"
+    claude_dir.mkdir(exist_ok=True)
+    settings_file = claude_dir / "settings.local.json"
+    settings: dict = {}
+    if settings_file.exists():
+        with open(settings_file) as f:
+            settings = json.load(f) or {}
+    enabled = list(settings.get("enabledMcpjsonServers", []))
+    if "kintsugi" not in enabled:
+        enabled.append("kintsugi")
+        settings["enabledMcpjsonServers"] = enabled
+        with open(settings_file, "w") as f:
+            json.dump(settings, f, indent=2)
+            f.write("\n")
+
+    gitignore = _ensure_gitignored(root, ".claude/settings.local.json")
+
+    return {
+        "mcp_json": mcp_file,
+        "settings": settings_file,
+        "gitignore": gitignore,
+        "server": servers["kintsugi"],
+    }
+
+
+def _ensure_gitignored(root: Path, pattern: str) -> Path:
+    """Add ``pattern`` to ``root/.gitignore`` unless an equivalent line is present."""
+    gitignore = root / ".gitignore"
+    lines = gitignore.read_text().splitlines() if gitignore.exists() else []
+    if any(line.strip().lstrip("/") == pattern for line in lines):
+        return gitignore
+    with open(gitignore, "a") as f:
+        if lines and lines[-1].strip():
+            f.write("\n")
+        f.write(f"# Per-user Claude Code settings written by kintsugi\n{pattern}\n")
+    return gitignore
 
 
 # Common image file extensions
@@ -1465,9 +1552,14 @@ class KintsugiProject:
 
         project = cls(root, config, kintsugi_path)
 
-        print(f"[OK] Loaded project: {project.config.name}")
-        print(f"  Created: {project.config.created[:10]}")
-        print(f"  Modified: {project.config.modified[:10]}")
+        # Log rather than print: load() runs inside the MCP server, whose stdout
+        # carries the JSON-RPC stream and must stay clean.
+        logger.info(
+            "Loaded project %s (created %s, modified %s)",
+            project.config.name,
+            project.config.created[:10],
+            project.config.modified[:10],
+        )
 
         return project
 
@@ -1924,37 +2016,13 @@ class KintsugiProject:
         """Create Claude Code MCP configuration.
 
         Creates .mcp.json at project root (MCP server definition) and
-        .claude/settings.local.json (enables the server).
+        .claude/settings.local.json (enables the server). See
+        :func:`write_claude_config` for the exact contents.
         """
-        # Create .mcp.json with the MCP server definition
-        mcp_file = self.paths.root / ".mcp.json"
-        if not mcp_file.exists():
-            mcp_config = {
-                "mcpServers": {
-                    "kintsugi": {
-                        "command": _resolve_kintsugi_executable(),
-                        "args": ["mcp", "start"],
-                        "cwd": str(self.paths.root),
-                    }
-                }
-            }
-            with open(mcp_file, "w") as f:
-                json.dump(mcp_config, f, indent=2)
-                f.write("\n")
+        existed = (self.paths.root / ".mcp.json").exists()
+        write_claude_config(self.paths.root)
+        if not existed:
             print("  Created .mcp.json")
-
-        # Create .claude/settings.local.json to enable the MCP server
-        claude_dir = self.paths.root / ".claude"
-        claude_dir.mkdir(exist_ok=True)
-        settings_file = claude_dir / "settings.local.json"
-        if not settings_file.exists():
-            settings_config = {
-                "enableAllProjectMcpServers": True,
-                "enabledMcpjsonServers": ["kintsugi"],
-            }
-            with open(settings_file, "w") as f:
-                json.dump(settings_config, f, indent=2)
-                f.write("\n")
             print("  Created .claude/settings.local.json")
 
     def _create_vscode_config(self) -> None:

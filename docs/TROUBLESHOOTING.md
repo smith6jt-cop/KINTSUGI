@@ -17,6 +17,7 @@ This guide covers common issues and their solutions when installing or running K
   - [Stitched Image Quality Issues](#stitched-image-quality-issues)
   - [Registration Failures](#registration-failures)
 - [HPC/SLURM Issues](#hpcslurm-issues)
+- [MCP Server (Claude Code)](#mcp-server-claude-code)
 - [Platform-Specific Issues](#platform-specific-issues)
   - [Windows](#windows)
   - [Linux](#linux)
@@ -168,51 +169,10 @@ print(f"libvips version: {pyvips.version(0)}.{pyvips.version(1)}.{pyvips.version
 > **Note:** Java, Maven, and FIJI/CLIJ2 are no longer required. KINTSUGI now uses pure Python
 > implementations for all processing. This section is kept for users of older versions.
 
-**Symptom**: `java.lang.Exception` or `JVMNotFoundException`.
-
-#### Check Java Installation
-
-```bash
-java -version
-echo $JAVA_HOME  # Linux/macOS
-echo %JAVA_HOME%  # Windows
-```
-
-#### Fix Missing Java
-
-1. **Install via conda** (recommended):
-   ```bash
-   conda install openjdk=11
-   ```
-
-2. **Download from Zenodo** (Windows):
-   - Download java-jdk21 from Zenodo
-   - Extract to KINTSUGI folder
-
-3. **Set JAVA_HOME**:
-   ```bash
-   # Linux/macOS
-   export JAVA_HOME=/path/to/java
-   export PATH=$JAVA_HOME/bin:$PATH
-
-   # Windows PowerShell
-   $env:JAVA_HOME = "C:\Users\[username]\KINTSUGI\java-jdk21"
-   $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
-   ```
-
-#### JVM Already Started Error
-
-**Symptom**: `JVMAlreadyStarted` exception.
-
-This occurs when trying to start JVM multiple times. Solutions:
-
-1. **Restart Python kernel** (in Jupyter)
-2. **Single JVM initialization**:
-   ```python
-   import jpype
-   if not jpype.isJVMStarted():
-       jpype.startJVM()
-   ```
+If an older notebook, environment file or error message still mentions `jpype`,
+`scyjava`, `JAVA_HOME` or Maven, you are running code from a pre-1.0 release:
+update to the current version and recreate the environment from `envs/`. No
+current KINTSUGI component installs or starts a JVM.
 
 ---
 
@@ -544,6 +504,57 @@ tail /path/to/project/slurm/logs/snakemake/stitch_cyc01.log
 
 ---
 
+## MCP Server (Claude Code)
+
+The KINTSUGI MCP server is started by Claude Code from the project's `.mcp.json`
+(written by `kintsugi init` or `kintsugi mcp config`). Run `/mcp` inside Claude Code to see
+the server's state and its tools. Full guide: [Claude Code Integration (MCP Server)](mcp.md).
+
+### "Executable not found in $PATH: kintsugi"
+
+Claude Code could not find the `kintsugi` command — typically because the `.mcp.json` entry
+uses a bare `kintsugi` and Claude Code was launched outside the conda/venv environment.
+Regenerate the entry so it carries the absolute path of the executable:
+
+```bash
+conda activate KINTSUGI             # the environment where kintsugi is installed
+kintsugi mcp config /path/to/project --force
+cat /path/to/project/.mcp.json      # "command" is now e.g. /home/you/envs/KINTSUGI/bin/kintsugi
+```
+
+The generated entry is `{"type": "stdio", "command": "<absolute path>", "args": ["mcp", "start",
+"--project-dir", "<project>"]}`. Then restart your MCP client (in Claude Code, `/mcp` reconnects).
+
+### "No project configured"
+
+The server was started without `--project-dir`, without `KINTSUGI_PROJECT_DIR`, and in a
+working directory that is not a KINTSUGI project, so it cannot guess which project a tool
+means. Regenerate the client configuration (`kintsugi mcp config /path/to/project --force`,
+which adds `--project-dir`), or pass `project_path` in the tool call.
+
+### Server shows "Pending approval"
+
+Project-scoped servers run only in a trusted folder. Accept the workspace trust dialog when
+Claude Code opens the project; the approval written by `kintsugi mcp config` is
+`.claude/settings.local.json` → `{"enabledMcpjsonServers": ["kintsugi"]}`. If an earlier
+decision rejected the server, clear it with `claude mcp reset-project-choices` and reopen
+the project.
+
+### "mcp 1.x is installed but KINTSUGI requires mcp>=2.0,<3"
+
+The server targets the 2.x SDK (`mcp.server.mcpserver.MCPServer`); the 1.x
+`mcp.server.fastmcp` API is not supported. Upgrade in the environment the server starts from:
+
+```bash
+pip install "mcp>=2.0,<3"           # or: pip install -e ".[mcp]"  /  kintsugi install mcp
+kintsugi check                      # should list the MCP server as available
+```
+
+`kintsugi mcp start` prints the same message to stderr (stdout is reserved for JSON-RPC).
+Never run `pip install kintsugi[mcp]` — it installs an unrelated PyPI package.
+
+---
+
 ## Platform-Specific Issues
 
 ### Windows
@@ -668,3 +679,6 @@ If you're still experiencing issues:
 | Snakemake not found | `pip install "snakemake>=8.0" snakemake-executor-plugin-slurm` |
 | SLURM OOM kill | GPU: 48 GB RAM; CPU: 128 GB RAM — increase in config.yaml |
 | SLURM_TRES_PER_TASK error | Patch jobstep plugin (see HPC section above) |
+| `Executable not found in $PATH: kintsugi` (MCP) | `kintsugi mcp config /path/to/project --force` from the activated env |
+| MCP server "Pending approval" | Accept the trust dialog; `claude mcp reset-project-choices` |
+| `mcp 1.x is installed` (MCP) | `pip install "mcp>=2.0,<3"` |

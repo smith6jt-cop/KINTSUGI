@@ -7,6 +7,199 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **mcp**: every tool is advertised with a title and MCP behaviour annotations
+  (readOnly / destructive / idempotent / openWorld); the server publishes
+  instructions, a version and a website URL.
+- **mcp**: resources `kintsugi://session/images`,
+  `kintsugi://session/history/{channel}`, `kintsugi://learning/stats` and
+  `kintsugi://project/channels`, and the `signal_isolation_workflow` prompt.
+- **mcp**: progress notifications on long-running tools (weighted
+  `subtract_blank`, `denoise_advanced`, `optimize_parameters`, `cluster_channels`,
+  `propagate_parameters`); `get_thumbnail` returns the preview as an image content
+  block.
+- **mcp**: typed output schemas for `get_image_stats`, `assess_quality`,
+  `suggest_with_learning` and `get_session_state`; structured output on all tools.
+- **mcp**: new tools `get_session_state` and `unload_channel`; 25 previously hidden
+  parameters are now advertised (including `subtract_blank` `method="weighted"`).
+- **cli**: `kintsugi mcp tools --markdown`, `--write FILE` and `--check FILE`
+  (backed by the new `kintsugi.mcp.docs_sync`) generate and verify the tool
+  reference embedded in `docs/mcp.md`, `docs/cli.md`, `README.md` and `CLAUDE.md`;
+  `kintsugi mcp config --force` overwrites an existing `kintsugi` entry.
+- **learning**: `LEARNING_OPERATIONS` and `HISTORY_TO_LEARNING_OP` constants used by
+  the MCP learning tools to validate operation names; recommendations report
+  `approved_records` and `bootstrap_records`.
+- **tests**: `test_mcp_protocol.py` (registry parity, metadata on the wire,
+  schema/signature parity, validation errors as `isError`, structured round trips),
+  `test_mcp_config.py`, `test_mcp_stdio.py` (raw JSON-RPC over a real subprocess)
+  and `test_mcp_docs_sync.py`; `KINTSUGI_REQUIRE_MCP=1` turns MCP skips into
+  failures in CI.
+- **evals**: the structural pass reads tools through the client and, under
+  `--strict`, also fails on missing titles, missing annotations and untargeted
+  tools; 12 new tasks (29 in total) cover every tool.
+- **ci**: the test job installs the `mcp` extra; the release workflow
+  smoke-tests the built wheel over stdio; the MCP eval workflow also triggers on
+  pin and CLI changes.
+- **docs**: `docs/mcp.md` is the canonical MCP page; the other pages link to it.
+- **mcp**: `compare_channels`, `get_intensity_profile` and `batch_assess_quality`
+  (implemented and tested but never registered) are now on the tool surface with
+  titles, annotations and eval tasks; 32 tools in total.
+- **project**: `kintsugi init` and `kintsugi mcp config` add
+  `.claude/settings.local.json` (a per-user file) to the project's `.gitignore`.
+- **docs**: `CITATION.cff` with the STAR Protocols article as the preferred
+  citation; the README BibTeX entry now carries the full author list and DOI.
+
+### Changed
+- **BREAKING**: the MCP server no longer reads `CLAUDE_PROJECT_DIR`. Its default
+  project comes from `kintsugi mcp start --project-dir PATH` (the directory must contain
+  `kintsugi_project.json`), else `KINTSUGI_PROJECT_DIR`, else the working
+  directory only if it is a KINTSUGI project. Without one, `load_channel`,
+  `list_channels`, `save_processed` and the `kintsugi://project/channels` resource
+  return an error asking for `project_path`, and `save_processed` never creates
+  directories under an arbitrary working directory. Learning tools default to the
+  configured project's database plus the user-wide one (previously user-wide
+  only), and `get_session_state` reports `project_root: null` when no project is
+  configured. `kintsugi mcp config` / `kintsugi init` now write
+  `"args": ["mcp", "start", "--project-dir", "<project>"]`; regenerate existing
+  entries with `kintsugi mcp config PROJECT --force`.
+- **BREAKING**: the package `kintsugi.claude` is now `kintsugi.assist` (parameter
+  learning, Jupyter tuners, workflow state), and the optional dependency group /
+  pip extra `claude` is now `mcp` (`pip install -e ".[mcp]"` or `kintsugi install
+  mcp`). The MCP server works with any MCP client, so neither name should point at
+  one vendor. There are no aliases: `import kintsugi.claude` fails and `kintsugi
+  install claude` exits with a pointer to the new name. The package's exports now
+  resolve lazily, so importing the learning engine no longer imports ipywidgets or
+  stackview; the unused `httpx` dependency left the extra.
+- **notebooks**: the parameter-learning cells of `3_Signal_Isolation_QC.ipynb`
+  imported `ParameterLearningEngine` from a module that never defined it, read
+  result keys the engine does not return (`found`, `sample_count`) and recorded
+  cleaning parameters under an unknown operation; they now import from
+  `kintsugi.assist`, check `status`, read `based_on_records` and record
+  `clean_background`.
+- **mcp**: the server now requires the 2.x Python SDK (`mcp>=2.0,<3`,
+  `mcp.server.mcpserver.MCPServer`) through the import gate `kintsugi.mcp._sdk`,
+  which distinguishes "mcp is not installed" from "an unsupported mcp 1.x is
+  installed". The 1.x `mcp.server.fastmcp` API is no longer supported. Install
+  with `pip install -e ".[mcp]"` or `kintsugi install mcp`.
+- **mcp**: generated Claude Code configuration changed shape. `.mcp.json` holds
+  `{"mcpServers": {"kintsugi": {"type": "stdio", "command": "<absolute path to
+  kintsugi>", "args": ["mcp", "start"]}}}` with no `cwd` (Claude Code starts
+  project servers in the project directory and sets `CLAUDE_PROJECT_DIR`), and
+  `.claude/settings.local.json` approves only that server
+  (`{"enabledMcpjsonServers": ["kintsugi"]}`, no `enableAllProjectMcpServers`).
+  `kintsugi mcp config` delegates to `project.write_claude_config()`.
+- **mcp**: input schemas are derived from the handler signatures
+  (`Annotated[..., Field(...)]`, `Literal[...]`) and enforced — a bad enum or
+  out-of-range value is rejected with `isError` before the handler runs — and
+  in-band errors are reported as `isError`. The hand-written schema copy and the
+  private `server._tool_manager` override are gone; `tool_specs.py` is a thin
+  registry of name, handler, title, description and annotations.
+- **mcp**: `save_processed` and `propagate_parameters` are marked destructive
+  (they overwrite files); `get_thumbnail.max_size` is bounded at 4096; two
+  never-read parameters were removed (`subtract_blank.record_success` /
+  `quality_threshold`, `assess_quality.model_path` / `tile_size`).
+- **mcp**: `approve_and_learn` maps session history names (`subtract_blank`) onto
+  learning operations (`blank_subtraction`) and rejects unknown keys in-band;
+  learning tools take a `Literal` operation.
+- **mcp**: `project_path` arguments default to `CLAUDE_PROJECT_DIR` or the
+  server's working directory.
+- **cli**: `kintsugi mcp start` writes its banner and errors to stderr; stdout
+  belongs to the JSON-RPC stream. `KintsugiProject.load()` logs instead of
+  printing, since it runs inside the server.
+- **learning**: unapproved (bootstrap) records are included in recommendations by
+  default at `BOOTSTRAP_WEIGHT` (0.6) of an approved record, and confidence is
+  scaled by `0.5 + 0.5 * approved_fraction` so bootstrap-only evidence stays below
+  the "learned" tier.
+- **deps**: `pydantic` is a core dependency; the `mcp` install group matches
+  the pyproject extra (adds `optuna`, `smo`); `mcp>=2.0,<3` in `pyproject.toml`,
+  `deps.py` and `envs/env-hpc.yml`.
+- **docs**: install text corrected everywhere — `pip install kintsugi[mcp]`
+  installed an unrelated PyPI package; it now reads `pip install -e ".[mcp]"`.
+  Tool tables are generated from the registry; stale file references
+  (`kintsugi-dev.code-workspace`, `test_data/mini_project`, `scripts/release.py`),
+  install-group counts, test counts and the denoise method lists were corrected.
+- **mcp**: the in-memory session (`_loaded_images`, `_processing_history` and
+  their accessors) lives in `kintsugi.mcp.session`; the tool modules import it from
+  there instead of from each other, and the three private copies of `_get_image`
+  are gone. `signal_isolation` re-exports the names for existing imports.
+- **mcp**: `suggest_parameters` and `suggest_with_learning` share one rule set
+  (`kintsugi.mcp.heuristics`) instead of two diverging copies; the blank channel is
+  sampled at the same stride as the signal, and a blank channel that is named but
+  not loaded is an error rather than silently ignored.
+- **learning**: `ParameterLearningEngine.recommend_parameters_many()` answers all
+  operations with one query per database (a window function ranks the top 50 per
+  operation) and `record_parameters_many()` writes every operation of an approval
+  in one transaction per database. `suggest_with_learning` and `approve_and_learn`
+  use them; `approve_and_learn` now reports each `record_id`.
+
+### Removed
+- **mcp**: the unregistered, untested `set_project_context` handler and the
+  `_basic_parameter_suggestion` fallback (its only trigger, `kintsugi.signal`
+  failing to import, cannot happen with the core dependencies).
+- **docs**: four zero-byte files (`docs/-r`, `docs/2.0.0`, `docs/2024.0.0`,
+  `docs/7.0.0`) and the unreferenced `docs/CD31_curtain.gif`; the stale Java/JVM
+  instructions in `TROUBLESHOOTING.md`.
+
+### Fixed
+- **learning**: a record mirrored into both the project and the user-wide
+  database is counted once in recommendations (it was counted twice, inflating
+  confidence).
+- **mcp**: the server imported `mcp.server.fastmcp.FastMCP`, which does not exist
+  in the 2.x SDK that `pip install mcp` resolves, while the project pinned
+  `mcp<2`; it now targets `mcp>=2.0,<3` and starts.
+- **learning**: marker and tissue aliases matched by substring, so CD31, CD34 and
+  CD38 collapsed onto `cd3`, CD45 (and "smooth muscle actin") onto `cd4`, and the
+  tissue "T" became "tonsil", silently merging unrelated records. Matching is now
+  exact on the cleaned name or on a complete token sequence, longest alias first.
+- **learning**: records written by `kintsugi mcp pretrain` (`user_approved=False`)
+  never reached `get_learned_parameters` or `suggest_with_learning` because
+  `recommend_parameters()` defaulted to `approved_only=True`.
+- **mcp**: a single cached learning engine was reused whenever `project_path` was
+  omitted, so a call without a project after a call with one kept reading and
+  writing the previous project's database; engines are now keyed by the resolved
+  project path.
+- **mcp**: `generate_jupyter_cell` interpolated values with `str()` (a quote in a
+  channel name broke the code), offered a `full_pipeline` template that imported
+  a module that does not exist, and told the tuner to look up MCP session channels
+  that live in another process. Cells now interpolate with `repr()`, the
+  `full_pipeline` branch is gone, and the cell loads the channel from its file on
+  disk (`param_tuner._load_image()` accepts a path).
+- **mcp**: `list_channels` joined the `cycle` argument onto the search directory
+  unchecked, so `cycle="../.."` listed files outside the project; path components
+  are now rejected.
+- **mcp**: `load_channel` took the first unsorted glob hit for `*CD3*`, so whether
+  `CD3` loaded `CD3.tif` or `CD31.tif` depended on filesystem order; it now ranks
+  matches (exact stem, whole token, substring) and reports a tie as an in-band
+  `candidates` error. `list_channels` output is sorted for the same reason.
+- **mcp**: `denoise_advanced` passed any existing `model_path` to `torch.load` and
+  `predict_parameters` passed any path to `joblib.load`; checkpoints are now
+  confined and loaded safely (see Security).
+- **mcp**: the learned-parameter merge in `subtract_blank` never applied — the
+  auto-suggest path imported `ParameterLearningEngine` from
+  `kintsugi.mcp.tools.learning` (which only imports it lazily) and tested
+  `recommendation["found"]` while the engine returns `status == "success"`. Both
+  the MCP tool and `signal.subtractor` now import from
+  `kintsugi.assist.parameter_learning` and test the status key.
+- **mcp**: `cluster_channels` never stored the loaded images in the session or set
+  `metadata.cluster_id`, which is exactly what `propagate_parameters` filters on,
+  so the pair always failed with "No channels found". Clustered channels are now
+  kept in the session with `cluster_id`, `source_path` and `wavelength_group`, and
+  the result lists `loaded_channels`.
+- **mcp**: `get_intensity_profile` with `position=1.0` indexed one row/column past
+  the image; the last row/column is now returned.
+
+### Security
+- **mcp**: model checkpoint paths given to `denoise_advanced` (`model_path`) and
+  `predict_parameters` must lie under the project, the Claude Code project
+  (`CLAUDE_PROJECT_DIR`) or `~/.kintsugi/models`
+  (`path_safety.allowed_model_roots` / `ensure_within_any`) and carry the expected
+  extension; N2V and CARE checkpoints are loaded with `torch.load(...,
+  weights_only=True)` (their config is saved as a plain dict so that works), and
+  the Random Forest predictor validates the loaded object's shape.
+- **mcp**: `list_channels` rejects path components in `cycle`, and
+  `cluster_channels` confines the files it loads to the project (`rglob` follows
+  symlinks, so the resolved path is checked).
+
 ## [1.2.3] - 2025-12-12
 
 ### Changed

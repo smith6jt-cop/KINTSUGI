@@ -79,9 +79,12 @@ The Claude Code MCP integration provides an interactive, AI-assisted workflow. C
 
 **Setup:**
 ```bash
-pip install kintsugi[claude]
+pip install -e ".[mcp]"   # or: kintsugi install mcp  (needs mcp>=2.0,<3)
 kintsugi mcp config /path/to/project  # If not using kintsugi init
 ```
+
+The full server reference (every tool, resources, the `signal_isolation_workflow`
+prompt, security model, troubleshooting) is [Claude Code Integration (MCP Server)](mcp.md).
 
 **Workflow:**
 
@@ -112,17 +115,7 @@ kintsugi mcp config /path/to/project  # If not using kintsugi init
             will use this as a baseline."
    ```
 
-**Available MCP tools:**
-
-| Tool | Purpose |
-|------|---------|
-| `load_channel` | Load a channel image from the project |
-| `analyze_weighted_subtraction` | Preview per-range weights without applying |
-| `subtract_blank` | Apply subtraction (`method="global"` or `"weighted"`) |
-| `suggest_with_learning` | Get recommendations combining analysis + learned history |
-| `approve_and_learn` | Record approved parameters for future learning |
-| `assess_quality` | Run quality assessment on the result |
-| `get_learned_parameters` | Query the learning database directly |
+**Available MCP tools:** the tools used above (`load_channel`, `analyze_weighted_subtraction`, `subtract_blank`, `assess_quality`, `suggest_with_learning`, `get_learned_parameters`, `approve_and_learn`) and the rest of the surface are listed by `kintsugi mcp tools` and documented in [mcp.md](mcp.md#tools).
 
 ### Python API
 
@@ -292,17 +285,21 @@ KINTSUGI's parameter learning system builds a database of successful parameters 
 
 ### Database location
 
-The learning database is stored per-project at:
+Two SQLite databases are used — a per-project one and a user-wide one:
 ```
-<project_dir>/data/.kintsugi_learning.db
+<project_dir>/.claude_workflow/parameter_learning.db   # project-local (records here weigh 1.5x)
+~/.kintsugi/parameter_learning.db                       # user-wide, shared across projects
 ```
+MCP learning tools use `<project_dir>` from their `project_path` argument; when it is
+omitted they use the project the server was started for (`kintsugi mcp start
+--project-dir` or `KINTSUGI_PROJECT_DIR`), and with no project only the user-wide database.
 
 ### Checking learning statistics
 
 ```python
-from kintsugi.mcp.tools.learning import ParameterLearningEngine
+from kintsugi.assist.parameter_learning import ParameterLearningEngine
 
-engine = ParameterLearningEngine(str(project_dir))
+engine = ParameterLearningEngine(str(project_dir))   # project_path=None -> user-wide DB only
 stats = engine.get_statistics()
 print(f"Total records: {stats['total_records']}")
 print(f"Tissue types: {stats['tissue_types']}")

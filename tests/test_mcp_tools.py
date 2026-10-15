@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from kintsugi.mcp.server import MCP_AVAILABLE
+from kintsugi.mcp._sdk import MCP_AVAILABLE
 
 # Check for optional dependencies using importlib
 HAS_ZARR = importlib.util.find_spec("zarr") is not None
@@ -32,7 +32,7 @@ HAS_DASK_IMAGE = importlib.util.find_spec("dask_image") is not None
 requires_zarr = pytest.mark.skipif(not HAS_ZARR, reason="zarr not installed")
 requires_dask_image = pytest.mark.skipif(not HAS_DASK_IMAGE, reason="dask_image not installed")
 
-requires_mcp = pytest.mark.skipif(not MCP_AVAILABLE, reason="mcp package not installed")
+requires_mcp = pytest.mark.skipif(not MCP_AVAILABLE, reason="mcp 2.x not installed")
 
 # The full public MCP tool surface (kept in sync with kintsugi.mcp.tool_specs).
 EXPECTED_TOOL_NAMES = {
@@ -46,13 +46,18 @@ EXPECTED_TOOL_NAMES = {
     "denoise_advanced",
     "assess_quality",
     "compute_snr",
+    "batch_assess_quality",
     "get_image_stats",
     "get_thumbnail",
+    "compare_channels",
+    "get_intensity_profile",
     "list_channels",
     "save_processed",
     "get_processing_history",
     "suggest_parameters",
     "generate_jupyter_cell",
+    "get_session_state",
+    "unload_channel",
     "cluster_channels",
     "propagate_parameters",
     "get_learned_parameters",
@@ -64,6 +69,14 @@ EXPECTED_TOOL_NAMES = {
     "predict_parameters",
     "estimate_background",
 }
+
+
+def _exec_kintsugi_imports(cell: str) -> None:
+    """Run the cell's ``from kintsugi... import ...`` lines so a renamed module fails here."""
+    lines = [ln.strip() for ln in cell.splitlines() if ln.strip().startswith("from kintsugi")]
+    assert lines, "generated cell imports nothing from kintsugi"
+    for line in lines:
+        exec(line, {})
 
 
 # =============================================================================
@@ -683,9 +696,11 @@ class TestVisualization:
         assert "histogram" in stats
         assert "zero_pixels" in stats
 
+    @requires_mcp
     @pytest.mark.asyncio
     async def test_get_thumbnail(self, sample_uint16_image, clear_mcp_state):
-        """Test thumbnail generation."""
+        """Thumbnail arrives as an image content block plus structured metadata."""
+        pytest.importorskip("PIL")
         from kintsugi.mcp.tools.signal_isolation import _store_image
         from kintsugi.mcp.tools.visualization import get_thumbnail
 
@@ -697,13 +712,22 @@ class TestVisualization:
             normalize=True,
         )
 
-        assert result["status"] == "success"
-        assert "thumbnail" in result
-        assert "data_uri" in result["thumbnail"]
-        assert result["thumbnail"]["format"] == "png"
+        assert not result.is_error
+        # The renderable image block comes first, followed by the JSON text block.
+        assert result.content[0].type == "image"
+        assert result.content[0].mime_type == "image/png"
+        assert result.content[1].type == "text"
+
+        meta = result.structured_content
+        assert meta["status"] == "success"
+        assert meta["channel"] == "test_ch"
+        assert meta["thumbnail"]["format"] == "png"
+        # The base64 data: URI is opt-in (include_data_uri) and off by default.
+        assert "data_uri" not in meta["thumbnail"]
         # Thumbnail should be smaller or equal to max_size
-        assert result["thumbnail"]["width"] <= 256
-        assert result["thumbnail"]["height"] <= 256
+        assert meta["thumbnail"]["width"] <= 256
+        assert meta["thumbnail"]["height"] <= 256
+        assert meta["original_shape"] == [512, 512]
 
     @pytest.mark.asyncio
     async def test_compare_channels(self, sample_uint16_image, sample_blank_image, clear_mcp_state):
@@ -850,23 +874,53 @@ class TestWorkflow:
         assert "recommendations" in suggestions
 
     @pytest.mark.asyncio
-    async def test_generate_jupyter_cell(self, sample_uint16_image, clear_mcp_state):
-        """Test Jupyter cell generation."""
+    async def test_generate_jupyter_cell(self, sample_uint16_image, clear_mcp_state, tmp_path):
+        """The generated cell loads the channel from its file and is valid Python."""
         from kintsugi.mcp.tools.signal_isolation import _store_image
         from kintsugi.mcp.tools.workflow import generate_jupyter_cell
 
-        _store_image("test_ch", sample_uint16_image)
+        signal_file = tmp_path / "test_ch.tif"
+        blank_file = tmp_path / "it's blank.tif"
+        _store_image("test_ch", sample_uint16_image, {"source_path": str(signal_file)})
+        _store_image("blank_ch", sample_uint16_image, {"source_path": str(blank_file)})
 
         result = await generate_jupyter_cell(
             operation="blank_subtraction",
             channel="test_ch",
-            initial_params={"blank_channel": "blank_ch"},
+            initial_params={"blank_channel": "blank_ch", "blank_scale_factor": 0.75},
         )
 
         assert result["status"] == "success"
-        assert "jupyter_cell" in result
-        assert "test_ch" in result["jupyter_cell"]
-        assert "blank_ch" in result["jupyter_cell"]
+        assert result["source_file"] == str(signal_file)
+        cell = result["jupyter_cell"]
+        assert str(signal_file) in cell and str(blank_file) in cell
+        assert "0.75" in cell
+        compile(cell, "<jupyter_cell>", "exec")  # quotes in paths/values stay valid
+        _exec_kintsugi_imports(cell)
+
+    @pytest.mark.parametrize("operation", ["denoise", "clahe", "clean", "gaussian_subtract"])
+    async def test_generate_jupyter_cell_every_operation_compiles(
+        self, operation, sample_uint16_image, clear_mcp_state, tmp_path
+    ):
+        from kintsugi.mcp.tools.signal_isolation import _store_image
+        from kintsugi.mcp.tools.workflow import generate_jupyter_cell
+
+        _store_image("ch", sample_uint16_image, {"source_path": str(tmp_path / "ch.tif")})
+        result = await generate_jupyter_cell(
+            operation=operation, channel="ch", initial_params={"method": 'x"y'}
+        )
+        assert result["status"] == "success"
+        compile(result["jupyter_cell"], "<jupyter_cell>", "exec")
+        _exec_kintsugi_imports(result["jupyter_cell"])
+
+    async def test_generate_jupyter_cell_needs_a_file(self, sample_uint16_image, clear_mcp_state):
+        """An in-memory-only channel cannot be reached from a notebook kernel."""
+        from kintsugi.mcp.tools.signal_isolation import _store_image
+        from kintsugi.mcp.tools.workflow import generate_jupyter_cell
+
+        _store_image("mem_only", sample_uint16_image)
+        result = await generate_jupyter_cell(operation="denoise", channel="mem_only")
+        assert "error" in result and "save_processed" in result["error"]
 
     @pytest.mark.asyncio
     async def test_get_session_state(self, sample_uint16_image, clear_mcp_state):
@@ -1177,7 +1231,7 @@ class TestMCPServer:
             server.MCP_AVAILABLE = False
 
             # Verify create_server raises ImportError when MCP is unavailable
-            with pytest.raises(ImportError, match="MCP package not installed"):
+            with pytest.raises(ImportError, match="Install with"):
                 server.create_server()
         finally:
             # Restore original value
@@ -1195,12 +1249,16 @@ class TestMCPServer:
         assert len(names) == len(set(names))
         assert set(names) == EXPECTED_TOOL_NAMES
 
-        # Each spec points at a real async handler in kintsugi.mcp.tools.
+        # Each spec points at a real async handler in kintsugi.mcp.tools and
+        # carries a title plus the four MCP behaviour hints.
+        hint_keys = {"readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"}
         for spec in tool_specs.TOOL_SPECS:
             module = importlib.import_module(f"kintsugi.mcp.tools.{spec['module']}")
             handler = getattr(module, spec["attr"])
             assert inspect.iscoroutinefunction(handler), spec["name"]
-            assert isinstance(spec["input_schema"], dict)
+            assert spec["title"].strip(), spec["name"]
+            assert set(spec["annotations"]) == hint_keys, spec["name"]
+            assert spec["annotations"]["openWorldHint"] is False, spec["name"]
 
 
 # =============================================================================
@@ -1210,45 +1268,36 @@ class TestMCPServer:
 
 @requires_mcp
 class TestStructuredOutput:
-    """The FastMCP server advertises curated schemas and emits structured content."""
+    """The server advertises curated schemas and emits structured content."""
+
+    @staticmethod
+    async def _tools():
+        from mcp.client import Client
+
+        from kintsugi.mcp.server import create_server
+
+        async with Client(create_server()) as client:
+            return {t.name: t for t in (await client.list_tools()).tools}
 
     async def test_all_tools_registered_with_output_schema(self):
         """Every tool is registered and declares an output schema."""
-        from kintsugi.mcp.server import create_server
+        tools = await self._tools()
 
-        server = create_server()
-        tools = await server.list_tools()
-
-        assert {t.name for t in tools} == EXPECTED_TOOL_NAMES
-        for tool in tools:
-            assert tool.outputSchema is not None, f"{tool.name} missing outputSchema"
-
-    async def test_curated_input_schema_advertised(self):
-        """The curated input schema (enums + descriptions) is advertised verbatim."""
-        from kintsugi.mcp.server import create_server
-
-        server = create_server()
-        tools = {t.name: t for t in await server.list_tools()}
-
-        # enum constraint preserved (FastMCP's signature-derived schema would drop it)
-        method = tools["denoise"].inputSchema["properties"]["method"]
-        assert method.get("enum") == ["percentile", "uniform", "median"]
-        # per-parameter description preserved
-        channel = tools["load_channel"].inputSchema["properties"]["channel"]
-        assert "description" in channel
+        assert set(tools) == EXPECTED_TOOL_NAMES
+        for name, tool in tools.items():
+            assert tool.output_schema is not None, f"{name} missing outputSchema"
 
     async def test_call_returns_structured_content(self):
         """A tool call returns structuredContent plus a human-readable text block."""
-        from mcp.shared.memory import create_connected_server_and_client_session as connect
+        from mcp.client import Client
 
         from kintsugi.mcp.server import create_server
 
-        server = create_server()
-        async with connect(server._mcp_server) as client:
+        async with Client(create_server()) as client:
             result = await client.call_tool("get_processing_history", {"channel": "nope"})
 
-        assert result.isError is False
-        assert result.structuredContent == {
+        assert result.is_error is False
+        assert result.structured_content == {
             "status": "success",
             "channel": "nope",
             "steps": [],
@@ -1260,9 +1309,368 @@ class TestStructuredOutput:
 
 
 # =============================================================================
-# Run Tests
+# Regression tests for audited defects
 # =============================================================================
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v", "--tb=short"])
+class TestAuditedDefects:
+    """Each test pins one defect found in the MCP audit."""
+
+    async def test_list_channels_rejects_cycle_traversal(self, tmp_path, clear_mcp_state):
+        from kintsugi.mcp.tools.workflow import list_channels
+
+        result = await list_channels(project_path=str(tmp_path), cycle="../..")
+        assert "error" in result and "cycle" in result["error"]
+
+    async def test_denoise_advanced_confines_model_path(
+        self, sample_uint16_image, tmp_path, clear_mcp_state
+    ):
+        from kintsugi.mcp.tools.signal_isolation import _store_image, denoise_advanced
+
+        _store_image("ch", sample_uint16_image)
+        outside = tmp_path / "outside" / "model.pt"
+        outside.parent.mkdir()
+        outside.write_bytes(b"not a checkpoint")
+        project = tmp_path / "proj"
+        project.mkdir()
+        (project / "kintsugi_project.json").write_text("{}")
+
+        result = await denoise_advanced(
+            channel="ch", method="n2v", model_path=str(outside), project_path=str(project)
+        )
+        assert "error" in result and "outside the allowed directories" in result["error"]
+
+        # A caller cannot widen the sandbox by naming a bare directory as the project.
+        result = await denoise_advanced(
+            channel="ch", method="n2v", model_path=str(outside), project_path=str(tmp_path)
+        )
+        assert "error" in result and "outside the allowed directories" in result["error"]
+
+        inside = project / "model.txt"
+        inside.write_bytes(b"")
+        result = await denoise_advanced(
+            channel="ch", method="n2v", model_path=str(inside), project_path=str(project)
+        )
+        assert "error" in result and ".pt/.pth" in result["error"]
+
+    async def test_predict_parameters_confines_model_path(
+        self, sample_uint16_image, tmp_path, clear_mcp_state
+    ):
+        pytest.importorskip("sklearn")
+        from kintsugi.mcp.tools.signal_isolation import _store_image, predict_parameters
+
+        _store_image("sig", sample_uint16_image)
+        outside = tmp_path / "evil.joblib"
+        outside.write_bytes(b"")
+        project = tmp_path / "proj"
+        project.mkdir()
+
+        result = await predict_parameters(
+            signal_channel="sig", model_path=str(outside), project_path=str(project)
+        )
+        assert "error" in result and "outside the allowed directories" in result["error"]
+
+    async def test_subtract_blank_uses_learned_parameters(
+        self, tmp_path, monkeypatch, clear_mcp_state
+    ):
+        """The learned-parameter merge was dead: wrong import and wrong status key."""
+        pytest.importorskip("dask_image")
+        from kintsugi.assist.parameter_learning import ParameterLearningEngine
+        from kintsugi.mcp.tools.signal_isolation import _store_image, subtract_blank
+
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+        (tmp_path / "home").mkdir()
+        project = tmp_path / "proj"
+        project.mkdir()
+        engine = ParameterLearningEngine(str(project))
+        for _ in range(3):
+            engine.record_parameters(
+                tissue_type="tonsil",
+                marker_name="CD3",
+                operation="blank_subtraction",
+                parameters={"blank_scale_factor": 0.33, "blank_clip_factor": 7, "erosion": 2},
+                quality_before=0.4,
+                quality_after=0.9,
+                user_approved=True,
+                to_global=False,
+            )
+
+        rng = np.random.default_rng(0)
+        signal = rng.integers(100, 2000, (128, 128), dtype=np.uint16)
+        blank = rng.integers(50, 500, (128, 128), dtype=np.uint16)
+        _store_image("sig", signal)
+        _store_image("blk", blank)
+
+        plain = await subtract_blank(
+            signal_channel="sig", blank_channel="blk", tissue_type="tonsil", marker_name="CD3"
+        )
+        learned = await subtract_blank(
+            signal_channel="sig",
+            blank_channel="blk",
+            tissue_type="tonsil",
+            marker_name="CD3",
+            project_path=str(project),
+        )
+        assert plain.get("status") == "success" and learned.get("status") == "success"
+        plain_scale = plain["parameters_used"]["blank_scale_factor"]
+        learned_scale = learned["parameters_used"]["blank_scale_factor"]
+        # The learned value (0.33) is blended in with up to 60% weight, so the
+        # auto-suggested scale moves towards it once the project history exists.
+        assert learned_scale != plain_scale
+        assert abs(learned_scale - 0.33) < abs(plain_scale - 0.33)
+
+    async def test_cluster_then_propagate(self, tmp_path, clear_mcp_state):
+        """cluster_channels tags members with cluster_id so propagate_parameters finds them."""
+        pytest.importorskip("sklearn")
+        tifffile = pytest.importorskip("tifffile")
+        from kintsugi.mcp.tools.signal_isolation import (
+            _loaded_images,
+            cluster_channels_tool,
+            propagate_parameters_tool,
+        )
+
+        project = tmp_path / "proj"
+        edf = project / "data" / "processed" / "edf"
+        edf.mkdir(parents=True)
+        rng = np.random.default_rng(1)
+        for name, level in (("CD3", 200), ("CD4", 220), ("DAPI", 3000), ("CD8", 210)):
+            img = rng.integers(0, level, (96, 96), dtype=np.uint16)
+            tifffile.imwrite(edf / f"{name}.tif", img)
+
+        clustered = await cluster_channels_tool(project_path=str(project), n_clusters=2)
+        assert clustered.get("status") == "success", clustered
+        assert set(clustered["loaded_channels"]) == {"CD3", "CD4", "DAPI", "CD8"}
+        cid = clustered["assignments"]["CD3"]
+        assert _loaded_images["CD3"]["metadata"]["cluster_id"] == cid
+
+        propagated = await propagate_parameters_tool(
+            project_path=str(project),
+            cluster_id=cid,
+            params={"clean_params": {"background_threshold": 10}},
+        )
+        assert propagated.get("status") == "success", propagated
+        assert propagated["total"] >= 1
+
+    async def test_cluster_state_is_scoped_per_project(self, tmp_path, clear_mcp_state):
+        """Clustering replaces earlier cluster state and propagate ignores other projects."""
+        pytest.importorskip("sklearn")
+        tifffile = pytest.importorskip("tifffile")
+        from kintsugi.mcp.tools.signal_isolation import (
+            _loaded_images,
+            _store_image,
+            cluster_channels_tool,
+            propagate_parameters_tool,
+        )
+
+        project_b = tmp_path / "b"
+        edf = project_b / "data" / "processed" / "edf"
+        edf.mkdir(parents=True)
+        rng = np.random.default_rng(2)
+        for name, level in (("CD3", 200), ("CD4", 220), ("DAPI", 3000), ("CD8", 210)):
+            tifffile.imwrite(edf / f"{name}.tif", rng.integers(0, level, (64, 64), dtype=np.uint16))
+
+        # A stale channel clustered for another project with a colliding cluster id.
+        _store_image(
+            "stale_from_a",
+            rng.integers(0, 100, (64, 64), dtype=np.uint16),
+            {"cluster_id": 0, "project": str(tmp_path / "a")},
+        )
+
+        clustered = await cluster_channels_tool(project_path=str(project_b), n_clusters=2)
+        assert clustered.get("status") == "success", clustered
+        assert "stale_from_a" not in _loaded_images  # previous cluster state is replaced
+
+        # Even if a foreign entry survives, propagate only touches this project's members.
+        _store_image(
+            "foreign",
+            rng.integers(0, 100, (64, 64), dtype=np.uint16),
+            {"cluster_id": clustered["assignments"]["CD3"], "project": str(tmp_path / "a")},
+        )
+        propagated = await propagate_parameters_tool(
+            project_path=str(project_b),
+            cluster_id=clustered["assignments"]["CD3"],
+            params={"clean_params": {"background_threshold": 10}},
+        )
+        assert propagated.get("status") == "success", propagated
+        assert "foreign" not in propagated["results"]
+
+    async def test_generate_jupyter_cell_neutralises_newlines_in_names(
+        self, sample_uint16_image, clear_mcp_state, tmp_path
+    ):
+        from kintsugi.mcp.tools.signal_isolation import _store_image
+        from kintsugi.mcp.tools.workflow import generate_jupyter_cell
+
+        evil = "CD3\nimport os; os.system('id')  # "
+        _store_image(evil, sample_uint16_image, {"source_path": str(tmp_path / "CD3.tif")})
+        result = await generate_jupyter_cell(operation="denoise", channel=evil)
+        assert result["status"] == "success"
+        cell = result["jupyter_cell"]
+        assert (
+            "os.system"
+            not in [line.strip() for line in cell.splitlines() if not line.strip().startswith("#")]
+            and "\nimport os" not in cell
+        )
+        compile(cell, "<jupyter_cell>", "exec")
+
+
+# =============================================================================
+# Deterministic file matching (results must not depend on directory order)
+# =============================================================================
+
+
+def _write_raw(root: Path, cycle: str, names: list[str]) -> Path:
+    import tifffile
+
+    raw = root / "data" / "raw" / cycle
+    raw.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        tifffile.imwrite(str(raw / name), np.full((8, 8), 100, dtype=np.uint16))
+    return raw
+
+
+class TestDeterministicFileMatching:
+    """list_channels and load_channel give the same answer on every filesystem."""
+
+    async def test_list_channels_is_sorted(self, tmp_path, clear_mcp_state):
+        from kintsugi.mcp.tools.workflow import list_channels
+
+        # Written in a deliberately unsorted order.
+        _write_raw(tmp_path, "cyc002", ["Zeta.tif"])
+        _write_raw(tmp_path, "cyc001", ["Zeta.tif", "Alpha.tif", "CD3.tif"])
+
+        result = await list_channels(project_path=str(tmp_path))
+
+        assert result["status"] == "success"
+        assert [(c["cycle"], c["channel"]) for c in result["channels"]] == [
+            ("cyc001", "Alpha"),
+            ("cyc001", "CD3"),
+            ("cyc001", "Zeta"),
+            ("cyc002", "Zeta"),
+        ]
+
+    @requires_zarr
+    async def test_load_channel_prefers_exact_stem_over_substring(self, tmp_path, clear_mcp_state):
+        from kintsugi.mcp.tools.signal_isolation import load_channel
+
+        _write_raw(tmp_path, "cyc001", ["CD31.tif", "CD3.tif"])
+
+        cd3 = await load_channel(project_path=str(tmp_path), cycle="1", channel="CD3")
+        cd31 = await load_channel(project_path=str(tmp_path), cycle="1", channel="CD31")
+
+        assert cd3["status"] == "loaded" and cd3["source"].endswith("CD3.tif")
+        assert cd31["status"] == "loaded" and cd31["source"].endswith("CD31.tif")
+
+    @requires_zarr
+    async def test_load_channel_prefers_whole_token_over_substring(self, tmp_path, clear_mcp_state):
+        from kintsugi.mcp.tools.signal_isolation import load_channel
+
+        _write_raw(tmp_path, "cyc001", ["CD31.tif", "cyc001_cd3_registered.tif"])
+
+        result = await load_channel(project_path=str(tmp_path), cycle="1", channel="CD3")
+
+        assert result["status"] == "loaded"
+        assert result["source"].endswith("cyc001_cd3_registered.tif")
+
+    @requires_zarr
+    async def test_load_channel_reports_ambiguous_match(self, tmp_path, clear_mcp_state):
+        from kintsugi.mcp.tools.signal_isolation import load_channel
+
+        _write_raw(tmp_path, "cyc001", ["CD3_b.tif", "CD3_a.tif"])
+
+        result = await load_channel(project_path=str(tmp_path), cycle="1", channel="CD3")
+
+        assert "ambiguous" in result["error"]
+        assert [Path(c).name for c in result["candidates"]] == ["CD3_a.tif", "CD3_b.tif"]
+
+
+class TestNewlyRegisteredTools:
+    """compare_channels, get_intensity_profile and batch_assess_quality on the wire."""
+
+    async def test_intensity_profile_last_row_and_bad_inputs(self, clear_mcp_state):
+        from kintsugi.mcp.session import _store_image
+        from kintsugi.mcp.tools.visualization import get_intensity_profile
+
+        image = np.arange(64, dtype=np.uint16).reshape(8, 8) * 100
+        _store_image("ch", image)
+
+        last_row = await get_intensity_profile(channel="ch", axis="horizontal", position=1.0)
+        assert last_row["status"] == "success"
+        assert last_row["profile"]["values"] == image[-1].tolist()
+
+        last_col = await get_intensity_profile(channel="ch", axis="vertical", position=1.0)
+        assert last_col["profile"]["values"] == image[:, -1].tolist()
+
+        assert "position" in (await get_intensity_profile(channel="ch", position=1.5))["error"]
+        assert "axis" in (await get_intensity_profile(channel="ch", axis="diagonal"))["error"]
+        assert "not loaded" in (await get_intensity_profile(channel="missing"))["error"].lower()
+
+    async def test_batch_assess_quality_reports_missing_channel_in_place(
+        self, sample_uint16_image, clear_mcp_state
+    ):
+        from kintsugi.mcp.session import _store_image
+        from kintsugi.mcp.tools.quality_assessment import batch_assess_quality
+
+        _store_image("good", sample_uint16_image)
+
+        result = await batch_assess_quality(channels=["good", "missing"])
+
+        assert result["status"] == "success"
+        assert result["total_channels"] == 2 and result["channels_assessed"] == 1
+        by_name = {r["channel"]: r for r in result["results"]}
+        assert "score" in by_name["good"] and "error" in by_name["missing"]
+        assert isinstance(result["average_score"], float)
+
+    async def test_intensity_profile_caps_points_and_rejects_3d(self, clear_mcp_state):
+        from kintsugi.mcp.session import _store_image
+        from kintsugi.mcp.tools.visualization import get_intensity_profile
+
+        _store_image("wide", np.ones((4, 999), dtype=np.uint16))
+        _store_image("stack", np.ones((3, 20, 30), dtype=np.uint16))
+        _store_image("single_plane", np.ones((1, 5, 7), dtype=np.uint16))
+
+        wide = await get_intensity_profile(channel="wide")
+        assert len(wide["profile"]["values"]) == 500 == len(wide["profile"]["x"])
+        assert wide["profile"]["x"][0] == 0 and wide["profile"]["x"][-1] == 998
+
+        assert "2-D" in (await get_intensity_profile(channel="stack"))["error"]
+        plane = await get_intensity_profile(channel="single_plane", axis="vertical")
+        assert len(plane["profile"]["values"]) == 5
+
+    async def test_compare_channels_ssim_scales_with_dtype(self, clear_mcp_state):
+        from kintsugi.mcp.session import _store_image
+        from kintsugi.mcp.tools.visualization import compare_channels
+
+        rng = np.random.default_rng(0)
+        _store_image("a8", rng.integers(0, 255, (32, 32)).astype(np.uint8))
+        _store_image("b8", rng.integers(0, 255, (32, 32)).astype(np.uint8))
+        _store_image("stack", np.ones((3, 32, 32), dtype=np.uint8))
+
+        result = await compare_channels(channel1="a8", channel2="b8")
+        comparison = result["comparison"]
+        # Independent noise images are dissimilar; with 16-bit constants SSIM was ~1.
+        assert comparison["ssim"] < 0.5
+        assert comparison["ssim_intensity_range"] == 255.0
+        assert "2-D" in (await compare_channels(channel1="a8", channel2="stack"))["error"]
+
+    async def test_batch_assess_quality_results_are_sorted_worst_first(
+        self, sample_uint16_image, sample_noisy_image, clear_mcp_state
+    ):
+        from kintsugi.mcp.session import _store_image
+        from kintsugi.mcp.tools.quality_assessment import batch_assess_quality
+
+        _store_image("clean", sample_uint16_image)
+        _store_image("noisy", sample_noisy_image)
+
+        result = await batch_assess_quality(channels=["clean", "missing", "noisy"])
+
+        scores = [r["score"] for r in result["results"] if "score" in r]
+        assert scores == sorted(scores) and len(scores) == 2
+        assert result["results"][-1]["channel"] == "missing"
+
+    def test_three_tools_are_registered_read_only(self):
+        from kintsugi.mcp.tool_specs import TOOL_SPECS
+
+        specs = {s["name"]: s for s in TOOL_SPECS}
+        for name in ("compare_channels", "get_intensity_profile", "batch_assess_quality"):
+            assert specs[name]["annotations"]["readOnlyHint"] is True
+            assert specs[name]["title"]

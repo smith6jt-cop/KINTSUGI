@@ -8,31 +8,55 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import numpy as np
+from pydantic import Field
 
-from kintsugi.mcp.path_safety import clamp_int, validate_choice
-
-# Import session state from signal_isolation
-from kintsugi.mcp.tools.signal_isolation import _loaded_images
+from kintsugi.mcp._sdk import CallToolResult, ImageContent, TextContent
+from kintsugi.mcp.path_safety import clamp_float, clamp_int, validate_choice
+from kintsugi.mcp.schemas import ImageStatsResult
+from kintsugi.mcp.session import _get_image
 
 logger = logging.getLogger("kintsugi.mcp.visualization")
 
 
-def _get_image(name: str) -> Any:
-    """Get a loaded image by name."""
-    if name not in _loaded_images:
-        raise ValueError(f"Image not loaded: {name}. Use load_channel first.")
-    return _loaded_images[name]["data"]
+def _as_2d(data: Any, name: str) -> Any:
+    """Return ``data`` as a 2-D image (a leading singleton axis is dropped) or raise ValueError."""
+    ndim = getattr(data, "ndim", None)
+    if ndim == 3 and data.shape[0] == 1:
+        data = data[0]
+        ndim = 2
+    if ndim != 2:
+        shape = tuple(getattr(data, "shape", ()))
+        raise ValueError(f"{name} must be a 2-D image for this tool, got shape {shape}")
+    return data
 
 
-async def get_image_stats(channel: str) -> dict[str, Any]:
+def _ssim_dynamic_range(*arrays: np.ndarray) -> float:
+    """The intensity range L that stabilises SSIM: the dtype maximum for integer
+    images, the observed maximum for float images."""
+    largest = 0.0
+    for a in arrays:
+        if np.issubdtype(a.dtype, np.integer):
+            largest = max(largest, float(np.iinfo(a.dtype).max))
+        elif a.size:
+            largest = max(largest, float(np.max(a)))
+    return largest if largest > 0 else 1.0
+
+
+async def get_image_stats(
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+) -> ImageStatsResult:
     """
     Get comprehensive statistics for a loaded image.
 
-    Returns intensity distribution, percentiles, and histogram data.
+    Returns intensity distribution, percentiles, and histogram data. The return
+    annotation is the advertised ``outputSchema``; every value must be a plain
+    Python scalar/list so the SDK's output validation and JSON serialisation
+    accept it (numpy integers are not JSON-serialisable by pydantic).
     """
     try:
         data = _get_image(channel)
@@ -48,8 +72,8 @@ async def get_image_stats(channel: str) -> dict[str, Any]:
         data_sample = data
 
     # Basic statistics
-    stats = {
-        "shape": list(data.shape) if hasattr(data, "shape") else None,
+    stats: dict[str, Any] = {
+        "shape": [int(s) for s in data.shape] if hasattr(data, "shape") else None,
         "dtype": str(data.dtype) if hasattr(data, "dtype") else None,
         "min": float(np.min(data_sample)),
         "max": float(np.max(data_sample)),
@@ -71,13 +95,13 @@ async def get_image_stats(channel: str) -> dict[str, Any]:
     }
 
     # Zero and saturation counts
-    total_pixels = data_sample.size
+    total_pixels = int(data_sample.size)
     stats["zero_pixels"] = int(np.sum(data_sample == 0))
-    stats["zero_ratio"] = stats["zero_pixels"] / total_pixels
+    stats["zero_ratio"] = float(stats["zero_pixels"] / total_pixels)
 
     max_val = 65535 if data_sample.dtype == np.uint16 else 255
     stats["saturated_pixels"] = int(np.sum(data_sample >= max_val * 0.99))
-    stats["saturation_ratio"] = stats["saturated_pixels"] / total_pixels
+    stats["saturation_ratio"] = float(stats["saturated_pixels"] / total_pixels)
 
     # Non-zero statistics (for sparse markers)
     nonzero = data_sample[data_sample > 0]
@@ -85,12 +109,12 @@ async def get_image_stats(channel: str) -> dict[str, Any]:
         stats["nonzero_mean"] = float(np.mean(nonzero))
         stats["nonzero_std"] = float(np.std(nonzero))
         stats["nonzero_median"] = float(np.median(nonzero))
-        stats["nonzero_ratio"] = len(nonzero) / total_pixels
+        stats["nonzero_ratio"] = float(len(nonzero) / total_pixels)
     else:
-        stats["nonzero_mean"] = 0
-        stats["nonzero_std"] = 0
-        stats["nonzero_median"] = 0
-        stats["nonzero_ratio"] = 0
+        stats["nonzero_mean"] = 0.0
+        stats["nonzero_std"] = 0.0
+        stats["nonzero_median"] = 0.0
+        stats["nonzero_ratio"] = 0.0
 
     return {
         "status": "success",
@@ -99,36 +123,35 @@ async def get_image_stats(channel: str) -> dict[str, Any]:
     }
 
 
-async def get_thumbnail(
-    channel: str,
-    max_size: int = 512,
-    normalize: bool = True,
-    format: str = "png",
-) -> dict[str, Any]:
-    """
-    Get a downsampled thumbnail of the image.
+def _error_result(message: str) -> CallToolResult:
+    """In-band error in the ``CallToolResult`` shape (never raised to the SDK)."""
+    err = {"error": message}
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(err))],
+        structuredContent=err,
+        isError=True,
+    )
 
-    Returns base64-encoded image data that Claude can view.
+
+def _render_thumbnail(
+    data: Any,
+    max_size: int,
+    normalize: bool,
+    fmt: str,
+) -> tuple[bytes, dict[str, Any]]:
+    """Downsample, normalise and encode an image for display.
+
+    Pure helper behind :func:`get_thumbnail`: it reads nothing from the session
+    state and raises (``ImportError`` without Pillow, ``ValueError`` on bad
+    input) instead of returning in-band errors. ``data`` may be a numpy or dask
+    array; ``fmt`` is ``"png"`` or ``"jpeg"`` (``"jpg"`` is accepted as an
+    alias). Returns the encoded bytes and ``{"width", "height", "format"}``.
     """
-    try:
-        clamp_int(max_size, "max_size", minimum=1, maximum=20000)
-        validate_choice(format.lower(), {"png", "jpeg", "jpg"}, "format")
-    except ValueError as e:
-        return {"error": str(e)}
+    from PIL import Image
 
     # Canonicalize so the accepted "jpg" alias does not fail in Pillow, which
     # only recognizes "JPEG" for that format.
-    format = "jpeg" if format.lower() == "jpg" else format.lower()
-
-    try:
-        from PIL import Image
-    except ImportError:
-        return {"error": "PIL/Pillow not installed"}
-
-    try:
-        data = _get_image(channel)
-    except ValueError as e:
-        return {"error": str(e)}
+    fmt = "jpeg" if fmt.lower() == "jpg" else fmt.lower()
 
     # Compute if dask array
     if hasattr(data, "compute"):
@@ -177,36 +200,104 @@ async def get_thumbnail(
     else:
         img = Image.fromarray(data)
 
-    # Convert to base64
     buffer = io.BytesIO()
-    img.save(buffer, format=format.upper())
-    img_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    img.save(buffer, format=fmt.upper())
+    return buffer.getvalue(), {"width": int(img.width), "height": int(img.height), "format": fmt}
 
-    return {
+
+async def get_thumbnail(
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+    max_size: Annotated[
+        int,
+        Field(
+            description="Maximum dimension of thumbnail in pixels (default: 512)", ge=16, le=4096
+        ),
+    ] = 512,
+    normalize: Annotated[
+        bool,
+        Field(description="Percentile-stretch 1-99% to 8-bit before encoding (default: true)"),
+    ] = True,
+    format: Annotated[
+        Literal["png", "jpeg", "jpg"],
+        Field(
+            description="Encoding of the returned image; 'jpg' is an alias of 'jpeg' (default: png)"
+        ),
+    ] = "png",
+    include_data_uri: Annotated[
+        bool,
+        Field(
+            description="Also embed the image as a data: URI in the structured result "
+            "(large; off by default)"
+        ),
+    ] = False,
+) -> Annotated[CallToolResult, dict[str, Any]]:
+    """
+    Get a downsampled thumbnail of the image.
+
+    The thumbnail is delivered as a renderable ``image`` content block (so the
+    client can display it) followed by a JSON text block; the structured
+    result carries the thumbnail dimensions, format and the original shape, and
+    the base64 ``data_uri`` only when ``include_data_uri`` is set. Errors are
+    returned in-band as ``{"error": ...}`` with ``isError`` set.
+    """
+    try:
+        clamp_int(max_size, "max_size", minimum=16, maximum=4096)
+        validate_choice(format.lower(), {"png", "jpeg", "jpg"}, "format")
+    except ValueError as e:
+        return _error_result(str(e))
+
+    fmt = "jpeg" if format.lower() == "jpg" else format.lower()
+
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        return _error_result("PIL/Pillow not installed")
+
+    try:
+        data = _get_image(channel)
+    except ValueError as e:
+        return _error_result(str(e))
+
+    original_shape = [int(s) for s in data.shape]
+    encoded, thumbnail = _render_thumbnail(data, max_size, normalize, fmt)
+    img_base64 = base64.b64encode(encoded).decode("ascii")
+    if include_data_uri:
+        thumbnail["data_uri"] = f"data:image/{fmt};base64,{img_base64}"
+
+    meta: dict[str, Any] = {
         "status": "success",
         "channel": channel,
-        "thumbnail": {
-            "width": img.width,
-            "height": img.height,
-            "format": format,
-            "data_uri": f"data:image/{format};base64,{img_base64}",
-        },
-        "original_shape": list(_loaded_images[channel]["data"].shape),
+        "thumbnail": thumbnail,
+        "original_shape": original_shape,
     }
+    return CallToolResult(
+        content=[
+            ImageContent(type="image", data=img_base64, mimeType=f"image/{fmt}"),
+            TextContent(type="text", text=json.dumps(meta)),
+        ],
+        structuredContent=meta,
+    )
 
 
 async def compare_channels(
-    channel1: str,
-    channel2: str,
+    channel1: Annotated[str, Field(description="Name of the first loaded channel")],
+    channel2: Annotated[
+        str,
+        Field(
+            description="Name of the second loaded channel, e.g. the processed version of channel1"
+        ),
+    ],
 ) -> dict[str, Any]:
     """
-    Compare two channels statistically.
+    Compare two loaded channels statistically.
 
-    Useful for before/after comparison or cross-channel analysis.
+    Reports per-channel mean/std/max, the difference image statistics, Pearson
+    correlation and a global SSIM, with a one-line interpretation. Useful for
+    before/after comparison or cross-channel analysis.
     """
     try:
-        data1 = _get_image(channel1)
-        data2 = _get_image(channel2)
+        data1 = _as_2d(_get_image(channel1), channel1)
+        data2 = _as_2d(_get_image(channel2), channel2)
     except ValueError as e:
         return {"error": str(e)}
 
@@ -261,13 +352,16 @@ async def compare_channels(
     std1, std2 = data1.std(), data2.std()
     cov = np.mean((data1 - mean1) * (data2 - mean2))
 
-    c1 = (0.01 * 65535) ** 2
-    c2 = (0.03 * 65535) ** 2
+    # Stabilisers scale with the image range (uint8, uint16 or float data alike).
+    intensity_range = _ssim_dynamic_range(data1, data2)
+    c1 = (0.01 * intensity_range) ** 2
+    c2 = (0.03 * intensity_range) ** 2
 
     ssim = ((2 * mean1 * mean2 + c1) * (2 * cov + c2)) / (
         (mean1**2 + mean2**2 + c1) * (std1**2 + std2**2 + c2)
     )
     comparison["ssim"] = float(ssim)
+    comparison["ssim_intensity_range"] = intensity_range
 
     # Interpretation
     if comparison["correlation"] > 0.95:
@@ -288,17 +382,33 @@ async def compare_channels(
 
 
 async def get_intensity_profile(
-    channel: str,
-    axis: str = "horizontal",
-    position: float | None = None,
+    channel: Annotated[str, Field(description="Name of the loaded channel")],
+    axis: Annotated[
+        Literal["horizontal", "vertical"],
+        Field(description="Line direction: a row (horizontal) or a column (vertical) of the image"),
+    ] = "horizontal",
+    position: Annotated[
+        float | None,
+        Field(
+            description="Where the line sits along the other axis as a fraction 0.0-1.0; "
+            "None = 0.5 (the centre)",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
-    Get intensity profile along a line through the image.
+    Intensity values along a horizontal or vertical line through the image.
 
-    Useful for checking for gradients or uneven illumination.
+    Useful for spotting gradients or uneven illumination. Long lines are
+    down-sampled to at most 500 points.
     """
     try:
-        data = _get_image(channel)
+        validate_choice(axis, ("horizontal", "vertical"), "axis")
+        if position is not None:
+            clamp_float(position, "position", minimum=0.0, maximum=1.0)
+        data = _as_2d(_get_image(channel), channel)
     except ValueError as e:
         return {"error": str(e)}
 
@@ -313,20 +423,20 @@ async def get_intensity_profile(
         position = 0.5
 
     if axis == "horizontal":
-        y = int(h * position)
+        y = min(h - 1, int(h * position))  # position=1.0 is the last row, not one past it
         profile = data[y, :].astype(float)
         x_coords = list(range(w))
     else:  # vertical
-        x = int(w * position)
+        x = min(w - 1, int(w * position))
         profile = data[:, x].astype(float)
         x_coords = list(range(h))
 
-    # Downsample if too many points
+    # Down-sample long lines to exactly max_points evenly spaced positions.
     max_points = 500
     if len(profile) > max_points:
-        step = len(profile) // max_points
-        profile = profile[::step]
-        x_coords = x_coords[::step]
+        index = np.linspace(0, len(profile) - 1, max_points).round().astype(int)
+        profile = profile[index]
+        x_coords = index.tolist()
 
     return {
         "status": "success",

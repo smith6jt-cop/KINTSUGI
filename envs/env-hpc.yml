@@ -151,8 +151,8 @@ dependencies:
     - snakemake-executor-plugin-slurm>=0.10.0
     - snakemake-executor-plugin-slurm-jobstep>=0.3.0
 
-    # Claude Code MCP integration
-    - mcp>=1.0.0
+    # MCP server for AI assistants (pip extra: mcp)
+    - mcp>=2.0,<3
     - httpx>=0.27.0
 
     # Parameter optimization

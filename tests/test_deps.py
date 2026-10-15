@@ -155,7 +155,7 @@ class TestOptionalGroups:
             "dl",
             "analysis",
             "bio",
-            "claude",
+            "mcp",
             "dev",
             "docs",
             "kronos",

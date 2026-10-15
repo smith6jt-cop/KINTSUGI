@@ -7,35 +7,53 @@ Provides channel quality assessment using the kintsugi.qc module.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Annotated, Any
 
 import numpy as np
+from pydantic import Field
 
-# Import session state from signal_isolation
-from kintsugi.mcp.tools.signal_isolation import _add_history, _loaded_images
+from kintsugi.mcp.schemas import QualityResult
+from kintsugi.mcp.session import _add_history, _get_image
 
 logger = logging.getLogger("kintsugi.mcp.quality_assessment")
 
 
-def _get_image(name: str) -> Any:
-    """Get a loaded image by name."""
-    if name not in _loaded_images:
-        raise ValueError(f"Image not loaded: {name}. Use load_channel first.")
-    return _loaded_images[name]["data"]
+def _plain(value: Any) -> Any:
+    """Turn numpy scalars into Python scalars so the typed result serialises."""
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
 
 
 async def assess_quality(
-    channel: str,
-    use_dl_model: bool = False,
-    model_path: str | None = None,
-    confidence_threshold: float = 0.85,
-    tile_size: int = 512,
-) -> dict[str, Any]:
+    channel: Annotated[str, Field(description="Name of loaded channel to assess")],
+    use_dl_model: Annotated[
+        bool,
+        Field(
+            description="Also run the kintsugi.qc.ImageQC heuristic assessor (not a deep-learning "
+            "model) and blend its score 70/30 with the built-in metrics; falls back to the "
+            "built-in metrics alone if the qc module is unavailable (default: False)"
+        ),
+    ] = False,
+    confidence_threshold: Annotated[
+        float,
+        Field(
+            description="Quality score on a 0.0-1.0 scale below which the channel is flagged "
+            "for manual review (default: 0.85)",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ] = 0.85,
+) -> QualityResult:
     """
-    Assess channel quality using heuristic and/or deep learning metrics.
+    Assess channel quality using heuristic metrics, optionally blended with the
+    ``kintsugi.qc.ImageQC`` assessor.
 
     Returns comprehensive quality metrics including SNR, contrast, and
-    whether the channel requires manual review.
+    whether the channel requires manual review. The return annotation is the
+    advertised ``outputSchema``, so every value is coerced to a plain Python
+    type before returning.
     """
     try:
         data = _get_image(channel)
@@ -64,7 +82,7 @@ async def assess_quality(
 
             qc = ImageQC()
             qc_result = qc.assess(data_sample, marker=channel)
-            qc_score = qc_result.quality_score
+            qc_score = float(qc_result.quality_score)
             metrics["qc_confidence"] = qc_score
             metrics["issues"] = len(qc_result.issues) if qc_result.issues else 0
 
@@ -75,12 +93,12 @@ async def assess_quality(
 
     # Combined score
     if qc_score is not None:
-        final_score = 0.7 * qc_score + 0.3 * heuristic_score
+        final_score = float(0.7 * qc_score + 0.3 * heuristic_score)
     else:
-        final_score = heuristic_score
+        final_score = float(heuristic_score)
 
     # Determine if review is needed
-    requires_review = final_score < confidence_threshold
+    requires_review = bool(final_score < confidence_threshold)
 
     # Generate recommendations
     recommendations = _generate_recommendations(metrics, final_score)
@@ -94,14 +112,17 @@ async def assess_quality(
         },
     )
 
+    plain_metrics = {k: _plain(v) for k, v in metrics.items()}
     return {
         "status": "success",
         "channel": channel,
         "quality_score": round(final_score, 3),
         "requires_review": requires_review,
-        "metrics": {k: round(v, 3) if isinstance(v, float) else v for k, v in metrics.items()},
-        "recommendations": recommendations,
-        "threshold_used": confidence_threshold,
+        "metrics": {
+            k: round(v, 3) if isinstance(v, float) else v for k, v in plain_metrics.items()
+        },
+        "recommendations": [str(r) for r in recommendations],
+        "threshold_used": float(confidence_threshold),
     }
 
 
@@ -235,7 +256,9 @@ def _generate_recommendations(metrics: dict[str, float], score: float) -> list[s
     return recommendations
 
 
-async def compute_snr(channel: str) -> dict[str, Any]:
+async def compute_snr(
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+) -> dict[str, Any]:
     """
     Compute Signal-to-Noise Ratio for a channel.
 
@@ -303,13 +326,26 @@ def _interpret_snr(snr: float) -> str:
 
 
 async def batch_assess_quality(
-    channels: list[str],
-    confidence_threshold: float = 0.85,
+    channels: Annotated[
+        list[str], Field(description="Names of the loaded channels to assess", min_length=1)
+    ],
+    confidence_threshold: Annotated[
+        float,
+        Field(
+            description="Quality score below which a channel is flagged for review (0.0-1.0)",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ] = 0.85,
 ) -> dict[str, Any]:
     """
-    Assess quality for multiple channels at once.
+    Assess quality for several loaded channels at once.
 
-    Returns a summary with channels sorted by quality score.
+    Runs ``assess_quality`` on each channel and returns the scores sorted from
+    worst to best plus a ``review_queue`` of the channels below the threshold.
+    A channel that is not loaded is reported in its own ``results`` entry
+    instead of failing the whole call.
     """
     results = []
 
@@ -335,9 +371,10 @@ async def batch_assess_quality(
                 }
             )
 
-    # Sort by score (lowest first - needs attention)
-    valid_results = [r for r in results if "score" in r]
-    valid_results.sort(key=lambda x: x["score"])
+    # Sort by score (lowest first - needs attention); channels that could not be
+    # assessed keep their error entry at the end.
+    valid_results = sorted((r for r in results if "score" in r), key=lambda x: x["score"])
+    results = valid_results + [r for r in results if "score" not in r]
 
     # Summary statistics
     scores = [r["score"] for r in valid_results]
@@ -348,9 +385,9 @@ async def batch_assess_quality(
         "total_channels": len(channels),
         "channels_assessed": len(valid_results),
         "channels_needing_review": len(needs_review),
-        "average_score": round(np.mean(scores), 3) if scores else 0,
-        "min_score": round(min(scores), 3) if scores else 0,
-        "max_score": round(max(scores), 3) if scores else 0,
+        "average_score": round(float(np.mean(scores)), 3) if scores else 0.0,
+        "min_score": round(float(min(scores)), 3) if scores else 0.0,
+        "max_score": round(float(max(scores)), 3) if scores else 0.0,
         "results": results,
         "review_queue": [r["channel"] for r in needs_review],
     }
