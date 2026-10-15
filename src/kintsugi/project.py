@@ -131,7 +131,11 @@ def write_claude_config(root: str | Path, *, force: bool = False) -> dict[str, A
             json.dump(settings, f, indent=2)
             f.write("\n")
 
-    gitignore = _ensure_gitignored(root, ".claude/settings.local.json")
+    gitignore = _ensure_gitignored(
+        root,
+        ".claude/settings.local.json",
+        "Per-user Claude Code settings written by kintsugi",
+    )
 
     return {
         "mcp_json": mcp_file,
@@ -141,16 +145,19 @@ def write_claude_config(root: str | Path, *, force: bool = False) -> dict[str, A
     }
 
 
-def _ensure_gitignored(root: Path, pattern: str) -> Path:
-    """Add ``pattern`` to ``root/.gitignore`` unless an equivalent line is present."""
+def _ensure_gitignored(root: Path, pattern: str, comment: str) -> Path:
+    """Add ``pattern`` (under a ``# comment`` line) to ``root/.gitignore``.
+
+    Nothing is written when an equivalent line is already present.
+    """
     gitignore = root / ".gitignore"
     lines = gitignore.read_text().splitlines() if gitignore.exists() else []
-    if any(line.strip().lstrip("/") == pattern for line in lines):
+    if any(line.strip().strip("/") == pattern.strip("/") for line in lines):
         return gitignore
     with open(gitignore, "a") as f:
         if lines and lines[-1].strip():
             f.write("\n")
-        f.write(f"# Per-user Claude Code settings written by kintsugi\n{pattern}\n")
+        f.write(f"# {comment}\n{pattern}\n")
     return gitignore
 
 
@@ -875,6 +882,8 @@ def scan_existing_data(
             ".claude",
             ".vscode",
             ".git",
+            ".kintsugi",
+            ".claude_workflow",
             "__pycache__",
             "configs",
         }:
@@ -2004,6 +2013,13 @@ class KintsugiProject:
             tissue_refractive_index=microscope_params.get("tissue_refractive_index", 1.44),
             auto_detect=True,
             overwrite=False,
+        )
+
+        # Keep project state (learning database, workflow state) out of git
+        _ensure_gitignored(
+            self.paths.root,
+            ".kintsugi/",
+            "KINTSUGI project state (learning database, workflow state)",
         )
 
         # Create Claude Code configuration

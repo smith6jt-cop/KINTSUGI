@@ -230,7 +230,10 @@ Scans `data/processed/edf/` for signal/blank pairs, computes weighted subtractio
 parameters for each, and records them with `algorithm_version='weighted_v1'` and
 `user_approved=False` (bootstrap records count at reduced weight in recommendations).
 Options: `-t/--tissue-type`, `--dry-run`, `-v/--verbose`. The databases live at
-`<project>/.claude_workflow/parameter_learning.db` and `~/.kintsugi/parameter_learning.db`.
+`<project>/.kintsugi/parameter_learning.db` and `~/.kintsugi/parameter_learning.db`.
+An existing `<project>/.claude_workflow/` from an earlier release is read as is and moved
+to `.kintsugi/` on the first write. Both databases are created when parameters are first
+recorded; looking up recommendations or statistics never creates them.
 
 ## Configuration File Format
 

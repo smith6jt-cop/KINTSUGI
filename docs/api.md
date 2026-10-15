@@ -311,9 +311,13 @@ from kintsugi.assist.parameter_learning import ParameterLearningEngine
 - `kintsugi.mcp.docs_sync` — `render_tool_table()`, `render_tool_list()`, `sync_file()` and
   `check_files()` behind `kintsugi mcp tools --markdown/--write/--check`.
 - `kintsugi.assist.parameter_learning.ParameterLearningEngine` — the SQLite learning
-  engine (`<project>/.claude_workflow/parameter_learning.db` and
+  engine (`<project>/.kintsugi/parameter_learning.db` and
   `~/.kintsugi/parameter_learning.db`) used by the learning tools: `record_parameters()`,
-  `recommend_parameters()` and `get_statistics()`.
+  `recommend_parameters()` and `get_statistics()`. The databases are created on the first
+  write.
+- `kintsugi.assist.state_dir.project_state_dir()` — the project's state directory
+  (`<project>/.kintsugi/`); reads fall back to a legacy `.claude_workflow/`, which the
+  first write moves to `.kintsugi/`.
 
 See [Claude Code Integration (MCP Server)](mcp.md) for the tool reference, resources,
 prompt, security model and a recorded session.

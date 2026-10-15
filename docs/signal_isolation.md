@@ -287,9 +287,12 @@ KINTSUGI's parameter learning system builds a database of successful parameters 
 
 Two SQLite databases are used — a per-project one and a user-wide one:
 ```
-<project_dir>/.claude_workflow/parameter_learning.db   # project-local (records here weigh 1.5x)
-~/.kintsugi/parameter_learning.db                       # user-wide, shared across projects
+<project_dir>/.kintsugi/parameter_learning.db   # project-local (records here weigh 1.5x)
+~/.kintsugi/parameter_learning.db               # user-wide, shared across projects
 ```
+An existing `<project>/.claude_workflow/` from an earlier release is read as is and moved
+to `.kintsugi/` on the first write. Both databases are created when parameters are first
+recorded; looking up recommendations or statistics never creates them.
 MCP learning tools use `<project_dir>` from their `project_path` argument; when it is
 omitted they use the project the server was started for (`kintsugi mcp start
 --project-dir` or `KINTSUGI_PROJECT_DIR`), and with no project only the user-wide database.

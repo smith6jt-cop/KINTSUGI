@@ -223,3 +223,74 @@ def test_a_mirrored_record_counts_once(isolated_home, tmp_path):
         "tonsil", "CD3", "denoise", {"filter_size": 2}, 0.3, 0.9, user_approved=True
     )
     assert engine.recommend_parameters("tonsil", "CD3", "denoise")["based_on_records"] == 2
+
+
+def _tree(path):
+    return sorted(str(p.relative_to(path)) for p in path.rglob("*")) if path.exists() else []
+
+
+def test_reading_never_creates_databases(isolated_home, tmp_path):
+    project = tmp_path / "proj"
+    project.mkdir()
+    engine = ParameterLearningEngine(str(project))
+
+    rec = engine.recommend_parameters("tonsil", "CD3", "denoise")
+    stats = engine.get_statistics()
+
+    assert rec["status"] == "no_history"
+    assert stats["project_records"] == 0 and stats["global_records"] == 0
+    assert _tree(project) == [] and _tree(isolated_home) == []
+
+    engine.record_parameters("tonsil", "CD3", "denoise", {"filter_size": 2}, 0.4, 0.8)
+    assert (project / ".kintsugi" / "parameter_learning.db").exists()
+    assert (isolated_home / ".kintsugi" / "parameter_learning.db").exists()
+
+
+def test_legacy_project_database_is_read_then_moved(isolated_home, tmp_path):
+    project = tmp_path / "proj"
+    ParameterLearningEngine(str(project), global_db=False).record_parameters(
+        "tonsil", "CD3", "denoise", {"filter_size": 2}, 0.4, 0.8, user_approved=True
+    )
+    (project / ".kintsugi").rename(project / ".claude_workflow")
+
+    engine = ParameterLearningEngine(str(project), global_db=False)
+    assert engine.project_db_path == project / ".claude_workflow" / "parameter_learning.db"
+    assert engine.recommend_parameters("tonsil", "CD3", "denoise")["status"] == "success"
+    assert not (project / ".kintsugi").exists()
+
+    engine.record_parameters("tonsil", "CD3", "denoise", {"filter_size": 3}, 0.4, 0.9)
+    assert not (project / ".claude_workflow").exists()
+    assert engine.project_db_path == project / ".kintsugi" / "parameter_learning.db"
+    assert engine.get_statistics()["project_records"] == 2
+
+
+def test_legacy_schema_without_algorithm_version_is_upgraded_on_read(isolated_home, tmp_path):
+    import sqlite3
+
+    project = tmp_path / "proj"
+    legacy = project / ".claude_workflow"
+    legacy.mkdir(parents=True)
+    conn = sqlite3.connect(str(legacy / "parameter_learning.db"))
+    conn.execute(
+        """CREATE TABLE parameter_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+            tissue_type TEXT, tissue_type_normalized TEXT, marker_name TEXT,
+            marker_name_normalized TEXT, characteristics_json TEXT, operation TEXT NOT NULL,
+            parameters_json TEXT NOT NULL, quality_before REAL, quality_after REAL,
+            quality_improvement REAL, user_approved INTEGER DEFAULT 0, user_notes TEXT,
+            project_path TEXT, channel_name TEXT)"""
+    )
+    conn.execute(
+        "INSERT INTO parameter_records (timestamp, tissue_type, tissue_type_normalized,"
+        " marker_name, marker_name_normalized, characteristics_json, operation,"
+        " parameters_json, quality_before, quality_after, quality_improvement, user_approved)"
+        " VALUES ('2025-01-01T00:00:00', 'tonsil', 'tonsil', 'CD3', 'cd3', '{}', 'denoise',"
+        " '{\"filter_size\": 4}', 0.2, 0.7, 0.5, 1)"
+    )
+    conn.commit()
+    conn.close()
+
+    engine = ParameterLearningEngine(str(project), global_db=False)
+    rec = engine.recommend_parameters("tonsil", "CD3", "denoise", algorithm_version="v1")
+    assert rec["status"] == "success"
+    assert rec["recommended_parameters"] == {"filter_size": 4}

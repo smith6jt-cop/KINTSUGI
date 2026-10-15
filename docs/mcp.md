@@ -219,11 +219,14 @@ actually look at, alongside the structured metadata; pass
 4. Next time, the recommendation confidence crosses the "learned" tier (> 0.5)
    and the learned values take precedence over the heuristic.
 
-Databases: `<project>/.claude_workflow/parameter_learning.db` and
+Databases: `<project>/.kintsugi/parameter_learning.db` and
 `~/.kintsugi/parameter_learning.db`. `kintsugi mcp pretrain <project>` seeds
 them from existing processed pairs; those bootstrap rows are visible to
 recommendations at reduced weight and can never push a recommendation above
-the 0.5 tier on their own.
+the 0.5 tier on their own. An existing `<project>/.claude_workflow/` from an
+earlier release is read as is and moved to `.kintsugi/` on the first write.
+Both databases are created when parameters are first recorded; looking up
+recommendations or statistics never creates them.
 
 ## Security model
 

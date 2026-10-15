@@ -25,6 +25,8 @@ from typing import Any
 
 import numpy as np
 
+from kintsugi.assist.state_dir import project_state_dir
+
 # Common tissue type aliases for normalization
 TISSUE_ALIASES = {
     # Lymphoid
@@ -341,6 +343,8 @@ class ParameterLearningEngine:
         )
     """
 
+    DB_NAME = "parameter_learning.db"
+
     def __init__(self, project_path: str | None = None, global_db: bool = True):
         """
         Initialize the learning engine.
@@ -352,21 +356,48 @@ class ParameterLearningEngine:
         self.project_path = Path(project_path) if project_path else None
         self.global_db = global_db
 
-        # Project-specific database
-        if self.project_path:
-            self.project_db_path = self.project_path / ".claude_workflow" / "parameter_learning.db"
-            self.project_db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._init_db(self.project_db_path)
-        else:
-            self.project_db_path = None
+        # Global database (user-wide learning). Nothing is created here: both
+        # databases are created on the first write (see _writable_db), so reading
+        # recommendations or statistics never leaves files behind.
+        self.global_db_path = Path.home() / ".kintsugi" / self.DB_NAME if global_db else None
+        self._schema_ready: set[Path] = set()
 
-        # Global database (user-wide learning)
-        if global_db:
-            self.global_db_path = Path.home() / ".kintsugi" / "parameter_learning.db"
-            self.global_db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._init_db(self.global_db_path)
+    @property
+    def project_db_path(self) -> Path | None:
+        """The project database: ``<project>/.kintsugi/parameter_learning.db``.
+
+        Before the first write this may point at a legacy ``.claude_workflow/``
+        database, which is read as is. It is recomputed on every access, so a
+        cached engine follows a migration done by another engine or process.
+        """
+        if self.project_path is None:
+            return None
+        return project_state_dir(self.project_path) / self.DB_NAME
+
+    def _writable_db(self, scope: str) -> Path:
+        """Create (if needed) and return the project or global database for writing."""
+        if scope == "project":
+            assert self.project_path is not None
+            db_path = project_state_dir(self.project_path, create=True) / self.DB_NAME
         else:
-            self.global_db_path = None
+            assert self.global_db_path is not None
+            db_path = self.global_db_path
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_schema(db_path)
+        return db_path
+
+    def _readable_db(self, db_path: Path | None) -> Path | None:
+        """``db_path`` with an up-to-date schema if the database exists, else ``None``."""
+        if db_path is None or not db_path.exists():
+            return None
+        self._ensure_schema(db_path)
+        return db_path
+
+    def _ensure_schema(self, db_path: Path) -> None:
+        """Run :meth:`_init_db` once per database (it is idempotent)."""
+        if db_path not in self._schema_ready:
+            self._init_db(db_path)
+            self._schema_ready.add(db_path)
 
     def _init_db(self, db_path: Path):
         """Initialize SQLite database schema."""
@@ -523,10 +554,10 @@ class ParameterLearningEngine:
         if not records:
             return []
         ids: list[int] = []
-        if self.project_db_path:
-            ids = self._insert_records(self.project_db_path, records)
+        if self.project_path is not None:
+            ids = self._insert_records(self._writable_db("project"), records)
         if to_global and self.global_db_path:
-            global_ids = self._insert_records(self.global_db_path, records)
+            global_ids = self._insert_records(self._writable_db("global"), records)
             ids = ids or global_ids
         return ids or [0] * len(records)
 
@@ -693,7 +724,8 @@ class ParameterLearningEngine:
             (self.project_db_path, "project", 1.5),  # project records get higher weight
             (self.global_db_path, "global", 1.0),
         ):
-            if not (db_path and db_path.exists()):
+            db_path = self._readable_db(db_path)
+            if db_path is None:
                 continue
             found = self._query_similar_records_many(
                 db_path,
@@ -1228,7 +1260,8 @@ class ParameterLearningEngine:
         }
 
         for db_path, key in [(self.project_db_path, "project"), (self.global_db_path, "global")]:
-            if db_path and db_path.exists():
+            db_path = self._readable_db(db_path)
+            if db_path is not None:
                 conn = sqlite3.connect(str(db_path))
                 cursor = conn.cursor()
 
@@ -1267,7 +1300,8 @@ class ParameterLearningEngine:
         all_records = []
 
         for db_path, source in [(self.project_db_path, "project"), (self.global_db_path, "global")]:
-            if db_path and db_path.exists():
+            db_path = self._readable_db(db_path)
+            if db_path is not None:
                 conn = sqlite3.connect(str(db_path))
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()

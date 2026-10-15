@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from kintsugi.assist.state_dir import project_state_dir
+
 
 @dataclass
 class ChannelState:
@@ -96,8 +98,7 @@ class WorkflowState:
             use_sqlite: Whether to use SQLite for audit trail
         """
         self.project_path = Path(project_path).resolve()
-        self.state_dir = self.project_path / ".claude_workflow"
-        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.state_dir = project_state_dir(self.project_path, create=True)
 
         self.json_path = self.state_dir / "workflow_state.json"
         self.db_path = self.state_dir / "workflow_audit.db" if use_sqlite else None

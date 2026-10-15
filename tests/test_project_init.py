@@ -246,3 +246,25 @@ def test_create_default_params_file_standalone(tmp_path):
         params = json.load(f)
     assert "illumination_correction" in params
     assert "registration" in params
+
+
+def test_init_gitignores_project_state_once(tmp_path, monkeypatch):
+    """Project state (.kintsugi/) is kept out of git, and a refresh does not duplicate the line."""
+    repo_path = tmp_path / "repo"
+    _create_fake_repo(repo_path)
+    monkeypatch.setattr(
+        KintsugiProject,
+        "_detect_kintsugi_path",
+        staticmethod(lambda: repo_path),
+    )
+    project_root = tmp_path / "project"
+    runner = CliRunner()
+
+    from kintsugi.cli import main
+
+    for _ in range(2):
+        result = runner.invoke(main, ["init", str(project_root), "--force"])
+        assert result.exit_code == 0, result.output
+
+    lines = (project_root / ".gitignore").read_text().splitlines()
+    assert lines.count(".kintsugi/") == 1
