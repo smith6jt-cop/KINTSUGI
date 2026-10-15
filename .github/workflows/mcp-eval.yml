@@ -21,6 +21,7 @@ on:
       - "docs/cli.md"
       - "README.md"
       - "CLAUDE.md"
+      - "AGENTS.md"
       - ".github/workflows/mcp-eval.yml"
   workflow_dispatch:
     inputs:

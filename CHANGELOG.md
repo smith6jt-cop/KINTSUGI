@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **mcp**: client registry `kintsugi.mcp.clients` (11 clients), `kintsugi mcp config
+  --client NAME` (repeatable), `kintsugi mcp clients`, `kintsugi init --mcp-client NAME`
+  (repeatable, or `none`); existing client files are merged and only the `kintsugi`
+  entry is replaced, with `--force`. Generated projects get an `AGENTS.md` (an existing
+  one only has its tool list refreshed); the repository gains a root `AGENTS.md`, and
+  `kintsugi mcp tools --check` covers it in CI.
 - **mcp**: every tool is advertised with a title and MCP behaviour annotations
   (readOnly / destructive / idempotent / openWorld); the server publishes
   instructions, a version and a website URL.
@@ -50,6 +56,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   citation; the README BibTeX entry now carries the full author list and DOI.
 
 ### Changed
+- **BREAKING**: `kintsugi.project.write_claude_config` is replaced by
+  `write_mcp_config(root, clients=None, *, force=False, require_project=True)`.
+  `kintsugi init` and `kintsugi mcp config` now write the configuration of every MCP
+  client that keeps it in the project (Claude Code `.mcp.json` +
+  `.claude/settings.local.json`, VS Code `.vscode/mcp.json`, Cursor `.cursor/mcp.json`,
+  Gemini CLI `.gemini/settings.json`, Antigravity `.agents/mcp_config.json`, Codex
+  `.codex/config.toml`, Zed `.zed/settings.json`), an `AGENTS.md`, and `.gitignore`
+  lines for the generated files, and print snippets for Claude Desktop, Windsurf, Cline
+  and JetBrains. `kintsugi mcp config` refuses a directory without
+  `kintsugi_project.json` unless `--force` is given.
 - **BREAKING**: project state moved from `<project>/.claude_workflow/` to
   `<project>/.kintsugi/` (`kintsugi.assist.state_dir.project_state_dir`). An existing
   `.claude_workflow/` is read as is and renamed to `.kintsugi/` on the first write, so
@@ -146,6 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instructions in `TROUBLESHOOTING.md`.
 
 ### Fixed
+- **cli**: `kintsugi mcp config --print-only` printed `args` without `--project-dir`.
 - **learning**: constructing `ParameterLearningEngine` no longer creates directories or
   databases; they are created on the first recorded parameters, so read-only MCP tools
   (`get_learned_parameters`, `suggest_with_learning`, `get_learning_statistics`, the

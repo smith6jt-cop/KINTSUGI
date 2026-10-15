@@ -18,6 +18,7 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from kintsugi.deps import OPTIONAL_GROUPS, _find_project_root
 
@@ -1044,63 +1045,116 @@ def tools(files: tuple[str, ...], markdown: bool, write_files: bool, check_files
 
 
 @mcp.command()
-@click.argument("project_path", type=click.Path(exists=True))
-@click.option("--print-only", is_flag=True, help="Only print config, don't create file")
-@click.option("--force", is_flag=True, help="Overwrite an existing kintsugi entry in .mcp.json")
-def config(project_path: str, print_only: bool, force: bool):
+@click.argument("project_path", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--client",
+    "client_names",
+    multiple=True,
+    metavar="NAME",
+    help="Only this MCP client (repeatable; see 'kintsugi mcp clients'). "
+    "Default: every client configured in the project, plus snippets for the others.",
+)
+@click.option("--print-only", is_flag=True, help="Show the configuration without writing files")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Replace existing kintsugi entries; also allow a directory without kintsugi_project.json",
+)
+def config(project_path: str, client_names: tuple[str, ...], print_only: bool, force: bool):
     """
-    Generate Claude Code MCP configuration for a project.
+    Write MCP client configuration for a project.
 
     PROJECT_PATH is the path to your KINTSUGI project directory.
 
-    Creates .mcp.json (MCP server definition) at the project root and
-    .claude/settings.local.json (approves the server). Existing entries for
-    other servers are preserved. Use --print-only to just display the
-    configuration without creating files.
+    Writes (or merges into) the configuration file of every MCP client that keeps
+    its configuration in the project (Claude Code, VS Code, Cursor, Gemini CLI,
+    Antigravity, Codex, Zed) and AGENTS.md, and prints the entry to paste for
+    clients configured per user (Claude Desktop, Windsurf, Cline) or in the IDE
+    (JetBrains). Nothing is written outside the project. Other servers and
+    settings in existing files are kept.
     """
-    import json as json_mod
     from pathlib import Path
 
-    from kintsugi.project import _resolve_kintsugi_executable, write_claude_config
+    from kintsugi.mcp import clients as mcp_clients
+    from kintsugi.project import _resolve_kintsugi_executable, write_mcp_config
 
     project_path = Path(project_path).resolve()
-
-    def _panel(entry: dict) -> Panel:
-        return Panel.fit(
-            json_mod.dumps({"mcpServers": {"kintsugi": entry}}, indent=2),
-            title="Claude Code MCP Configuration (.mcp.json)",
-        )
+    names = list(client_names) or None
+    try:
+        selected = mcp_clients.resolve_clients(names)
+    except mcp_clients.ClientConfigError as exc:
+        raise click.BadParameter(str(exc), param_hint="--client") from exc
+    if names is None:
+        selected += [c for c in mcp_clients.CLIENTS if c.scope != "project"]
+        names = [c.name for c in selected]
 
     if print_only:
-        entry = {
-            "type": "stdio",
-            "command": _resolve_kintsugi_executable(),
-            "args": ["mcp", "start"],
-        }
-        console.print(_panel(entry))
+        command = _resolve_kintsugi_executable()
+        for client in selected:
+            if client.scope == "project":
+                text = mcp_clients.render(client, project_path, command)
+                title = f"{client.display}: {client.path}"
+            else:
+                text = mcp_clients.snippet(client, project_path, command)
+                title = f"{client.display}: paste into {client.path}"
+            console.print(Panel.fit(Text(text.rstrip()), title=title))
         return
 
-    mcp_file = project_path / ".mcp.json"
-    had_entry = False
-    if mcp_file.exists():
-        with open(mcp_file) as f:
-            had_entry = "kintsugi" in (json_mod.load(f) or {}).get("mcpServers", {})
+    try:
+        result = write_mcp_config(project_path, names, force=force, require_project=not force)
+    except mcp_clients.ClientConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise SystemExit(1) from exc
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        console.print("Use --force to write the configuration anyway.")
+        raise SystemExit(2) from exc
 
-    result = write_claude_config(project_path, force=force)
+    for path in result["written"]:
+        console.print(f"[green]Wrote {path}[/green]")
+    for path in result["unchanged"]:
+        console.print(f"[dim]Unchanged (kintsugi entry already present): {path}[/dim]")
+    if result["unchanged"]:
+        console.print("[dim]Use --force to rewrite existing kintsugi entries.[/dim]")
+    if result["agents_md"] is not None:
+        console.print(f"[green]Wrote {result['agents_md']}[/green]")
 
-    if had_entry and not force:
-        console.print(f"[yellow]KINTSUGI MCP config already exists in {mcp_file}[/yellow]")
-        console.print("Use --force to rewrite it, or --print-only to see the configuration.")
-    else:
-        console.print(f"[green]Wrote {result['mcp_json']}[/green]")
-    console.print(f"[green]Approved server 'kintsugi' in {result['settings']}[/green]")
-    console.print(_panel(result["server"]))
+    registry = mcp_clients.by_name()
+    for name, text in result["snippets"].items():
+        client = registry[name]
+        console.print(Panel.fit(Text(text), title=f"{client.display}: paste into {client.path}"))
+
     console.print("\n[bold]Next steps:[/bold]")
-    console.print("1. Open this project folder in Claude Code (accept the trust dialog)")
-    console.print("2. Run /mcp - the kintsugi server is listed and its tools are available")
+    for client in selected:
+        console.print(f"- {client.display}: {client.next_steps}")
+    console.print("[dim]Details for every client: docs/mcp.md ('kintsugi mcp clients').[/dim]")
+
+
+@mcp.command("clients")
+def mcp_clients_cmd():
+    """List the MCP clients 'kintsugi mcp config' knows how to configure."""
+    from kintsugi.mcp.clients import CLIENTS
+
+    table = Table(title="MCP clients")
+    table.add_column("Name", style="cyan")
+    table.add_column("Client")
+    table.add_column("Scope")
+    table.add_column("Configuration", overflow="fold")
+    table.add_column("Instructions file", overflow="fold")
+    table.add_column("Docs", overflow="fold")
+    for client in CLIENTS:
+        table.add_row(
+            client.name,
+            client.display,
+            client.scope,
+            client.path,
+            client.instructions,
+            client.docs_url,
+        )
+    console.print(table)
     console.print(
-        "   Equivalent CLI form: claude mcp add --scope project --transport stdio "
-        "kintsugi -- kintsugi mcp start"
+        "[dim]project: written into the project by 'kintsugi mcp config'; "
+        "user/ide: printed as a snippet to paste.[/dim]"
     )
 
 
@@ -4568,6 +4622,14 @@ def workflow_spillover(project_dir: str, sample: str | None, element_shape: str,
 @click.option(
     "--tissue-ri", type=float, default=None, help="Tissue refractive index (default: 1.44)"
 )
+@click.option(
+    "--mcp-client",
+    "mcp_client_names",
+    multiple=True,
+    metavar="NAME",
+    help="MCP client to configure (repeatable; 'none' for none; see 'kintsugi mcp clients'). "
+    "Default: every client configured in the project.",
+)
 def init(
     project_path: str,
     name: str | None,
@@ -4584,6 +4646,7 @@ def init(
     z_step_size: float | None,
     numerical_aperture: float | None,
     tissue_ri: float | None,
+    mcp_client_names: tuple[str, ...],
 ):
     """
     Initialize a new KINTSUGI project.
@@ -4600,10 +4663,16 @@ def init(
     """
     from pathlib import Path
 
+    from kintsugi.mcp.clients import ClientConfigError, resolve_clients
     from kintsugi.project import ExistingDataReport, KintsugiProject, scan_existing_data
 
     project_path = Path(project_path).resolve()
     config_file = project_path / "kintsugi_project.json"
+    mcp_clients = list(mcp_client_names) or None
+    try:
+        resolve_clients(mcp_clients)
+    except ClientConfigError as exc:
+        raise click.BadParameter(str(exc), param_hint="--mcp-client") from exc
 
     # Handle existing projects
     if config_file.exists():
@@ -4625,7 +4694,7 @@ def init(
             project.paths.create_all()
             project.setup_notebooks(overwrite=True)
             project._ensure_state_gitignored()
-            project._create_claude_config()
+            project._create_mcp_config(mcp_clients)
             project._create_vscode_config()
 
             # Regenerate default_parameters.json
@@ -4879,6 +4948,7 @@ def init(
             z_step_size=z_step_size if z_step_size is not None else 1500.0,
             numerical_aperture=numerical_aperture if numerical_aperture is not None else 0.75,
             tissue_refractive_index=tissue_ri if tissue_ri is not None else 1.44,
+            mcp_clients=mcp_clients,
         )
 
         # Delete processed stages if requested
@@ -4895,10 +4965,11 @@ def init(
 
         console.print("\n[green]Project created successfully![/green]")
 
-        # Remind about Claude Code
-        console.print(
-            "\n[dim]Claude Code is configured. Open this folder in VS Code to start.[/dim]"
-        )
+        if mcp_clients != ["none"]:
+            console.print(
+                "\n[dim]MCP clients configured (see AGENTS.md); 'kintsugi mcp config . "
+                "--client NAME' adds others, 'kintsugi mcp clients' lists them.[/dim]"
+            )
 
     except Exception as e:
         console.print(f"[red]Failed to create project: {e}[/red]")

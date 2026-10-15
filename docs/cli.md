@@ -182,16 +182,24 @@ placeholder line between them and run `--write` — never hand-edit the table.
 
 ### kintsugi mcp config
 
-Generate and create Claude Code MCP configuration for a project.
+Write MCP client configuration (and `AGENTS.md`) for a project.
 
 ```bash
-kintsugi mcp config /path/to/project
-kintsugi mcp config /path/to/project --print-only   # Display the configuration without creating files
-kintsugi mcp config /path/to/project --force        # Overwrite an existing kintsugi entry in .mcp.json
+kintsugi mcp config /path/to/project                   # every project-scoped client + snippets
+kintsugi mcp config /path/to/project --client cursor   # one client (repeatable)
+kintsugi mcp config /path/to/project --print-only      # show everything, write nothing
+kintsugi mcp config /path/to/project --force           # replace existing kintsugi entries
 ```
 
-This writes two files and adds `.claude/settings.local.json` to the project's `.gitignore`.
-`.mcp.json` at the project root holds the server definition:
+By default it writes or merges the configuration of every client that keeps it in the
+project (Claude Code, VS Code, Cursor, Gemini CLI, Antigravity, Codex, Zed), writes
+`AGENTS.md` if the project has none, and prints the entry to paste for Claude Desktop,
+Windsurf, Cline and JetBrains; nothing is written outside the project. Other servers and
+settings in existing files are kept, and the generated files are added to the project's
+`.gitignore` (they hold machine-specific absolute paths). A directory without
+`kintsugi_project.json` is refused unless `--force` is given. `kintsugi init` writes the
+same files (`--mcp-client NAME`, repeatable, or `--mcp-client none` to choose). For
+Claude Code, `.mcp.json` at the project root holds the server definition:
 
 ```json
 {
@@ -207,14 +215,21 @@ This writes two files and adds `.claude/settings.local.json` to the project's `.
 
 The project travels in `args` rather than a `cwd` entry, because several clients ignore
 `cwd`. `.claude/settings.local.json` approves only that server:
-`{"enabledMcpjsonServers": ["kintsugi"]}`. If `.mcp.json` already exists, the KINTSUGI
-server is added alongside the other entries (use `--force` to replace an existing
-`kintsugi` entry). `kintsugi init` writes the same files. The equivalent Claude Code
-CLI command is:
+`{"enabledMcpjsonServers": ["kintsugi"]}`. The equivalent Claude Code CLI command is:
 
 ```bash
 claude mcp add --scope project --transport stdio kintsugi -- \
   kintsugi mcp start --project-dir /path/to/project
+```
+
+### kintsugi mcp clients
+
+List the MCP clients `kintsugi mcp config` knows: name, scope (`project` = written into
+the project, `user` / `ide` = printed as a snippet), configuration file, instructions file
+and documentation link.
+
+```bash
+kintsugi mcp clients
 ```
 
 ### kintsugi mcp pretrain

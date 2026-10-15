@@ -240,7 +240,7 @@ def run_agentic(
     }
 
 
-DOCS_WITH_TOOL_BLOCKS = ("docs/mcp.md", "docs/cli.md", "README.md", "CLAUDE.md")
+DOCS_WITH_TOOL_BLOCKS = ("docs/mcp.md", "docs/cli.md", "README.md", "CLAUDE.md", "AGENTS.md")
 
 
 def _docs_drift() -> list[str]:
