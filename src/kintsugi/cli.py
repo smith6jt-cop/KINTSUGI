@@ -1130,6 +1130,48 @@ def config(project_path: str, client_names: tuple[str, ...], print_only: bool, f
     console.print("[dim]Details for every client: docs/mcp.md ('kintsugi mcp clients').[/dim]")
 
 
+@mcp.command("status")
+@click.argument("project_path", type=click.Path(exists=True, file_okay=False), default=".")
+def mcp_status_cmd(project_path: str):
+    """Show the persistent workflow state of a project (what get_workflow_status returns)."""
+    from pathlib import Path
+
+    from kintsugi.assist.workflow_state import WorkflowState
+    from kintsugi.mcp.session import is_kintsugi_project
+
+    root = Path(project_path).resolve()
+    if not is_kintsugi_project(root):
+        console.print(f"[red]{root} is not a KINTSUGI project (no kintsugi_project.json)[/red]")
+        raise SystemExit(2)
+    state = WorkflowState(root)
+    summary = state.summary()
+    channels = state.channels()
+    if not channels:
+        console.print(f"No workflow state recorded yet in {root}")
+        return
+    table = Table(title=f"Workflow state: {root.name}")
+    table.add_column("Channel", style="cyan")
+    table.add_column("Status")
+    table.add_column("Quality")
+    table.add_column("Steps")
+    table.add_column("Last operation")
+    table.add_column("Modified")
+    for name, ch in sorted(channels.items()):
+        table.add_row(
+            name,
+            ch.status,
+            "" if ch.quality_score is None else f"{ch.quality_score:.3f}",
+            str(len(ch.processing_steps)),
+            ch.processing_steps[-1]["operation"] if ch.processing_steps else "",
+            ch.modified[:19],
+        )
+    console.print(table)
+    breakdown = ", ".join(f"{k}: {v}" for k, v in sorted(summary["status_breakdown"].items()))
+    console.print(f"Session {summary['session_id']} ({summary['sessions']} in total); {breakdown}")
+    if summary["review_queue"]:
+        console.print("Awaiting review: " + ", ".join(summary["review_queue"]))
+
+
 @mcp.command("clients")
 def mcp_clients_cmd():
     """List the MCP clients 'kintsugi mcp config' knows how to configure."""

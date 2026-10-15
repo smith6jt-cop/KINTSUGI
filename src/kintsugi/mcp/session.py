@@ -59,10 +59,25 @@ def _get_image(name: str) -> Any:
 
 
 def _store_image(name: str, data: Any, metadata: dict[str, Any] | None = None) -> None:
-    """Store (or replace) an image in the session with its metadata."""
+    """Store (or replace) an image in the session with its metadata.
+
+    Lineage is filled in so every image knows the project it belongs to: a derived
+    image (``metadata["source"]`` or ``source_channel`` naming a loaded image)
+    inherits that image's ``project``, ``cycle``, ``channel`` and ``root``; an image
+    read from disk (``source_path``) is its own ``root``.
+    """
+    metadata = dict(metadata or {})
+    parent_name = metadata.get("source") or metadata.get("source_channel")
+    if parent_name in _loaded_images:
+        parent = _loaded_images[parent_name]["metadata"]
+        for key in ("project", "cycle", "channel", "root"):
+            if key in parent and key not in metadata:
+                metadata[key] = parent[key]
+    elif "source_path" in metadata:
+        metadata.setdefault("root", name)
     _loaded_images[name] = {
         "data": data,
-        "metadata": metadata or {},
+        "metadata": metadata,
         "dtype": str(data.dtype) if hasattr(data, "dtype") else "unknown",
         "shape": data.shape if hasattr(data, "shape") else None,
     }
@@ -71,8 +86,16 @@ def _store_image(name: str, data: Any, metadata: dict[str, Any] | None = None) -
 
 
 def _add_history(name: str, operation: str, params: dict[str, Any]) -> None:
-    """Append an operation to the processing history of ``name``."""
+    """Append an operation to the processing history of ``name``.
+
+    Operations that change an image are also recorded in the project's persistent
+    workflow state (:mod:`kintsugi.mcp.workflow_store`).
+    """
     _processing_history.setdefault(name, []).append({"operation": operation, "params": params})
+    from kintsugi.mcp.workflow_store import TRACKED_OPERATIONS, track
+
+    if operation in TRACKED_OPERATIONS and name in _loaded_images:
+        track(name, _loaded_images[name]["metadata"], operation, params)
 
 
 def _as_numpy(data: Any) -> np.ndarray:

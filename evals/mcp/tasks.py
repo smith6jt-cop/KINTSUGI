@@ -231,4 +231,22 @@ TASKS: list[EvalTask] = [
         "expected": {"get_intensity_profile"},
         "rationale": "A line profile answers a gradient question; get_image_stats does not.",
     },
+    {
+        "id": "workflow_status",
+        "prompt": (
+            "I'm back after yesterday's session. Which channels did we already approve, and "
+            "which are still waiting for my review?"
+        ),
+        "expected": {"get_workflow_status"},
+        "rationale": "Persistent state across restarts, not the in-memory session.",
+    },
+    {
+        "id": "review_decision",
+        "prompt": (
+            "The CD20 result from cycle 3 still has too much autofluorescence in the follicles; "
+            "mark it as needing another pass."
+        ),
+        "expected": {"set_review_decision"},
+        "rationale": "A non-approval review outcome; approve_and_learn is only for approvals.",
+    },
 ]

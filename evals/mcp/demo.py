@@ -81,6 +81,7 @@ STEPS: list[tuple[str, dict[str, Any]]] = [
         {"tissue_type": "tonsil", "marker_name": "CD3", "operation": "blank_subtraction"},
     ),
     ("get_session_state", {}),
+    ("get_workflow_status", {}),
 ]
 
 
@@ -123,6 +124,8 @@ def _normalise(value: Any, root: Path) -> Any:
         value = re.sub(
             r"data:image/\w+;base64,[A-Za-z0-9+/=]+", "data:image/...;base64,<elided>", value
         )
+        value = re.sub(r"\d{8}_\d{6}_[0-9a-f]{6}", "<session>", value)
+        value = re.sub(r"\d{4}-\d{2}-\d{2}T[\d:.]+", "<time>", value)
         value = re.sub(r"\d{8}_\d{6}", "<timestamp>", value)
         return value if len(value) <= 200 else value[:200] + "..."
     return value
@@ -154,11 +157,13 @@ async def record(root: Path) -> str:
     from kintsugi.mcp.server import create_server
     from kintsugi.mcp.session import clear_session
     from kintsugi.mcp.tools import learning
+    from kintsugi.mcp.workflow_store import clear_workflow_stores
 
-    # Fresh session and fresh learning engines (they are cached per project, and the
-    # user-wide one would otherwise keep pointing at a previous run's HOME).
+    # Fresh session, learning engines and workflow stores (they are cached per project,
+    # and the user-wide engine would otherwise keep pointing at a previous run's HOME).
     clear_session()
     learning._learning_engines.clear()
+    clear_workflow_stores()
     out: list[str] = []
     async with Client(create_server()) as client:
         out.append(
@@ -174,6 +179,7 @@ async def record(root: Path) -> str:
             out.append("")
     clear_session()
     learning._learning_engines.clear()
+    clear_workflow_stores()
     return "\n".join(out).rstrip() + "\n"
 
 

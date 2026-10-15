@@ -46,6 +46,11 @@ CONFUSABLE_GROUPS: list[tuple[str, list[str]]] = [
         ["suggest_parameters", "suggest_with_learning", "get_learned_parameters"],
     ),
     ("record learning", ["record_successful_parameters", "approve_and_learn"]),
+    (
+        "session vs project state",
+        ["get_session_state", "get_workflow_status", "get_processing_history"],
+    ),
+    ("review outcome", ["approve_and_learn", "set_review_decision"]),
 ]
 
 DEFAULT_MODEL = "claude-sonnet-4-6"

@@ -596,9 +596,20 @@ async def approve_and_learn(
         for (op, _params), record_id in zip(mapped_operations, record_ids, strict=True)
     ]
 
+    from kintsugi.mcp.workflow_store import record_approval
+
+    tracked = record_approval(
+        channel,
+        project_path,
+        final_params=dict(mapped_operations),
+        quality_score=quality_after,
+        notes=notes,
+    )
+
     return {
         "status": "success",
         "message": "Processing approved and parameters recorded for learning",
+        "workflow_channel": tracked,
         "tissue_type": tissue_type,
         "marker_name": marker_name,
         "quality_improvement": quality_after - quality_before,

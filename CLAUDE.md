@@ -10,7 +10,7 @@ KINTSUGI (Knowledge Integration with New Technologies for Simplified User-Guided
 
 KINTSUGI includes an MCP (Model Context Protocol) server that exposes image processing tools to Claude Code. This enables Claude to act as an AI image processing assistant.
 
-**MCP server** (`src/kintsugi/mcp/`, canonical guide: `docs/mcp.md`): requires `mcp>=2.0,<3` — install with `pip install -e ".[mcp]"` or `kintsugi install mcp` (never `pip install kintsugi[mcp]`, which installs an unrelated PyPI package). Every tool carries a title and behaviour annotations (readOnly/destructive/idempotent/openWorld); the server publishes instructions; input schemas are derived from the handler signatures and enforced (bad enums/ranges are rejected with `isError` before the handler runs) and in-band errors are reported as `isError`; resources `kintsugi://session/images`, `kintsugi://session/history/{channel}`, `kintsugi://learning/stats` and `kintsugi://project/channels`; the `signal_isolation_workflow` prompt; progress notifications on long tools; `get_thumbnail` returns the preview as image content; typed output schemas for `get_image_stats`, `assess_quality`, `suggest_with_learning` and `get_session_state`; new tools `get_session_state` and `unload_channel`; model checkpoints are confined to the project, the server's project or `~/.kintsugi/models` and loaded with torch `weights_only=True`. `project_path` arguments default to the project the server was started for: `kintsugi mcp start --project-dir PATH` (what generated configs pass), else `KINTSUGI_PROJECT_DIR`, else the working directory if it is a KINTSUGI project; otherwise tools that need a project return an error instead of guessing. Project state (learning database, workflow state) lives in `<project>/.kintsugi/` (`kintsugi.assist.state_dir`); a legacy `.claude_workflow/` is read as is and moved there on the first write, and databases are created on the first write, never by a read.
+**MCP server** (`src/kintsugi/mcp/`, canonical guide: `docs/mcp.md`): requires `mcp>=2.0,<3` — install with `pip install -e ".[mcp]"` or `kintsugi install mcp` (never `pip install kintsugi[mcp]`, which installs an unrelated PyPI package). Every tool carries a title and behaviour annotations (readOnly/destructive/idempotent/openWorld); the server publishes instructions; input schemas are derived from the handler signatures and enforced (bad enums/ranges are rejected with `isError` before the handler runs) and in-band errors are reported as `isError`; resources `kintsugi://session/images`, `kintsugi://session/history/{channel}`, `kintsugi://learning/stats` and `kintsugi://project/channels`; the `signal_isolation_workflow` prompt; progress notifications on long tools; `get_thumbnail` returns the preview as image content; typed output schemas for `get_image_stats`, `assess_quality`, `suggest_with_learning` and `get_session_state`; new tools `get_session_state` and `unload_channel`; model checkpoints are confined to the project, the server's project or `~/.kintsugi/models` and loaded with torch `weights_only=True`. `project_path` arguments default to the project the server was started for: `kintsugi mcp start --project-dir PATH` (what generated configs pass), else `KINTSUGI_PROJECT_DIR`, else the working directory if it is a KINTSUGI project; otherwise tools that need a project return an error instead of guessing. Per-channel workflow state (status, steps, review decisions) persists across restarts in `<project>/.kintsugi/workflow_state.json` (`kintsugi.assist.workflow_state`, wired in through `mcp/workflow_store.py`; tools `get_workflow_status` and `set_review_decision`, resource `kintsugi://project/workflow`, CLI `kintsugi mcp status`). Project state (learning database, workflow state) lives in `<project>/.kintsugi/` (`kintsugi.assist.state_dir`); a legacy `.claude_workflow/` is read as is and moved there on the first write, and databases are created on the first write, never by a read.
 
 ### Creating a Project
 
@@ -207,6 +207,7 @@ kintsugi mcp tools --markdown                      # Markdown table
 kintsugi mcp tools --write CLAUDE.md docs/cli.md   # Regenerate the <!-- mcp-tools:* --> blocks in docs
 kintsugi mcp tools --check CLAUDE.md AGENTS.md docs/cli.md   # Fail if those blocks drifted (CI runs this)
 kintsugi mcp clients                               # MCP clients 'mcp config' can configure
+kintsugi mcp status /path/to/project               # Persistent per-channel workflow state
 
 # Bootstrap the learning database from existing processed data
 kintsugi mcp pretrain /path/to/project --tissue-type tonsil [--dry-run] [--verbose]
@@ -220,10 +221,10 @@ The authoritative list is `kintsugi mcp tools` (`--markdown` for a table with ti
 - **Signal isolation:** `load_channel`, `subtract_blank`, `analyze_weighted_subtraction`, `denoise`, `apply_clahe`, `clean_background`, `gaussian_subtract`, `denoise_advanced`, `cluster_channels`, `propagate_parameters`, `optimize_parameters`, `predict_parameters`, `estimate_background`
 - **Quality assessment:** `assess_quality`, `compute_snr`, `batch_assess_quality`
 - **Visualization:** `get_image_stats`, `get_thumbnail`, `compare_channels`, `get_intensity_profile`
-- **Workflow:** `list_channels`, `save_processed`, `get_processing_history`, `suggest_parameters`, `generate_jupyter_cell`, `get_session_state`, `unload_channel`
+- **Workflow:** `list_channels`, `save_processed`, `get_processing_history`, `suggest_parameters`, `generate_jupyter_cell`, `get_session_state`, `unload_channel`, `get_workflow_status`, `set_review_decision`
 - **Parameter learning:** `get_learned_parameters`, `record_successful_parameters`, `suggest_with_learning`, `approve_and_learn`, `get_learning_statistics`
 
-32 tools. Generated by `kintsugi mcp tools --write`; do not edit by hand.
+34 tools. Generated by `kintsugi mcp tools --write`; do not edit by hand.
 <!-- mcp-tools:list:end -->
 
 `denoise` methods are `percentile`, `uniform` and `median`; `denoise_advanced` methods are `adaptive`, `bilateral`, `nlm`, `bm3d`, `n2v` and `patch_svd`. `subtract_blank` takes `method="global"|"weighted"`; preview the weighted plan first with `analyze_weighted_subtraction`.
@@ -325,7 +326,7 @@ python -m build
   - `stripe_mitigation.py` - Correction methods (notch filter, directional filter, z-plane interpolation)
   - `ImageQC`, `CellQC`, `MarkerQC`, `BatchQC` - Standard QC classes
 - `segment/` - Segmentation (SAM wrapper, watershed, postprocessing)
-- `claude/` - Claude Code integration (parameter_learning, param_tuner, workflow_state)
+- `assist/` - Parameter learning, Jupyter tuners, persistent workflow state (`workflow_state.py`), project state directory (`state_dir.py`)
 
 **Notebook Modules** (`notebooks/`):
 - `Kreg/` - Registration system (15 modules) wrapping VALIS for rigid/non-rigid registration

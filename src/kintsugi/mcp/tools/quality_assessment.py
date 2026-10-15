@@ -14,7 +14,7 @@ from pydantic import Field
 
 from kintsugi.assist._coerce import plain as _plain
 from kintsugi.mcp.schemas import QualityResult
-from kintsugi.mcp.session import _add_history, _get_image
+from kintsugi.mcp.session import _get_image, _loaded_images
 
 logger = logging.getLogger("kintsugi.mcp.quality_assessment")
 
@@ -97,14 +97,9 @@ async def assess_quality(
     # Generate recommendations
     recommendations = _generate_recommendations(metrics, final_score)
 
-    _add_history(
-        channel,
-        "assess_quality",
-        {
-            "confidence_threshold": confidence_threshold,
-            "use_dl_model": use_dl_model,
-        },
-    )
+    # Read-only with respect to files and history: the score only annotates the
+    # image's session metadata, which save_processed and approve_and_learn persist.
+    _loaded_images[channel]["metadata"]["quality_score"] = round(final_score, 3)
 
     plain_metrics = {k: _plain(v) for k, v in metrics.items()}
     return {

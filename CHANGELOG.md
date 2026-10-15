@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **mcp**: persistent per-project workflow state. `load_channel`, the processing tools,
+  `save_processed`, `propagate_parameters` and `approve_and_learn` record channel status
+  and steps in `<project>/.kintsugi/workflow_state.json` (with an `audit_log` in
+  `workflow_audit.db`), which survives server restarts. New tools `get_workflow_status`
+  (typed output) and `set_review_decision`, resource `kintsugi://project/workflow`, CLI
+  `kintsugi mcp status`; `get_session_state` gains a `workflow` summary and
+  `get_processing_history` a `source` key, falling back to persisted steps for a channel
+  that is no longer loaded. Derived images inherit `project`, `cycle` and `root` from
+  the image they were computed from. 34 tools.
 - **mcp**: client registry `kintsugi.mcp.clients` (11 clients), `kintsugi mcp config
   --client NAME` (repeatable), `kintsugi mcp clients`, `kintsugi init --mcp-client NAME`
   (repeatable, or `none`); existing client files are merged and only the `kintsugi`
@@ -162,6 +171,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instructions in `TROUBLESHOOTING.md`.
 
 ### Fixed
+- **mcp**: numpy values in a tool result are converted before serialisation; a
+  default (global) `subtract_blank` call returned a `numpy.bool_` and failed with
+  "Error executing tool" over the protocol.
+- **mcp**: `assess_quality` and `predict_parameters` (read-only tools) no longer append to
+  the processing history; `assess_quality` stores its score in the image metadata.
+  `estimate_background` records its history on the corrected output, so saving it
+  writes a non-empty history file. `save_processed` serialises numpy values in the
+  history file.
+- **assist**: `WorkflowState` creates nothing until the first change, merges concurrent
+  writers under a lock with atomic writes, no longer replaces an existing channel in
+  `add_channel`, and reports unknown channels instead of ignoring them.
 - **cli**: `kintsugi mcp config --print-only` printed `args` without `--project-dir`.
 - **learning**: constructing `ParameterLearningEngine` no longer creates directories or
   databases; they are created on the first recorded parameters, so read-only MCP tools

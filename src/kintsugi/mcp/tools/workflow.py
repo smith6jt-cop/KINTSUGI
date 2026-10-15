@@ -15,6 +15,7 @@ from typing import Annotated, Any, Literal
 import numpy as np
 from pydantic import Field
 
+from kintsugi.assist._coerce import json_default
 from kintsugi.mcp.heuristics import (
     HEURISTIC_OPERATIONS,
     heuristic_suggestion,
@@ -28,7 +29,7 @@ from kintsugi.mcp.path_safety import (
     safe_filename,
     validate_choice,
 )
-from kintsugi.mcp.schemas import SessionStateResult
+from kintsugi.mcp.schemas import SessionStateResult, WorkflowStatusResult
 from kintsugi.mcp.session import (
     NO_PROJECT_MESSAGE,
     PROJECT_PATH_HELP,
@@ -40,6 +41,7 @@ from kintsugi.mcp.session import (
     estimate_memory_usage,
     resolve_project_path,
 )
+from kintsugi.mcp.workflow_store import resolve_channel, track, workflow_store
 
 logger = logging.getLogger("kintsugi.mcp.workflow")
 
@@ -293,9 +295,18 @@ async def save_processed(
             "source_metadata": metadata,
         }
         with open(history_path, "w") as f:
-            json.dump(history, f, indent=2)
+            json.dump(history, f, indent=2, default=json_default)
 
         _loaded_images[channel].setdefault("metadata", {})["saved_path"] = str(output_path)
+        state_project = project_path or metadata.get("project") or configured_project_root()
+        track(
+            channel,
+            {**metadata, "project": str(state_project), "root": metadata.get("root") or channel},
+            "saved",
+            {"output_path": str(output_path), "history_path": str(history_path), "format": format},
+            quality_after=metadata.get("quality_score"),
+            status="review",
+        )
 
         return {
             "status": "success",
@@ -311,27 +322,56 @@ async def save_processed(
 
 async def get_processing_history(
     channel: Annotated[
-        str, Field(description="Name of a loaded channel whose recorded operations to return")
+        str,
+        Field(
+            description="Loaded channel whose recorded operations to return, or the name of a "
+            "channel in the project's workflow state (for example after a restart)"
+        ),
     ],
+    project_path: Annotated[str | None, Field(description=PROJECT_PATH_HELP)] = None,
 ) -> dict[str, Any]:
     """
     Get the processing history for a channel.
 
-    Shows all operations applied in order.
+    Shows all operations applied in order: from the current session when the channel
+    is loaded ("source": "session"), otherwise the steps persisted in the project's
+    workflow state ("source": "persisted").
     """
-    history = _processing_history.get(channel, [])
+    if channel in _loaded_images or channel in _processing_history:
+        history = _processing_history.get(channel, [])
+        metadata = _loaded_images.get(channel, {}).get("metadata", {})
+        return {
+            "status": "success",
+            "channel": channel,
+            "source": "session",
+            "steps": history,
+            "total_steps": len(history),
+            "source_metadata": metadata,
+        }
 
-    # Also get metadata if available
-    metadata = {}
-    if channel in _loaded_images:
-        metadata = _loaded_images[channel].get("metadata", {})
-
+    store, root = resolve_channel(channel, project_path)
+    state = store.get_channel(root) if store is not None else None
+    if state is None:
+        return {
+            "status": "success",
+            "channel": channel,
+            "source": "session",
+            "steps": [],
+            "total_steps": 0,
+            "source_metadata": {},
+        }
     return {
         "status": "success",
-        "channel": channel,
-        "steps": history,
-        "total_steps": len(history),
-        "source_metadata": metadata,
+        "channel": root,
+        "source": "persisted",
+        "steps": state.processing_steps,
+        "total_steps": len(state.processing_steps),
+        "source_metadata": {
+            "status": state.status,
+            "cycle": state.cycle,
+            "quality_score": state.quality_score,
+            "review_notes": state.review_notes,
+        },
     }
 
 
@@ -575,7 +615,7 @@ async def get_session_state() -> SessionStateResult:
     history_summary = {channel: len(steps) for channel, steps in _processing_history.items()}
     memory = estimate_memory_usage()
 
-    return {
+    result: SessionStateResult = {
         "status": "success",
         "project_root": str(root) if root is not None else None,
         "loaded_images": loaded,
@@ -586,6 +626,92 @@ async def get_session_state() -> SessionStateResult:
             "total_gb": float(memory["total_gb"]),
         },
     }
+    store = workflow_store(root)
+    if store is not None:
+        result["workflow"] = store.summary()
+    return result
+
+
+async def get_workflow_status(
+    project_path: Annotated[str | None, Field(description=PROJECT_PATH_HELP)] = None,
+) -> WorkflowStatusResult:
+    """
+    Get the persistent workflow state of a project: every channel's status
+    (pending, processing, review, approved, rejected, needs_adjustment), quality
+    score and step count, plus the processing and review queues.
+
+    This survives server restarts (it lives in <project>/.kintsugi/), so call it at
+    the start of a session to resume where the previous one stopped.
+    """
+    try:
+        project = resolve_project_path(project_path)
+    except ProjectNotConfigured as e:
+        return {"error": str(e)}
+    store = workflow_store(project)
+    if store is None:
+        return {"error": f"{project} is not a KINTSUGI project (no kintsugi_project.json)"}
+    channels = store.channels()
+    return {
+        "status": "success",
+        "project_root": str(Path(project).resolve()),
+        **store.summary(),
+        "channels": {
+            name: {
+                "status": ch.status,
+                "cycle": ch.cycle,
+                "quality_score": ch.quality_score,
+                "steps": len(ch.processing_steps),
+                "last_operation": (
+                    ch.processing_steps[-1]["operation"] if ch.processing_steps else None
+                ),
+                "review_notes": ch.review_notes,
+                "modified": ch.modified,
+            }
+            for name, ch in channels.items()
+        },
+    }
+
+
+async def set_review_decision(
+    channel: Annotated[
+        str,
+        Field(
+            description="Loaded channel (or the name of a channel in the project's workflow "
+            "state, such as cyc001_CD3) to record the decision for"
+        ),
+    ],
+    decision: Annotated[
+        Literal["rejected", "needs_adjustment", "pending"],
+        Field(
+            description="'rejected' (do not use), 'needs_adjustment' (reprocess) or 'pending' "
+            "(reset); use approve_and_learn to approve"
+        ),
+    ],
+    notes: Annotated[str, Field(description="Free-text review notes")] = "",
+    project_path: Annotated[str | None, Field(description=PROJECT_PATH_HELP)] = None,
+) -> dict[str, Any]:
+    """
+    Record a review decision other than approval for a channel in the project's
+    persistent workflow state. Works for channels that are no longer loaded
+    (for example after a restart), by their name in get_workflow_status.
+    """
+    try:
+        validate_choice(decision, {"rejected", "needs_adjustment", "pending"}, "decision")
+    except ValueError as e:
+        return {"error": str(e)}
+    store, root = resolve_channel(channel, project_path)
+    if store is None:
+        return {
+            "error": NO_PROJECT_MESSAGE
+            if project_path is None
+            else f"{project_path} is not a KINTSUGI project (no kintsugi_project.json)"
+        }
+    if not store.set_user_decision(root, decision, notes):
+        return {
+            "error": f"Channel {root!r} is not in the workflow state of {store.project_path}; "
+            "load it first or check get_workflow_status"
+        }
+    return {"status": "success", "channel": root, "decision": decision, "notes": notes}
 
 
 async def unload_channel(

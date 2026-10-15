@@ -301,6 +301,31 @@ TOOL_SPECS: list[dict[str, Any]] = [
         ),
         "annotations": _PROCESSING,
     },
+    {
+        "name": "get_workflow_status",
+        "module": "workflow",
+        "attr": "get_workflow_status",
+        "title": "Workflow status",
+        "description": (
+            "Show the project's persistent workflow state, which survives server restarts: "
+            "every channel's status (pending, processing, review, approved, rejected, "
+            "needs_adjustment), quality score and step count, plus the processing and review "
+            "queues. Call it first to resume earlier work."
+        ),
+        "annotations": _READ_ONLY,
+    },
+    {
+        "name": "set_review_decision",
+        "module": "workflow",
+        "attr": "set_review_decision",
+        "title": "Record review decision",
+        "description": (
+            "Record a review decision other than approval (rejected, needs_adjustment, or "
+            "pending to reset) for a channel in the project's workflow state; works for "
+            "channels that are no longer loaded. Use approve_and_learn to approve."
+        ),
+        "annotations": _APPENDS,
+    },
     # ---- Parameter learning ----
     {
         "name": "get_learned_parameters",

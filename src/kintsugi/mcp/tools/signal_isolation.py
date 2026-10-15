@@ -40,6 +40,7 @@ from kintsugi.mcp.session import (  # noqa: F401  (some names re-exported for ot
     learning_project_root,
     resolve_project_path,
 )
+from kintsugi.mcp.workflow_store import register_channel, track
 
 logger = logging.getLogger("kintsugi.mcp.signal_isolation")
 
@@ -270,6 +271,7 @@ async def load_channel(
             "project": str(project_path),
         },
     )
+    register_channel(_loaded_images[image_name]["metadata"])
 
     # Compute basic stats (sample for large images)
     try:
@@ -1672,6 +1674,7 @@ async def cluster_channels_tool(
         del _loaded_images[stale]
         _processing_history.pop(stale, None)
     for name, cid in assignments.items():
+        cycle_match = re.match(r"(cyc\d+)", name, re.IGNORECASE)
         _store_image(
             name,
             marker_dict[name],
@@ -1679,9 +1682,11 @@ async def cluster_channels_tool(
                 "cluster_id": int(cid),
                 "source_path": str(path_by_name[name]),
                 "project": str(project_path_obj),
+                "cycle": cycle_match.group(1) if cycle_match else "unknown",
                 "wavelength_group": features[name].get("wavelength_group"),
             },
         )
+        register_channel(_loaded_images[name]["metadata"])
 
     # Format result
     cluster_info = {}
@@ -1782,6 +1787,18 @@ async def propagate_parameters_tool(
         }
         for name, r in results.items()
     }
+
+    for name, r in results.items():
+        if name in _loaded_images:
+            succeeded = r["status"] == "success"
+            track(
+                name,
+                _loaded_images[name]["metadata"],
+                "propagate_parameters",
+                {**params, "output_path": summary[name]["output_path"]},
+                quality_after=r.get("quality_score") if succeeded else None,
+                status="review" if succeeded else "processing",
+            )
 
     successes = sum(1 for r in results.values() if r["status"] == "success")
     await _report_progress(ctx, 2, 2, "done")
@@ -2000,15 +2017,6 @@ async def predict_parameters(
     predictor = ParameterPredictor(model_path=predictor_path)
     result = predictor.predict(fv)
 
-    _add_history(
-        signal_channel,
-        "predict_parameters",
-        {
-            "confidence": result.get("confidence", 0),
-            "status": result["status"],
-        },
-    )
-
     return result
 
 
@@ -2083,7 +2091,7 @@ async def estimate_background(
     )
 
     _add_history(
-        channel,
+        corrected_name,
         "estimate_background_smo",
         {"kernel_size": kernel_size, "background_mean": result["background_mean"]},
     )

@@ -90,6 +90,18 @@ class MemoryUsage(TypedDict, total=False):
     total_gb: float
 
 
+class WorkflowSummary(TypedDict, total=False):
+    """Persistent workflow state of a project (``.kintsugi/workflow_state.json``)."""
+
+    session_id: str | None
+    sessions: int
+    total_channels: int
+    status_breakdown: dict[str, int]
+    processing_queue: list[str]
+    review_queue: list[str]
+    approved: list[str]
+
+
 class SessionStateResult(TypedDict, total=False):
     """Result of ``get_session_state``."""
 
@@ -99,4 +111,24 @@ class SessionStateResult(TypedDict, total=False):
     total_loaded: int
     processing_history: dict[str, int]
     memory_usage: MemoryUsage
+    workflow: NotRequired[WorkflowSummary]
+    error: NotRequired[str]
+
+
+class WorkflowChannel(TypedDict, total=False):
+    status: str
+    cycle: str
+    quality_score: float | None
+    steps: int
+    last_operation: str | None
+    review_notes: str
+    modified: str
+
+
+class WorkflowStatusResult(WorkflowSummary, total=False):
+    """Result of ``get_workflow_status``."""
+
+    status: str
+    project_root: str
+    channels: dict[str, WorkflowChannel]
     error: NotRequired[str]

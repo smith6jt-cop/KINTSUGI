@@ -176,6 +176,7 @@ async def test_resources_and_templates_are_advertised_and_readable(tmp_path, mon
         "kintsugi://session/images",
         "kintsugi://learning/stats",
         "kintsugi://project/channels",
+        "kintsugi://project/workflow",
     }
     assert templates == {"kintsugi://session/history/{channel}"}
     state = json.loads(images.contents[0].text)

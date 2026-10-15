@@ -26,6 +26,8 @@ def signal_isolation_workflow(
 {blank_channel} in {project} (tissue: {tissue_type}). Work through these steps, \
 reporting what you see after each, and stop for confirmation before step 6.
 
+0. get_workflow_status: if {channel} is already approved or awaiting review from an \
+earlier session, say so and ask before redoing it.
 1. list_channels, then load_channel for {channel} and {blank_channel} (same cycle).
 2. get_image_stats and get_thumbnail for both; describe intensity range, background \
 and any artefacts.
@@ -38,6 +40,7 @@ looks wrong); optionally denoise or clean_background.
 6. assess_quality and compute_snr on the result; show a get_thumbnail; ask whether the \
 result is acceptable.
 7. If approved: save_processed, then approve_and_learn with the operations and \
-parameters you used so the next session starts from them. If not, adjust one \
+parameters you used so the next session starts from them. If not, record \
+set_review_decision (needs_adjustment or rejected) with the reason, adjust one \
 parameter at a time and repeat from step 5.
 """
