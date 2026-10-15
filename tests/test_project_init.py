@@ -262,9 +262,23 @@ def test_init_gitignores_project_state_once(tmp_path, monkeypatch):
 
     from kintsugi.cli import main
 
+    result = runner.invoke(main, ["init", str(project_root), "--force"])
+    assert result.exit_code == 0, result.output
+
+    # A project created before this rule existed has no .kintsugi/ line; refreshing
+    # it (init --force on an existing project) adds the line, and only once.
+    gitignore = project_root / ".gitignore"
+    gitignore.write_text(
+        "".join(
+            line + "\n"
+            for line in gitignore.read_text().splitlines()
+            if ".kintsugi" not in line and "KINTSUGI project state" not in line
+        )
+    )
     for _ in range(2):
         result = runner.invoke(main, ["init", str(project_root), "--force"])
         assert result.exit_code == 0, result.output
+        assert "Updating existing project" in result.output
 
-    lines = (project_root / ".gitignore").read_text().splitlines()
+    lines = gitignore.read_text().splitlines()
     assert lines.count(".kintsugi/") == 1

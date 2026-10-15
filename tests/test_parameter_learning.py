@@ -294,3 +294,27 @@ def test_legacy_schema_without_algorithm_version_is_upgraded_on_read(isolated_ho
     rec = engine.recommend_parameters("tonsil", "CD3", "denoise", algorithm_version="v1")
     assert rec["status"] == "success"
     assert rec["recommended_parameters"] == {"filter_size": 4}
+
+
+def test_read_survives_a_concurrent_migration(isolated_home, tmp_path):
+    """A first write elsewhere may move .claude_workflow/ between path lookup and open."""
+    project = tmp_path / "proj"
+    ParameterLearningEngine(str(project), global_db=False).record_parameters(
+        "tonsil", "CD3", "denoise", {"filter_size": 2}, 0.4, 0.8, user_approved=True
+    )
+    (project / ".kintsugi").rename(project / ".claude_workflow")
+
+    engine = ParameterLearningEngine(str(project), global_db=False)
+    real_query = engine._query_similar_records_many
+    moved = []
+
+    def migrate_then_query(db_path, *args, **kwargs):
+        if not moved:  # the other writer wins the race once
+            (project / ".claude_workflow").rename(project / ".kintsugi")
+            moved.append(True)
+        return real_query(db_path, *args, **kwargs)
+
+    engine._query_similar_records_many = migrate_then_query
+    rec = engine.recommend_parameters("tonsil", "CD3", "denoise")
+    assert moved and rec["status"] == "success"
+    assert rec["recommended_parameters"] == {"filter_size": 2}

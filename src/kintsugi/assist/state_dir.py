@@ -18,8 +18,15 @@ logger = logging.getLogger(__name__)
 STATE_DIR_NAME = ".kintsugi"
 LEGACY_STATE_DIR_NAME = ".claude_workflow"
 
-# Projects already warned about having both directories (warn once per process).
-_warned_both: set[Path] = set()
+# (reason, project) pairs already warned about (each warning once per process).
+_warned: set[tuple[str, Path]] = set()
+
+
+def _warn_once(reason: str, root: Path, message: str, *args: object) -> None:
+    key = (reason, root.resolve())
+    if key not in _warned:
+        _warned.add(key)
+        logger.warning(message, *args)
 
 
 def project_state_dir(project: str | Path, *, create: bool = False) -> Path:
@@ -36,40 +43,39 @@ def project_state_dir(project: str | Path, *, create: bool = False) -> Path:
     current = root / STATE_DIR_NAME
     legacy = root / LEGACY_STATE_DIR_NAME
 
+    if legacy.is_dir() and current.is_dir():
+        _warn_once(
+            "both",
+            root,
+            "%s and %s both exist; using %s. Records in %s are no longer read: merge or remove it.",
+            current,
+            legacy,
+            current,
+            legacy,
+        )
+        return current
+
     if not create:
-        if current.is_dir() or not legacy.is_dir():
-            return current
-        return legacy
+        return legacy if legacy.is_dir() else current
 
     if legacy.is_dir():
-        if current.is_dir():
-            key = root.resolve()
-            if key not in _warned_both:
-                _warned_both.add(key)
-                logger.warning(
-                    "%s and %s both exist; using %s. Records in %s are no longer read: "
-                    "merge or remove it.",
-                    current,
+        try:
+            legacy.rename(current)
+            logger.info("Moved project state %s to %s", legacy, current)
+        except FileNotFoundError:
+            pass  # another process moved it first
+        except OSError as exc:
+            if not current.is_dir():
+                _warn_once(
+                    "move",
+                    root,
+                    "Could not move %s to %s (%s); keeping project state in %s",
                     legacy,
                     current,
+                    exc,
                     legacy,
                 )
-        else:
-            try:
-                legacy.rename(current)
-                logger.info("Moved project state %s to %s", legacy, current)
-            except FileNotFoundError:
-                pass  # another process moved it first
-            except OSError as exc:
-                if not current.is_dir():
-                    logger.warning(
-                        "Could not move %s to %s (%s); keeping project state in %s",
-                        legacy,
-                        current,
-                        exc,
-                        legacy,
-                    )
-                    return legacy
+                return legacy
 
     current.mkdir(parents=True, exist_ok=True)
     return current

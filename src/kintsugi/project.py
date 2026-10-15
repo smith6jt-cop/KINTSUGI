@@ -2015,18 +2015,21 @@ class KintsugiProject:
             overwrite=False,
         )
 
-        # Keep project state (learning database, workflow state) out of git
-        _ensure_gitignored(
-            self.paths.root,
-            ".kintsugi/",
-            "KINTSUGI project state (learning database, workflow state)",
-        )
+        self._ensure_state_gitignored()
 
         # Create Claude Code configuration
         self._create_claude_config()
 
         # Create VS Code configuration
         self._create_vscode_config()
+
+    def _ensure_state_gitignored(self) -> None:
+        """Keep project state (learning database, workflow state) out of git."""
+        _ensure_gitignored(
+            self.paths.root,
+            ".kintsugi/",
+            "KINTSUGI project state (learning database, workflow state)",
+        )
 
     def _create_claude_config(self) -> None:
         """Create Claude Code MCP configuration.

@@ -15,9 +15,9 @@ from kintsugi.assist.state_dir import (
 
 @pytest.fixture(autouse=True)
 def _reset_warnings():
-    state_dir._warned_both.clear()
+    state_dir._warned.clear()
     yield
-    state_dir._warned_both.clear()
+    state_dir._warned.clear()
 
 
 def _legacy(project: Path) -> Path:
@@ -88,3 +88,34 @@ def test_a_move_done_by_another_process_counts_as_success(tmp_path, monkeypatch)
     current = project_state_dir(tmp_path, create=True)
     assert current == tmp_path / STATE_DIR_NAME
     assert (current / "parameter_learning.db").exists()
+
+
+def test_reads_alone_warn_once_when_both_directories_exist(tmp_path, caplog):
+    _legacy(tmp_path)
+    (tmp_path / STATE_DIR_NAME).mkdir()
+    with caplog.at_level(logging.WARNING, logger="kintsugi.assist.state_dir"):
+        for _ in range(3):
+            assert project_state_dir(tmp_path) == tmp_path / STATE_DIR_NAME
+    assert len([r for r in caplog.records if "both exist" in r.getMessage()]) == 1
+
+
+def test_workflow_state_follows_a_later_migration(tmp_path, monkeypatch):
+    """A failed move keeps the legacy directory; a later successful move is followed."""
+    from kintsugi.assist.workflow_state import WorkflowState
+
+    legacy = _legacy(tmp_path)
+    real_rename = Path.rename
+
+    def refuse(self, target):
+        raise PermissionError("busy")
+
+    monkeypatch.setattr(Path, "rename", refuse)
+    state = WorkflowState(tmp_path)
+    assert state.state_dir == legacy
+
+    monkeypatch.setattr(Path, "rename", real_rename)
+    project_state_dir(tmp_path, create=True)  # e.g. a learning write moves it
+    state.new_session()
+    assert state.json_path == tmp_path / STATE_DIR_NAME / "workflow_state.json"
+    assert state.json_path.exists()
+    assert not legacy.exists()
