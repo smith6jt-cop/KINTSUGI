@@ -10,9 +10,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-import numpy as np
 from pydantic import Field
 
+from kintsugi.assist._coerce import plain as _plain
 from kintsugi.mcp.heuristics import (
     heuristic_suggestion,
     sample_image,
@@ -26,19 +26,6 @@ if TYPE_CHECKING:
     from kintsugi.assist.parameter_learning import ImageCharacteristics
 
 logger = logging.getLogger("kintsugi.mcp.learning")
-
-
-def _plain(value: Any) -> Any:
-    """Recursively turn numpy scalars/arrays into JSON-serialisable Python values."""
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, dict):
-        return {str(k): _plain(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(v) for v in value]
-    return value
 
 
 # Learning engines, one per project (key "" = the user-wide database only). A single

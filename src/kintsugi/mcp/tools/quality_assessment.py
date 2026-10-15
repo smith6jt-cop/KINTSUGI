@@ -12,17 +12,11 @@ from typing import Annotated, Any
 import numpy as np
 from pydantic import Field
 
+from kintsugi.assist._coerce import plain as _plain
 from kintsugi.mcp.schemas import QualityResult
 from kintsugi.mcp.session import _add_history, _get_image
 
 logger = logging.getLogger("kintsugi.mcp.quality_assessment")
-
-
-def _plain(value: Any) -> Any:
-    """Turn numpy scalars into Python scalars so the typed result serialises."""
-    if isinstance(value, np.generic):
-        return value.item()
-    return value
 
 
 async def assess_quality(
