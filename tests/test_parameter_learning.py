@@ -139,3 +139,52 @@ def test_mcp_engine_cache_is_per_project(isolated_home, tmp_path):
     assert engine_global.project_path is None
     assert learning._get_learning_engine(str(a)) is engine_a
     learning._learning_engines.clear()
+
+
+def test_recommend_parameters_many_matches_single_queries(isolated_home, tmp_path):
+    engine = ParameterLearningEngine(str(tmp_path / "proj"))
+    for op, params in (("denoise", {"filter_size": 2}), ("clahe", {"clip_limit": 0.01})):
+        for approved in (True, False):
+            engine.record_parameters("tonsil", "CD3", op, params, 0.4, 0.8, user_approved=approved)
+
+    operations = ["denoise", "clahe", "gaussian_subtract"]
+    many = engine.recommend_parameters_many("tonsil", "CD3", operations)
+
+    assert list(many) == operations
+    for op in operations:
+        assert many[op] == engine.recommend_parameters("tonsil", "CD3", op)
+    assert many["denoise"]["status"] == "success"
+    assert many["denoise"]["recommended_parameters"] == {"filter_size": 2}
+    assert many["gaussian_subtract"]["status"] == "no_history"
+
+
+def test_record_parameters_many_writes_every_entry_in_order(isolated_home, tmp_path):
+    engine = ParameterLearningEngine(str(tmp_path / "proj"))
+    entries = [
+        {"operation": "blank_subtraction", "parameters": {"method": "weighted"}},
+        {"operation": "denoise", "parameters": {"filter_size": 3}, "algorithm_version": "v2"},
+    ]
+
+    ids = engine.record_parameters_many(
+        entries,
+        tissue_type="tonsil",
+        marker_name="CD3",
+        quality_before=0.3,
+        quality_after=0.9,
+        user_approved=True,
+        channel_name="cyc001_CD3",
+    )
+
+    assert len(ids) == 2 and ids[1] > ids[0] > 0
+    assert engine.record_parameters_many([], tissue_type="t", marker_name="m") == []
+    stats = engine.get_statistics()
+    assert stats["project_records"] == 2 and stats["global_records"] == 2
+    denoise = engine.recommend_parameters("tonsil", "CD3", "denoise", algorithm_version="v2")
+    assert denoise["status"] == "success" and denoise["recommended_parameters"] == {
+        "filter_size": 3
+    }
+    # Without a project database the ids come from the global database.
+    global_only = ParameterLearningEngine(None)
+    assert global_only.record_parameters_many(
+        entries[:1], tissue_type="tonsil", marker_name="CD3"
+    ) == [3]

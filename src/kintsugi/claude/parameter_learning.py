@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -455,14 +456,96 @@ class ParameterLearningEngine:
         Returns:
             Record ID
         """
-        # Determine algorithm version from parameters if not explicit
-        if algorithm_version is None:
-            algorithm_version = parameters.get("algorithm_version", "v1")
-
         # Support quality_score as alternative to quality_after
         if quality_score is not None and quality_after == 0.0:
             quality_after = quality_score
+        return self.record_parameters_many(
+            [
+                {
+                    "operation": operation,
+                    "parameters": parameters,
+                    "algorithm_version": algorithm_version,
+                }
+            ],
+            tissue_type=tissue_type,
+            marker_name=marker_name,
+            quality_before=quality_before,
+            quality_after=quality_after,
+            user_approved=user_approved,
+            user_notes=user_notes,
+            characteristics=characteristics,
+            channel_name=channel_name,
+            to_global=to_global,
+        )[0]
 
+    def record_parameters_many(
+        self,
+        entries: Sequence[dict[str, Any]],
+        *,
+        tissue_type: str,
+        marker_name: str,
+        quality_before: float = 0.0,
+        quality_after: float = 0.0,
+        user_approved: bool = False,
+        user_notes: str = "",
+        characteristics: ImageCharacteristics | None = None,
+        channel_name: str = "",
+        to_global: bool = True,
+    ) -> list[int]:
+        """
+        Record several parameter sets that share one outcome, in one transaction per database.
+
+        Each entry is ``{"operation": str, "parameters": dict}`` with an optional
+        ``"algorithm_version"``. This is what ``approve_and_learn`` uses: one
+        approval covers every operation of a processing run, so the records are
+        written together instead of one connection and commit per operation.
+
+        Returns:
+            The id of every record in entry order, from the project database when
+            the engine has one and otherwise from the global database.
+        """
+        records = [
+            self._make_record(
+                tissue_type=tissue_type,
+                marker_name=marker_name,
+                operation=entry["operation"],
+                parameters=entry["parameters"],
+                quality_before=quality_before,
+                quality_after=quality_after,
+                user_approved=user_approved,
+                user_notes=user_notes,
+                characteristics=characteristics,
+                channel_name=channel_name,
+                algorithm_version=entry.get("algorithm_version"),
+            )
+            for entry in entries
+        ]
+        if not records:
+            return []
+        ids: list[int] = []
+        if self.project_db_path:
+            ids = self._insert_records(self.project_db_path, records)
+        if to_global and self.global_db_path:
+            global_ids = self._insert_records(self.global_db_path, records)
+            ids = ids or global_ids
+        return ids or [0] * len(records)
+
+    def _make_record(
+        self,
+        *,
+        tissue_type: str,
+        marker_name: str,
+        operation: str,
+        parameters: dict[str, Any],
+        quality_before: float,
+        quality_after: float,
+        user_approved: bool,
+        user_notes: str,
+        characteristics: ImageCharacteristics | None,
+        channel_name: str,
+        algorithm_version: str | None,
+    ) -> ParameterRecord:
+        """Build a ``ParameterRecord`` with normalized names and the algorithm version."""
         record = ParameterRecord(
             tissue_type=tissue_type,
             tissue_type_normalized=normalize_tissue_type(tissue_type),
@@ -479,63 +562,58 @@ class ParameterLearningEngine:
             project_path=str(self.project_path) if self.project_path else "",
             channel_name=channel_name,
         )
+        # Determine algorithm version from parameters if not explicit
+        if algorithm_version is None:
+            algorithm_version = parameters.get("algorithm_version", "v1")
         record.algorithm_version = algorithm_version
-
-        record_id = None
-
-        # Save to project database
-        if self.project_db_path:
-            record_id = self._insert_record(self.project_db_path, record)
-
-        # Save to global database
-        if to_global and self.global_db_path:
-            self._insert_record(self.global_db_path, record)
-
-        return record_id or 0
+        return record
 
     def _insert_record(self, db_path: Path, record: ParameterRecord) -> int:
         """Insert a record into the database."""
+        return self._insert_records(db_path, [record])[0]
+
+    def _insert_records(self, db_path: Path, records: Sequence[ParameterRecord]) -> list[int]:
+        """Insert records into ``db_path`` in one transaction; return their ids in order."""
         conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
-
-        algo_version = getattr(record, "algorithm_version", "v1")
-
-        cursor.execute(
-            """
-            INSERT INTO parameter_records (
-                timestamp, tissue_type, tissue_type_normalized,
-                marker_name, marker_name_normalized,
-                characteristics_json, operation, parameters_json,
-                quality_before, quality_after, quality_improvement,
-                user_approved, user_notes, project_path, channel_name,
-                algorithm_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                record.timestamp,
-                record.tissue_type,
-                record.tissue_type_normalized,
-                record.marker_name,
-                record.marker_name_normalized,
-                json.dumps(record.characteristics.to_dict()),
-                record.operation,
-                json.dumps(record.parameters),
-                record.quality_before,
-                record.quality_after,
-                record.quality_improvement,
-                1 if record.user_approved else 0,
-                record.user_notes,
-                record.project_path,
-                record.channel_name,
-                algo_version,
-            ),
-        )
-
-        record_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-
-        return record_id
+        try:
+            cursor = conn.cursor()
+            ids: list[int] = []
+            for record in records:
+                cursor.execute(
+                    """
+                    INSERT INTO parameter_records (
+                        timestamp, tissue_type, tissue_type_normalized,
+                        marker_name, marker_name_normalized,
+                        characteristics_json, operation, parameters_json,
+                        quality_before, quality_after, quality_improvement,
+                        user_approved, user_notes, project_path, channel_name,
+                        algorithm_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        record.timestamp,
+                        record.tissue_type,
+                        record.tissue_type_normalized,
+                        record.marker_name,
+                        record.marker_name_normalized,
+                        json.dumps(record.characteristics.to_dict()),
+                        record.operation,
+                        json.dumps(record.parameters),
+                        record.quality_before,
+                        record.quality_after,
+                        record.quality_improvement,
+                        1 if record.user_approved else 0,
+                        record.user_notes,
+                        record.project_path,
+                        record.channel_name,
+                        getattr(record, "algorithm_version", "v1"),
+                    ),
+                )
+                ids.append(int(cursor.lastrowid))
+            conn.commit()
+        finally:
+            conn.close()
+        return ids
 
     def recommend_parameters(
         self,
@@ -557,6 +635,8 @@ class ParameterLearningEngine:
         recommendation is scaled by ``0.5 + 0.5 * approved_fraction``, so a result that
         rests only on bootstrap data never exceeds 0.5 (the "learned" tier threshold).
 
+        Single-operation form of :meth:`recommend_parameters_many`.
+
         Args:
             tissue_type: Target tissue type
             marker_name: Target marker name
@@ -570,43 +650,91 @@ class ParameterLearningEngine:
         Returns:
             Dictionary with recommended parameters and confidence
         """
+        return self.recommend_parameters_many(
+            tissue_type,
+            marker_name,
+            [operation],
+            characteristics=characteristics,
+            min_quality_improvement=min_quality_improvement,
+            approved_only=approved_only,
+            max_results=max_results,
+            algorithm_version=algorithm_version,
+        )[operation]
+
+    def recommend_parameters_many(
+        self,
+        tissue_type: str,
+        marker_name: str,
+        operations: Sequence[str],
+        characteristics: ImageCharacteristics | None = None,
+        min_quality_improvement: float = 0.0,
+        approved_only: bool = False,
+        max_results: int = 5,
+        algorithm_version: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Recommend parameters for several operations with one query per database.
+
+        ``suggest_with_learning`` asks for all five learning operations at once;
+        querying them together costs two round trips (project + global database)
+        instead of two per operation. Scoring, aggregation and confidence are the
+        same as :meth:`recommend_parameters`, applied per operation.
+
+        Returns:
+            ``{operation: recommendation}`` with one entry per requested operation.
+        """
+        operations = list(dict.fromkeys(operations))
         tissue_norm = normalize_tissue_type(tissue_type)
         marker_norm = normalize_marker_name(marker_name)
 
-        # Query both databases
-        all_records = []
-
-        if self.project_db_path and self.project_db_path.exists():
-            records = self._query_similar_records(
-                self.project_db_path,
+        by_operation: dict[str, list[dict[str, Any]]] = {op: [] for op in operations}
+        for db_path, source, weight in (
+            (self.project_db_path, "project", 1.5),  # project records get higher weight
+            (self.global_db_path, "global", 1.0),
+        ):
+            if not (db_path and db_path.exists()):
+                continue
+            found = self._query_similar_records_many(
+                db_path,
                 tissue_norm,
                 marker_norm,
-                operation,
+                operations,
                 min_quality_improvement,
                 approved_only,
                 algorithm_version=algorithm_version,
             )
-            # Project records get higher weight
-            for r in records:
-                r["source"] = "project"
-                r["weight"] = 1.5
-            all_records.extend(records)
+            for op, records in found.items():
+                for r in records:
+                    r["source"] = source
+                    r["weight"] = weight
+                by_operation[op].extend(records)
 
-        if self.global_db_path and self.global_db_path.exists():
-            records = self._query_similar_records(
-                self.global_db_path,
+        return {
+            op: self._build_recommendation(
+                tissue_type,
+                marker_name,
                 tissue_norm,
                 marker_norm,
-                operation,
-                min_quality_improvement,
-                approved_only,
-                algorithm_version=algorithm_version,
+                op,
+                records,
+                characteristics,
+                max_results,
             )
-            for r in records:
-                r["source"] = "global"
-                r["weight"] = 1.0
-            all_records.extend(records)
+            for op, records in by_operation.items()
+        }
 
+    def _build_recommendation(
+        self,
+        tissue_type: str,
+        marker_name: str,
+        tissue_norm: str,
+        marker_norm: str,
+        operation: str,
+        all_records: list[dict[str, Any]],
+        characteristics: ImageCharacteristics | None,
+        max_results: int,
+    ) -> dict[str, Any]:
+        """Score, rank and aggregate the records found for one operation."""
         if not all_records:
             return {
                 "status": "no_history",
@@ -660,6 +788,106 @@ class ParameterLearningEngine:
             ],
         }
 
+    # Window functions (ROW_NUMBER ... OVER) need SQLite 3.25 (2018).
+    _WINDOW_FUNCTIONS = sqlite3.sqlite_version_info >= (3, 25, 0)
+
+    def _query_similar_records_many(
+        self,
+        db_path: Path,
+        tissue_norm: str,
+        marker_norm: str,
+        operations: Sequence[str],
+        min_improvement: float,
+        approved_only: bool,
+        algorithm_version: str | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """:meth:`_query_similar_records` for several operations in one round trip.
+
+        Returns the 50 most relevant records per operation (the same ordering as
+        the single-operation query), keyed by operation; operations without
+        records map to an empty list.
+        """
+        operations = list(operations)
+        if not operations:
+            return {}
+        if not self._WINDOW_FUNCTIONS:  # pragma: no cover - SQLite < 3.25
+            return {
+                op: self._query_similar_records(
+                    db_path,
+                    tissue_norm,
+                    marker_norm,
+                    op,
+                    min_improvement,
+                    approved_only,
+                    algorithm_version=algorithm_version,
+                )
+                for op in operations
+            }
+
+        where = f"operation IN ({','.join('?' * len(operations))}) AND quality_improvement >= ?"
+        where_params: list[Any] = [*operations, min_improvement]
+        if approved_only:
+            where += " AND user_approved = 1"
+        if algorithm_version:
+            where += " AND algorithm_version = ?"
+            where_params.append(algorithm_version)
+
+        # Positional parameters bind in textual order: the window ORDER BY first,
+        # then the WHERE clause.
+        query = f"""
+            SELECT * FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY operation
+                    ORDER BY
+                        CASE
+                            WHEN tissue_type_normalized = ? AND marker_name_normalized = ? THEN 4
+                            WHEN tissue_type_normalized = ? THEN 3
+                            WHEN marker_name_normalized = ? THEN 2
+                            ELSE 1
+                        END DESC,
+                        quality_improvement DESC,
+                        timestamp DESC
+                ) AS relevance_rank
+                FROM parameter_records
+                WHERE {where}
+            )
+            WHERE relevance_rank <= 50
+            ORDER BY operation, relevance_rank
+        """
+        params = [tissue_norm, marker_norm, tissue_norm, marker_norm, *where_params]
+
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(query, params).fetchall()
+        finally:
+            conn.close()
+
+        result: dict[str, list[dict[str, Any]]] = {op: [] for op in operations}
+        for row in rows:
+            result[row["operation"]].append(self._row_to_record(row))
+        return result
+
+    @staticmethod
+    def _row_to_record(row: sqlite3.Row) -> dict[str, Any]:
+        """Convert a ``parameter_records`` row into the dict the scorer works on."""
+        return {
+            "id": row["id"],
+            "timestamp": row["timestamp"],
+            "tissue_type": row["tissue_type"],
+            "tissue_type_normalized": row["tissue_type_normalized"],
+            "marker_name": row["marker_name"],
+            "marker_name_normalized": row["marker_name_normalized"],
+            "characteristics": (
+                json.loads(row["characteristics_json"]) if row["characteristics_json"] else {}
+            ),
+            "parameters": json.loads(row["parameters_json"]),
+            "quality_before": row["quality_before"],
+            "quality_after": row["quality_after"],
+            "quality_improvement": row["quality_improvement"],
+            "user_approved": bool(row["user_approved"]),
+        }
+
     def _query_similar_records(
         self,
         db_path: Path,
@@ -709,30 +937,7 @@ class ParameterLearningEngine:
         rows = cursor.fetchall()
         conn.close()
 
-        records = []
-        for row in rows:
-            records.append(
-                {
-                    "id": row["id"],
-                    "timestamp": row["timestamp"],
-                    "tissue_type": row["tissue_type"],
-                    "tissue_type_normalized": row["tissue_type_normalized"],
-                    "marker_name": row["marker_name"],
-                    "marker_name_normalized": row["marker_name_normalized"],
-                    "characteristics": (
-                        json.loads(row["characteristics_json"])
-                        if row["characteristics_json"]
-                        else {}
-                    ),
-                    "parameters": json.loads(row["parameters_json"]),
-                    "quality_before": row["quality_before"],
-                    "quality_after": row["quality_after"],
-                    "quality_improvement": row["quality_improvement"],
-                    "user_approved": bool(row["user_approved"]),
-                }
-            )
-
-        return records
+        return [self._row_to_record(row) for row in rows]
 
     def _score_records(
         self,
