@@ -13,18 +13,9 @@ import numpy as np
 from pydantic import Field
 
 from kintsugi.mcp.schemas import QualityResult
-
-# Import session state from signal_isolation
-from kintsugi.mcp.tools.signal_isolation import _add_history, _loaded_images
+from kintsugi.mcp.session import _add_history, _get_image
 
 logger = logging.getLogger("kintsugi.mcp.quality_assessment")
-
-
-def _get_image(name: str) -> Any:
-    """Get a loaded image by name."""
-    if name not in _loaded_images:
-        raise ValueError(f"Image not loaded: {name}. Use load_channel first.")
-    return _loaded_images[name]["data"]
 
 
 def _plain(value: Any) -> Any:
@@ -335,13 +326,26 @@ def _interpret_snr(snr: float) -> str:
 
 
 async def batch_assess_quality(
-    channels: list[str],
-    confidence_threshold: float = 0.85,
+    channels: Annotated[
+        list[str], Field(description="Names of the loaded channels to assess", min_length=1)
+    ],
+    confidence_threshold: Annotated[
+        float,
+        Field(
+            description="Quality score below which a channel is flagged for review (0.0-1.0)",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ] = 0.85,
 ) -> dict[str, Any]:
     """
-    Assess quality for multiple channels at once.
+    Assess quality for several loaded channels at once.
 
-    Returns a summary with channels sorted by quality score.
+    Runs ``assess_quality`` on each channel and returns the scores sorted from
+    worst to best plus a ``review_queue`` of the channels below the threshold.
+    A channel that is not loaded is reported in its own ``results`` entry
+    instead of failing the whole call.
     """
     results = []
 
@@ -380,9 +384,9 @@ async def batch_assess_quality(
         "total_channels": len(channels),
         "channels_assessed": len(valid_results),
         "channels_needing_review": len(needs_review),
-        "average_score": round(np.mean(scores), 3) if scores else 0,
-        "min_score": round(min(scores), 3) if scores else 0,
-        "max_score": round(max(scores), 3) if scores else 0,
+        "average_score": round(float(np.mean(scores)), 3) if scores else 0.0,
+        "min_score": round(float(min(scores)), 3) if scores else 0.0,
+        "max_score": round(float(max(scores)), 3) if scores else 0.0,
         "results": results,
         "review_queue": [r["channel"] for r in needs_review],
     }

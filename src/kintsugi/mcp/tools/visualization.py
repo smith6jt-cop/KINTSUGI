@@ -16,20 +16,11 @@ import numpy as np
 from pydantic import Field
 
 from kintsugi.mcp._sdk import CallToolResult, ImageContent, TextContent
-from kintsugi.mcp.path_safety import clamp_int, validate_choice
+from kintsugi.mcp.path_safety import clamp_float, clamp_int, validate_choice
 from kintsugi.mcp.schemas import ImageStatsResult
-
-# Import session state from signal_isolation
-from kintsugi.mcp.tools.signal_isolation import _loaded_images
+from kintsugi.mcp.session import _get_image
 
 logger = logging.getLogger("kintsugi.mcp.visualization")
-
-
-def _get_image(name: str) -> Any:
-    """Get a loaded image by name."""
-    if name not in _loaded_images:
-        raise ValueError(f"Image not loaded: {name}. Use load_channel first.")
-    return _loaded_images[name]["data"]
 
 
 async def get_image_stats(
@@ -265,13 +256,20 @@ async def get_thumbnail(
 
 
 async def compare_channels(
-    channel1: str,
-    channel2: str,
+    channel1: Annotated[str, Field(description="Name of the first loaded channel")],
+    channel2: Annotated[
+        str,
+        Field(
+            description="Name of the second loaded channel, e.g. the processed version of channel1"
+        ),
+    ],
 ) -> dict[str, Any]:
     """
-    Compare two channels statistically.
+    Compare two loaded channels statistically.
 
-    Useful for before/after comparison or cross-channel analysis.
+    Reports per-channel mean/std/max, the difference image statistics, Pearson
+    correlation and a global SSIM, with a one-line interpretation. Useful for
+    before/after comparison or cross-channel analysis.
     """
     try:
         data1 = _get_image(channel1)
@@ -357,16 +355,32 @@ async def compare_channels(
 
 
 async def get_intensity_profile(
-    channel: str,
-    axis: str = "horizontal",
-    position: float | None = None,
+    channel: Annotated[str, Field(description="Name of the loaded channel")],
+    axis: Annotated[
+        Literal["horizontal", "vertical"],
+        Field(description="Line direction: a row (horizontal) or a column (vertical) of the image"),
+    ] = "horizontal",
+    position: Annotated[
+        float | None,
+        Field(
+            description="Where the line sits along the other axis as a fraction 0.0-1.0; "
+            "None = 0.5 (the centre)",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ] = None,
 ) -> dict[str, Any]:
     """
-    Get intensity profile along a line through the image.
+    Intensity values along a horizontal or vertical line through the image.
 
-    Useful for checking for gradients or uneven illumination.
+    Useful for spotting gradients or uneven illumination. Long lines are
+    down-sampled to at most 500 points.
     """
     try:
+        validate_choice(axis, ("horizontal", "vertical"), "axis")
+        if position is not None:
+            clamp_float(position, "position", minimum=0.0, maximum=1.0)
         data = _get_image(channel)
     except ValueError as e:
         return {"error": str(e)}
@@ -382,11 +396,11 @@ async def get_intensity_profile(
         position = 0.5
 
     if axis == "horizontal":
-        y = int(h * position)
+        y = min(h - 1, int(h * position))  # position=1.0 is the last row, not one past it
         profile = data[y, :].astype(float)
         x_coords = list(range(w))
     else:  # vertical
-        x = int(w * position)
+        x = min(w - 1, int(w * position))
         profile = data[:, x].astype(float)
         x_coords = list(range(h))
 

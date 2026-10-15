@@ -46,8 +46,11 @@ EXPECTED_TOOL_NAMES = {
     "denoise_advanced",
     "assess_quality",
     "compute_snr",
+    "batch_assess_quality",
     "get_image_stats",
     "get_thumbnail",
+    "compare_channels",
+    "get_intensity_profile",
     "list_channels",
     "save_processed",
     "get_processing_history",
@@ -1568,3 +1571,49 @@ class TestDeterministicFileMatching:
 
         assert "ambiguous" in result["error"]
         assert [Path(c).name for c in result["candidates"]] == ["CD3_a.tif", "CD3_b.tif"]
+
+
+class TestNewlyRegisteredTools:
+    """compare_channels, get_intensity_profile and batch_assess_quality on the wire."""
+
+    async def test_intensity_profile_last_row_and_bad_inputs(self, clear_mcp_state):
+        from kintsugi.mcp.session import _store_image
+        from kintsugi.mcp.tools.visualization import get_intensity_profile
+
+        image = np.arange(64, dtype=np.uint16).reshape(8, 8) * 100
+        _store_image("ch", image)
+
+        last_row = await get_intensity_profile(channel="ch", axis="horizontal", position=1.0)
+        assert last_row["status"] == "success"
+        assert last_row["profile"]["values"] == image[-1].tolist()
+
+        last_col = await get_intensity_profile(channel="ch", axis="vertical", position=1.0)
+        assert last_col["profile"]["values"] == image[:, -1].tolist()
+
+        assert "position" in (await get_intensity_profile(channel="ch", position=1.5))["error"]
+        assert "axis" in (await get_intensity_profile(channel="ch", axis="diagonal"))["error"]
+        assert "not loaded" in (await get_intensity_profile(channel="missing"))["error"].lower()
+
+    async def test_batch_assess_quality_reports_missing_channel_in_place(
+        self, sample_uint16_image, clear_mcp_state
+    ):
+        from kintsugi.mcp.session import _store_image
+        from kintsugi.mcp.tools.quality_assessment import batch_assess_quality
+
+        _store_image("good", sample_uint16_image)
+
+        result = await batch_assess_quality(channels=["good", "missing"])
+
+        assert result["status"] == "success"
+        assert result["total_channels"] == 2 and result["channels_assessed"] == 1
+        by_name = {r["channel"]: r for r in result["results"]}
+        assert "score" in by_name["good"] and "error" in by_name["missing"]
+        assert isinstance(result["average_score"], float)
+
+    def test_three_tools_are_registered_read_only(self):
+        from kintsugi.mcp.tool_specs import TOOL_SPECS
+
+        specs = {s["name"]: s for s in TOOL_SPECS}
+        for name in ("compare_channels", "get_intensity_profile", "batch_assess_quality"):
+            assert specs[name]["annotations"]["readOnlyHint"] is True
+            assert specs[name]["title"]

@@ -13,10 +13,9 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 import numpy as np
 from pydantic import Field
 
+from kintsugi.mcp.heuristics import heuristic_suggestion, sample_image, summarize_intensity
 from kintsugi.mcp.schemas import LearningSuggestion
-
-# Import session state from signal_isolation
-from kintsugi.mcp.tools.signal_isolation import _loaded_images
+from kintsugi.mcp.session import _loaded_images
 
 if TYPE_CHECKING:
     from kintsugi.claude.parameter_learning import ImageCharacteristics
@@ -58,6 +57,25 @@ def _get_learning_engine(project_path: str | None = None):
 
         engine = _learning_engines[key] = ParameterLearningEngine(project_path)
     return engine
+
+
+def _channel_characteristics(channel: str | None) -> ImageCharacteristics | None:
+    """``ImageCharacteristics`` of a loaded channel (sub-sampled), or None."""
+    if not channel or channel not in _loaded_images:
+        return None
+    try:
+        from kintsugi.claude.parameter_learning import ImageCharacteristics
+
+        data = _loaded_images[channel]["data"]
+        if hasattr(data, "compute"):
+            step = max(1, data.shape[0] // 1000)
+            sample = data[::step, ::step].compute()
+        else:
+            sample = data[::10, ::10]
+        return ImageCharacteristics.from_image(sample)
+    except Exception as e:
+        logger.warning(f"Failed to compute characteristics: {e}")
+        return None
 
 
 async def get_learned_parameters(
@@ -214,25 +232,13 @@ async def record_successful_parameters(
         Confirmation with record ID
     """
     try:
-        from kintsugi.claude.parameter_learning import ImageCharacteristics
+        from kintsugi.claude.parameter_learning import ImageCharacteristics  # noqa: F401
     except ImportError as e:
         return {"error": f"Learning module not available: {e}"}
 
     engine = _get_learning_engine(project_path)
 
-    # Get image characteristics if channel is loaded
-    characteristics = None
-    if channel and channel in _loaded_images:
-        try:
-            data = _loaded_images[channel]["data"]
-            if hasattr(data, "compute"):
-                step = max(1, data.shape[0] // 1000)
-                sample = data[::step, ::step].compute()
-            else:
-                sample = data[::10, ::10]
-            characteristics = ImageCharacteristics.from_image(sample)
-        except Exception as e:
-            logger.warning(f"Failed to compute characteristics: {e}")
+    characteristics = _channel_characteristics(channel)
 
     # Record parameters
     record_id = engine.record_parameters(
@@ -342,21 +348,14 @@ async def suggest_with_learning(
 
     engine = _get_learning_engine(project_path)
 
-    # Get image data
-    data = _loaded_images[channel]["data"]
-    if hasattr(data, "compute"):
-        step = max(1, data.shape[0] // 2000)
-        sample = data[::step, ::step].compute()
-    else:
-        sample = data
-
-    # Compute characteristics
+    sample = sample_image(_loaded_images[channel]["data"])
     characteristics = ImageCharacteristics.from_image(sample)
-
-    # Analyze image for heuristic suggestions
-    p1, p10, p50, p90, p99 = np.percentile(sample, [1, 10, 50, 90, 99])
-    dynamic_range = p99 - p1
-    noise_estimate = float(np.std(sample[sample < p10]))
+    summary = summarize_intensity(sample)
+    blank_sample = None
+    if blank_channel:
+        if blank_channel not in _loaded_images:
+            return {"error": f"Blank channel not loaded: {blank_channel}"}
+        blank_sample = sample_image(_loaded_images[blank_channel]["data"])
 
     # Get learned parameters for each operation
     operations = list(LEARNING_OPERATIONS)
@@ -377,25 +376,17 @@ async def suggest_with_learning(
         "operations": {},
     }
 
-    for operation in operations:
-        # Get learned parameters
-        learned = engine.recommend_parameters(
-            tissue_type=tissue_type,
-            marker_name=marker_name,
-            operation=operation,
-            characteristics=characteristics,
-        )
+    # One query per database for all operations instead of one per operation.
+    learned_by_operation = engine.recommend_parameters_many(
+        tissue_type=tissue_type,
+        marker_name=marker_name,
+        operations=operations,
+        characteristics=characteristics,
+    )
 
-        # Get heuristic suggestion
-        heuristic = _get_heuristic_suggestion(
-            operation,
-            sample,
-            p10,
-            p90,
-            dynamic_range,
-            noise_estimate,
-            blank_channel,
-        )
+    for operation in operations:
+        learned = learned_by_operation[operation]
+        heuristic = heuristic_suggestion(operation, sample, summary, blank_sample)
 
         # Combine learned and heuristic
         if learned["status"] == "success" and learned["confidence"] > 0.5:
@@ -458,162 +449,6 @@ async def suggest_with_learning(
     ]
 
     return recommendations
-
-
-def _get_heuristic_suggestion(
-    operation: str,
-    sample: np.ndarray,
-    p10: float,
-    p90: float,
-    dynamic_range: float,
-    noise_estimate: float,
-    blank_channel: str | None,
-    method: str = "global",
-) -> dict[str, Any]:
-    """Get heuristic suggestion for an operation based on image analysis."""
-
-    if operation == "blank_subtraction" and method == "weighted":
-        # Weighted subtraction heuristic
-        if blank_channel and blank_channel in _loaded_images:
-            blank_data = _loaded_images[blank_channel]["data"]
-            if hasattr(blank_data, "compute"):
-                blank_sample = blank_data[::10, ::10].compute()
-            else:
-                blank_sample = blank_data[::10, ::10]
-
-            try:
-                from kintsugi.signal.autofluorescence import (
-                    analyze_for_weighted_subtraction,
-                )
-
-                analysis = analyze_for_weighted_subtraction(sample, blank_sample)
-                return {
-                    "parameters": {
-                        "method": "weighted",
-                        "base_scale_factor": analysis["base_scale_factor"],
-                        "blank_clip_factor": analysis["blank_clip_factor"],
-                        "n_ranges": analysis["n_ranges"],
-                        "range_method": analysis["range_method"],
-                        "ranges": analysis["ranges"],
-                        "transition_width": analysis["transition_width"],
-                        "smooth_low": analysis["smooth_low"],
-                        "smooth_high": analysis["smooth_high"],
-                        "erosion": analysis["erosion"],
-                    },
-                    "rationale": (
-                        f"Weighted: {analysis['n_ranges']} ranges, "
-                        f"dim weight={analysis['ranges'][1]['weight']:.2f} "
-                        f"bright weight={analysis['ranges'][-1]['weight']:.2f}"
-                        if len(analysis["ranges"]) > 1
-                        else "Weighted subtraction"
-                    ),
-                }
-            except Exception as e:
-                logger.warning(f"Weighted analysis failed, falling back: {e}")
-
-        return {
-            "parameters": {
-                "method": "weighted",
-                "base_scale_factor": 1.0,
-                "blank_clip_factor": 0,
-                "n_ranges": 5,
-                "range_method": "percentile",
-                "transition_width": 0.1,
-            },
-            "rationale": "Default weighted parameters (no blank loaded)",
-        }
-
-    if operation == "blank_subtraction":
-        if blank_channel and blank_channel in _loaded_images:
-            blank_data = _loaded_images[blank_channel]["data"]
-            if hasattr(blank_data, "compute"):
-                blank_sample = blank_data[::10, ::10].compute()
-            else:
-                blank_sample = blank_data[::10, ::10]
-            blank_mean = float(np.mean(blank_sample))
-            signal_mean = float(np.mean(sample))
-
-            if blank_mean > 0:
-                suggested_scale = min(1.0, max(0.5, signal_mean / blank_mean * 0.8))
-            else:
-                suggested_scale = 0.8
-
-            return {
-                "parameters": {
-                    "blank_scale_factor": round(suggested_scale, 2),
-                    "blank_clip_factor": int(np.percentile(blank_sample, 5)),
-                    "smooth_low": noise_estimate > 300,
-                    "smooth_high": False,
-                    "erosion": 1 if suggested_scale > 0.7 else 0,
-                },
-                "rationale": f"Blank mean={blank_mean:.0f}, Signal mean={signal_mean:.0f}",
-            }
-        else:
-            return {
-                "parameters": {
-                    "blank_scale_factor": 0.8,
-                    "blank_clip_factor": 0,
-                    "smooth_low": False,
-                    "smooth_high": False,
-                    "erosion": 0,
-                },
-                "rationale": "No blank channel loaded - using defaults",
-            }
-
-    elif operation == "denoise":
-        if noise_estimate > 500:
-            return {
-                "parameters": {"method": "median", "filter_size": 3},
-                "rationale": f"High noise (std={noise_estimate:.0f})",
-            }
-        elif noise_estimate > 200:
-            return {
-                "parameters": {"method": "median", "filter_size": 2},
-                "rationale": f"Moderate noise (std={noise_estimate:.0f})",
-            }
-        else:
-            return {
-                "parameters": {"method": "median", "filter_size": 1},
-                "rationale": f"Low noise (std={noise_estimate:.0f}) - minimal filtering",
-            }
-
-    elif operation == "clahe":
-        if dynamic_range < 10000:
-            return {
-                "parameters": {"clip_limit": 0.02, "tile_grid_size": 50, "nbins": 128},
-                "rationale": f"Low dynamic range ({dynamic_range:.0f}) - aggressive CLAHE",
-            }
-        elif dynamic_range < 30000:
-            return {
-                "parameters": {"clip_limit": 0.01, "tile_grid_size": 70, "nbins": 128},
-                "rationale": f"Moderate dynamic range ({dynamic_range:.0f})",
-            }
-        else:
-            return {
-                "parameters": {"clip_limit": 0.005, "tile_grid_size": 100, "nbins": 256},
-                "rationale": f"Good dynamic range ({dynamic_range:.0f}) - gentle CLAHE",
-            }
-
-    elif operation == "clean_background":
-        return {
-            "parameters": {
-                "background_threshold": int(p10 * 0.5),
-                "remove_small_objects": True,
-                "min_object_size": 30,
-            },
-            "rationale": f"Background level at p10={p10:.0f}",
-        }
-
-    elif operation == "gaussian_subtract":
-        return {
-            "parameters": {
-                "sigma": 10,
-                "scale_factor": 0.1 if dynamic_range > 20000 else 0.2,
-            },
-            "rationale": "Standard Gaussian subtraction",
-        }
-
-    return {"parameters": {}, "rationale": "Unknown operation"}
 
 
 def _suggest_processing_order(
@@ -735,27 +570,24 @@ async def approve_and_learn(
             }
         mapped_operations.append((learning_op, parameters))
 
-    results = []
-
-    for operation, parameters in mapped_operations:
-        result = await record_successful_parameters(
-            tissue_type=tissue_type,
-            marker_name=marker_name,
-            operation=operation,
-            parameters=parameters,
-            quality_before=quality_before,
-            quality_after=quality_after,
-            user_approved=True,
-            user_notes=notes,
-            channel=channel,
-            project_path=project_path,
-        )
-        results.append(
-            {
-                "operation": operation,
-                "recorded": result.get("status") == "success",
-            }
-        )
+    # All operations are written in one transaction per database, with the image
+    # characteristics computed once rather than once per operation.
+    engine = _get_learning_engine(project_path)
+    record_ids = engine.record_parameters_many(
+        [{"operation": op, "parameters": params} for op, params in mapped_operations],
+        tissue_type=tissue_type,
+        marker_name=marker_name,
+        quality_before=quality_before,
+        quality_after=quality_after,
+        user_approved=True,
+        user_notes=notes,
+        characteristics=_channel_characteristics(channel),
+        channel_name=channel or "",
+    )
+    results = [
+        {"operation": op, "recorded": True, "record_id": record_id}
+        for (op, _params), record_id in zip(mapped_operations, record_ids, strict=True)
+    ]
 
     return {
         "status": "success",

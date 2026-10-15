@@ -40,7 +40,7 @@ from tasks import TASKS  # noqa: E402  (local sibling module)
 CONFUSABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("denoising", ["denoise", "denoise_advanced"]),
     ("background removal", ["subtract_blank", "gaussian_subtract", "estimate_background"]),
-    ("quality", ["assess_quality", "compute_snr"]),
+    ("quality", ["assess_quality", "compute_snr", "batch_assess_quality"]),
     (
         "parameter suggestion",
         ["suggest_parameters", "suggest_with_learning", "get_learned_parameters"],

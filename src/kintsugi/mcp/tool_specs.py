@@ -158,6 +158,17 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "description": "Compute Signal-to-Noise Ratio for a channel.",
         "annotations": _READ_ONLY,
     },
+    {
+        "name": "batch_assess_quality",
+        "module": "quality_assessment",
+        "attr": "batch_assess_quality",
+        "title": "Batch quality assessment",
+        "description": (
+            "Assess several loaded channels at once: scores sorted worst-first and a review "
+            "queue of the channels below the threshold."
+        ),
+        "annotations": _READ_ONLY,
+    },
     # ---- Visualization ----
     {
         "name": "get_image_stats",
@@ -173,6 +184,28 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "attr": "get_thumbnail",
         "title": "Thumbnail preview",
         "description": "Get a downsampled thumbnail of the image for preview.",
+        "annotations": _READ_ONLY,
+    },
+    {
+        "name": "compare_channels",
+        "module": "visualization",
+        "attr": "compare_channels",
+        "title": "Compare two channels",
+        "description": (
+            "Compare two loaded channels statistically (means, difference, correlation, SSIM) "
+            "with a one-line interpretation; useful for before/after checks."
+        ),
+        "annotations": _READ_ONLY,
+    },
+    {
+        "name": "get_intensity_profile",
+        "module": "visualization",
+        "attr": "get_intensity_profile",
+        "title": "Intensity profile",
+        "description": (
+            "Intensity values along a horizontal or vertical line through a loaded channel, "
+            "for spotting gradients or uneven illumination."
+        ),
         "annotations": _READ_ONLY,
     },
     # ---- Workflow ----
@@ -205,7 +238,11 @@ TOOL_SPECS: list[dict[str, Any]] = [
         "module": "workflow",
         "attr": "suggest_parameters",
         "title": "Suggest parameters (heuristic)",
-        "description": "Analyze channel and suggest processing parameters based on image characteristics.",
+        "description": (
+            "Rule-based suggestions for every operation from the channel's intensity "
+            "statistics, without the learning database. Prefer suggest_with_learning when "
+            "the tissue type and marker are known."
+        ),
         "annotations": _READ_ONLY,
     },
     {

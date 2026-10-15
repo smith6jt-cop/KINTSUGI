@@ -1,9 +1,9 @@
 {
   "structural": {
-    "tool_count": 29,
-    "total_definition_tokens_est": 7467,
-    "mean_tokens_per_tool_est": 257.5,
-    "tools_with_output_schema": 29,
+    "tool_count": 32,
+    "total_definition_tokens_est": 8005,
+    "mean_tokens_per_tool_est": 250.2,
+    "tools_with_output_schema": 32,
     "top_tools_by_tokens": [
       [
         "subtract_blank",
@@ -11,7 +11,7 @@
       ],
       [
         "record_successful_parameters",
-        580
+        596
       ],
       [
         "approve_and_learn",
@@ -51,7 +51,8 @@
         "theme": "quality",
         "tools": [
           "assess_quality",
-          "compute_snr"
+          "compute_snr",
+          "batch_assess_quality"
         ]
       },
       {

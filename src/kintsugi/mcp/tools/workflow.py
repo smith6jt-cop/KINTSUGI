@@ -15,6 +15,12 @@ from typing import Annotated, Any, Literal
 import numpy as np
 from pydantic import Field
 
+from kintsugi.mcp.heuristics import (
+    HEURISTIC_OPERATIONS,
+    heuristic_suggestion,
+    sample_image,
+    summarize_intensity,
+)
 from kintsugi.mcp.path_safety import (
     PathSafetyError,
     ensure_within,
@@ -22,11 +28,11 @@ from kintsugi.mcp.path_safety import (
     validate_choice,
 )
 from kintsugi.mcp.schemas import SessionStateResult
-
-# Import session state from signal_isolation
-from kintsugi.mcp.tools.signal_isolation import (
+from kintsugi.mcp.session import (
     _loaded_images,
     _processing_history,
+    clear_session,
+    estimate_memory_usage,
 )
 
 logger = logging.getLogger("kintsugi.mcp.workflow")
@@ -339,107 +345,41 @@ async def suggest_parameters(
     ] = None,
 ) -> dict[str, Any]:
     """
-    Analyze channel and suggest processing parameters.
+    Rule-based parameter suggestions from the channel's intensity statistics.
 
-    Uses image statistics to recommend appropriate settings.
+    Uses the same rules as ``suggest_with_learning`` (``kintsugi.mcp.heuristics``)
+    without consulting the learning database, so it needs no tissue type or
+    marker name. Returns the percentile analysis and one recommendation per
+    operation, each with a one-line rationale.
     """
     if channel not in _loaded_images:
         return {"error": f"Channel not loaded: {channel}"}
+    blank_sample = None
+    if blank_channel:
+        if blank_channel not in _loaded_images:
+            return {"error": f"Blank channel not loaded: {blank_channel}"}
+        blank_sample = sample_image(_loaded_images[blank_channel]["data"])
 
-    data = _loaded_images[channel]["data"]
+    sample = sample_image(_loaded_images[channel]["data"])
+    summary = summarize_intensity(sample)
 
-    # Compute sample for analysis
-    if hasattr(data, "compute"):
-        step = max(1, data.shape[0] // 2000)
-        sample = data[::step, ::step].compute()
-    else:
-        sample = data
-
-    suggestions = {
-        "channel": channel,
-        "analysis": {},
-        "recommendations": {},
-    }
-
-    # Analyze intensity distribution
-    p1, p10, p50, p90, p99 = np.percentile(sample, [1, 10, 50, 90, 99])
-    suggestions["analysis"]["intensity"] = {
-        "p1": float(p1),
-        "p10": float(p10),
-        "p50": float(p50),
-        "p90": float(p90),
-        "p99": float(p99),
-        "dynamic_range": float(p99 - p1),
-    }
-
-    # Background estimation
-    float(p10)
-    float(p90)
-
-    # Blank subtraction parameters
-    if blank_channel and blank_channel in _loaded_images:
-        blank_data = _loaded_images[blank_channel]["data"]
-        if hasattr(blank_data, "compute"):
-            blank_sample = blank_data[::step, ::step].compute()
-        else:
-            blank_sample = blank_data
-
-        blank_mean = float(np.mean(blank_sample))
-        signal_mean = float(np.mean(sample))
-
-        if blank_mean > 0:
-            suggested_scale = min(1.0, signal_mean / blank_mean * 0.8)
-        else:
-            suggested_scale = 0.8
-
-        suggestions["recommendations"]["blank_subtraction"] = {
-            "blank_scale_factor": round(suggested_scale, 2),
-            "blank_clip_factor": int(np.percentile(blank_sample, 5)),
-            "rationale": f"Blank mean={blank_mean:.0f}, Signal mean={signal_mean:.0f}",
-        }
-
-    # Denoising parameters
-    noise_estimate = float(np.std(sample[sample < p10]))
-    if noise_estimate > 500:
-        suggestions["recommendations"]["denoise"] = {
-            "method": "median",
-            "filter_size": 3,
-            "rationale": f"High noise detected (std={noise_estimate:.0f})",
-        }
-    elif noise_estimate > 200:
-        suggestions["recommendations"]["denoise"] = {
-            "method": "median",
-            "filter_size": 2,
-            "rationale": f"Moderate noise detected (std={noise_estimate:.0f})",
-        }
-
-    # CLAHE parameters
-    dynamic_range = p99 - p1
-    if dynamic_range < 10000:
-        suggestions["recommendations"]["clahe"] = {
-            "clip_limit": 0.02,
-            "tile_grid_size": 50,
-            "rationale": f"Low dynamic range ({dynamic_range:.0f}), aggressive CLAHE",
-        }
-    elif dynamic_range < 30000:
-        suggestions["recommendations"]["clahe"] = {
-            "clip_limit": 0.01,
-            "tile_grid_size": 70,
-            "rationale": f"Moderate dynamic range ({dynamic_range:.0f})",
-        }
-
-    # Background cleaning
-    if p10 > 500:
-        suggestions["recommendations"]["clean_background"] = {
-            "background_threshold": int(p10 * 0.5),
-            "remove_small_objects": True,
-            "min_object_size": 50,
-            "rationale": f"Elevated background (p10={p10:.0f})",
+    recommendations: dict[str, Any] = {}
+    for operation in HEURISTIC_OPERATIONS:
+        if operation == "blank_subtraction" and blank_sample is None:
+            continue
+        suggestion = heuristic_suggestion(operation, sample, summary, blank_sample)
+        recommendations[operation] = {
+            **suggestion["parameters"],
+            "rationale": suggestion["rationale"],
         }
 
     return {
         "status": "success",
-        "suggestions": suggestions,
+        "suggestions": {
+            "channel": channel,
+            "analysis": {"intensity": summary.to_dict()},
+            "recommendations": recommendations,
+        },
     }
 
 
@@ -612,41 +552,6 @@ print("Final parameters:", result.get_params())
     }
 
 
-async def set_project_context(project_path: str) -> dict[str, Any]:
-    """
-    Set the current project context for the session.
-
-    Loads project configuration and prepares for processing.
-    """
-    project_path = Path(project_path)
-
-    try:
-        from kintsugi.project import KintsugiProject
-
-        project = KintsugiProject.load(project_path)
-
-        return {
-            "status": "success",
-            "project": {
-                "name": project.config.name,
-                "path": str(project_path),
-                "cycles": project.list_cycles(),
-                "raw_dir": str(project.paths.raw),
-                "processed_dir": str(project.paths.processed),
-            },
-        }
-
-    except FileNotFoundError:
-        return {
-            "status": "not_found",
-            "message": f"No KINTSUGI project at {project_path}",
-            "suggestion": "Use KintsugiProject.create() to initialize a new project",
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
-
-
 async def get_session_state() -> SessionStateResult:
     """
     Get the current session state.
@@ -666,7 +571,7 @@ async def get_session_state() -> SessionStateResult:
     }
 
     history_summary = {channel: len(steps) for channel, steps in _processing_history.items()}
-    memory = _estimate_memory_usage()
+    memory = estimate_memory_usage()
 
     return {
         "status": "success",
@@ -697,9 +602,8 @@ async def unload_channel(
     Loaded images live in server memory for the whole session; call this when
     a channel (or everything) is no longer needed. Files on disk are untouched.
     """
-    from kintsugi.mcp.tools.signal_isolation import clear_session
 
-    before = _estimate_memory_usage()["total_mb"]
+    before = estimate_memory_usage()["total_mb"]
     if clear_all:
         dropped = sorted(_loaded_images)
         clear_session()
@@ -711,32 +615,11 @@ async def unload_channel(
         dropped = [channel]
         del _loaded_images[channel]
         _processing_history.pop(channel, None)
-    after = _estimate_memory_usage()["total_mb"]
+    after = estimate_memory_usage()["total_mb"]
 
     return {
         "status": "success",
         "unloaded": dropped,
         "remaining": sorted(_loaded_images),
         "freed_mb": round(float(before - after), 2),
-    }
-
-
-def _estimate_memory_usage() -> dict[str, float]:
-    """Estimate memory usage of loaded images."""
-    total_bytes = 0
-
-    for _name, info in _loaded_images.items():
-        data = info["data"]
-        if hasattr(data, "nbytes"):
-            total_bytes += data.nbytes
-        elif info.get("shape"):
-            # Estimate from shape
-            shape = info["shape"]
-            dtype = info.get("dtype", "uint16")
-            itemsize = {"uint8": 1, "uint16": 2, "float32": 4, "float64": 8}.get(dtype, 2)
-            total_bytes += np.prod(shape) * itemsize
-
-    return {
-        "total_mb": total_bytes / (1024 * 1024),
-        "total_gb": total_bytes / (1024 * 1024 * 1024),
     }

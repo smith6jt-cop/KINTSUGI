@@ -152,8 +152,8 @@ async def record(root: Path) -> str:
     from mcp.client import Client
 
     from kintsugi.mcp.server import create_server
+    from kintsugi.mcp.session import clear_session
     from kintsugi.mcp.tools import learning
-    from kintsugi.mcp.tools.signal_isolation import clear_session
 
     # Fresh session and fresh learning engines (they are cached per project, and the
     # user-wide one would otherwise keep pointing at a previous run's HOME).

@@ -204,4 +204,31 @@ TASKS: list[EvalTask] = [
         "expected": {"unload_channel"},
         "rationale": "Drop a loaded channel from the session.",
     },
+    {
+        "id": "batch_quality",
+        "prompt": (
+            "Score all five channels I loaded from cycle 3 in one go and tell me which "
+            "ones need a second look."
+        ),
+        "expected": {"batch_assess_quality"},
+        "rationale": "Several channels at once with a review queue; not one assess_quality per channel.",
+    },
+    {
+        "id": "compare_before_after",
+        "prompt": (
+            "How different is cyc001_CD3_subtracted from the original cyc001_CD3? "
+            "Give me the correlation and SSIM between them."
+        ),
+        "expected": {"compare_channels"},
+        "rationale": "Two-channel statistical comparison, not a single-channel quality score.",
+    },
+    {
+        "id": "intensity_profile",
+        "prompt": (
+            "Is there an illumination gradient across the loaded DAPI channel? Show me the "
+            "intensity along a horizontal line through the middle of the image."
+        ),
+        "expected": {"get_intensity_profile"},
+        "rationale": "A line profile answers a gradient question; get_image_stats does not.",
+    },
 ]

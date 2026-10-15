@@ -27,54 +27,17 @@ from kintsugi.mcp.path_safety import (
     safe_filename,
     validate_choice,
 )
+from kintsugi.mcp.session import (  # noqa: F401  (re-exported for the other modules/tests)
+    _add_history,
+    _as_numpy,
+    _get_image,
+    _loaded_images,
+    _processing_history,
+    _store_image,
+    clear_session,
+)
 
 logger = logging.getLogger("kintsugi.mcp.signal_isolation")
-
-# Session state - shared with server
-_loaded_images: dict[str, Any] = {}
-_processing_history: dict[str, list] = {}
-
-
-def _get_image(name: str) -> Any:
-    """Get a loaded image by name."""
-    if name not in _loaded_images:
-        raise ValueError(f"Image not loaded: {name}. Use load_channel first.")
-    return _loaded_images[name]["data"]
-
-
-def _store_image(name: str, data: Any, metadata: dict[str, Any] = None):
-    """Store an image with metadata."""
-    _loaded_images[name] = {
-        "data": data,
-        "metadata": metadata or {},
-        "dtype": str(data.dtype) if hasattr(data, "dtype") else "unknown",
-        "shape": data.shape if hasattr(data, "shape") else None,
-    }
-    if name not in _processing_history:
-        _processing_history[name] = []
-
-
-def _add_history(name: str, operation: str, params: dict[str, Any]):
-    """Add an operation to processing history."""
-    if name not in _processing_history:
-        _processing_history[name] = []
-    _processing_history[name].append(
-        {
-            "operation": operation,
-            "params": params,
-        }
-    )
-
-
-def _as_numpy(data: Any) -> np.ndarray:
-    """Materialize a loaded image (dask or array-like) as a NumPy array.
-
-    Runs the (possibly heavy) ``compute()`` so callers can push it onto a
-    worker thread with :func:`asyncio.to_thread`.
-    """
-    if hasattr(data, "compute"):
-        return data.compute()
-    return np.array(data)
 
 
 async def _report_progress(
@@ -382,13 +345,7 @@ async def suggest_subtraction_parameters(
         signal_np = np.array(signal_data)
         blank_np = np.array(blank_data)
 
-    # Use the intelligent analysis
-    try:
-        from kintsugi.signal import analyze_for_subtraction
-    except ImportError:
-        # Fallback to basic analysis
-        logger.warning("kintsugi.signal module not available, using basic analysis")
-        return _basic_parameter_suggestion(signal_np, blank_np)
+    from kintsugi.signal.autofluorescence import analyze_for_subtraction
 
     # Get analysis-based suggestions
     analysis = analyze_for_subtraction(
@@ -474,37 +431,6 @@ async def suggest_subtraction_parameters(
         ),
         "tissue_type": tissue_type,
         "marker_name": marker_name,
-    }
-
-
-def _basic_parameter_suggestion(signal: np.ndarray, blank: np.ndarray) -> dict:
-    """Fallback basic parameter suggestion without the signal module."""
-    # Simple correlation
-    flat_s = signal.ravel().astype(np.float64)
-    flat_b = blank.ravel().astype(np.float64)
-    mask = (flat_s > 0) | (flat_b > 0)
-    corr = np.corrcoef(flat_s[mask], flat_b[mask])[0, 1] if np.sum(mask) > 100 else 0
-
-    # Basic suggestions
-    clip = int(np.percentile(blank, 10))
-    scale = 1.0 + max(0, corr - 0.5) * 0.8
-
-    return {
-        "status": "success",
-        "suggested_parameters": {
-            "blank_clip_factor": clip,
-            "blank_scale_factor": round(scale, 2),
-            "smooth_low": False,
-            "low_size": 2,
-            "low_percentile": 60,
-            "smooth_high": False,
-            "high_size": 2,
-            "high_percentile": 90,
-            "erosion": 1 if corr > 0.6 else 0,
-        },
-        "confidence": 0.4,
-        "source": "basic_analysis",
-        "analysis": {"correlation": round(corr, 4)},
     }
 
 
@@ -1657,12 +1583,6 @@ def get_loaded_images() -> dict[str, Any]:
 def get_processing_history(channel: str) -> list:
     """Get processing history for a channel."""
     return _processing_history.get(channel, [])
-
-
-def clear_session():
-    """Clear all loaded images and history."""
-    _loaded_images.clear()
-    _processing_history.clear()
 
 
 async def cluster_channels_tool(

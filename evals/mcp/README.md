@@ -6,7 +6,7 @@ verify MCP improvements (tool consolidation, description quality, resources/prom
 
 ## Why
 
-The server exposes 29 tools to Claude. Two questions decide whether that surface
+The server exposes 32 tools to Claude. Two questions decide whether that surface
 is *good*:
 
 1. **Is it cheap and clear?** (structural) — how many tokens do the tool
@@ -42,7 +42,7 @@ it needs **no image data or project**, just the live tool schemas.
 
 | File | Purpose |
 |------|---------|
-| `tasks.py` | 26 realistic natural-language tasks with `expected` acceptable tool(s); every registered tool is the target of at least one task. Includes deliberate confusable pairs (`denoise` vs `denoise_advanced`; the three background-removal tools; `assess_quality` vs `compute_snr`; the parameter-suggestion and record-learning groups). |
+| `tasks.py` | 29 realistic natural-language tasks with `expected` acceptable tool(s); every registered tool is the target of at least one task. Includes deliberate confusable pairs (`denoise` vs `denoise_advanced`; the three background-removal tools; `assess_quality` vs `compute_snr`; the parameter-suggestion and record-learning groups). |
 | `harness.py` | Builds the live server, runs the structural metrics, and (opt-in) the agentic tool-selection loop. |
 
 Add a task by appending an `EvalTask` to `TASKS`; the structural pass verifies that
@@ -77,10 +77,10 @@ re-describing a tool without regenerating the docs fails the build
 
 `python evals/mcp/harness.py --json baseline.json` on the current server:
 
-- **29 tools**, **29/29 carry an output schema** (structured output on every tool;
+- **32 tools**, **32/32 carry an output schema** (structured output on every tool;
   `get_image_stats`, `assess_quality`, `suggest_with_learning` and
   `get_session_state` declare typed schemas).
-- **~7.4k tokens** of tool definitions injected on every call (~255/tool). This is
+- **~8.0k tokens** of tool definitions injected on every call (~250/tool). This is
   up from ~3.9k before the schema work because 25 previously hidden parameters are
   now advertised (with descriptions, enums and ranges) and every tool carries a
   title and annotations. Heaviest: `subtract_blank` (~1.0k, the weighted-method
@@ -89,7 +89,7 @@ re-describing a tool without regenerating the docs fails the build
   server (≈55k for 43 tools); no urgent token pressure.
 - **0 params missing a description**, **0 tools with weak descriptions**,
   **0 tools missing a title**, **0 tools missing annotations**.
-- **0 untargeted tools**; **all 26 tasks reference existing tools**.
+- **0 untargeted tools**; **all 29 tasks reference existing tools**.
 - Earlier eval-driven fix, kept for the record: the harness caught
   `analyze_weighted_subtraction` — documented and implemented, but never
   registered. Now wired up and targeted.
