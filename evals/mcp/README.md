@@ -18,7 +18,7 @@ is *good*:
 ## Run it
 
 ```bash
-# Structural only — no network, no API key. Needs mcp>=2.0 (pip install -e ".[claude]").
+# Structural only — no network, no API key. Needs mcp>=2.0 (pip install -e ".[mcp]").
 python evals/mcp/harness.py
 
 # Same, but exit non-zero on any structural problem (the CI gate).

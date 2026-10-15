@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **evals**: the structural pass reads tools through the client and, under
   `--strict`, also fails on missing titles, missing annotations and untargeted
   tools; 12 new tasks (29 in total) cover every tool.
-- **ci**: the test job installs the `claude` extra; the release workflow
+- **ci**: the test job installs the `mcp` extra; the release workflow
   smoke-tests the built wheel over stdio; the MCP eval workflow also triggers on
   pin and CLI changes.
 - **docs**: `docs/mcp.md` is the canonical MCP page; the other pages link to it.
@@ -50,11 +50,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   citation; the README BibTeX entry now carries the full author list and DOI.
 
 ### Changed
+- **BREAKING**: the package `kintsugi.claude` is now `kintsugi.assist` (parameter
+  learning, Jupyter tuners, workflow state), and the optional dependency group /
+  pip extra `claude` is now `mcp` (`pip install -e ".[mcp]"` or `kintsugi install
+  mcp`). The MCP server works with any MCP client, so neither name should point at
+  one vendor. There are no aliases: `import kintsugi.claude` fails and `kintsugi
+  install claude` exits with a pointer to the new name. The package's exports now
+  resolve lazily, so importing the learning engine no longer imports ipywidgets or
+  stackview; the unused `httpx` dependency left the extra.
+- **notebooks**: the parameter-learning cells of `3_Signal_Isolation_QC.ipynb`
+  imported `ParameterLearningEngine` from a module that never defined it, read
+  result keys the engine does not return (`found`, `sample_count`) and recorded
+  cleaning parameters under an unknown operation; they now import from
+  `kintsugi.assist`, check `status`, read `based_on_records` and record
+  `clean_background`.
 - **mcp**: the server now requires the 2.x Python SDK (`mcp>=2.0,<3`,
   `mcp.server.mcpserver.MCPServer`) through the import gate `kintsugi.mcp._sdk`,
   which distinguishes "mcp is not installed" from "an unsupported mcp 1.x is
   installed". The 1.x `mcp.server.fastmcp` API is no longer supported. Install
-  with `pip install -e ".[claude]"` or `kintsugi install claude`.
+  with `pip install -e ".[mcp]"` or `kintsugi install mcp`.
 - **mcp**: generated Claude Code configuration changed shape. `.mcp.json` holds
   `{"mcpServers": {"kintsugi": {"type": "stdio", "command": "<absolute path to
   kintsugi>", "args": ["mcp", "start"]}}}` with no `cwd` (Claude Code starts
@@ -84,11 +98,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default at `BOOTSTRAP_WEIGHT` (0.6) of an approved record, and confidence is
   scaled by `0.5 + 0.5 * approved_fraction` so bootstrap-only evidence stays below
   the "learned" tier.
-- **deps**: `pydantic` is a core dependency; the `claude` install group matches
+- **deps**: `pydantic` is a core dependency; the `mcp` install group matches
   the pyproject extra (adds `optuna`, `smo`); `mcp>=2.0,<3` in `pyproject.toml`,
   `deps.py` and `envs/env-hpc.yml`.
-- **docs**: install text corrected everywhere — `pip install kintsugi[claude]`
-  installed an unrelated PyPI package; it now reads `pip install -e ".[claude]"`.
+- **docs**: install text corrected everywhere — `pip install kintsugi[mcp]`
+  installed an unrelated PyPI package; it now reads `pip install -e ".[mcp]"`.
   Tool tables are generated from the registry; stale file references
   (`kintsugi-dev.code-workspace`, `test_data/mini_project`, `scripts/release.py`),
   install-group counts, test counts and the denoise method lists were corrected.
@@ -150,7 +164,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `kintsugi.mcp.tools.learning` (which only imports it lazily) and tested
   `recommendation["found"]` while the engine returns `status == "success"`. Both
   the MCP tool and `signal.subtractor` now import from
-  `kintsugi.claude.parameter_learning` and test the status key.
+  `kintsugi.assist.parameter_learning` and test the status key.
 - **mcp**: `cluster_channels` never stored the loaded images in the session or set
   `metadata.cluster_id`, which is exactly what `propagate_parameters` filters on,
   so the pair always failed with "No channels found". Clustered channels are now

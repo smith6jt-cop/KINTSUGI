@@ -47,7 +47,7 @@ session starts from it.
 ## Sixty-second setup
 
 ```bash
-pip install -e ".[claude]"        # or: kintsugi install claude  (needs mcp>=2.0)
+pip install -e ".[mcp]"        # or: kintsugi install mcp  (needs mcp>=2.0)
 kintsugi init /path/to/project --name "My Experiment"   # new project
 kintsugi mcp config /path/to/project                    # existing project
 ```
@@ -117,12 +117,12 @@ flowchart LR
   becomes an MCP tool error, and registers the resources and the prompt.
 - **`kintsugi.mcp.tools.*`** are plain `async` functions returning dicts. They
   are SDK-agnostic, which is why the unit tests can call them directly and why
-  the Jupyter tuners in `kintsugi.claude.param_tuner` can share them.
+  the Jupyter tuners in `kintsugi.assist.param_tuner` can share them.
 - **Session state** lives in server memory for the lifetime of the Claude Code
   session: loaded channels, intermediate results and per-channel history.
   `get_session_state` shows it, `unload_channel` frees it.
 - **`kintsugi.mcp.path_safety`** holds the checks a JSON schema cannot express.
-- **`kintsugi.claude.parameter_learning`** is the learning engine behind the
+- **`kintsugi.assist.parameter_learning`** is the learning engine behind the
   `learning` tools.
 
 ## Tools

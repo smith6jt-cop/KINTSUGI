@@ -540,12 +540,12 @@ The server targets the 2.x SDK (`mcp.server.mcpserver.MCPServer`); the 1.x
 `mcp.server.fastmcp` API is not supported. Upgrade in the environment the server starts from:
 
 ```bash
-pip install "mcp>=2.0,<3"           # or: pip install -e ".[claude]"  /  kintsugi install claude
+pip install "mcp>=2.0,<3"           # or: pip install -e ".[mcp]"  /  kintsugi install mcp
 kintsugi check                      # should list the MCP server as available
 ```
 
 `kintsugi mcp start` prints the same message to stderr (stdout is reserved for JSON-RPC).
-Never run `pip install kintsugi[claude]` — it installs an unrelated PyPI package.
+Never run `pip install kintsugi[mcp]` — it installs an unrelated PyPI package.
 
 ---
 

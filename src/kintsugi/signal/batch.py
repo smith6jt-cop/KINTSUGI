@@ -1496,7 +1496,7 @@ def process_batch(
     engine = None
     if learn and not dry_run and tissue_type:
         try:
-            from kintsugi.claude.parameter_learning import ParameterLearningEngine
+            from kintsugi.assist.parameter_learning import ParameterLearningEngine
 
             engine = ParameterLearningEngine(project_path=project_dir)
         except Exception as e:

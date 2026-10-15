@@ -148,13 +148,12 @@ bio = [
     "readlif>=0.6.0",
 ]
 
-# Claude Code MCP integration
-claude = [
+# MCP server for AI assistants (works with any MCP client)
+mcp = [
     # The server targets the 2.x line of the official SDK (MCPServer, structured
     # output, tool annotations, in-process test client). 1.x is not supported:
     # its mcp.server.fastmcp import path no longer exists in 2.x.
     "mcp>=2.0,<3",
-    "httpx>=0.27.0",
     "optuna>=3.0",
     "smo>=0.7",
 ]

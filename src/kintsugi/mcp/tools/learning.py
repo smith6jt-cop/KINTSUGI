@@ -23,7 +23,7 @@ from kintsugi.mcp.schemas import LearningSuggestion
 from kintsugi.mcp.session import _loaded_images
 
 if TYPE_CHECKING:
-    from kintsugi.claude.parameter_learning import ImageCharacteristics
+    from kintsugi.assist.parameter_learning import ImageCharacteristics
 
 logger = logging.getLogger("kintsugi.mcp.learning")
 
@@ -58,7 +58,7 @@ def _get_learning_engine(project_path: str | None = None):
     key = _engine_key(project_path)
     engine = _learning_engines.get(key)
     if engine is None:
-        from kintsugi.claude.parameter_learning import ParameterLearningEngine
+        from kintsugi.assist.parameter_learning import ParameterLearningEngine
 
         engine = _learning_engines[key] = ParameterLearningEngine(project_path)
     return engine
@@ -69,7 +69,7 @@ def _channel_characteristics(channel: str | None) -> ImageCharacteristics | None
     if not channel or channel not in _loaded_images:
         return None
     try:
-        from kintsugi.claude.parameter_learning import ImageCharacteristics
+        from kintsugi.assist.parameter_learning import ImageCharacteristics
 
         data = _loaded_images[channel]["data"]
         if hasattr(data, "compute"):
@@ -124,7 +124,7 @@ async def get_learned_parameters(
         Recommendation with parameters and confidence
     """
     try:
-        from kintsugi.claude.parameter_learning import ImageCharacteristics
+        from kintsugi.assist.parameter_learning import ImageCharacteristics
     except ImportError as e:
         return {"error": f"Learning module not available: {e}"}
 
@@ -237,7 +237,7 @@ async def record_successful_parameters(
         Confirmation with record ID
     """
     try:
-        from kintsugi.claude.parameter_learning import ImageCharacteristics  # noqa: F401
+        from kintsugi.assist.parameter_learning import ImageCharacteristics  # noqa: F401
     except ImportError as e:
         return {"error": f"Learning module not available: {e}"}
 
@@ -284,7 +284,7 @@ async def get_learning_statistics(
     Returns counts of records, unique tissues/markers, and operation stats.
     """
     try:
-        from kintsugi.claude.parameter_learning import ParameterLearningEngine  # noqa: F401
+        from kintsugi.assist.parameter_learning import ParameterLearningEngine  # noqa: F401
     except ImportError as e:
         return {"error": f"Learning module not available: {e}"}
 
@@ -342,7 +342,7 @@ async def suggest_with_learning(
         return {"error": f"Channel not loaded: {channel}"}
 
     try:
-        from kintsugi.claude.parameter_learning import (
+        from kintsugi.assist.parameter_learning import (
             LEARNING_OPERATIONS,
             ImageCharacteristics,
             normalize_marker_name,
@@ -554,7 +554,7 @@ async def approve_and_learn(
         Confirmation with learning status
     """
     try:
-        from kintsugi.claude.parameter_learning import (
+        from kintsugi.assist.parameter_learning import (
             HISTORY_TO_LEARNING_OP,
             LEARNING_OPERATIONS,
         )

@@ -5,7 +5,7 @@ Each entry pairs a public MCP tool name with its handler (``module``/``attr`` in
 ``kintsugi.mcp.tools``), a human-readable ``title``, the top-level ``description``
 advertised to clients, and the MCP tool ``annotations`` (behaviour hints). Keeping
 this as plain data (no ``mcp`` import) lets ``kintsugi mcp tools``, the docs
-generator, and the tests read the registry without the optional ``[claude]``
+generator, and the tests read the registry without the optional ``[mcp]``
 dependency installed.
 
 The *input schema* of every tool is derived by the SDK from the handler's own

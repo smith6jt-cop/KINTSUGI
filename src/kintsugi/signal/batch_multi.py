@@ -440,7 +440,7 @@ def resolve_recipes_for_project(
     remaining = [m for m in markers if m not in recipes]
     if remaining and project.tissue_type != "unknown":
         try:
-            from kintsugi.claude.parameter_learning import ParameterLearningEngine
+            from kintsugi.assist.parameter_learning import ParameterLearningEngine
 
             engine = ParameterLearningEngine(project_path=project.path)
             for marker in remaining:

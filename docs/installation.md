@@ -221,12 +221,12 @@ KINTSUGI's MCP server lets Claude Code drive signal isolation. It needs the 2.x 
 (`mcp>=2.0,<3`), installed through the `claude` group — from a clone of the repository:
 
 ```bash
-pip install -e ".[claude]"      # or: kintsugi install claude
+pip install -e ".[mcp]"      # or: kintsugi install mcp
 kintsugi init /path/to/project --name "My Experiment"   # new project: writes .mcp.json + .claude/settings.local.json
 kintsugi mcp config /path/to/project                    # existing project
 ```
 
-Do **not** run `pip install kintsugi[claude]` — that installs an unrelated package from PyPI.
+Do **not** run `pip install kintsugi[mcp]` — that installs an unrelated package from PyPI.
 `kintsugi check` reports the server as unavailable when `mcp` is missing or a 1.x release is
 installed (`pip install "mcp>=2.0,<3"` upgrades it). Setup, the tool reference and
 troubleshooting are in [Claude Code Integration (MCP Server)](mcp.md).

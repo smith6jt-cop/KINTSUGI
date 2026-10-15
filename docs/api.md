@@ -290,7 +290,7 @@ from kintsugi.mcp import create_server          # build the MCPServer (needs mcp
 from kintsugi.mcp.tool_specs import TOOL_SPECS  # registry: name, handler, title, description, annotations
 from kintsugi.mcp import path_safety            # ensure_within / allowed_model_roots / numeric clamps
 from kintsugi.mcp import docs_sync              # render + splice the <!-- mcp-tools:* --> doc blocks
-from kintsugi.claude.parameter_learning import ParameterLearningEngine
+from kintsugi.assist.parameter_learning import ParameterLearningEngine
 ```
 
 - `kintsugi.mcp.create_server()` — returns the configured `mcp.server.mcpserver.MCPServer`
@@ -307,7 +307,7 @@ from kintsugi.claude.parameter_learning import ParameterLearningEngine
   checkpoints to the project, `CLAUDE_PROJECT_DIR` or `~/.kintsugi/models`.
 - `kintsugi.mcp.docs_sync` — `render_tool_table()`, `render_tool_list()`, `sync_file()` and
   `check_files()` behind `kintsugi mcp tools --markdown/--write/--check`.
-- `kintsugi.claude.parameter_learning.ParameterLearningEngine` — the SQLite learning
+- `kintsugi.assist.parameter_learning.ParameterLearningEngine` — the SQLite learning
   engine (`<project>/.claude_workflow/parameter_learning.db` and
   `~/.kintsugi/parameter_learning.db`) used by the learning tools: `record_parameters()`,
   `recommend_parameters()` and `get_statistics()`.

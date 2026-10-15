@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from kintsugi.claude.parameter_learning import (
+from kintsugi.assist.parameter_learning import (
     BOOTSTRAP_WEIGHT,
     ParameterLearningEngine,
     normalize_marker_name,

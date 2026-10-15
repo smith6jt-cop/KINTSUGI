@@ -35,7 +35,7 @@ Open `notebooks/3_Signal_Isolation_QC.ipynb` and follow the step-by-step workflo
 
 1. **Install dependencies:**
    ```bash
-   pip install -e ".[claude]"   # or: kintsugi install claude  (needs mcp>=2.0,<3)
+   pip install -e ".[mcp]"   # or: kintsugi install mcp  (needs mcp>=2.0,<3)
    ```
 
 2. **Configure Claude Code:**
@@ -49,7 +49,7 @@ Open `notebooks/3_Signal_Isolation_QC.ipynb` and follow the step-by-step workflo
 ### Option 2: Jupyter Interactive Tuners
 
 ```python
-from kintsugi.claude import (
+from kintsugi.assist import (
     blank_subtraction_tuner,
     denoise_tuner,
     clahe_tuner,
@@ -104,7 +104,7 @@ result = ini_params(
 #### New: MCP Tool or Parameter Tuner
 ```python
 # NEW Option 1: Jupyter tuner
-from kintsugi.claude import blank_subtraction_tuner
+from kintsugi.assist import blank_subtraction_tuner
 result = blank_subtraction_tuner(signal_channel, blank_channel)
 params = result.get_params()
 
@@ -162,7 +162,7 @@ result = await apply_clahe(
 )
 
 # Or via Jupyter tuner
-from kintsugi.claude import clahe_tuner
+from kintsugi.assist import clahe_tuner
 result = clahe_tuner(channel_name)
 ```
 
@@ -223,7 +223,7 @@ The new system learns from successful parameter choices:
 
 ```python
 # Parameters are automatically recorded when you approve results
-from kintsugi.claude import ParameterLearningEngine
+from kintsugi.assist import ParameterLearningEngine
 
 engine = ParameterLearningEngine("/path/to/project")
 

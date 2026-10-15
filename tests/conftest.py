@@ -24,7 +24,7 @@ if str(SRC_PATH) not in sys.path:
 def _require_mcp_when_demanded():
     """Turn MCP skips into a hard failure when CI demands the SDK.
 
-    CI sets KINTSUGI_REQUIRE_MCP=1 after installing the ``claude`` extra, so a
+    CI sets KINTSUGI_REQUIRE_MCP=1 after installing the ``mcp`` extra, so a
     broken SDK import can never degrade into silently skipped protocol tests.
     """
     if os.environ.get("KINTSUGI_REQUIRE_MCP"):

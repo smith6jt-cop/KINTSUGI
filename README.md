@@ -142,7 +142,7 @@ kintsugi install dl               # Deep learning segmentation (InstanSeg)
 kintsugi install analysis         # Spatial analysis (scanpy, scimap)
 kintsugi install viz              # Napari interactive visualization
 kintsugi install bio              # Bio formats I/O (OME-TIFF, LIF)
-kintsugi install claude           # Claude Code MCP integration
+kintsugi install mcp              # MCP server for AI assistants
 kintsugi install dev              # Development tools (pytest, ruff, black)
 
 # Or install everything at once (resolves all constraints together)
@@ -358,7 +358,7 @@ KINTSUGI includes a [Model Context Protocol](https://modelcontextprotocol.io) se
 **Setup**
 
 ```bash
-pip install -e ".[claude]"   # or: kintsugi install claude   (requires mcp>=2.0)
+pip install -e ".[mcp]"   # or: kintsugi install mcp   (requires mcp>=2.0)
 kintsugi init /path/to/project --name "My Experiment"   # new project: config is generated
 kintsugi mcp config /path/to/project                    # existing project
 ```

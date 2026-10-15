@@ -2,7 +2,7 @@
 
 Everything in :mod:`kintsugi.mcp` that touches the SDK imports it from here so
 that the rest of the package (the tool registry, the tool handlers, and the
-``kintsugi mcp tools`` listing) can be imported without the optional ``claude``
+``kintsugi mcp tools`` listing) can be imported without the optional ``mcp``
 extra, and so the server can tell "``mcp`` is not installed" apart from "an
 unsupported ``mcp`` 1.x is installed".
 
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from importlib import metadata
 
-INSTALL_HINT = 'pip install -e ".[claude]"  (or: kintsugi install claude)'
+INSTALL_HINT = 'pip install -e ".[mcp]"  (or: kintsugi install mcp)'
 REQUIRED_SPEC = "mcp>=2.0,<3"
 
 MCP_SDK_VERSION: str | None

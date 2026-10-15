@@ -310,6 +310,13 @@ def install(group: str | None, list_groups: bool, use_conda: bool):
         _install_all(use_conda)
         return
 
+    if group == "claude":
+        console.print(
+            "[red]The 'claude' group was renamed to 'mcp' in KINTSUGI 2.0 (the MCP server "
+            "works with any MCP client).[/red]\nRun: [bold]kintsugi install mcp[/bold]"
+        )
+        raise SystemExit(1)
+
     if group not in OPTIONAL_GROUPS:
         console.print(f"[red]Unknown group: {group}[/red]")
         available = [k for k in OPTIONAL_GROUPS if k != "full"]
@@ -935,9 +942,9 @@ def start():
 
     except ImportError as e:
         err_console.print(f"[red]MCP dependencies not installed: {e}[/red]")
-        err_console.print(
-            'Install with: [bold]pip install -e ".[claude]"[/bold] or [bold]kintsugi install claude[/bold]'
-        )
+        from kintsugi.mcp._sdk import INSTALL_HINT
+
+        err_console.print(f"Install with: [bold]{INSTALL_HINT}[/bold]")
         raise SystemExit(1)
 
 

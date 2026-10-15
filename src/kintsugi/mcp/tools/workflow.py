@@ -439,7 +439,7 @@ async def generate_jupyter_cell(
             blank_meta = _loaded_images[blank_channel].get("metadata", {})
             blank_source = blank_meta.get("saved_path") or blank_meta.get("source_path") or ""
         code = f"""# Interactive Blank Subtraction Parameter Tuning
-from kintsugi.claude.param_tuner import blank_subtraction_tuner
+from kintsugi.assist.param_tuner import blank_subtraction_tuner
 
 # Image files (the tuner loads them; MCP session names are not visible here)
 signal = {source!r}  # {channel_note}
@@ -464,7 +464,7 @@ print("Final parameters:", result.get_params())
 
     elif operation == "denoise":
         code = f"""# Interactive Denoising Parameter Tuning
-from kintsugi.claude.param_tuner import denoise_tuner
+from kintsugi.assist.param_tuner import denoise_tuner
 
 channel = {source!r}  # {channel_note}
 
@@ -483,7 +483,7 @@ print("Final parameters:", result.get_params())
 
     elif operation == "clahe":
         code = f"""# Interactive CLAHE Parameter Tuning
-from kintsugi.claude.param_tuner import clahe_tuner
+from kintsugi.assist.param_tuner import clahe_tuner
 
 channel = {source!r}  # {channel_note}
 
@@ -502,7 +502,7 @@ print("Final parameters:", result.get_params())
 
     elif operation == "clean":
         code = f"""# Interactive Background Cleaning
-from kintsugi.claude.param_tuner import clean_tuner
+from kintsugi.assist.param_tuner import clean_tuner
 
 channel = {source!r}  # {channel_note}
 
@@ -521,7 +521,7 @@ print("Final parameters:", result.get_params())
 
     elif operation == "gaussian_subtract":
         code = f"""# Interactive Gaussian Subtraction
-from kintsugi.claude.param_tuner import gaussian_subtract_tuner
+from kintsugi.assist.param_tuner import gaussian_subtract_tuner
 
 channel = {source!r}  # {channel_note}
 

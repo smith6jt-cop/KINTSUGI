@@ -87,7 +87,7 @@ kintsugi install gpu        # GPU acceleration (PyTorch + CuPy for CUDA)
 kintsugi install analysis   # Spatial analysis (scanpy, scimap)
 kintsugi install bio        # Bio formats I/O (OME-TIFF, LIF, etc.)
 kintsugi install viz        # Napari visualization
-kintsugi install claude     # Claude Code MCP integration (mcp>=2.0,<3)
+kintsugi install mcp        # MCP server for AI assistants (mcp>=2.0,<3)
 kintsugi install dev        # Development tools (pytest, ruff, black, mypy)
 kintsugi install all        # All optional features
 ```
@@ -96,14 +96,14 @@ The groups are defined in `src/kintsugi/deps.py` (`OPTIONAL_GROUPS`, 14 groups:
 `gpu`, `viz`, `dl`, `analysis`, `bio`, `claude`, `dev`, `docs`, `kronos`, `denoise`,
 `optimize`, `rapids`, `workflow`, `full`). There is no `torch` group — PyTorch is
 installed by `gpu` (and by `dl`, `denoise`, `kronos`). For development installs,
-`pip install -e ".[claude]"` is equivalent to `kintsugi install claude`; do **not** run
-`pip install kintsugi[claude]`, which installs an unrelated PyPI package.
+`pip install -e ".[mcp]"` is equivalent to `kintsugi install mcp`; do **not** run
+`pip install kintsugi[mcp]`, which installs an unrelated PyPI package.
 
 ## MCP Server Commands
 
 KINTSUGI includes an MCP (Model Context Protocol) server for Claude Code integration.
-It requires the 2.x Python SDK (`mcp>=2.0,<3`): `pip install -e ".[claude]"` or
-`kintsugi install claude`. The full guide — tools, resources, the prompt, the learning
+It requires the 2.x Python SDK (`mcp>=2.0,<3`): `pip install -e ".[mcp]"` or
+`kintsugi install mcp`. The full guide — tools, resources, the prompt, the learning
 loop, security model and troubleshooting — is [Claude Code Integration (MCP Server)](mcp.md).
 
 ### kintsugi mcp start

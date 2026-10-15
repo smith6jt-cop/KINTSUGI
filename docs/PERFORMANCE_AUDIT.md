@@ -59,7 +59,7 @@ for operation, parameters in operations_params.items():
 
 ### 1.3 Sequential Queries in Statistics Gathering
 
-**File:** `src/kintsugi/claude/parameter_learning.py:823-865`
+**File:** `src/kintsugi/assist/parameter_learning.py:823-865`
 
 ```python
 cursor.execute("SELECT COUNT(*) FROM parameter_records")      # Query 1
@@ -74,7 +74,7 @@ cursor.execute("SELECT operation, COUNT(*), AVG(...)...")     # Query 4
 
 ### 1.4 Dual Database Queries in recommend_parameters()
 
-**File:** `src/kintsugi/claude/parameter_learning.py:477-504`
+**File:** `src/kintsugi/assist/parameter_learning.py:477-504`
 
 **Impact:** Same query executed against project and global databases separately.
 

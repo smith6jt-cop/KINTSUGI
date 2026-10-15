@@ -29,8 +29,8 @@ still pinned `mcp<2`. This skill records what holds on 2.x.
    in one module (`kintsugi/mcp/_sdk.py`) that distinguishes "mcp is not
    installed" from "an unsupported mcp 1.x is installed" and exposes
    `MCPServer`, `Context`, `ToolAnnotations`, `ImageContent`, `CallToolResult`.
-   Install text must read `pip install -e ".[claude]"` — `pip install
-   kintsugi[claude]` installs an unrelated PyPI package.
+   Install text must read `pip install -e ".[mcp]"` — `pip install
+   kintsugi[mcp]` installs an unrelated PyPI package.
 
 2. **`MCPServer(name, instructions=..., version=..., website_url=...)`** and
    register each handler with a **title** and **`ToolAnnotations`**

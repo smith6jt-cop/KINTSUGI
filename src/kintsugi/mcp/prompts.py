@@ -1,7 +1,7 @@
 """MCP prompts: reusable, parameterised instructions the client can offer the user.
 
 Kept free of any ``mcp`` import so the text can be rendered and tested without
-the optional ``claude`` extra; :mod:`kintsugi.mcp.server` registers it.
+the optional ``mcp`` extra; :mod:`kintsugi.mcp.server` registers it.
 """
 
 from __future__ import annotations

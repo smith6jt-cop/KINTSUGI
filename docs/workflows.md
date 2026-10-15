@@ -106,7 +106,7 @@ documented in [Claude Code Integration (MCP Server)](mcp.md).
 
 **Setup:**
 ```bash
-pip install -e ".[claude]"   # or: kintsugi install claude  (needs mcp>=2.0,<3)
+pip install -e ".[mcp]"   # or: kintsugi install mcp  (needs mcp>=2.0,<3)
 # If using kintsugi init, Claude config (.mcp.json + .claude/settings.local.json) is automatic
 # For existing projects: kintsugi mcp config /path/to/project
 ```

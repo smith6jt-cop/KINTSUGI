@@ -10,7 +10,7 @@ KINTSUGI (Knowledge Integration with New Technologies for Simplified User-Guided
 
 KINTSUGI includes an MCP (Model Context Protocol) server that exposes image processing tools to Claude Code. This enables Claude to act as an AI image processing assistant.
 
-**MCP server** (`src/kintsugi/mcp/`, canonical guide: `docs/mcp.md`): requires `mcp>=2.0,<3` — install with `pip install -e ".[claude]"` or `kintsugi install claude` (never `pip install kintsugi[claude]`, which installs an unrelated PyPI package). Every tool carries a title and behaviour annotations (readOnly/destructive/idempotent/openWorld); the server publishes instructions; input schemas are derived from the handler signatures and enforced (bad enums/ranges are rejected with `isError` before the handler runs) and in-band errors are reported as `isError`; resources `kintsugi://session/images`, `kintsugi://session/history/{channel}`, `kintsugi://learning/stats` and `kintsugi://project/channels`; the `signal_isolation_workflow` prompt; progress notifications on long tools; `get_thumbnail` returns the preview as image content; typed output schemas for `get_image_stats`, `assess_quality`, `suggest_with_learning` and `get_session_state`; new tools `get_session_state` and `unload_channel`; model checkpoints are confined to the project, `CLAUDE_PROJECT_DIR` or `~/.kintsugi/models` and loaded with torch `weights_only=True`. `project_path` arguments default to `CLAUDE_PROJECT_DIR` (or the server's working directory).
+**MCP server** (`src/kintsugi/mcp/`, canonical guide: `docs/mcp.md`): requires `mcp>=2.0,<3` — install with `pip install -e ".[mcp]"` or `kintsugi install mcp` (never `pip install kintsugi[mcp]`, which installs an unrelated PyPI package). Every tool carries a title and behaviour annotations (readOnly/destructive/idempotent/openWorld); the server publishes instructions; input schemas are derived from the handler signatures and enforced (bad enums/ranges are rejected with `isError` before the handler runs) and in-band errors are reported as `isError`; resources `kintsugi://session/images`, `kintsugi://session/history/{channel}`, `kintsugi://learning/stats` and `kintsugi://project/channels`; the `signal_isolation_workflow` prompt; progress notifications on long tools; `get_thumbnail` returns the preview as image content; typed output schemas for `get_image_stats`, `assess_quality`, `suggest_with_learning` and `get_session_state`; new tools `get_session_state` and `unload_channel`; model checkpoints are confined to the project, `CLAUDE_PROJECT_DIR` or `~/.kintsugi/models` and loaded with torch `weights_only=True`. `project_path` arguments default to `CLAUDE_PROJECT_DIR` (or the server's working directory).
 
 ### Creating a Project
 
@@ -287,7 +287,7 @@ python -m build
 **Core Package** (`src/kintsugi/`):
 - `cli.py` - Click-based CLI with subcommands: check, register, template, info, mcp (config/start/tools/pretrain), init, install, workflow (config/check/run/export). `_resolve_project_dir()` auto-detects `workflow/` subdirectories for all workflow subcommands
 - `kreg.py`, `kstitch.py`, `kview2.py` - Bridge modules to notebook implementations
-- `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA). `OPTIONAL_GROUPS` dict is the single source of truth for all 14 install groups (gpu, viz, dl, analysis, bio, claude, dev, docs, kronos, denoise, optimize, rapids, workflow, full)
+- `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA). `OPTIONAL_GROUPS` dict is the single source of truth for all 14 install groups (gpu, viz, dl, analysis, bio, mcp, dev, docs, kronos, denoise, optimize, rapids, workflow, full)
 - `edf.py` - Extended depth of focus processing (CuPy GPU or NumPy CPU)
 - `project.py` - Project structure management (`KintsugiProject` class), `_resolve_kintsugi_executable()` for absolute-path MCP config
 - `deprecation.py` - Deprecation warnings and migration guidance
@@ -311,7 +311,7 @@ python -m build
 - `tools/quality_assessment.py` - QC tools
 - `tools/visualization.py` - Image preview tools
 - `tools/workflow.py` - Workflow management tools
-- `tools/learning.py` - MCP learning tools (the engine is `kintsugi.claude.parameter_learning.ParameterLearningEngine`)
+- `tools/learning.py` - MCP learning tools (the engine is `kintsugi.assist.parameter_learning.ParameterLearningEngine`)
 
 **Pure Python Modules** (`src/kintsugi/`):
 - `signal/` - Autofluorescence subtraction (global + weighted multi-range), bootstrap learning (`bootstrap.py`), multi-project batch orchestration (`batch_multi.py`)
@@ -407,7 +407,7 @@ Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, py
 - `dl` - Deep learning segmentation (InstanSeg)
 - `analysis` - scanpy, scimap for spatial analysis
 - `bio` - Bio formats I/O (OME-TIFF, LIF, etc.)
-- `claude` - MCP server for Claude Code integration
+- `mcp` - MCP server for AI assistants (any MCP client)
 - `dev` - Development tools (pytest, ruff, black, mypy)
 - `docs` - Documentation (Sphinx)
 - `kronos` - KRONOS foundation model (prints post-install note about cloning KRONOS repo)

@@ -71,6 +71,14 @@ EXPECTED_TOOL_NAMES = {
 }
 
 
+def _exec_kintsugi_imports(cell: str) -> None:
+    """Run the cell's ``from kintsugi... import ...`` lines so a renamed module fails here."""
+    lines = [ln.strip() for ln in cell.splitlines() if ln.strip().startswith("from kintsugi")]
+    assert lines, "generated cell imports nothing from kintsugi"
+    for line in lines:
+        exec(line, {})
+
+
 # =============================================================================
 # Test Fixtures
 # =============================================================================
@@ -888,6 +896,7 @@ class TestWorkflow:
         assert str(signal_file) in cell and str(blank_file) in cell
         assert "0.75" in cell
         compile(cell, "<jupyter_cell>", "exec")  # quotes in paths/values stay valid
+        _exec_kintsugi_imports(cell)
 
     @pytest.mark.parametrize("operation", ["denoise", "clahe", "clean", "gaussian_subtract"])
     async def test_generate_jupyter_cell_every_operation_compiles(
@@ -902,6 +911,7 @@ class TestWorkflow:
         )
         assert result["status"] == "success"
         compile(result["jupyter_cell"], "<jupyter_cell>", "exec")
+        _exec_kintsugi_imports(result["jupyter_cell"])
 
     async def test_generate_jupyter_cell_needs_a_file(self, sample_uint16_image, clear_mcp_state):
         """An in-memory-only channel cannot be reached from a notebook kernel."""
@@ -1365,7 +1375,7 @@ class TestAuditedDefects:
     ):
         """The learned-parameter merge was dead: wrong import and wrong status key."""
         pytest.importorskip("dask_image")
-        from kintsugi.claude.parameter_learning import ParameterLearningEngine
+        from kintsugi.assist.parameter_learning import ParameterLearningEngine
         from kintsugi.mcp.tools.signal_isolation import _store_image, subtract_blank
 
         monkeypatch.setenv("HOME", str(tmp_path / "home"))

@@ -79,7 +79,7 @@ The Claude Code MCP integration provides an interactive, AI-assisted workflow. C
 
 **Setup:**
 ```bash
-pip install -e ".[claude]"   # or: kintsugi install claude  (needs mcp>=2.0,<3)
+pip install -e ".[mcp]"   # or: kintsugi install mcp  (needs mcp>=2.0,<3)
 kintsugi mcp config /path/to/project  # If not using kintsugi init
 ```
 
@@ -296,7 +296,7 @@ MCP tools resolve `<project_dir>` from their `project_path` argument, which defa
 ### Checking learning statistics
 
 ```python
-from kintsugi.claude.parameter_learning import ParameterLearningEngine
+from kintsugi.assist.parameter_learning import ParameterLearningEngine
 
 engine = ParameterLearningEngine(str(project_dir))   # project_path=None -> user-wide DB only
 stats = engine.get_statistics()

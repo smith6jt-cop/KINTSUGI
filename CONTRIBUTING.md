@@ -7,7 +7,7 @@ The full contributor guide lives in the documentation:
 Quick start:
 
 ```bash
-pip install -e ".[dev,claude]"
+pip install -e ".[dev,mcp]"
 pre-commit install && pre-commit install --hook-type commit-msg
 pytest tests/ -q
 ruff check src/ tests/ evals/ && ruff format --check src/ tests/ evals/

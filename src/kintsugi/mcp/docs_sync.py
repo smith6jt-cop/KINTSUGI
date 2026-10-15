@@ -12,7 +12,7 @@ and spliced between marker comments::
 ``kintsugi mcp tools --check FILE...`` fails when a block is stale, which CI and
 the eval harness run so the documented tool surface can never drift from the
 registry again. Only the registry and the standard library are imported, so this
-works without the optional ``claude`` extra.
+works without the optional ``mcp`` extra.
 """
 
 from __future__ import annotations

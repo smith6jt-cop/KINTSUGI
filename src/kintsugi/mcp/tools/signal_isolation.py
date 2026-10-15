@@ -360,7 +360,7 @@ async def suggest_subtraction_parameters(
     learned_confidence = 0
     if use_learning and project_path and marker_name:
         try:
-            from kintsugi.claude.parameter_learning import ParameterLearningEngine
+            from kintsugi.assist.parameter_learning import ParameterLearningEngine
 
             engine = ParameterLearningEngine(project_path)
             recommendation = engine.recommend_parameters(

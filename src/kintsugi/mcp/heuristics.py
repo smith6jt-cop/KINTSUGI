@@ -19,7 +19,7 @@ import numpy as np
 logger = logging.getLogger("kintsugi.mcp.heuristics")
 
 #: Operations the heuristics know about, in the order the tools report them.
-#: Identical to ``kintsugi.claude.parameter_learning.LEARNING_OPERATIONS``.
+#: Identical to ``kintsugi.assist.parameter_learning.LEARNING_OPERATIONS``.
 HEURISTIC_OPERATIONS: tuple[str, ...] = (
     "blank_subtraction",
     "denoise",

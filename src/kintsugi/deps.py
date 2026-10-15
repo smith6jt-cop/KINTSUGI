@@ -101,12 +101,12 @@ OPTIONAL_GROUPS = {
         "packages": ["bioio", "bioio-ome-tiff", "ome-zarr", "slideio", "readlif"],
         "install_cmd": "pip install bioio bioio-ome-tiff ome-zarr slideio readlif",
     },
-    "claude": {
-        "description": "Claude Code MCP integration",
-        # Mirrors the pyproject `claude` extra. mcp 2.x is required (the server
+    "mcp": {
+        "description": "MCP server for AI assistants (any MCP client)",
+        # Mirrors the pyproject `mcp` extra. mcp 2.x is required (the server
         # uses MCPServer); quote the spec so the shell does not treat < as redirect.
-        "packages": ["mcp", "httpx", "optuna", "smo"],
-        "install_cmd": "pip install 'mcp>=2.0,<3' httpx 'optuna>=3.0' 'smo>=0.7'",
+        "packages": ["mcp", "optuna", "smo"],
+        "install_cmd": "pip install 'mcp>=2.0,<3' 'optuna>=3.0' 'smo>=0.7'",
     },
     "dev": {
         "description": "Development tools (pytest, ruff, black, mypy)",
@@ -519,7 +519,7 @@ def install_optional(
         "dl",
         "analysis",
         "bio",
-        "claude",
+        "mcp",
         "dev",
         "docs",
         "kronos",
@@ -708,10 +708,10 @@ class DependencyChecker:
             ("bioio", "1.0.0", "bio"),
             ("ome-zarr", None, "bio"),
             ("slideio", None, "bio"),
-            # Claude Code MCP server (mcp 2.x required: the 1.x API is not supported)
-            ("mcp", "2.0.0", "claude"),
-            ("optuna", "3.0", "claude"),
-            ("smo", None, "claude"),
+            # MCP server (mcp 2.x required: the 1.x API is not supported)
+            ("mcp", "2.0.0", "mcp"),
+            ("optuna", "3.0", "mcp"),
+            ("smo", None, "mcp"),
         ]
 
         for package, min_version, group in optional_packages:
