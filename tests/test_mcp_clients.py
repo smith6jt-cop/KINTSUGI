@@ -100,8 +100,14 @@ def test_user_and_ide_clients_only_print_snippets(project, tmp_path, monkeypatch
 
 
 def test_resolve_clients():
-    assert [c.name for c in mc.resolve_clients(None)] == [c.name for c in mc.project_clients()]
+    # No default client: the caller has to ask.
+    for nothing in (None, []):
+        with pytest.raises(mc.ClientConfigError, match="choose the MCP client"):
+            mc.resolve_clients(nothing)
+    assert [c.name for c in mc.resolve_clients(["all"])] == [c.name for c in mc.CLIENTS]
     assert mc.resolve_clients(["none"]) == []
+    with pytest.raises(mc.ClientConfigError, match="cannot be combined"):
+        mc.resolve_clients(["none", "zed"])
     assert [c.name for c in mc.resolve_clients(["zed", "zed"])] == ["zed"]
     with pytest.raises(mc.ClientConfigError, match="choose from"):
         mc.resolve_clients(["nope"])
@@ -132,7 +138,7 @@ def test_existing_agents_md_keeps_user_text_and_refreshes_the_block(project):
 
 
 def test_never_writes_files_that_shadow_agents_md(project):
-    write_mcp_config(project)
+    write_mcp_config(project, ["all"])
     for name in mc.NEVER_GENERATED:
         assert not (project / name).exists()
 
@@ -147,7 +153,8 @@ def test_init_writes_agents_md_and_the_selected_clients(tmp_path, monkeypatch):
     runner = CliRunner()
 
     every = tmp_path / "every"
-    assert runner.invoke(main, ["init", str(every), "--force"]).exit_code == 0
+    result = runner.invoke(main, ["init", str(every), "--force", "--mcp-client", "all"])
+    assert result.exit_code == 0, result.output
     for client in mc.project_clients():
         assert (every / client.path).exists(), client.name
     assert (every / "AGENTS.md").exists()
@@ -222,3 +229,93 @@ def test_init_prints_snippets_for_user_scoped_clients(tmp_path, monkeypatch):
     assert "Claude Desktop: paste into" in result.output
     assert '"mcpServers"' in result.output and "--project-dir" in result.output
     assert not (root / ".mcp.json").exists()
+
+
+def _no_mcp_files(root):
+    names = [c.path for c in mc.project_clients()] + ["AGENTS.md", ".claude"]
+    return [n for n in names if (root / n).exists()]
+
+
+def test_init_configures_no_client_unless_chosen(tmp_path, monkeypatch):
+    """No terminal and no --mcp-client: the project is created with no MCP files."""
+    from click.testing import CliRunner
+
+    from kintsugi.cli import main
+    from kintsugi.project import KintsugiProject
+
+    monkeypatch.setattr(KintsugiProject, "setup_notebooks", lambda self, **kw: None)
+    root = tmp_path / "plain"
+    result = CliRunner().invoke(main, ["init", str(root), "--force"])
+    assert result.exit_code == 0, result.output
+    assert (root / "kintsugi_project.json").exists()
+    assert _no_mcp_files(root) == []
+    assert "kintsugi mcp config . --client NAME" in result.output
+
+
+def test_library_create_configures_no_client(tmp_path):
+    import contextlib
+    import io
+
+    from kintsugi.project import KintsugiProject
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        KintsugiProject.create(tmp_path / "lib", name="lib", setup_notebooks=False)
+    assert _no_mcp_files(tmp_path / "lib") == []
+
+
+def test_init_prompts_for_the_client_in_a_terminal(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+
+    from kintsugi import cli
+    from kintsugi.project import KintsugiProject
+
+    monkeypatch.setattr(KintsugiProject, "setup_notebooks", lambda self, **kw: None)
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    root = tmp_path / "asked"
+    number = [c.name for c in mc.CLIENTS].index("cursor") + 1
+    result = CliRunner().invoke(cli.main, ["init", str(root), "--force"], input=f"nope\n{number}\n")
+    assert result.exit_code == 0, result.output
+    assert "Which MCP client(s)" in result.output and "unknown MCP client 'nope'" in result.output
+    assert (root / ".cursor" / "mcp.json").exists()
+    assert _no_mcp_files(root) == [".cursor/mcp.json", "AGENTS.md"]
+
+    # Enter accepts the default, which is no client.
+    empty = tmp_path / "empty"
+    result = CliRunner().invoke(cli.main, ["init", str(empty), "--force"], input="\n")
+    assert result.exit_code == 0, result.output
+    assert _no_mcp_files(empty) == []
+
+
+def test_forced_refresh_keeps_exactly_the_configured_clients(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+
+    from kintsugi.cli import main
+    from kintsugi.project import KintsugiProject
+
+    monkeypatch.setattr(KintsugiProject, "setup_notebooks", lambda self, **kw: None)
+    root = tmp_path / "proj"
+    runner = CliRunner()
+    assert runner.invoke(main, ["init", str(root), "--force", "--mcp-client", "zed"]).exit_code == 0
+    (root / ".zed" / "settings.json").write_text('{"context_servers": {"kintsugi": {}}}')
+    assert mc.configured_clients(root) == ["zed"]
+
+    result = runner.invoke(main, ["init", str(root), "--force"])
+    assert result.exit_code == 0, result.output
+    assert mc.configured_clients(root) == ["zed"]
+    assert _no_mcp_files(root) == [".zed/settings.json", "AGENTS.md"]
+
+    # A project without a client stays without one.
+    bare = tmp_path / "bare"
+    assert runner.invoke(main, ["init", str(bare), "--force"]).exit_code == 0
+    assert runner.invoke(main, ["init", str(bare), "--force"]).exit_code == 0
+    assert _no_mcp_files(bare) == []
+
+
+def test_configured_clients_reads_json_and_toml(tmp_path):
+    (tmp_path / ".cursor").mkdir()
+    (tmp_path / ".cursor" / "mcp.json").write_text('{"mcpServers": {"other": {}}}')
+    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex" / "config.toml").write_text('[mcp_servers."kintsugi"]\ncommand = "k"\n')
+    (tmp_path / ".vscode").mkdir()
+    (tmp_path / ".vscode" / "mcp.json").write_text("not json")
+    assert mc.configured_clients(tmp_path) == ["codex"]

@@ -187,21 +187,26 @@ placeholder line between them and run `--write` — never hand-edit the table.
 Write MCP client configuration (and `AGENTS.md`) for a project.
 
 ```bash
-kintsugi mcp config /path/to/project                   # every project-scoped client + snippets
-kintsugi mcp config /path/to/project --client cursor   # one client (repeatable)
-kintsugi mcp config /path/to/project --print-only      # show everything, write nothing
-kintsugi mcp config /path/to/project --force           # replace existing kintsugi entries
+kintsugi mcp config /path/to/project --client cursor          # one client (repeatable)
+kintsugi mcp config /path/to/project --client all             # every client
+kintsugi mcp config /path/to/project --client NAME --print-only   # show, write nothing
+kintsugi mcp config /path/to/project --client NAME --force    # replace existing kintsugi entries
+kintsugi mcp config /path/to/project                          # asks which client(s)
 ```
 
-By default it writes or merges the configuration of every client that keeps it in the
-project (Claude Code, VS Code, Cursor, Gemini CLI, Antigravity, Codex, Zed), writes
-`AGENTS.md` if the project has none, and prints the entry to paste for Claude Desktop,
-Windsurf, Cline and JetBrains; nothing is written outside the project. Other servers and
+There is no default client. Without `--client` the command asks in a terminal and
+otherwise exits with status 2 and the list of clients. A chosen client that keeps its
+configuration in the project (Claude Code, VS Code, Cursor, Gemini CLI, Antigravity,
+Codex, Zed) gets that file written or merged and `AGENTS.md` if the project has none;
+Claude Desktop, Windsurf, Cline and JetBrains get the entry to paste. Nothing is
+written outside the project. Other servers and
 settings in existing files are kept, and the generated files are added to the project's
 `.gitignore` (they hold machine-specific absolute paths). A directory without
-`kintsugi_project.json` is refused unless `--force` is given. `kintsugi init` writes the
-same files (`--mcp-client NAME`, repeatable, or `--mcp-client none` to choose). For
-Claude Code, `.mcp.json` at the project root holds the server definition:
+`kintsugi_project.json` is refused unless `--force` is given. `kintsugi init --mcp-client NAME`
+(repeatable, `all` or `none`) writes the same files for a new project; without it,
+`init` asks in a terminal (default: none) and otherwise configures no client, and
+`init --force` refreshes only the clients already configured. With `--client
+claude-code`, `.mcp.json` at the project root holds the server definition:
 
 ```json
 {

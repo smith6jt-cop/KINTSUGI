@@ -80,7 +80,7 @@ The Claude Code MCP integration provides an interactive, AI-assisted workflow. C
 **Setup:**
 ```bash
 pip install -e ".[mcp]"   # or: kintsugi install mcp  (needs mcp>=2.0,<3)
-kintsugi mcp config /path/to/project  # If not using kintsugi init
+kintsugi mcp config /path/to/project --client NAME  # your MCP client ('kintsugi mcp clients')
 ```
 
 The full server reference (every tool, resources, the `signal_isolation_workflow`

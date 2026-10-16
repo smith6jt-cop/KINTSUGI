@@ -518,7 +518,7 @@ Regenerate the entry so it carries the absolute path of the executable:
 
 ```bash
 conda activate KINTSUGI             # the environment where kintsugi is installed
-kintsugi mcp config /path/to/project --force
+kintsugi mcp config /path/to/project --client NAME --force
 cat /path/to/project/.mcp.json      # "command" is now e.g. /home/you/envs/KINTSUGI/bin/kintsugi
 ```
 
@@ -529,7 +529,7 @@ The generated entry is `{"type": "stdio", "command": "<absolute path>", "args": 
 
 The server was started without `--project-dir`, without `KINTSUGI_PROJECT_DIR`, and in a
 working directory that is not a KINTSUGI project, so it cannot guess which project a tool
-means. Regenerate the client configuration (`kintsugi mcp config /path/to/project --force`,
+means. Regenerate the client configuration (`kintsugi mcp config /path/to/project --client NAME --force`,
 which adds `--project-dir`), or pass `project_path` in the tool call.
 
 ### Server shows "Pending approval"
@@ -679,6 +679,6 @@ If you're still experiencing issues:
 | Snakemake not found | `pip install "snakemake>=8.0" snakemake-executor-plugin-slurm` |
 | SLURM OOM kill | GPU: 48 GB RAM; CPU: 128 GB RAM — increase in config.yaml |
 | SLURM_TRES_PER_TASK error | Patch jobstep plugin (see HPC section above) |
-| `Executable not found in $PATH: kintsugi` (MCP) | `kintsugi mcp config /path/to/project --force` from the activated env |
+| `Executable not found in $PATH: kintsugi` (MCP) | `kintsugi mcp config /path/to/project --client NAME --force` from the activated env |
 | MCP server "Pending approval" | Accept the trust dialog; `claude mcp reset-project-choices` |
 | `mcp 1.x is installed` (MCP) | `pip install "mcp>=2.0,<3"` |

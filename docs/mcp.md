@@ -49,16 +49,21 @@ session starts from it.
 
 ```bash
 pip install -e ".[mcp]"        # or: kintsugi install mcp  (needs mcp>=2.0)
-kintsugi init /path/to/project --name "My Experiment"   # new project
-kintsugi mcp config /path/to/project                    # existing project
+kintsugi mcp clients                                     # the clients it can configure
+kintsugi mcp config /path/to/project --client NAME       # configure yours (repeatable)
+kintsugi init /path/to/project --mcp-client NAME         # or while creating a project
 ```
 
-`kintsugi init` and `kintsugi mcp config` write the configuration of every MCP
-client that keeps it in the project, an `AGENTS.md` for the assistant, and print
-the entry to paste for clients configured per user or in the IDE.
-`kintsugi mcp config <project> --client NAME` restricts to one client (repeat the
-option for several), `--print-only` shows everything without writing, and
-`kintsugi mcp clients` lists the registry:
+The MCP server is optional, and no client is configured unless you choose it.
+`kintsugi mcp config` without `--client` asks which client(s) in a terminal and
+otherwise fails with the list; `kintsugi init` without `--mcp-client` asks
+(default: none) in a terminal and otherwise creates the project with no MCP
+configuration, and `kintsugi init --force` refreshes only the clients the project
+already has. `--client all` configures every client below, `--print-only` shows the
+configuration without writing, and `kintsugi mcp clients` lists the registry. A
+client that keeps its configuration in the project gets that file and an
+`AGENTS.md` for the assistant; a client configured per user or in the IDE gets the
+entry to paste:
 
 | Client | Written / printed | Servers key |
 |--------|-------------------|-------------|
@@ -77,11 +82,10 @@ Existing files are merged (other servers and settings are kept; an existing
 project, and the generated files are added to the project's `.gitignore` because
 they hold machine-specific absolute paths: collaborators run `kintsugi mcp config`
 on their own machine. `AGENTS.md` is created only when absent; an existing one only
-has its generated tool list refreshed. Both commands refuse a directory without
-`kintsugi_project.json` (the server would refuse it as `--project-dir`);
-`kintsugi init --mcp-client NAME` (or `none`) chooses the clients for a new project.
+has its generated tool list refreshed. `kintsugi mcp config` refuses a directory without
+`kintsugi_project.json` (the server would refuse it as `--project-dir`).
 
-For Claude Code the two files are:
+For example, `--client claude-code` writes these two files:
 
 ```json
 // .mcp.json — the server definition Claude Code reads
@@ -943,7 +947,7 @@ content: image block (image/png, 3996 base64 chars) + text
 ## Troubleshooting
 
 - **`Executable not found in $PATH: kintsugi`** — the repository's own
-  `.mcp.json` uses a bare `kintsugi`; run `kintsugi mcp config <project>` so the
+  `.mcp.json` uses a bare `kintsugi`; run `kintsugi mcp config <project> --client NAME` so the
   generated entry carries the absolute path of the executable.
 - **Server shows "Pending approval"** — accept the workspace trust dialog in
   Claude Code; `.claude/settings.local.json` approvals are applied only in a

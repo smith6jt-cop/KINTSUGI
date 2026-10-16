@@ -38,7 +38,7 @@ my_project/
 └── .cursor/ .gemini/ .agents/ .codex/ .zed/  ← other MCP clients' configs
 ```
 
-`kintsugi init` (and `kintsugi mcp config`) writes the configuration of every MCP client that keeps it in the project (Claude Code, VS Code, Cursor, Gemini CLI, Antigravity, Codex, Zed; `kintsugi mcp clients` lists them), `AGENTS.md`, and `.gitignore` lines for the generated files; `--mcp-client NAME` / `--client NAME` restricts the set. For Claude Code, `.mcp.json` holds the server definition — `{"mcpServers": {"kintsugi": {"type": "stdio", "command": "<absolute path to kintsugi>", "args": ["mcp", "start", "--project-dir", "<absolute project root>"]}}}` — the project travels in `args` because MCP clients differ in the working directory and environment they give a server. `.claude/settings.local.json` approves only that server: `{"enabledMcpjsonServers": ["kintsugi"]}`. The equivalent CLI form is `claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start --project-dir /path/to/project`. See `docs/mcp.md`.
+MCP is optional and no client is configured by default. `kintsugi mcp config PROJECT --client NAME` (repeatable, or `all`) and `kintsugi init --mcp-client NAME` write the configuration of the chosen client(s) (`kintsugi mcp clients` lists Claude Code, VS Code, Cursor, Gemini CLI, Antigravity, Codex, Zed and the snippet-only clients), `AGENTS.md`, and `.gitignore` lines for the generated files. Without a choice, `mcp config` asks in a terminal and otherwise exits 2; `init` asks (default: none) or creates the project without MCP files; `init --force` refreshes only the clients already configured. With `--client claude-code`, `.mcp.json` holds the server definition — `{"mcpServers": {"kintsugi": {"type": "stdio", "command": "<absolute path to kintsugi>", "args": ["mcp", "start", "--project-dir", "<absolute project root>"]}}}` — the project travels in `args` because MCP clients differ in the working directory and environment they give a server. `.claude/settings.local.json` approves only that server: `{"enabledMcpjsonServers": ["kintsugi"]}`. The equivalent CLI form is `claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start --project-dir /path/to/project`. See `docs/mcp.md`.
 
 ### Experiment Metadata
 
@@ -185,14 +185,14 @@ After switching, reload the VS Code window (Cmd/Ctrl+Shift+P -> "Reload Window")
 If you're not using `kintsugi init`, or need to add MCP support to an existing project, run:
 
 ```bash
-kintsugi mcp config /path/to/project
+kintsugi mcp config /path/to/project --client NAME
 ```
 
-This writes or merges the configuration of every project-scoped MCP client (for Claude Code: `.mcp.json` with an absolute path to the `kintsugi` executable and `.claude/settings.local.json` with `{"enabledMcpjsonServers": ["kintsugi"]}`), writes `AGENTS.md` if absent, and prints snippets for user- or IDE-configured clients (Claude Desktop, Windsurf, Cline, JetBrains). Existing entries for other servers are kept (`--force` overwrites an existing `kintsugi` entry); `--client NAME` restricts to one client; a directory without `kintsugi_project.json` is refused unless `--force`.
+This writes or merges the configuration of the chosen MCP client(s) (for `claude-code`: `.mcp.json` with an absolute path to the `kintsugi` executable and `.claude/settings.local.json` with `{"enabledMcpjsonServers": ["kintsugi"]}`), writes `AGENTS.md` if absent, and prints snippets for user- or IDE-configured clients (Claude Desktop, Windsurf, Cline, JetBrains). Existing entries for other servers are kept (`--force` overwrites an existing `kintsugi` entry); `--client` is repeatable, `--client all` selects every client, and without `--client` the command asks in a terminal or exits 2; a directory without `kintsugi_project.json` is refused unless `--force`.
 
 Use `--print-only` to display the configuration without creating files:
 ```bash
-kintsugi mcp config /path/to/project --print-only
+kintsugi mcp config /path/to/project --client NAME --print-only
 ```
 
 ### MCP Server Commands

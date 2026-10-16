@@ -126,12 +126,13 @@ KINTSUGI includes an MCP server for Claude Code integration, enabling AI-assiste
 pip install -e ".[mcp]"   # or: kintsugi install mcp
 ```
 
-**If creating a new project:** Use `kintsugi init` - Claude Code configuration (`.mcp.json` + `.claude/settings.local.json`) is created automatically.
+Choose your client (`kintsugi mcp clients` lists them); nothing is configured by default:
 
-**If adding to an existing project:**
 ```bash
-kintsugi mcp config /path/to/your/project
+kintsugi mcp config /path/to/your/project --client NAME
 ```
+
+`kintsugi init --mcp-client NAME` does the same while creating a project.
 
 Open the project in Claude Code and run `/mcp` to confirm the `kintsugi` server is connected.
 

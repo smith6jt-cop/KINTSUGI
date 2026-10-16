@@ -29,9 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that is no longer loaded. Derived images inherit `project`, `cycle` and `root` from
   the image they were computed from. 34 tools.
 - **mcp**: client registry `kintsugi.mcp.clients` (11 clients), `kintsugi mcp config
-  --client NAME` (repeatable), `kintsugi mcp clients`, `kintsugi init --mcp-client NAME`
-  (repeatable, or `none`); existing client files are merged and only the `kintsugi`
-  entry is replaced, with `--force`. Generated projects get an `AGENTS.md` (an existing
+  --client NAME` (repeatable, or `all`), `kintsugi mcp clients`, `kintsugi init
+  --mcp-client NAME` (repeatable, `all` or `none`). No client is configured unless
+  chosen: without `--client`, `mcp config` asks in a terminal and otherwise exits 2;
+  `init` asks (default: none) or creates the project without MCP files, and `init
+  --force` refreshes only the clients already configured. KINTSUGI works without the
+  `mcp` package and without any assistant. Existing client files are merged and only
+  the `kintsugi` entry is replaced, with `--force`. Generated projects get an `AGENTS.md` (an existing
   one only has its tool list refreshed); the repository gains a root `AGENTS.md`, and
   `kintsugi mcp tools --check` covers it in CI.
 - **mcp**: every tool is advertised with a title and MCP behaviour annotations
@@ -82,9 +86,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agentic pass only when a provider and model are configured. `ruff` in CI now also
   checks `evals/`.
 - **BREAKING**: `kintsugi.project.write_claude_config` is replaced by
-  `write_mcp_config(root, clients=None, *, force=False, require_project=True)`.
-  `kintsugi init` and `kintsugi mcp config` now write the configuration of every MCP
-  client that keeps it in the project (Claude Code `.mcp.json` +
+  `write_mcp_config(root, clients, *, force=False, require_project=True)`, where
+  `clients` is required (no default client). `kintsugi init` no longer writes Claude
+  Code files by default: it and `kintsugi mcp config` write the configuration of the
+  client(s) the user chooses among those that keep it in the project (Claude Code `.mcp.json` +
   `.claude/settings.local.json`, VS Code `.vscode/mcp.json`, Cursor `.cursor/mcp.json`,
   Gemini CLI `.gemini/settings.json`, Antigravity `.agents/mcp_config.json`, Codex
   `.codex/config.toml`, Zed `.zed/settings.json`), an `AGENTS.md`, and `.gitignore`

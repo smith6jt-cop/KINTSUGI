@@ -176,21 +176,66 @@ def project_clients() -> list[ClientSpec]:
     return [c for c in CLIENTS if c.scope == "project"]
 
 
+def choose_message() -> str:
+    """How to choose clients; used when no selection was given."""
+    return (
+        "choose the MCP client(s) to configure: one or more of "
+        f"{', '.join(c.name for c in CLIENTS)}, 'all' or 'none' "
+        "('kintsugi mcp clients' describes them)"
+    )
+
+
 def resolve_clients(names: Iterable[str] | None) -> list[ClientSpec]:
-    """``None`` means every project-scoped client; ``"none"`` (alone) means no client."""
-    if names is None:
-        return project_clients()
-    names = list(names)
-    if names == ["none"]:
+    """The clients selected by ``names``: registry names, ``"all"`` or ``"none"``.
+
+    There is no default client: ``None`` or an empty selection raises
+    :class:`ClientConfigError`, so a caller must ask the user. ``"all"`` selects
+    every client in the registry (project-scoped ones are written, the others get
+    a snippet); ``"none"`` (alone) selects none.
+    """
+    names = list(names or [])
+    if not names:
+        raise ClientConfigError(choose_message())
+    if "none" in names:
+        if names != ["none"]:
+            raise ClientConfigError("'none' cannot be combined with other MCP clients")
         return []
+    if "all" in names:
+        return list(CLIENTS)
     registry = by_name()
     unknown = [n for n in names if n not in registry]
     if unknown:
         raise ClientConfigError(
             f"unknown MCP client {', '.join(map(repr, unknown))}; "
-            f"choose from {', '.join(registry)} or 'none'"
+            f"choose from {', '.join(registry)}, 'all' or 'none'"
         )
     return [registry[n] for n in dict.fromkeys(names)]
+
+
+def configured_clients(root: str | Path) -> list[str]:
+    """Project-scoped clients whose file in ``root`` already holds a ``kintsugi`` entry."""
+    root = Path(root)
+    found: list[str] = []
+    for client in project_clients():
+        try:
+            text = (root / client.path).read_text()
+        except OSError:
+            continue
+        if client.format == "json":
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            servers = data.get(client.key) if isinstance(data, dict) else None
+            if isinstance(servers, dict) and SERVER_NAME in servers:
+                found.append(client.name)
+            continue
+        for line in text.splitlines():
+            match = _TOML_HEADER.match(line)
+            if match and _toml_key_parts(match.group(1)) == (client.key, SERVER_NAME):
+                found.append(client.name)
+                break
+    return found
 
 
 def server_entry(client: ClientSpec, root: Path, command: str) -> dict[str, Any]:
@@ -416,10 +461,11 @@ assess quality and learn parameters for this project.
 
 ## The MCP server
 
-`kintsugi mcp config .` writes the MCP client configuration for this project (run
-it again after moving the project or the Python environment; collaborators run it
-on their own machine, because the generated files hold absolute paths and are not
-committed). Every client starts the same server:
+`kintsugi mcp config . --client NAME` writes the configuration of your MCP client
+for this project (`kintsugi mcp clients` lists the clients it knows). Run it again
+after moving the project or the Python environment; collaborators run it on their
+own machine with their own client, because the generated files hold absolute paths
+and are not committed. Every client starts the same server:
 
 ```bash
 kintsugi mcp start --project-dir /path/to/this/project

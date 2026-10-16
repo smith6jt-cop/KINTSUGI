@@ -84,7 +84,7 @@ def test_force_rewrites_only_our_entry(project):
 
 def test_refuses_a_directory_that_is_not_a_project(tmp_path):
     with pytest.raises(ValueError, match="not a KINTSUGI project"):
-        write_mcp_config(tmp_path)
+        write_mcp_config(tmp_path, ["all"])
     assert list(tmp_path.iterdir()) == []
     write_mcp_config(tmp_path, ["cursor"], require_project=False)
     assert (tmp_path / ".cursor" / "mcp.json").exists()
@@ -93,7 +93,9 @@ def test_refuses_a_directory_that_is_not_a_project(tmp_path):
 def test_cli_print_only_writes_nothing_and_shows_project_dir(project):
     from kintsugi.cli import main
 
-    result = CliRunner().invoke(main, ["mcp", "config", str(project), "--print-only"])
+    result = CliRunner().invoke(
+        main, ["mcp", "config", str(project), "--print-only", "--client", "all"]
+    )
     assert result.exit_code == 0, result.output
     flat = " ".join(result.output.split())
     assert '"kintsugi"' in flat and "--project-dir" in flat
@@ -101,10 +103,31 @@ def test_cli_print_only_writes_nothing_and_shows_project_dir(project):
     assert sorted(p.name for p in project.iterdir()) == [PROJECT_CONFIG_FILE]
 
 
+def test_cli_requires_a_client_choice(project):
+    """No default client: without a terminal and without --client, nothing is written."""
+    from kintsugi.cli import main
+
+    for argv in ([], ["--print-only"]):
+        result = CliRunner().invoke(main, ["mcp", "config", str(project), *argv])
+        assert result.exit_code == 2, result.output
+        assert "No MCP client chosen" in result.output and "--client" in result.output
+    assert sorted(p.name for p in project.iterdir()) == [PROJECT_CONFIG_FILE]
+
+
+def test_cli_prompts_for_the_client_in_a_terminal(project, monkeypatch):
+    from kintsugi import cli
+
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    result = CliRunner().invoke(cli.main, ["mcp", "config", str(project)], input="\ncodex\n")
+    assert result.exit_code == 0, result.output
+    assert (project / ".codex" / "config.toml").exists()
+    assert not (project / ".mcp.json").exists()
+
+
 def test_cli_writes_every_project_client_and_prints_snippets(project):
     from kintsugi.cli import main
 
-    result = CliRunner().invoke(main, ["mcp", "config", str(project)])
+    result = CliRunner().invoke(main, ["mcp", "config", str(project), "--client", "all"])
     assert result.exit_code == 0, result.output
     for rel in (
         ".mcp.json",
@@ -140,10 +163,11 @@ def test_cli_refuses_a_non_project_without_force(tmp_path):
     from kintsugi.cli import main
 
     runner = CliRunner()
-    result = runner.invoke(main, ["mcp", "config", str(tmp_path)])
+    result = runner.invoke(main, ["mcp", "config", str(tmp_path), "--client", "claude-code"])
     assert result.exit_code == 2 and "not a KINTSUGI project" in " ".join(result.output.split())
     assert list(tmp_path.iterdir()) == []
-    assert runner.invoke(main, ["mcp", "config", str(tmp_path), "--force"]).exit_code == 0
+    forced = ["mcp", "config", str(tmp_path), "--force", "--client", "claude-code"]
+    assert runner.invoke(main, forced).exit_code == 0
     assert (tmp_path / ".mcp.json").exists()
 
 
@@ -160,9 +184,9 @@ def test_project_load_writes_nothing_to_stdout(tmp_path, capsys):
 def test_gitignores_generated_files_once_under_one_header(project):
     (project / ".gitignore").write_text("data/raw/\n")
 
-    write_mcp_config(project)
-    write_mcp_config(project)  # idempotent
-    write_mcp_config(project, force=True)
+    write_mcp_config(project, ["all"])
+    write_mcp_config(project, ["all"])  # idempotent
+    write_mcp_config(project, ["all"], force=True)
 
     text = (project / ".gitignore").read_text()
     assert text.startswith("data/raw/\n")  # existing rules untouched

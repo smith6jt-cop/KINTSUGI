@@ -73,7 +73,7 @@ def _resolve_kintsugi_executable() -> str:
 
 def write_mcp_config(
     root: str | Path,
-    clients: list[str] | None = None,
+    clients: Sequence[str],
     *,
     force: bool = False,
     require_project: bool = True,
@@ -81,11 +81,12 @@ def write_mcp_config(
 ) -> dict[str, Any]:
     """Write the MCP client configuration and ``AGENTS.md`` for a project.
 
-    ``clients`` names clients from :data:`kintsugi.mcp.clients.CLIENTS`; ``None``
-    means every client whose configuration lives in the project, ``["none"]``
-    means none. Each project-scoped client file is created or merged (other
-    servers and settings are kept; an existing ``kintsugi`` entry is replaced
-    only with ``force``). The server entry runs the absolute path of the
+    ``clients`` names clients from :data:`kintsugi.mcp.clients.CLIENTS`, or is
+    ``["all"]`` or ``["none"]``. There is no default client: an empty selection
+    raises :class:`kintsugi.mcp.clients.ClientConfigError` (see
+    :func:`kintsugi.mcp.clients.resolve_clients`). Each project-scoped client
+    file is created or merged (other servers and settings are kept; an existing
+    ``kintsugi`` entry is replaced only with ``force``). The server entry runs the absolute path of the
     ``kintsugi`` executable (see :func:`_resolve_kintsugi_executable`) with
     ``mcp start --project-dir <root>``, so the client needs neither ``PATH`` nor
     a particular working directory or environment. Clients configured per user
@@ -1303,6 +1304,7 @@ class KintsugiProject:
         self.config = config or ProjectConfig(name=self.root.name)
         # MCP clients to configure (None = every project-scoped client).
         self._mcp_clients: list[str] | None = None
+        self._mcp_configured = False
 
         # Detect or use provided KINTSUGI path
         if kintsugi_path:
@@ -1436,8 +1438,9 @@ class KintsugiProject:
             Tissue refractive index (default: 1.44)
         mcp_clients : list of str, optional
             MCP clients to write configuration for (names from
-            ``kintsugi mcp clients``); None = every project-scoped client,
-            ``["none"]`` = none.
+            ``kintsugi mcp clients``, or ``["all"]``). None (the default) or
+            ``["none"]`` writes no MCP configuration: the project works without
+            any AI assistant, and ``kintsugi mcp config`` adds one later.
 
         Returns
         -------
@@ -1526,7 +1529,6 @@ class KintsugiProject:
         print("  +-- logs/             <- Processing logs")
         if slurm:
             print("  +-- slurm/            <- SLURM job submission")
-        print("  +-- .claude/          <- Claude Code config")
         print("  +-- .vscode/          <- VS Code config")
         print()
 
@@ -1549,6 +1551,11 @@ class KintsugiProject:
             print("  1. Copy raw images to data/raw/")
         print("  2. Open folder in VS Code: code .")
         print("  3. Start with notebooks/1_Single_Channel_Eval.ipynb")
+        if not project._mcp_configured:
+            print(
+                "  Optional: connect an AI assistant with "
+                "'kintsugi mcp config . --client NAME' ('kintsugi mcp clients' lists them)"
+            )
 
         return project
 
@@ -2080,21 +2087,25 @@ class KintsugiProject:
             "KINTSUGI project state (learning database, workflow state)",
         )
 
-    def _create_mcp_config(self, clients: list[str] | None = None) -> None:
+    def _create_mcp_config(self, clients: Sequence[str] | None = None) -> None:
         """Write MCP client configuration and ``AGENTS.md`` (see :func:`write_mcp_config`).
 
-        ``clients`` defaults to the selection given to :meth:`create` (every
-        project-scoped client unless one was given). The project marker may not be
-        saved yet when this runs from :meth:`create`, so it is not required here.
+        ``clients`` defaults to the selection given to :meth:`create`. Nothing is
+        written when no client was chosen (None, empty or ``["none"]``). The
+        project marker may not be saved yet when this runs from :meth:`create`, so
+        it is not required here.
         """
         if clients is None:
             clients = self._mcp_clients
+        if not clients or list(clients) == ["none"]:
+            return
         result = write_mcp_config(
             self.paths.root,
             clients,
             require_project=False,
             project_name=self.config.name,
         )
+        self._mcp_configured = True
         for path in [*result["written"], result["agents_md"]]:
             if path is not None:
                 print(f"  Wrote {path.relative_to(self.paths.root)}")

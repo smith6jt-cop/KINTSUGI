@@ -39,8 +39,7 @@ Open `notebooks/3_Signal_Isolation_QC.ipynb` and follow the step-by-step workflo
    ```
 
 2. **Configure Claude Code:**
-   - If you used `kintsugi init`, configuration (`.mcp.json` + `.claude/settings.local.json`) is already set up
-   - For existing projects: `kintsugi mcp config /path/to/your/project`
+   - `kintsugi mcp config /path/to/your/project --client NAME` (`kintsugi mcp clients` lists the clients; nothing is configured by default)
 
 3. **Start using with Claude Code:**
    - Claude can now load channels, suggest parameters, and process images

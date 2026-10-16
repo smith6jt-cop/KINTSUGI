@@ -37,9 +37,10 @@ Commits (`feat:`, `fix:`, `docs:`; `!` marks a breaking change). `numpy<2.0`.
 
 ## MCP server
 
-`kintsugi mcp config <project>` writes the configuration for every MCP client that
-keeps it in the project and prints snippets for the others (`kintsugi mcp clients`
-lists them); the server starts as `kintsugi mcp start --project-dir <project>`. This
+The MCP server is optional and no client is configured by default:
+`kintsugi mcp config <project> --client NAME` writes the configuration of the
+chosen client(s) (`kintsugi mcp clients` lists them; without `--client` it asks in a
+terminal and fails elsewhere). KINTSUGI itself does not need the server. The server starts as `kintsugi mcp start --project-dir <project>`. This
 repository's own `.mcp.json` runs the server without a project, so tools that read or
 write project files need an explicit `project_path`. Full reference: `docs/mcp.md`.
 

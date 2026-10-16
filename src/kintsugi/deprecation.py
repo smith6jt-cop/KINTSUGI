@@ -102,7 +102,7 @@ The Signal Isolation workflow has been replaced with:
    kintsugi mcp start
 
    # Configure Claude Code with KINTSUGI tools
-   kintsugi mcp config /path/to/project
+   kintsugi mcp config /path/to/project --client NAME
    ```
 
 2. JUPYTER PARAMETER TUNERS:

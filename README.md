@@ -353,17 +353,18 @@ denoised = adaptive_denoise(image, strength="auto")
 
 ### Claude Code Integration (MCP server)
 
-KINTSUGI includes a [Model Context Protocol](https://modelcontextprotocol.io) server that lets Claude Code act as an image-processing assistant: it can load channels, inspect them, suggest and apply autofluorescence subtraction, score the result, save it, and record what worked for next time. Full guide: [docs/mcp.md](docs/mcp.md).
+KINTSUGI includes an optional [Model Context Protocol](https://modelcontextprotocol.io) server that lets the AI assistant of your choice act as an image-processing assistant: it can load channels, inspect them, suggest and apply autofluorescence subtraction, score the result, save it, and record what worked for next time. Full guide: [docs/mcp.md](docs/mcp.md).
 
 **Setup**
 
 ```bash
 pip install -e ".[mcp]"   # or: kintsugi install mcp   (requires mcp>=2.0)
-kintsugi init /path/to/project --name "My Experiment"   # new project: config is generated
-kintsugi mcp config /path/to/project                    # existing project
+kintsugi mcp clients                                         # the AI assistants it can configure
+kintsugi mcp config /path/to/project --client NAME           # configure yours (repeatable)
+kintsugi init /path/to/project --mcp-client NAME             # or choose while creating a project
 ```
 
-This writes the configuration of every MCP client that keeps it in the project (Claude Code, VS Code, Cursor, Gemini CLI, Antigravity, Codex, Zed), an `AGENTS.md` for the assistant, and prints the entry to paste for Claude Desktop, Windsurf, Cline and JetBrains (`--client NAME` restricts; `kintsugi mcp clients` lists them). For Claude Code that is `.mcp.json` (the server definition, with the absolute path of the `kintsugi` executable) and `.claude/settings.local.json` (approves the `kintsugi` server only):
+Nothing is configured for any assistant unless you choose it: without `--client` the command asks in a terminal and fails elsewhere, and `kintsugi init` asks (default: none) or, non-interactively, creates the project without MCP configuration. KINTSUGI itself (CLI, notebooks, Snakemake workflow) does not need the MCP server or any assistant. A client that keeps its configuration in the project gets that file (merged with what is there) and an `AGENTS.md`; Claude Desktop, Windsurf, Cline and JetBrains get the entry to paste. For example, `--client claude-code` writes `.mcp.json` (the server definition, with the absolute path of the `kintsugi` executable) and `.claude/settings.local.json` (approves the `kintsugi` server only):
 
 ```json
 {"mcpServers": {"kintsugi": {"type": "stdio", "command": "/path/to/env/bin/kintsugi", "args": ["mcp", "start", "--project-dir", "/path/to/project"]}}}

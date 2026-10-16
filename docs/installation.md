@@ -222,8 +222,8 @@ KINTSUGI's MCP server lets Claude Code drive signal isolation. It needs the 2.x 
 
 ```bash
 pip install -e ".[mcp]"      # or: kintsugi install mcp
-kintsugi init /path/to/project --name "My Experiment"   # new project: writes .mcp.json + .claude/settings.local.json
-kintsugi mcp config /path/to/project                    # existing project
+kintsugi mcp clients                                    # the clients it can configure
+kintsugi mcp config /path/to/project --client NAME      # configure yours
 ```
 
 Do **not** run `pip install kintsugi[mcp]` — that installs an unrelated package from PyPI.
