@@ -1,7 +1,7 @@
 """Record a real KINTSUGI MCP session as a Markdown transcript.
 
 Creates a throw-away project with synthetic signal/blank channels, drives the
-live server through the SDK's in-process client exactly as Claude Code would,
+live server through the SDK's in-process client exactly as an MCP client would,
 and prints what every tool returned. The output is deterministic (seeded data,
 fixed names, temp paths normalised) so it can be embedded in the docs between
 ``<!-- mcp-demo:begin -->`` / ``<!-- mcp-demo:end -->`` markers and checked in CI.

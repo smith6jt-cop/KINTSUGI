@@ -98,11 +98,11 @@ For detailed documentation including the weighted multi-range algorithm, paramet
 
 **Notebook**: `notebooks/3_Signal_Isolation_QC.ipynb`
 
-### Option A: Claude-Guided Workflow (Recommended)
+### Option A: AI-Assisted Workflow (optional MCP server)
 
-Use Claude Code with the KINTSUGI MCP server for interactive, AI-assisted signal isolation.
+Connect the AI assistant you use (any MCP client) to the KINTSUGI MCP server for interactive, AI-assisted signal isolation.
 The server, its tools, resources and prompt, the learning loop and the security model are
-documented in [Claude Code Integration (MCP Server)](mcp.md).
+documented in [MCP server](mcp.md).
 
 **Setup:**
 ```bash
@@ -112,7 +112,7 @@ kintsugi mcp config /path/to/project --client NAME
 ```
 
 **Usage:**
-Claude Code can:
+The assistant can:
 - Load and analyze channels
 - Suggest optimal parameters based on image characteristics
 - Apply processing with real-time feedback (global or weighted subtraction)
@@ -456,6 +456,6 @@ EDF outputs use marker names from `meta/CHANNELNAMES.txt` (falls back to `CH#` i
 2. **Use HPC for batch**: Use the Snakemake workflow for datasets with many cycles
 3. **Monitor memory**: GPU jobs need ~48 GB RAM; CPU jobs need ~128 GB
 4. **GPU acceleration**: Enable CuPy for faster deconvolution and stitching
-5. **Parameter learning**: Use Claude Code to build a database of successful parameters
+5. **Parameter learning**: Record approved parameters (`approve_and_learn`, the tuners or `kintsugi mcp pretrain`) to build a database of successful parameters
 6. **Batch QC**: Run BatchQC to detect and correct batch effects before analysis
 7. **Run in tmux**: Snakemake is a long-running coordinator — use tmux/screen

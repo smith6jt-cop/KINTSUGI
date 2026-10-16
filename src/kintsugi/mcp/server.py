@@ -1,13 +1,13 @@
 """
 KINTSUGI MCP Server
 
-Exposes the KINTSUGI image-processing tools to Claude Code over the Model
+Exposes the KINTSUGI image-processing tools to any MCP client over the Model
 Context Protocol, built on :class:`mcp.server.mcpserver.MCPServer` from the
 official ``mcp`` SDK (2.x).
 
 Each tool returns a plain ``dict`` which the SDK emits as **structured content**
-(``structuredContent``) alongside the human-readable JSON text block, so Claude
-receives machine-readable results rather than only a serialized string. The tool
+(``structuredContent``) alongside the human-readable JSON text block, so the
+client receives machine-readable results rather than only a serialized string. The tool
 implementations live in :mod:`kintsugi.mcp.tools`; their input schemas are
 derived from the handlers' ``Annotated``/``Literal`` signatures (and enforced by
 the SDK), while names, titles, descriptions and behaviour annotations come from

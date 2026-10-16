@@ -7,8 +7,8 @@ title: "KINTSUGI: Knowledge Integration with New Technologies for Simplified Use
 abstract: >-
   Multiplex immunofluorescence image processing pipeline (illumination correction,
   stitching, deconvolution, extended depth of focus, multi-cycle registration,
-  autofluorescence removal, segmentation and spatial analysis) with a Model
-  Context Protocol (MCP) server for Claude Code.
+  autofluorescence removal, segmentation and spatial analysis) with an optional
+  Model Context Protocol (MCP) server for AI assistants.
 version: 1.2.3
 license: MIT
 repository-code: "https://github.com/smith6jt-cop/KINTSUGI"
@@ -26,7 +26,8 @@ keywords:
   - spatial-analysis
   - registration
   - model-context-protocol
-  - claude-code
+  - mcp-server
+  - ai-assistant
 preferred-citation:
   type: article
   title: "Protocol for processing and analyzing multiplexed images improves lymphatic cell identification and spatial architecture in human tissue"

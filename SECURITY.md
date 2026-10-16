@@ -32,8 +32,9 @@ model sends as a tool argument is treated as untrusted input:
 - **Resource limits** - numeric arguments carry schema bounds that the SDK
   enforces, plus stricter in-body clamps (`clamp_int`/`clamp_float` reject
   booleans, NaN and infinities).
-- **Approval scope** - the generated `.claude/settings.local.json` approves only
-  the `kintsugi` server (`enabledMcpjsonServers`), never every project server.
+- **Approval scope** - client configuration is written only for the client(s) the
+  user chooses; for Claude Code, the generated `.claude/settings.local.json` approves
+  only the `kintsugi` server (`enabledMcpjsonServers`), never every project server.
 
 The security helpers live in `src/kintsugi/mcp/path_safety.py` and are covered
 by `tests/test_mcp_path_safety.py`. See `docs/mcp.md` for the full design.

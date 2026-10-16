@@ -1,13 +1,13 @@
 """Realistic tool-selection tasks for the KINTSUGI MCP evaluation harness.
 
-Each task is a natural-language request a scientist might make to Claude while
-driving the MCP server. ``expected`` is the set of *acceptable* first tool calls
+Each task is a natural-language request a scientist might make to an AI
+assistant driving the MCP server. ``expected`` is the set of *acceptable* first tool calls
 (more than one is allowed where genuinely ambiguous). Several tasks are
 deliberately chosen to probe confusable pairs on the tool surface
 (``denoise`` vs ``denoise_advanced``; the three background-removal tools;
 ``assess_quality`` vs ``compute_snr``; the learning-recall vs record tools).
 
-Keeping these as plain data (no MCP/anthropic import) lets the harness load them
+Keeping these as plain data (no MCP or provider import) lets the harness load them
 in any environment.
 """
 

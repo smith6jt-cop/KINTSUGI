@@ -1,8 +1,8 @@
 """
 KINTSUGI MCP Server
 
-Model Context Protocol server for Claude Code integration, providing image
-processing tools for signal isolation, quality assessment, and parameter
+Optional Model Context Protocol server for any MCP client (AI assistant),
+providing image processing tools for signal isolation, quality assessment, and parameter
 learning.
 
 Requires the 2.x Python SDK (``mcp>=2.0,<3``); install it with
@@ -36,7 +36,8 @@ in ``mcpServers`` form; ``command`` is the resolved absolute path to the
 because MCP clients differ in the working directory and environment they give a
 server; ``KINTSUGI_PROJECT_DIR`` does the same where a client can set environment
 variables. Without either, the working directory is used only if it is a
-KINTSUGI project. The equivalent Claude Code command is::
+KINTSUGI project. Some clients have their own command for this; Claude Code's,
+for example, is::
 
     claude mcp add --scope project --transport stdio kintsugi -- \
         kintsugi mcp start --project-dir /path/to/project

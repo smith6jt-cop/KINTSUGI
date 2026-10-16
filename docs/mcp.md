@@ -1,11 +1,12 @@
-# Claude Code Integration (MCP Server)
+# MCP Server
 
-KINTSUGI ships a [Model Context Protocol](https://modelcontextprotocol.io) (MCP)
-server that turns the signal-isolation toolbox into tools an AI assistant can
-drive. Open a KINTSUGI project in [Claude Code](https://code.claude.com), and
-Claude can load channels, inspect them, suggest and apply autofluorescence
-subtraction, score the result, save it, and record what worked so the next
-session starts from it.
+KINTSUGI ships an optional [Model Context Protocol](https://modelcontextprotocol.io)
+(MCP) server that turns the signal-isolation toolbox into tools an AI assistant can
+drive. Connect the MCP client you use (see [Connect your client](#connect-your-client))
+to a KINTSUGI project, and the assistant can load channels, inspect them, suggest
+and apply autofluorescence subtraction, score the result, save it, and record what
+worked so the next session starts from it. KINTSUGI itself (CLI, notebooks,
+Snakemake workflow) does not need the server or any assistant.
 
 ```{contents}
 :local:
@@ -17,7 +18,7 @@ session starts from it.
 - **Declarative, dependency-free registry.** `kintsugi.mcp.tool_specs.TOOL_SPECS`
   lists every tool (name, handler, title, description, behaviour annotations)
   without importing the SDK, so `kintsugi mcp tools`, the docs generator and
-  the tests work without the optional `claude` extra.
+  the tests work without the optional `mcp` extra.
 - **Schemas derived from the handlers and enforced.** Parameter descriptions,
   enums and numeric ranges live in the handler signatures
   (`Annotated[int, Field(description=..., ge=1, le=99)]`, `Literal[...]`). The
@@ -63,19 +64,8 @@ already has. `--client all` configures every client below, `--print-only` shows 
 configuration without writing, and `kintsugi mcp clients` lists the registry. A
 client that keeps its configuration in the project gets that file and an
 `AGENTS.md` for the assistant; a client configured per user or in the IDE gets the
-entry to paste:
-
-| Client | Written / printed | Servers key |
-|--------|-------------------|-------------|
-| Claude Code (`claude-code`) | `.mcp.json` + `.claude/settings.local.json` (approves only `kintsugi`) | `mcpServers` |
-| VS Code / Copilot (`vscode`) | `.vscode/mcp.json` | `servers` |
-| Cursor (`cursor`) | `.cursor/mcp.json` | `mcpServers` |
-| Gemini CLI (`gemini-cli`) | `.gemini/settings.json` (+ `context.fileName` = `AGENTS.md`, `GEMINI.md`) | `mcpServers` |
-| Antigravity (`antigravity`) | `.agents/mcp_config.json` | `mcpServers` |
-| OpenAI Codex CLI (`codex`) | `.codex/config.toml` (trusted projects only) | `[mcp_servers.kintsugi]` |
-| Zed (`zed`) | `.zed/settings.json` | `context_servers` |
-| Claude Desktop, Windsurf / Devin Desktop, Cline | snippet for the user's configuration file | `mcpServers` |
-| JetBrains AI Assistant | snippet for Settings > Tools > AI Assistant > MCP | `mcpServers` |
+entry to paste. [Connect your client](#connect-your-client) lists every client and
+what to do after configuring it.
 
 Existing files are merged (other servers and settings are kept; an existing
 `kintsugi` entry is replaced only with `--force`), nothing is written outside the
@@ -85,7 +75,8 @@ on their own machine. `AGENTS.md` is created only when absent; an existing one o
 has its generated tool list refreshed. `kintsugi mcp config` refuses a directory without
 `kintsugi_project.json` (the server would refuse it as `--project-dir`).
 
-For example, `--client claude-code` writes these two files:
+Every client gets the same server entry in its own format. For example,
+`--client claude-code` writes these two files:
 
 ```json
 // .mcp.json — the server definition Claude Code reads
@@ -114,25 +105,100 @@ on almost no environment variables), so the project travels in `args`, which
 every client supports. Where a client can set environment variables,
 `KINTSUGI_PROJECT_DIR` does the same; without either, the working directory is
 used only if it contains `kintsugi_project.json`, and tools that need a project
-otherwise ask for `project_path` instead of guessing. The equivalent Claude Code
-command is:
-
-```bash
-claude mcp add --scope project --transport stdio kintsugi -- \
-  kintsugi mcp start --project-dir /path/to/project
-```
-
-Then open the project folder in Claude Code, accept the workspace trust dialog,
-and run `/mcp`: the `kintsugi` server is listed with its tools, resources and
-prompt. The server speaks JSON-RPC over stdio; nothing else is written to
+otherwise ask for `project_path` instead of guessing. The server speaks JSON-RPC over stdio; nothing else is written to
 stdout (diagnostics go to stderr), and a test spawns the real server over a
 pipe to keep it that way.
+
+## Connect your client
+
+`kintsugi mcp config <project> --client NAME` (or `kintsugi init --mcp-client NAME`)
+writes or prints the configuration; then follow the last column. The table is
+generated from the registry the command uses:
+
+<!-- mcp-tools:clients:begin -->
+| Client | `--client` | Configuration | After configuring | Client docs |
+|--------|------------|---------------|-------------------|-------------|
+| Claude Code | `claude-code` | `.mcp.json` (written) | Open the project folder, accept the trust dialog, then run /mcp. | [docs](https://code.claude.com/docs/en/mcp) |
+| VS Code (GitHub Copilot) | `vscode` | `.vscode/mcp.json` (written) | Open the folder, trust the workspace, and start 'kintsugi' from MCP: List Servers. | [docs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) |
+| Cursor | `cursor` | `.cursor/mcp.json` (written) | Open the folder; enable 'kintsugi' under Settings > MCP if prompted. | [docs](https://cursor.com/docs/context/mcp) |
+| Gemini CLI | `gemini-cli` | `.gemini/settings.json` (written) | Run 'gemini' in the project folder (trust it with 'gemini trust' if asked), then /mcp. | [docs](https://geminicli.com/docs/tools/mcp-server/) |
+| Antigravity | `antigravity` | `.agents/mcp_config.json` (written) | Open the folder as the workspace; the server appears under MCP servers. | [docs](https://antigravity.google/docs/mcp) |
+| OpenAI Codex CLI | `codex` | `.codex/config.toml` (written) | Mark the project trusted (Codex loads .codex/config.toml only in trusted projects), then run 'codex' there and /mcp. | [docs](https://developers.openai.com/codex/mcp) |
+| Zed | `zed` | `.zed/settings.json` (written) | Open the folder (trust the worktree); the server is listed in the Agent Panel settings. | [docs](https://zed.dev/docs/ai/mcp) |
+| Claude Desktop | `claude-desktop` | snippet to paste: claude_desktop_config.json (macOS: ~/Library/Application Support/Claude/; Windows: %APPDATA%\Claude\) | Merge the entry into mcpServers and restart Claude Desktop. | [docs](https://modelcontextprotocol.io/docs/develop/connect-local-servers) |
+| Windsurf / Devin Desktop | `windsurf` | snippet to paste: mcp_config.json (~/.config/devin/ or ~/.codeium/; Windows: %APPDATA%\devin\) | Merge the entry into mcpServers, then refresh the MCP servers list. | [docs](https://docs.windsurf.com/windsurf/cascade/mcp) |
+| Cline | `cline` | snippet to paste: cline_mcp_settings.json (open it from Cline > MCP Servers > Configure) | Merge the entry into mcpServers and save; Cline restarts the server. | [docs](https://docs.cline.bot/mcp/configuring-mcp-servers) |
+| JetBrains AI Assistant | `jetbrains` | snippet to paste: Settings > Tools > AI Assistant > Model Context Protocol (MCP) > Add | Choose STDIO, paste the JSON, and set the working directory to the project folder. | [docs](https://www.jetbrains.com/help/ai-assistant/mcp.html) |
+
+11 clients. Generated from `kintsugi.mcp.clients` by `kintsugi mcp tools --write`; do not edit by hand.
+<!-- mcp-tools:clients:end -->
+
+Instructions file: every client above except Claude Desktop reads `AGENTS.md`
+(Gemini CLI through the `context.fileName` entry `kintsugi mcp config` adds;
+Claude Code reads `CLAUDE.md` first, which can be the single line `@AGENTS.md`).
+Claude Code also has its own command for the same entry:
+`claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start
+--project-dir /path/to/project`.
+
+### Any other client
+
+Any MCP client that can start a local stdio server works. Give it:
+
+- **command**: the absolute path of `kintsugi` in the environment where KINTSUGI is
+  installed (`which kintsugi`, or `where kintsugi` on Windows), so the client does
+  not depend on its `PATH`;
+- **args**: `["mcp", "start", "--project-dir", "/absolute/path/to/project"]`.
+
+In the common `mcpServers` JSON form:
+
+```json
+{
+  "mcpServers": {
+    "kintsugi": {
+      "command": "/path/to/env/bin/kintsugi",
+      "args": ["mcp", "start", "--project-dir", "/path/to/project"]
+    }
+  }
+}
+```
+
+To try the server without any
+assistant, the [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector)
+lists and calls its tools:
+
+```bash
+npx @modelcontextprotocol/inspector --cli "$(which kintsugi)" mcp start \
+  --project-dir /path/to/project --method tools/list
+```
+
+From Python, the `mcp` SDK starts it the same way:
+
+```python
+import asyncio
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+params = StdioServerParameters(
+    command="/path/to/env/bin/kintsugi",
+    args=["mcp", "start", "--project-dir", "/path/to/project"],
+)
+
+
+async def main():
+    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+        await session.initialize()
+        print([tool.name for tool in (await session.list_tools()).tools])
+
+
+asyncio.run(main())
+```
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    CC[Claude Code] <-- "JSON-RPC over stdio" --> S[MCPServer<br/>kintsugi mcp start]
+    CC[MCP client<br/>your AI assistant] <-- "JSON-RPC over stdio" --> S[MCPServer<br/>kintsugi mcp start]
     S --> R[tool_specs.py<br/>34 tools: name, title,<br/>description, annotations]
     S --> ADP["handler adapter<br/>{'error': ...} → isError"]
     ADP --> T1[tools/signal_isolation]
@@ -238,7 +304,7 @@ Long-running tools (`subtract_blank` with `method="weighted"`,
 `denoise_advanced`, `optimize_parameters`, `cluster_channels`,
 `propagate_parameters`) run their CPU work on a worker thread and send MCP
 progress notifications, so the client stays responsive and can cancel.
-`get_thumbnail` returns the preview as an **image content block** Claude can
+`get_thumbnail` returns the preview as an **image content block** the model can
 actually look at, alongside the structured metadata; pass
 `include_data_uri=true` only if you also want the base64 in the JSON.
 
@@ -302,8 +368,8 @@ client and a notebook) on one project do not overwrite each other.
 
 ## Security model
 
-The server is a **local, single-user stdio subprocess** started by Claude Code
-with the user's own permissions; there is no network listener, authentication
+The server is a **local, single-user stdio subprocess** started by the MCP
+client with the user's own permissions; there is no network listener, authentication
 or multi-tenancy, so the relevant threat is a model-supplied argument escaping
 the project.
 
@@ -322,8 +388,8 @@ to report a vulnerability.
 
 ### Why the tools are not prefixed `kintsugi_`
 
-The 34 names are valid, unique, verb-first `snake_case` names, and Claude Code
-already namespaces every MCP tool as `mcp__kintsugi__<tool>`. A prefix would
+The 34 names are valid, unique, verb-first `snake_case` names, and MCP clients
+namespace tools by server (Claude Code, for example, as `mcp__kintsugi__<tool>`). A prefix would
 duplicate that namespace while breaking existing permission rules, notebooks
 and evaluation tasks. The server's `instructions` and each tool's title carry
 the context instead.
@@ -950,9 +1016,11 @@ content: image block (image/png, 3996 base64 chars) + text
   `kintsugi` that is not on the client's `PATH`; run
   `kintsugi mcp config <project> --client NAME --force` from the environment where
   KINTSUGI is installed, so the entry carries the absolute path of the executable.
-- **Server shows "Pending approval"** — accept the workspace trust dialog in
-  Claude Code; `.claude/settings.local.json` approvals are applied only in a
-  trusted folder. `claude mcp reset-project-choices` clears earlier decisions.
+- **The server is listed but not started, or "Pending approval"** — the client
+  has not approved it yet: trust the folder or workspace and enable `kintsugi`
+  as the last column of [Connect your client](#connect-your-client) describes. In
+  Claude Code, `.claude/settings.local.json` approvals apply only in a trusted
+  folder, and `claude mcp reset-project-choices` clears earlier decisions.
 - **`mcp 1.x is installed but KINTSUGI requires mcp>=2.0`** — run
   `pip install "mcp>=2.0,<3"` in the environment the server starts from.
 - **A tool call fails with a validation error** — the message names the

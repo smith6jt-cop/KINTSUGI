@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "kintsugi"
 version = "1.2.3"
-description = "Multiplex immunofluorescence image processing pipeline with a Model Context Protocol (MCP) server for Claude Code"
+description = "Multiplex immunofluorescence image processing pipeline with an optional Model Context Protocol (MCP) server for AI assistants"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -21,7 +21,8 @@ keywords = [
     "spatial-analysis",
     "mcp",
     "model-context-protocol",
-    "claude-code",
+    "mcp-server",
+    "ai-assistant",
     "ai-agent",
 ]
 classifiers = [
@@ -47,7 +48,7 @@ dependencies = [
     "scikit-learn>=1.3.0",
     "scikit-image>=0.21.0",
     # Tool signatures in kintsugi.mcp.tools use pydantic.Field metadata; the
-    # modules are also imported by the notebook tuners without the claude extra.
+    # modules are also imported by the notebook tuners without the mcp extra.
     "pydantic>=2.7,<3",
 
     # Image processing
@@ -372,11 +373,7 @@ version_provider = "pep621"
 version_files = ["CITATION.cff:^version"]
 update_changelog_on_bump = true
 changelog_incremental = true
-major_version_zero = true
 gpg_sign = false
-
-# Changelog configuration
-[tool.commitizen.changelog_format]
 changelog_file = "CHANGELOG.md"
 
 # Bump settings - map commit types to version bumps

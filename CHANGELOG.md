@@ -80,6 +80,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   citation; the README BibTeX entry now carries the full author list and DOI.
 
 ### Changed
+- **docs**: the documentation, notebooks, docstrings and package metadata describe the
+  MCP server as optional and usable with any MCP client; client names appear only
+  where a sentence is about that client. `docs/mcp.md` is titled "MCP server" and has
+  a "Connect your client" section whose table is generated from the client registry
+  (new `mcp-tools:clients` block, checked like the tool tables) plus setup for any
+  other client (stdio entry, MCP Inspector, Python SDK). `pyproject.toml` and
+  `CITATION.cff` no longer describe KINTSUGI as "for Claude Code" (keywords
+  `mcp-server`, `ai-assistant`).
+- **deprecation**: the Notebook 3/5 notices list the Python API first and the MCP
+  route as optional for any client; `DEPRECATION_MAP` points `ini_params*` to
+  `kintsugi.signal.subtract_autofluorescence` / `subtract_autofluorescence_dask`
+  instead of an MCP tool function.
 - **docs**: guidance for AI coding assistants lives in `AGENTS.md` files (repository
   root, `src/kintsugi/`, `src/kintsugi/signal/`, `workflow/`, `notebooks/`), read by
   any assistant; each `CLAUDE.md` is now the one line `@AGENTS.md`. The generated tool
@@ -201,6 +213,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instructions in `TROUBLESHOOTING.md`.
 
 ### Fixed
+- **release**: `cz bump` failed (`TypeError: unhashable type: 'Table'`) because
+  `[tool.commitizen.changelog_format]` was a table, and `major_version_zero = true`
+  would have kept a breaking change below 2.0.0; `changelog_file` is now a plain key
+  and `major_version_zero` is removed, so `cz bump --dry-run` reports 1.2.3 → 2.0.0.
 - **mcp**: numpy values in a tool result are converted before serialisation; a
   default (global) `subtract_blank` call returned a `numpy.bool_` and failed with
   "Error executing tool" over the protocol.

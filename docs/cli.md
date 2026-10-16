@@ -93,7 +93,7 @@ kintsugi install all        # All optional features
 ```
 
 The groups are defined in `src/kintsugi/deps.py` (`OPTIONAL_GROUPS`, 14 groups:
-`gpu`, `viz`, `dl`, `analysis`, `bio`, `claude`, `dev`, `docs`, `kronos`, `denoise`,
+`gpu`, `viz`, `dl`, `analysis`, `bio`, `mcp`, `dev`, `docs`, `kronos`, `denoise`,
 `optimize`, `rapids`, `workflow`, `full`). There is no `torch` group — PyTorch is
 installed by `gpu` (and by `dl`, `denoise`, `kronos`). For development installs,
 `pip install -e ".[mcp]"` is equivalent to `kintsugi install mcp`; do **not** run
@@ -101,14 +101,14 @@ installed by `gpu` (and by `dl`, `denoise`, `kronos`). For development installs,
 
 ## MCP Server Commands
 
-KINTSUGI includes an MCP (Model Context Protocol) server for Claude Code integration.
-It requires the 2.x Python SDK (`mcp>=2.0,<3`): `pip install -e ".[mcp]"` or
+KINTSUGI includes an optional MCP (Model Context Protocol) server for AI assistants
+(any MCP client). It requires the 2.x Python SDK (`mcp>=2.0,<3`): `pip install -e ".[mcp]"` or
 `kintsugi install mcp`. The full guide — tools, resources, the prompt, the learning
-loop, security model and troubleshooting — is [Claude Code Integration (MCP Server)](mcp.md).
+loop, security model and troubleshooting — is [MCP server](mcp.md).
 
 ### kintsugi mcp start
 
-Start the MCP server for Claude Code integration.
+Start the MCP server. MCP clients run this command themselves from their configuration.
 
 ```bash
 kintsugi mcp start                                   # project from KINTSUGI_PROJECT_DIR or a project cwd
@@ -222,7 +222,7 @@ claude-code`, `.mcp.json` at the project root holds the server definition:
 
 The project travels in `args` rather than a `cwd` entry, because several clients ignore
 `cwd`. `.claude/settings.local.json` approves only that server:
-`{"enabledMcpjsonServers": ["kintsugi"]}`. The equivalent Claude Code CLI command is:
+`{"enabledMcpjsonServers": ["kintsugi"]}`. Claude Code's own CLI can add the same entry:
 
 ```bash
 claude mcp add --scope project --transport stdio kintsugi -- \

@@ -19,9 +19,9 @@ is false for every tool: the server only touches the local project directory
 and its own session state.
 
 Naming: tool names are deliberately *not* prefixed with ``kintsugi_``. They are
-valid, unique, verb-first snake_case names (SEP-986), and Claude Code already
-namespaces every MCP tool as ``mcp__kintsugi__<tool>``; a prefix would only
-duplicate that and break existing permission rules, notebooks and eval tasks.
+valid, unique, verb-first snake_case names (SEP-986), and MCP clients namespace
+tools by server (Claude Code, for example, as ``mcp__kintsugi__<tool>``); a prefix
+would only duplicate that and break existing permission rules, notebooks and eval tasks.
 """
 
 from __future__ import annotations

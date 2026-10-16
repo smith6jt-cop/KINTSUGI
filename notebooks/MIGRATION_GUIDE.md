@@ -27,22 +27,22 @@ The old notebooks have been replaced with a single, more powerful notebook:
 
 Open `notebooks/3_Signal_Isolation_QC.ipynb` and follow the step-by-step workflow. The notebook supports three approaches:
 
-1. **Claude-Guided**: AI recommends parameters, learns from success
+1. **AI-assisted (optional MCP server)**: the assistant you connect recommends parameters, learns from success
 2. **Interactive Tuners**: Widget-based parameter adjustment
 3. **Python API**: Direct programmatic control
 
-### Option 1: Claude Code Integration (Recommended for AI-assisted workflow)
+### Option 1: AI Assistant through the MCP server (optional, any MCP client)
 
 1. **Install dependencies:**
    ```bash
    pip install -e ".[mcp]"   # or: kintsugi install mcp  (needs mcp>=2.0,<3)
    ```
 
-2. **Configure Claude Code:**
+2. **Configure your MCP client:**
    - `kintsugi mcp config /path/to/your/project --client NAME` (`kintsugi mcp clients` lists the clients; nothing is configured by default)
 
-3. **Start using with Claude Code:**
-   - Claude can now load channels, suggest parameters, and process images
+3. **Open the project in your client** and approve the server (see the client table in `docs/mcp.md`):
+   - The assistant can now load channels, suggest parameters, and process images
    - Parameters are learned and improve over time
 
 ### Option 2: Jupyter Interactive Tuners
@@ -237,7 +237,7 @@ print(f"Recommended params: {recommendations['recommended_parameters']}")
 print(f"Confidence: {recommendations['confidence']}")
 ```
 
-When using Claude Code, this happens automatically through the MCP tools.
+With an AI assistant connected through the MCP server, this happens automatically through the MCP tools.
 
 ---
 
@@ -274,7 +274,7 @@ The tool surface is generated from the server's registry — run `kintsugi mcp t
 
 ## FAQ
 
-**Q: What if I don't use Claude Code?**
+**Q: What if I don't use an AI assistant?**
 A: You can use the Jupyter interactive tuners (Kview2 + Kutils) or direct Python API. The MCP server is optional.
 
 **Q: Will my existing parameters work?**
@@ -292,4 +292,4 @@ A: Yes, `Kutils.py` is still available in the notebooks folder and is used by th
 
 - Documentation: See `docs/` directory
 - Issues: https://github.com/smith6jt-cop/KINTSUGI/issues
-- Claude Code: run `/mcp` — it lists the `kintsugi` server, its connection state and its tools
+- MCP server: your client's MCP view lists the `kintsugi` server, its connection state and its tools (in Claude Code and Gemini CLI, `/mcp`)

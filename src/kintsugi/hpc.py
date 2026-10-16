@@ -1203,7 +1203,8 @@ After each step completes, review QC outputs:
 
 **Next steps:**
 1. Open `3_Signal_Isolation_QC.ipynb` for signal isolation and QC
-2. Use Claude MCP tools for interactive processing assistance
+2. Optionally, connect an AI assistant through the KINTSUGI MCP server
+   (`kintsugi mcp config . --client NAME`)
 3. Proceed to segmentation with `4_Segmentation_Analysis.ipynb`
 
 ---
