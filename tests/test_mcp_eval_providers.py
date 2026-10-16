@@ -259,29 +259,70 @@ def test_unreachable_endpoint(captured):
         providers.select_tool("openai", "m", "p", TOOLS, base_url="http://127.0.0.1:9/v1")
 
 
-def test_resolve_provider():
-    assert providers.resolve_provider("openai", {"ANTHROPIC_API_KEY": "k"}) == "openai"
-    assert providers.resolve_provider(None, {"ANTHROPIC_API_KEY": "k"}) == "anthropic"
-    assert providers.resolve_provider(None, {"OPENAI_API_KEY": "k"}) == "openai"
-    assert providers.resolve_provider(None, {"OPENAI_BASE_URL": "http://h/v1"}) == "openai"
-    with pytest.raises(ValueError, match="ANTHROPIC_API_KEY or OPENAI_API_KEY"):
-        providers.resolve_provider(None, {"ANTHROPIC_API_KEY": ""})
-    with pytest.raises(ValueError, match="pass --provider"):
-        providers.resolve_provider(None, {"ANTHROPIC_API_KEY": "a", "OPENAI_API_KEY": "b"})
+def test_check_provider():
+    providers.check_provider("anthropic")
+    providers.check_provider("openai")
     with pytest.raises(ValueError, match="Unknown provider"):
-        providers.resolve_provider("acme", {})
+        providers.check_provider("acme")
 
 
-def test_harness_requires_a_model_for_agentic(capsys):
+def _harness():
     sys.path.insert(0, str(EVALS))
     try:
         import harness
     finally:
         sys.path.remove(str(EVALS))
+    return harness
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--agentic"],
+        ["--agentic", "--provider", "openai"],
+        ["--agentic", "--model", "m"],
+    ],
+)
+def test_harness_never_picks_a_provider_or_model(argv, monkeypatch, capsys):
+    """No default and no inference from API keys: without a terminal, a usage error."""
+    harness = _harness()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", KEY)
+    monkeypatch.setenv("OPENAI_API_KEY", KEY)
+    monkeypatch.setattr(harness, "_interactive", lambda: False)
+    monkeypatch.setattr(harness, "load_tools", lambda: pytest.fail("ran without a choice"))
     with pytest.raises(SystemExit) as info:
-        harness.main(["--agentic", "--provider", "openai"])
+        harness.main(argv)
     assert info.value.code == 2
-    assert "--agentic requires --model" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "--agentic requires --provider {anthropic,openai} and --model MODEL" in err
+
+
+def test_harness_asks_for_provider_and_model_in_a_terminal(monkeypatch, capsys):
+    harness = _harness()
+    answers = iter(["acme", "openai", "local-model"])
+    chosen: list[tuple[str, str]] = []
+    monkeypatch.setattr(harness, "_interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    monkeypatch.setattr(harness, "load_tools", lambda: [])
+    monkeypatch.setattr(harness, "run_structural", lambda tools, tasks: {})
+
+    def fake_run_agentic(tools, tasks, *, provider, model, base_url=None):
+        chosen.append((provider, model))
+        return {}
+
+    monkeypatch.setattr(harness, "run_agentic", fake_run_agentic)
+    assert harness.main(["--agentic"]) == 0
+    assert chosen == [("openai", "local-model")]
+    assert "Unknown provider 'acme'" in capsys.readouterr().out
+
+
+def test_harness_prompt_without_an_answer_fails(monkeypatch):
+    harness = _harness()
+    monkeypatch.setattr(harness, "_interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "")
+    with pytest.raises(SystemExit) as info:
+        harness.main(["--agentic"])
+    assert info.value.code == 2
 
 
 def test_real_http_round_trip(monkeypatch):

@@ -329,8 +329,8 @@ the context instead.
 ```bash
 python evals/mcp/harness.py            # structural pass, no network
 python evals/mcp/harness.py --strict   # what CI runs on every MCP change
-ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL   # tool selection
-OPENAI_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL
+ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic --provider anthropic --model MODEL
+OPENAI_API_KEY=... python evals/mcp/harness.py --agentic --provider openai --model MODEL
 OPENAI_BASE_URL=http://localhost:11434/v1 \
   python evals/mcp/harness.py --agentic --provider openai --model MODEL   # local model
 ```
@@ -346,9 +346,9 @@ The agentic pass offers the advertised tools to a model for each of the eval
 tasks and scores the first tool it calls. `--provider anthropic` uses the
 Messages API; `--provider openai` uses Chat Completions, which OpenAI and many
 other platforms and local servers (Ollama, vLLM) serve, selected with
-`OPENAI_BASE_URL` or `--base-url`. The adapters use only the standard library,
-`--model` is always required, and with one provider configured in the environment
-`--provider` can be omitted. See `evals/mcp/README.md` for the details and the
+`OPENAI_BASE_URL` or `--base-url`. The adapters use only the standard library.
+There is no default provider or model: pass `--provider` and `--model`, or answer
+the prompts in a terminal; elsewhere a missing choice is a usage error. See `evals/mcp/README.md` for the details and the
 weekly CI job's settings.
 
 ## A recorded session

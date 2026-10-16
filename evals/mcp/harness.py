@@ -9,21 +9,22 @@ tasks instead of guessing. It has two modes.
   * Flags curated confusable tool groups (consolidation candidates).
   * Confirms every eval task's expected tool exists on the live server.
 
-**Agentic** (``--agentic --model MODEL``, needs a model provider, see ``providers.py``):
+**Agentic** (``--agentic --provider NAME --model MODEL``, see ``providers.py``):
   * Presents the live tool schemas to the model for each task with automatic
     tool choice and records the model's *first* tool call.
   * Scores tool **selection** (did it pick an acceptable tool?). Because we only
     measure selection, no image data or handler execution is required.
   * ``--provider anthropic`` uses the Anthropic Messages API; ``--provider openai``
     uses the OpenAI Chat Completions API, which other platforms and local servers
-    (Ollama, vLLM) also serve (``OPENAI_BASE_URL`` / ``--base-url``). With exactly
-    one provider configured in the environment, ``--provider`` may be omitted.
+    (Ollama, vLLM) also serve (``OPENAI_BASE_URL`` / ``--base-url``).
+  * There is no default provider or model. In a terminal the harness asks for a
+    missing one; otherwise it exits with a usage error.
 
 Run::
 
     python evals/mcp/harness.py                 # structural only
-    ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL
-    OPENAI_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL
+    ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic --provider anthropic --model MODEL
+    OPENAI_API_KEY=... python evals/mcp/harness.py --agentic --provider openai --model MODEL
     OPENAI_BASE_URL=http://localhost:11434/v1 python evals/mcp/harness.py \
         --agentic --provider openai --model MODEL      # local model (Ollama)
     python evals/mcp/harness.py --json report.json
@@ -255,24 +256,57 @@ def _docs_drift() -> list[str]:
     return docs_sync.check_files(present)
 
 
+def _interactive() -> bool:
+    """True when a person can answer prompts (stdin and stdout are terminals)."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _choose_provider_and_model(args: argparse.Namespace) -> None:
+    """Fill ``args.provider`` and ``args.model``: never a default, asked for in a terminal."""
+    if args.provider and args.model:
+        return
+    usage = (
+        f"--agentic requires --provider {{{','.join(providers.PROVIDERS)}}} and --model MODEL "
+        "(there is no default provider or model)"
+    )
+    if not _interactive():
+        raise ValueError(usage)
+    try:
+        while not args.provider:
+            answer = input(f"Model provider ({', '.join(providers.PROVIDERS)}): ").strip()
+            if answer in providers.PROVIDERS:
+                args.provider = answer
+            elif not answer:
+                raise ValueError(usage)
+            else:
+                print(f"Unknown provider {answer!r}.")
+        if not args.model:
+            args.model = input(f"Model identifier at {args.provider}: ").strip()
+            if not args.model:
+                raise ValueError(usage)
+    except EOFError:
+        raise ValueError(usage) from None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Evaluate the KINTSUGI MCP tool surface.")
     parser.add_argument(
         "--agentic",
         action="store_true",
-        help="Run the live tool-selection eval against a model (needs --model and a provider).",
+        help="Run the live tool-selection eval against a model (needs --provider and --model).",
     )
     parser.add_argument(
         "--provider",
         choices=providers.PROVIDERS,
         help=(
             "API format: 'anthropic' (Messages API) or 'openai' (Chat Completions, also "
-            "served by other platforms and local servers). Default: the only provider "
-            "whose API key (or OPENAI_BASE_URL) is set."
+            "served by other platforms and local servers). Required with --agentic; "
+            "asked for in a terminal."
         ),
     )
     parser.add_argument(
-        "--model", help="Model identifier at the provider (required with --agentic)."
+        "--model",
+        help="Model identifier at the provider. Required with --agentic; asked for in a terminal.",
     )
     parser.add_argument(
         "--base-url",
@@ -288,12 +322,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
-    provider = None
     if args.agentic:
-        if not args.model:
-            parser.error("--agentic requires --model (the model identifier at the provider)")
         try:
-            provider = providers.resolve_provider(args.provider)
+            _choose_provider_and_model(args)
         except ValueError as exc:
             parser.error(str(exc))
 
@@ -302,7 +333,7 @@ def main(argv: list[str] | None = None) -> int:
     report: dict[str, Any] = {"structural": structural}
     if args.agentic:
         report["agentic"] = run_agentic(
-            tools, TASKS, provider=provider, model=args.model, base_url=args.base_url
+            tools, TASKS, provider=args.provider, model=args.model, base_url=args.base_url
         )
 
     if args.json:

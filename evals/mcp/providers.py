@@ -12,7 +12,8 @@ answers in text). Two wire formats cover the common platforms:
     ``--base-url``) to point it at one, for example Ollama at
     ``http://localhost:11434/v1`` or a vLLM server.
 
-No vendor SDK is needed: a request is one JSON POST through :mod:`urllib`.
+No vendor SDK is needed: a request is one JSON POST through :mod:`urllib`. There is
+no default provider or model: the caller always names both.
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ import os
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -54,7 +54,7 @@ class ProviderError(RuntimeError):
 
 def resolve_base_url(provider: str, explicit: str | None = None) -> str:
     """The endpoint base: ``explicit``, else the provider's environment variable, else default."""
-    _check_provider(provider)
+    check_provider(provider)
     url = explicit or os.environ.get(BASE_URL_ENV[provider]) or DEFAULT_BASE_URL[provider]
     return url.rstrip("/")
 
@@ -64,33 +64,6 @@ def endpoint_host(provider: str, explicit: str | None = None) -> str:
     parts = urlsplit(resolve_base_url(provider, explicit))
     host = parts.hostname or ""
     return f"{host}:{parts.port}" if parts.port else host
-
-
-def resolve_provider(explicit: str | None, env: Mapping[str, str] | None = None) -> str:
-    """The provider to use: ``explicit``, else the only one configured in ``env``.
-
-    A provider counts as configured when its API key variable is set; ``openai``
-    also counts when ``OPENAI_BASE_URL`` is set (a local server may need no key).
-    """
-    if explicit:
-        _check_provider(explicit)
-        return explicit
-    env = os.environ if env is None else env
-    configured = [p for p in PROVIDERS if env.get(API_KEY_ENV[p])]
-    if env.get(BASE_URL_ENV["openai"]) and "openai" not in configured:
-        configured.append("openai")
-    if len(configured) == 1:
-        return configured[0]
-    if not configured:
-        raise ValueError(
-            "No model provider configured: set "
-            + " or ".join(API_KEY_ENV[p] for p in PROVIDERS)
-            + " (for a local OpenAI-compatible server, set OPENAI_BASE_URL), "
-            "or pass --provider."
-        )
-    raise ValueError(
-        f"Several providers are configured ({', '.join(configured)}): pass --provider."
-    )
 
 
 def sanitize_schema(schema: Any) -> Any:
@@ -140,7 +113,7 @@ def select_tool(
     ``input_schema``). Raises :class:`ProviderError` on a configuration, network
     or HTTP error; the API key never appears in its message.
     """
-    _check_provider(provider)
+    check_provider(provider)
     root = resolve_base_url(provider, base_url)
     key = api_key or os.environ.get(API_KEY_ENV[provider]) or ""
     if not key and (provider == "anthropic" or root == DEFAULT_BASE_URL["openai"]):
@@ -197,7 +170,8 @@ def select_tool(
     return None
 
 
-def _check_provider(provider: str) -> None:
+def check_provider(provider: str) -> None:
+    """Raise ``ValueError`` unless ``provider`` is one of :data:`PROVIDERS`."""
     if provider not in PROVIDERS:
         raise ValueError(f"Unknown provider {provider!r}; choose from {', '.join(PROVIDERS)}.")
 

@@ -25,15 +25,15 @@ python evals/mcp/harness.py
 python evals/mcp/harness.py --strict
 
 # Agentic tool-selection eval — a model provider and a model (no SDK needed).
-ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL
-OPENAI_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL
+ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic --provider anthropic --model MODEL
+OPENAI_API_KEY=... python evals/mcp/harness.py --agentic --provider openai --model MODEL
 
 # Any OpenAI-compatible endpoint, for example a local model served by Ollama.
 OPENAI_BASE_URL=http://localhost:11434/v1 \
   python evals/mcp/harness.py --agentic --provider openai --model MODEL
 
 # Save the full report (structural + agentic) as JSON.
-python evals/mcp/harness.py --agentic --model MODEL --json mcp_eval_report.json
+python evals/mcp/harness.py --agentic --provider NAME --model MODEL --json mcp_eval_report.json
 ```
 
 The harness reads the tools **through the in-process MCP client**, so it sees
@@ -45,8 +45,10 @@ it needs **no image data or project**, just the live tool schemas.
 ### Providers
 
 `providers.py` speaks two wire formats with the standard library (one JSON POST
-per task, no vendor SDK); `--model` is always required, and the code has no
-default model.
+per task, no vendor SDK). There is no default provider or model, and none is
+inferred from the API keys that happen to be set: pass `--provider` and `--model`,
+or answer the prompts the harness shows in a terminal. Without a terminal, a missing
+choice is a usage error (exit 2).
 
 | `--provider` | API | Key | Base URL (`--base-url` overrides) |
 |---|---|---|---|
@@ -58,20 +60,18 @@ default model.
 hosted platform's OpenAI-compatible endpoint, with that platform's key in
 `OPENAI_API_KEY`). For this format the input schemas are sent without annotation-only
 keywords (`title`, `default`, `format`) and with `anyOf: [T, null]` reduced to `T`;
-constraints (`enum`, bounds, `required`, `additionalProperties`) are kept. Without
-`--provider`, the harness uses the only provider configured in the environment and
-asks for `--provider` when both are. Rate-limit and overload responses are retried
+constraints (`enum`, bounds, `required`, `additionalProperties`) are kept. Rate-limit and overload responses are retried
 twice; any other error stops the run with the HTTP status and the API's message
 (never the key). The report's `agentic` block records `provider`, `model` and the
 endpoint `host`.
 
-The weekly CI job (`.github/workflows/mcp-eval.yml`) runs the agentic pass once per
-configured provider: `anthropic` when the `ANTHROPIC_API_KEY` secret is set (model:
-the dispatch input, else the `EVAL_MODEL_ANTHROPIC` repository variable, else the
-workflow's default), `openai` when the `OPENAI_API_KEY` secret or the
-`OPENAI_BASE_URL` variable is set and a model is given by the dispatch input or the
-`EVAL_MODEL_OPENAI` variable. Each run writes `mcp_eval_report_<provider>.json`;
-unconfigured providers are skipped with a notice.
+The CI job (`.github/workflows/mcp-eval.yml`) runs the agentic pass only with an
+explicit choice: on manual dispatch, the `provider` (`none`, `anthropic`, `openai`),
+`model` and optional `base_url` inputs; on the weekly schedule, the repository
+variables `EVAL_PROVIDER`, `EVAL_MODEL` and optional `EVAL_BASE_URL`. The key comes
+from the secret `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. With neither a provider nor
+a model the pass is skipped with a notice; with only one of them the job fails. The
+run writes `mcp_eval_report_<provider>.json`.
 
 ## Files
 
