@@ -225,3 +225,74 @@ async def test_default_subtract_blank_survives_serialisation(project):
         )
     assert not result.is_error, result.content[0].text
     assert result.structured_content["status"] == "success"
+
+
+async def test_approval_keeps_every_operation_as_given(project):
+    from kintsugi.mcp.tools import learning, signal_isolation, workflow
+
+    await signal_isolation.load_channel(cycle="1", channel="CD3")
+    result = await learning.approve_and_learn(
+        channel="cyc001_CD3",
+        tissue_type="tonsil",
+        marker_name="CD3",
+        operations_params={
+            "denoise": {"filter_size": 3},
+            "denoise_advanced": {"method": "bilateral"},
+        },
+        quality_before=0.3,
+        quality_after=0.8,
+    )
+    assert result["status"] == "success"
+    from kintsugi.mcp.workflow_store import workflow_store
+
+    ch = workflow_store(project).get_channel("cyc001_CD3")
+    # Both tools map to the "denoise" learning category; the workflow keeps both.
+    assert ch.final_params == {
+        "denoise": {"filter_size": 3},
+        "denoise_advanced": {"method": "bilateral"},
+    }
+    assert (await workflow.get_workflow_status())["channels"]["cyc001_CD3"]["status"] == (
+        "approved"
+    )
+
+
+async def test_clustering_tracks_the_same_channel_as_load_channel(project):
+    import tifffile
+
+    from kintsugi.mcp.session import _loaded_images
+    from kintsugi.mcp.tools import signal_isolation, workflow
+
+    reg = project / "data" / "processed" / "registered" / "cyc001"
+    reg.mkdir(parents=True)
+    rng = np.random.default_rng(1)
+    for marker in ("CD3", "CD8", "CD20"):
+        tifffile.imwrite(reg / f"{marker}.tif", rng.integers(0, 4000, (64, 64)).astype(np.uint16))
+
+    clustered = await signal_isolation.cluster_channels_tool(
+        project_path=str(project), n_clusters=1
+    )
+    assert clustered["status"] == "success", clustered
+    assert _loaded_images["CD3"]["metadata"]["root"] == "cyc001_CD3"
+    await signal_isolation.load_channel(cycle="1", channel="CD3")
+
+    channels = (await workflow.get_workflow_status())["channels"]
+    assert {"cyc001_CD3", "cyc001_CD8", "cyc001_CD20"} <= set(channels)
+    assert "CD3" not in channels and channels["cyc001_CD3"]["cycle"] == "cyc001"
+
+
+async def test_history_follows_the_requested_project(project, tmp_path):
+    from kintsugi.mcp.tools import signal_isolation, workflow
+    from kintsugi.mcp.workflow_store import workflow_store
+
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "kintsugi_project.json").write_text("{}")
+    workflow_store(other).record("cyc001_CD3", "denoise", {"filter_size": 5})
+
+    await signal_isolation.load_channel(cycle="1", channel="CD3")
+    here = await workflow.get_processing_history(channel="cyc001_CD3")
+    assert here["source"] == "session"
+
+    there = await workflow.get_processing_history(channel="cyc001_CD3", project_path=str(other))
+    assert there["source"] == "persisted"
+    assert [s["params"] for s in there["steps"]] == [{"filter_size": 5}]

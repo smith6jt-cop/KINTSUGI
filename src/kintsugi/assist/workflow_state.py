@@ -33,6 +33,7 @@ import os
 import secrets
 import sqlite3
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -55,7 +56,43 @@ STATUSES = ("pending", "processing", "review", "approved", "rejected", "needs_ad
 DECISIONS = ("approved", "rejected", "needs_adjustment", "pending", "review")
 
 LOCK_TIMEOUT_S = 20.0
-STALE_LOCK_S = 60.0
+
+try:  # POSIX record locks (also honoured over NFS, where HPC projects live)
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None  # type: ignore[assignment]
+    import msvcrt
+
+# POSIX record locks belong to the process, so writers in one process (threads,
+# several WorkflowState instances) are serialised by a thread lock per directory.
+_thread_locks: dict[Path, threading.Lock] = {}
+_thread_locks_guard = threading.Lock()
+
+
+def _thread_lock(state_dir: Path) -> threading.Lock:
+    with _thread_locks_guard:
+        return _thread_locks.setdefault(state_dir.resolve(), threading.Lock())
+
+
+def _try_lock(fd: int) -> bool:
+    try:
+        if fcntl is not None:
+            fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:  # pragma: no cover - Windows
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+        return True
+    except OSError:
+        return False
+
+
+def _unlock(fd: int) -> None:
+    if fcntl is not None:
+        fcntl.lockf(fd, fcntl.LOCK_UN)
+    else:  # pragma: no cover - Windows
+        os.lseek(fd, 0, os.SEEK_SET)
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+
 
 T = TypeVar("T")
 
@@ -174,31 +211,34 @@ class WorkflowState:
 
     @contextmanager
     def _locked(self) -> Iterator[Path]:
-        """Hold ``workflow_state.lock`` in the (created) state directory."""
+        """Hold an exclusive OS lock on ``workflow_state.lock`` in the state directory.
+
+        The lock is an advisory record lock (``fcntl.lockf``; ``msvcrt.locking`` on
+        Windows) on a lock file that is never deleted: the kernel releases it when
+        the holder closes it or exits, so a crashed writer cannot leave a stale lock
+        and no writer can remove another's.
+        """
         state_dir = project_state_dir(self.project_path, create=True)
         lock = state_dir / LOCK_FILE
         deadline = time.monotonic() + LOCK_TIMEOUT_S
-        while True:
-            try:
-                fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                break
-            except FileExistsError:
-                try:
-                    if time.time() - lock.stat().st_mtime > STALE_LOCK_S:
-                        lock.unlink(missing_ok=True)
-                        logger.warning("Removed a stale workflow state lock %s", lock)
-                        continue
-                except FileNotFoundError:
-                    continue
-                if time.monotonic() > deadline:
-                    raise TimeoutError(f"workflow state is locked by another process: {lock}")
-                time.sleep(0.05)
+        thread_lock = _thread_lock(state_dir)
+        if not thread_lock.acquire(timeout=LOCK_TIMEOUT_S):
+            raise TimeoutError(f"workflow state is locked by another thread: {lock}")
         try:
-            os.write(fd, str(os.getpid()).encode())
-            os.close(fd)
-            yield state_dir
+            fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
+            try:
+                while not _try_lock(fd):
+                    if time.monotonic() > deadline:
+                        raise TimeoutError(f"workflow state is locked by another process: {lock}")
+                    time.sleep(0.05)
+                try:
+                    yield state_dir
+                finally:
+                    _unlock(fd)
+            finally:
+                os.close(fd)
         finally:
-            lock.unlink(missing_ok=True)
+            thread_lock.release()
 
     def _write(self, state_dir: Path, data: dict[str, Any]) -> None:
         path = state_dir / STATE_FILE
@@ -333,6 +373,7 @@ class WorkflowState:
         *,
         image: str | None = None,
         cycle: str = "unknown",
+        quality_before: float | None = None,
         quality_after: float | None = None,
         status: str | None = "processing",
     ) -> ChannelState:
@@ -341,6 +382,7 @@ class WorkflowState:
             "operation": operation,
             "params": plain(params),
             "image": image,
+            "quality_before": quality_before,
             "quality_after": quality_after,
             "session_id": None,  # filled in under the lock
             "timestamp": _now(),
@@ -377,7 +419,14 @@ class WorkflowState:
         """Append a step to a known channel; False if the channel is not registered."""
         if self.get_channel(channel_name) is None:
             return False
-        self.record(channel_name, operation, params, quality_after=quality_after, status=None)
+        self.record(
+            channel_name,
+            operation,
+            params,
+            quality_before=quality_before,
+            quality_after=quality_after,
+            status=None,
+        )
         return True
 
     def update_channel(self, channel_name: str, **fields: Any) -> bool:

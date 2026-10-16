@@ -291,7 +291,8 @@ change is also appended to the `audit_log` table of `workflow_audit.db`. Nothing
 written until the first change, read-only tools never write, and state is only
 kept for directories that are KINTSUGI projects (`kintsugi_project.json`), so a
 model-supplied `project_path` cannot create it elsewhere. Changes are
-read-modify-write under a lock file with atomic replacement, so two clients (or a
+read-modify-write under an OS file lock (`fcntl.lockf`, which also works over NFS;
+`msvcrt.locking` on Windows) with atomic replacement, so two clients (or a
 client and a notebook) on one project do not overwrite each other.
 
 ## Security model

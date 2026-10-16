@@ -337,9 +337,13 @@ async def get_processing_history(
     is loaded ("source": "session"), otherwise the steps persisted in the project's
     workflow state ("source": "persisted").
     """
-    if channel in _loaded_images or channel in _processing_history:
+    metadata = _loaded_images.get(channel, {}).get("metadata", {})
+    same_project = project_path is None or (
+        metadata.get("project") is not None
+        and Path(metadata["project"]).resolve() == Path(project_path).resolve()
+    )
+    if same_project and (channel in _loaded_images or channel in _processing_history):
         history = _processing_history.get(channel, [])
-        metadata = _loaded_images.get(channel, {}).get("metadata", {})
         return {
             "status": "success",
             "channel": channel,
@@ -350,6 +354,8 @@ async def get_processing_history(
         }
 
     store, root = resolve_channel(channel, project_path)
+    if not same_project:
+        root = channel  # a name in the requested project, not this session's lineage
     state = store.get_channel(root) if store is not None else None
     if state is None:
         return {

@@ -1674,7 +1674,10 @@ async def cluster_channels_tool(
         del _loaded_images[stale]
         _processing_history.pop(stale, None)
     for name, cid in assignments.items():
-        cycle_match = re.match(r"(cyc\d+)", name, re.IGNORECASE)
+        # Track the channel under the name load_channel gives it (cyc001_CD3 for
+        # .../cyc001/CD3.tif), so both tools add to one workflow entry.
+        cycle_dir = path_by_name[name].parent.name
+        cycle = cycle_dir.lower() if re.fullmatch(r"cyc\d+", cycle_dir, re.IGNORECASE) else None
         _store_image(
             name,
             marker_dict[name],
@@ -1682,7 +1685,8 @@ async def cluster_channels_tool(
                 "cluster_id": int(cid),
                 "source_path": str(path_by_name[name]),
                 "project": str(project_path_obj),
-                "cycle": cycle_match.group(1) if cycle_match else "unknown",
+                "cycle": cycle or "unknown",
+                "root": f"{cycle}_{name}" if cycle else name,
                 "wavelength_group": features[name].get("wavelength_group"),
             },
         )

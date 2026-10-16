@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
-import time
+import subprocess
+import sys
 
 import numpy as np
 import pytest
@@ -44,9 +44,10 @@ def test_first_write_creates_state_and_audit_log(tmp_path):
         "SELECT action, channel FROM audit_log"
     )
     assert list(rows) == [("channel_added", "cyc001_CD3")]
-    # The write is atomic: no temporary or lock file is left behind.
+    # The write is atomic: no temporary file is left behind (the lock file stays;
+    # only the OS lock on it is released).
     assert sorted(p.name for p in (tmp_path / ".kintsugi").iterdir()) == sorted(
-        [STATE_FILE, "workflow_audit.db"]
+        [STATE_FILE, "workflow_audit.db", LOCK_FILE]
     )
 
 
@@ -126,22 +127,45 @@ def test_two_instances_interleaving_writes_lose_nothing(tmp_path):
     assert channels["from_a"].status == "processing" and channels["from_b"].status == "rejected"
 
 
-def test_a_stale_lock_is_broken_and_a_live_one_times_out(tmp_path, monkeypatch):
+@pytest.mark.skipif(sys.platform == "win32", reason="uses fcntl in the helper process")
+def test_a_lock_held_by_another_process_blocks_until_it_exits(tmp_path, monkeypatch):
     from kintsugi.assist import workflow_state as ws
 
     state = WorkflowState(tmp_path)
     state.add_channel("ch")
     lock = tmp_path / ".kintsugi" / LOCK_FILE
-    lock.write_text("123")
-    old = time.time() - ws.STALE_LOCK_S - 5
-    os.utime(lock, (old, old))
-    state.record("ch", "denoise", {})  # stale lock removed
-    assert not lock.exists()
+    holder = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import fcntl, os, sys, time\n"
+            f"fd = os.open({str(lock)!r}, os.O_RDWR)\n"
+            "fcntl.lockf(fd, fcntl.LOCK_EX)\n"
+            "print('locked', flush=True)\n"
+            "sys.stdin.read()\n",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout.readline().strip() == "locked"
+        monkeypatch.setattr(ws, "LOCK_TIMEOUT_S", 0.3)
+        with pytest.raises(TimeoutError, match="locked by another process"):
+            state.record("ch", "denoise", {})
+    finally:
+        holder.stdin.close()  # the holder exits; the kernel drops its lock
+        holder.wait(timeout=10)
+    state.record("ch", "denoise", {})  # no stale lock to clean up
+    assert lock.exists() and len(state.get_channel("ch").processing_steps) == 1
 
-    lock.write_text("123")
-    monkeypatch.setattr(ws, "LOCK_TIMEOUT_S", 0.2)
-    with pytest.raises(TimeoutError, match="locked by another process"):
-        state.record("ch", "denoise", {})
+
+def test_quality_before_is_kept(tmp_path):
+    state = WorkflowState(tmp_path)
+    state.add_channel("ch")
+    assert state.add_processing_step("ch", "denoise", {}, quality_before=0.3, quality_after=0.8)
+    step = state.get_channel("ch").processing_steps[0]
+    assert step["quality_before"] == 0.3 and step["quality_after"] == 0.8
 
 
 def test_an_unreadable_state_file_is_moved_aside(tmp_path, caplog):
@@ -175,3 +199,21 @@ def test_export_parameters(tmp_path):
     state.set_user_decision("ch", "approved", final_params={"denoise": {"filter_size": 3}})
     out = json.loads(state.export_parameters(tmp_path / "out.json").read_text())
     assert out["channels"]["ch"]["final_params"] == {"denoise": {"filter_size": 3}}
+
+
+def test_concurrent_processes_lose_no_updates(tmp_path):
+    """Four processes register 15 channels each at the same time; all 60 survive."""
+    script = (
+        "import sys\n"
+        "from kintsugi.assist.workflow_state import WorkflowState\n"
+        "state = WorkflowState(sys.argv[1])\n"
+        "for i in range(15):\n"
+        "    state.record(f'{sys.argv[2]}_{i}', 'denoise', {'i': i})\n"
+    )
+    procs = [
+        subprocess.Popen([sys.executable, "-c", script, str(tmp_path), f"p{n}"]) for n in range(4)
+    ]
+    assert [p.wait(timeout=120) for p in procs] == [0, 0, 0, 0]
+    channels = WorkflowState(tmp_path).channels()
+    assert len(channels) == 60
+    assert all(len(ch.processing_steps) == 1 for ch in channels.values())

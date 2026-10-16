@@ -601,7 +601,9 @@ async def approve_and_learn(
     tracked = record_approval(
         channel,
         project_path,
-        final_params=dict(mapped_operations),
+        # Keyed as the caller gave them: several tools share one learning category
+        # (denoise / denoise_advanced), and the workflow state keeps each.
+        final_params=dict(operations_params),
         quality_score=quality_after,
         notes=notes,
     )
