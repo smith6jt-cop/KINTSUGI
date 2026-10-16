@@ -31,10 +31,10 @@ jobs:
           ruff version
 
       - name: Run ruff linter
-        run: ruff check src/ tests/
+        run: ruff check src/ tests/ evals/
 
       - name: Check formatting with ruff
-        run: ruff format --check --diff src/ tests/
+        run: ruff format --check --diff src/ tests/ evals/
 
   test:
     name: Test (Python ${{ matrix.python-version }})

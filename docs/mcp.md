@@ -41,8 +41,9 @@ session starts from it.
   tools, so the assistant can escalate when the cheap option is not enough.
 - **Evaluated, not assumed.** `evals/mcp/harness.py` measures the tool surface
   (token cost, descriptions, titles, annotations, task coverage) and a strict
-  structural gate runs in CI; an optional agentic pass measures whether Claude
-  picks the right tool for realistic requests.
+  structural gate runs in CI; an optional agentic pass measures whether a model
+  picks the right tool for realistic requests, through the Anthropic Messages API
+  or any OpenAI-compatible endpoint (including local models).
 
 ## Sixty-second setup
 
@@ -328,7 +329,10 @@ the context instead.
 ```bash
 python evals/mcp/harness.py            # structural pass, no network
 python evals/mcp/harness.py --strict   # what CI runs on every MCP change
-ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic   # tool-selection accuracy
+ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL   # tool selection
+OPENAI_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL
+OPENAI_BASE_URL=http://localhost:11434/v1 \
+  python evals/mcp/harness.py --agentic --provider openai --model MODEL   # local model
 ```
 
 The structural pass reports the token cost of the advertised tool definitions,
@@ -337,6 +341,15 @@ that name absent tools, and tools no task targets. `--strict` fails on any of
 those and on documentation drift, so the table above, the registry and the
 server can never disagree. The committed baseline lives in
 `evals/mcp/baseline.json`; `evals/mcp/README.md` explains the numbers.
+
+The agentic pass offers the advertised tools to a model for each of the eval
+tasks and scores the first tool it calls. `--provider anthropic` uses the
+Messages API; `--provider openai` uses Chat Completions, which OpenAI and many
+other platforms and local servers (Ollama, vLLM) serve, selected with
+`OPENAI_BASE_URL` or `--base-url`. The adapters use only the standard library,
+`--model` is always required, and with one provider configured in the environment
+`--provider` can be omitted. See `evals/mcp/README.md` for the details and the
+weekly CI job's settings.
 
 ## A recorded session
 

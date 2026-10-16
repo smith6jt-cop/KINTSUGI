@@ -9,16 +9,23 @@ tasks instead of guessing. It has two modes.
   * Flags curated confusable tool groups (consolidation candidates).
   * Confirms every eval task's expected tool exists on the live server.
 
-**Agentic** (``--agentic``, requires ``ANTHROPIC_API_KEY`` + ``anthropic`` SDK):
-  * Presents the live tool schemas to Claude for each task with
-    ``tool_choice=auto`` and records the model's *first* tool call.
+**Agentic** (``--agentic --model MODEL``, needs a model provider, see ``providers.py``):
+  * Presents the live tool schemas to the model for each task with automatic
+    tool choice and records the model's *first* tool call.
   * Scores tool **selection** (did it pick an acceptable tool?). Because we only
     measure selection, no image data or handler execution is required.
+  * ``--provider anthropic`` uses the Anthropic Messages API; ``--provider openai``
+    uses the OpenAI Chat Completions API, which other platforms and local servers
+    (Ollama, vLLM) also serve (``OPENAI_BASE_URL`` / ``--base-url``). With exactly
+    one provider configured in the environment, ``--provider`` may be omitted.
 
 Run::
 
     python evals/mcp/harness.py                 # structural only
-    ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic
+    ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL
+    OPENAI_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL
+    OPENAI_BASE_URL=http://localhost:11434/v1 python evals/mcp/harness.py \
+        --agentic --provider openai --model MODEL      # local model (Ollama)
     python evals/mcp/harness.py --json report.json
 """
 
@@ -27,12 +34,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import providers  # noqa: E402  (local sibling module)
 from tasks import TASKS  # noqa: E402  (local sibling module)
 
 # Curated groups whose members are easy to confuse and are candidates for
@@ -53,8 +60,6 @@ CONFUSABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("review outcome", ["approve_and_learn", "set_review_decision"]),
 ]
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
-
 
 def estimate_tokens(text: str) -> int:
     """Rough token estimate (~4 chars/token). Approximate; for relative sizing."""
@@ -65,7 +70,7 @@ def load_tools() -> list[dict[str, Any]]:
     """Build the live MCP server and return its advertised tool definitions.
 
     Tools are read through the SDK's in-process client, so what the harness
-    measures is exactly what a connected Claude Code session receives.
+    measures is exactly what a connected MCP client receives.
     """
     try:
         from kintsugi.mcp._sdk import MCP_AVAILABLE, unavailable_message
@@ -194,36 +199,27 @@ def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> 
 
 
 def run_agentic(
-    tools: list[dict[str, Any]], tasks: list[dict[str, Any]], model: str
+    tools: list[dict[str, Any]],
+    tasks: list[dict[str, Any]],
+    *,
+    provider: str,
+    model: str,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     """Score tool *selection*: does the model pick an acceptable tool per task?"""
-    try:
-        import anthropic
-    except ImportError:
-        raise SystemExit("Agentic mode needs the SDK: pip install anthropic")
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise SystemExit("Agentic mode needs ANTHROPIC_API_KEY in the environment.")
-
-    client = anthropic.Anthropic()
-    api_tools = [
-        {"name": t["name"], "description": t["description"], "input_schema": t["input_schema"]}
-        for t in tools
-    ]
-
+    host = providers.endpoint_host(provider, base_url)
     results = []
     passed = 0
     print("\n" + "=" * 70)
-    print(f"AGENTIC TOOL-SELECTION EVALUATION  (model={model})")
+    print(f"AGENTIC TOOL-SELECTION EVALUATION  (provider={provider}, model={model}, host={host})")
     print("=" * 70)
     for task in tasks:
-        msg = client.messages.create(
-            model=model,
-            max_tokens=512,
-            tools=api_tools,
-            tool_choice={"type": "auto"},
-            messages=[{"role": "user", "content": task["prompt"]}],
-        )
-        chosen = next((b.name for b in msg.content if getattr(b, "type", "") == "tool_use"), None)
+        try:
+            chosen = providers.select_tool(
+                provider, model, task["prompt"], tools, base_url=base_url
+            )
+        except providers.ProviderError as exc:
+            raise SystemExit(f"Agentic eval stopped at task {task['id']}: {exc}") from None
         ok = chosen in task["expected"]
         passed += int(ok)
         results.append(
@@ -237,7 +233,9 @@ def run_agentic(
     accuracy = passed / max(1, len(tasks))
     print(f"\nTool-selection accuracy: {passed}/{len(tasks)} = {accuracy:.0%}")
     return {
+        "provider": provider,
         "model": model,
+        "host": host,
         "accuracy": accuracy,
         "passed": passed,
         "total": len(tasks),
@@ -262,9 +260,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--agentic",
         action="store_true",
-        help="Run the live tool-selection eval (needs ANTHROPIC_API_KEY).",
+        help="Run the live tool-selection eval against a model (needs --model and a provider).",
     )
-    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model (default: {DEFAULT_MODEL}).")
+    parser.add_argument(
+        "--provider",
+        choices=providers.PROVIDERS,
+        help=(
+            "API format: 'anthropic' (Messages API) or 'openai' (Chat Completions, also "
+            "served by other platforms and local servers). Default: the only provider "
+            "whose API key (or OPENAI_BASE_URL) is set."
+        ),
+    )
+    parser.add_argument(
+        "--model", help="Model identifier at the provider (required with --agentic)."
+    )
+    parser.add_argument(
+        "--base-url",
+        help="Endpoint base URL (default: ANTHROPIC_BASE_URL / OPENAI_BASE_URL, else the vendor's).",
+    )
     parser.add_argument("--json", metavar="PATH", help="Write the full report as JSON.")
     parser.add_argument(
         "--strict",
@@ -275,12 +288,22 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+    provider = None
+    if args.agentic:
+        if not args.model:
+            parser.error("--agentic requires --model (the model identifier at the provider)")
+        try:
+            provider = providers.resolve_provider(args.provider)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     tools = load_tools()
     structural = run_structural(tools, TASKS)
     report: dict[str, Any] = {"structural": structural}
     if args.agentic:
-        report["agentic"] = run_agentic(tools, TASKS, args.model)
+        report["agentic"] = run_agentic(
+            tools, TASKS, provider=provider, model=args.model, base_url=args.base_url
+        )
 
     if args.json:
         Path(args.json).write_text(json.dumps(report, indent=2))

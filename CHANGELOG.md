@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **evals**: the agentic tool-selection eval is provider-pluggable.
+  `evals/mcp/providers.py` (standard library only) speaks the Anthropic Messages API
+  (`--provider anthropic`) and the OpenAI Chat Completions API (`--provider openai`),
+  which also reaches other platforms and local servers such as Ollama and vLLM through
+  `OPENAI_BASE_URL` or `--base-url`. The report records the provider, model and
+  endpoint host. The weekly `mcp-eval` workflow runs once per configured provider
+  (secrets `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`; variables `EVAL_MODEL_ANTHROPIC`,
+  `EVAL_MODEL_OPENAI`, `OPENAI_BASE_URL`) and writes `mcp_eval_report_<provider>.json`.
 - **mcp**: persistent per-project workflow state. `load_channel`, the processing tools,
   `save_processed`, `propagate_parameters` and `approve_and_learn` record channel status
   and steps in `<project>/.kintsugi/workflow_state.json` (with an `audit_log` in
@@ -65,6 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   citation; the README BibTeX entry now carries the full author list and DOI.
 
 ### Changed
+- **BREAKING (evals)**: `evals/mcp/harness.py --agentic` requires `--model` (there is
+  no default model) and no longer uses the `anthropic` SDK; the `mcp-eval` workflow's
+  dispatch input `model` is replaced by `anthropic_model` and `openai_model`. `ruff`
+  in CI now also checks `evals/`.
 - **BREAKING**: `kintsugi.project.write_claude_config` is replaced by
   `write_mcp_config(root, clients=None, *, force=False, require_project=True)`.
   `kintsugi init` and `kintsugi mcp config` now write the configuration of every MCP

@@ -6,14 +6,14 @@ verify MCP improvements (tool consolidation, description quality, resources/prom
 
 ## Why
 
-The server exposes 32 tools to Claude. Two questions decide whether that surface
+The server exposes 34 tools to whichever AI assistant connects to it. Two questions decide whether that surface
 is *good*:
 
 1. **Is it cheap and clear?** (structural) — how many tokens do the tool
    definitions cost, and are any tools/params under-described, untitled,
    unannotated or confusable?
 2. **Does the model use it correctly?** (agentic) — given a realistic request,
-   does Claude pick the right tool?
+   does the model pick the right tool?
 
 ## Run it
 
@@ -24,26 +24,62 @@ python evals/mcp/harness.py
 # Same, but exit non-zero on any structural problem (the CI gate).
 python evals/mcp/harness.py --strict
 
-# Agentic tool-selection eval — needs an API key + the anthropic SDK.
-pip install anthropic
-ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic
+# Agentic tool-selection eval — a model provider and a model (no SDK needed).
+ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL
+OPENAI_API_KEY=... python evals/mcp/harness.py --agentic --model MODEL
+
+# Any OpenAI-compatible endpoint, for example a local model served by Ollama.
+OPENAI_BASE_URL=http://localhost:11434/v1 \
+  python evals/mcp/harness.py --agentic --provider openai --model MODEL
 
 # Save the full report (structural + agentic) as JSON.
-python evals/mcp/harness.py --agentic --json mcp_eval_report.json
+python evals/mcp/harness.py --agentic --model MODEL --json mcp_eval_report.json
 ```
 
 The harness reads the tools **through the in-process MCP client**, so it sees
-exactly what Claude Code sees (titles, annotations, the signature-derived input
-schemas, output schemas). The agentic mode measures **tool selection only** — it
-records the model's first `tool_use` per task and never executes the handler — so
+exactly what a connected client sees (titles, annotations, the signature-derived
+input schemas, output schemas). The agentic mode measures **tool selection only** —
+it records the model's first tool call per task and never executes the handler — so
 it needs **no image data or project**, just the live tool schemas.
+
+### Providers
+
+`providers.py` speaks two wire formats with the standard library (one JSON POST
+per task, no vendor SDK); `--model` is always required, and the code has no
+default model.
+
+| `--provider` | API | Key | Base URL (`--base-url` overrides) |
+|---|---|---|---|
+| `anthropic` | Messages (`POST /v1/messages`) | `ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL`, else `https://api.anthropic.com` |
+| `openai` | Chat Completions (`POST /chat/completions`) | `OPENAI_API_KEY` (optional for a custom base URL) | `OPENAI_BASE_URL`, else `https://api.openai.com/v1` |
+
+`openai` covers every service and server that implements Chat Completions: point
+`OPENAI_BASE_URL` at it (Ollama `http://localhost:11434/v1`, a vLLM server, or a
+hosted platform's OpenAI-compatible endpoint, with that platform's key in
+`OPENAI_API_KEY`). For this format the input schemas are sent without annotation-only
+keywords (`title`, `default`, `format`) and with `anyOf: [T, null]` reduced to `T`;
+constraints (`enum`, bounds, `required`, `additionalProperties`) are kept. Without
+`--provider`, the harness uses the only provider configured in the environment and
+asks for `--provider` when both are. Rate-limit and overload responses are retried
+twice; any other error stops the run with the HTTP status and the API's message
+(never the key). The report's `agentic` block records `provider`, `model` and the
+endpoint `host`.
+
+The weekly CI job (`.github/workflows/mcp-eval.yml`) runs the agentic pass once per
+configured provider: `anthropic` when the `ANTHROPIC_API_KEY` secret is set (model:
+the dispatch input, else the `EVAL_MODEL_ANTHROPIC` repository variable, else the
+workflow's default), `openai` when the `OPENAI_API_KEY` secret or the
+`OPENAI_BASE_URL` variable is set and a model is given by the dispatch input or the
+`EVAL_MODEL_OPENAI` variable. Each run writes `mcp_eval_report_<provider>.json`;
+unconfigured providers are skipped with a notice.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `tasks.py` | 29 realistic natural-language tasks with `expected` acceptable tool(s); every registered tool is the target of at least one task. Includes deliberate confusable pairs (`denoise` vs `denoise_advanced`; the three background-removal tools; `assess_quality` vs `compute_snr`; the parameter-suggestion and record-learning groups). |
+| `tasks.py` | 31 realistic natural-language tasks with `expected` acceptable tool(s); every registered tool is the target of at least one task. Includes deliberate confusable pairs (`denoise` vs `denoise_advanced`; the three background-removal tools; `assess_quality` vs `compute_snr`; the parameter-suggestion and record-learning groups). |
 | `harness.py` | Builds the live server, runs the structural metrics, and (opt-in) the agentic tool-selection loop. |
+| `providers.py` | Standard-library adapters for the agentic loop: Anthropic Messages and OpenAI-compatible Chat Completions. |
 
 Add a task by appending an `EvalTask` to `TASKS`; the structural pass verifies that
 its `expected` tools exist on the server, and `--strict` fails if any tool is left
@@ -111,7 +147,7 @@ re-describing a tool without regenerating the docs fails the build
   heaviest definition; consider trimming descriptions once the agentic pass shows
   they are not needed for correct selection.
 
-Run the agentic pass with a key to turn the "confusable groups" hypotheses into
+Run the agentic pass with any provider to turn the "confusable groups" hypotheses into
 measured tool-selection accuracy, then act on the tools that get mis-selected.
 
 ## Recorded session
