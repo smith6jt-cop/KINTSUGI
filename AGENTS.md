@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI coding assistants working in this repository. Codex, Cursor, VS Code (Copilot), Zed, JetBrains and others read `AGENTS.md` directly; Gemini CLI reads it when `context.fileName` includes `AGENTS.md`; Claude Code reads it through the one-line `AGENTS.md` (`@AGENTS.md`). Subdirectories (`src/kintsugi/`, `src/kintsugi/signal/`, `workflow/`, `notebooks/`) have their own `AGENTS.md` with feature notes.
+Guidance for AI coding assistants working in this repository. Codex, Cursor, VS Code (Copilot), Zed, JetBrains and others read `AGENTS.md` directly; Gemini CLI reads it when `context.fileName` includes `AGENTS.md`; Claude Code reads it through the one-line `CLAUDE.md` (`@AGENTS.md`). Subdirectories (`src/kintsugi/`, `src/kintsugi/signal/`, `workflow/`, `notebooks/`) have their own `AGENTS.md` with feature notes.
 
 ## Project Overview
 
@@ -203,7 +203,7 @@ kintsugi mcp start --project-dir /path/to/project
 kintsugi mcp tools
 kintsugi mcp tools --markdown                      # Markdown table
 kintsugi mcp tools --write AGENTS.md docs/cli.md   # Regenerate the <!-- mcp-tools:* --> blocks in docs
-kintsugi mcp tools --check AGENTS.md AGENTS.md docs/cli.md   # Fail if those blocks drifted (CI runs this)
+kintsugi mcp tools --check docs/mcp.md docs/cli.md README.md AGENTS.md   # Fail if those blocks drifted (CI runs this)
 kintsugi mcp clients                               # MCP clients 'mcp config' can configure
 kintsugi mcp status /path/to/project               # Persistent per-channel workflow state
 
