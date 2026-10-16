@@ -128,8 +128,8 @@ List the registered MCP tools, or sync the generated tool reference in the docs.
 ```bash
 kintsugi mcp tools                                   # Rich table (name, title, read-only, description)
 kintsugi mcp tools --markdown                        # Same as a Markdown table
-kintsugi mcp tools --write docs/cli.md CLAUDE.md     # Regenerate the <!-- mcp-tools:* --> blocks
-kintsugi mcp tools --check docs/cli.md CLAUDE.md     # Exit non-zero if a block is stale (CI runs this)
+kintsugi mcp tools --write docs/cli.md AGENTS.md     # Regenerate the <!-- mcp-tools:* --> blocks
+kintsugi mcp tools --check docs/cli.md AGENTS.md     # Exit non-zero if a block is stale (CI runs this)
 ```
 
 The registry (`kintsugi.mcp.tool_specs.TOOL_SPECS`) is the single source of truth. Docs

@@ -7,7 +7,6 @@ Run with: pytest tests/test_mcp_path_safety.py -v
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -256,22 +255,6 @@ def test_resolve_executable_returns_nonempty():
 
     cmd = _resolve_kintsugi_executable()
     assert isinstance(cmd, str) and cmd
-
-
-def test_committed_mcp_json_is_portable():
-    """The repo's own .mcp.json must not hardcode a machine-specific path."""
-    repo_root = Path(__file__).resolve().parents[1]
-    mcp_file = repo_root / ".mcp.json"
-    if not mcp_file.exists():
-        pytest.skip(".mcp.json not present")
-
-    config = json.loads(mcp_file.read_text())
-    server = config["mcpServers"]["kintsugi"]
-
-    assert server["command"] == "kintsugi", "command should be a PATH-resolvable name"
-    assert not Path(server["command"]).is_absolute()
-    # Claude Code ignores cwd (servers start in the project dir); never write it.
-    assert "cwd" not in server
 
 
 # =============================================================================

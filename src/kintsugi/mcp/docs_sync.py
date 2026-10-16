@@ -1,7 +1,7 @@
 """Generate and verify the MCP tool reference embedded in the documentation.
 
 The tool table in ``docs/mcp.md``, ``docs/cli.md`` and ``README.md`` (and the
-name lists in ``CLAUDE.md`` and ``AGENTS.md``) are rendered from
+name list in ``AGENTS.md``) are rendered from
 :data:`kintsugi.mcp.tool_specs.TOOL_SPECS` and spliced between marker comments::
 
     <!-- mcp-tools:table:begin -->

@@ -80,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   citation; the README BibTeX entry now carries the full author list and DOI.
 
 ### Changed
+- **docs**: guidance for AI coding assistants lives in `AGENTS.md` files (repository
+  root, `src/kintsugi/`, `src/kintsugi/signal/`, `workflow/`, `notebooks/`), read by
+  any assistant; each `CLAUDE.md` is now the one line `@AGENTS.md`. The generated tool
+  list is checked in `AGENTS.md` only.
 - **BREAKING (evals)**: `evals/mcp/harness.py --agentic` requires `--provider` and
   `--model` (no default model, no provider inferred from API keys) and no longer uses
   the `anthropic` SDK; the `mcp-eval` workflow has no default model and runs the
@@ -184,6 +188,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   use them; `approve_and_learn` now reports each `record_id`.
 
 ### Removed
+- The repository no longer ships MCP client configuration: the root `.mcp.json` and
+  `.claude/commands/` are untracked and gitignored, together with the other clients'
+  directories, so each contributor keeps their own. A clone that pulls this change
+  loses its tracked copies; restore them as local, ignored files with
+  `git restore --source=a0645c3 --worktree -- .mcp.json .claude/commands`.
 - **mcp**: the unregistered, untested `set_project_context` handler and the
   `_basic_parameter_suggestion` fallback (its only trigger, `kintsugi.signal`
   failing to import, cannot happen with the core dependencies).

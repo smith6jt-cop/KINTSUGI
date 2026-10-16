@@ -104,7 +104,7 @@ deterministic PR gate (no API key needed; `.github/workflows/mcp-eval.yml`):
 The documented tool surface is generated, not hand-written: `kintsugi mcp tools
 --write FILE...` renders the registry (`kintsugi.mcp.tool_specs.TOOL_SPECS`) into
 the `<!-- mcp-tools:table -->` / `<!-- mcp-tools:list -->` blocks of `docs/mcp.md`,
-`docs/cli.md`, `README.md`, `CLAUDE.md` and `AGENTS.md`, and `kintsugi mcp tools --check FILE...`
+`docs/cli.md`, `README.md` and `AGENTS.md`, and `kintsugi mcp tools --check FILE...`
 exits non-zero when a block is stale. CI runs the check, so adding, renaming or
 re-describing a tool without regenerating the docs fails the build
 (`tests/test_mcp_docs_sync.py` covers the generator itself).

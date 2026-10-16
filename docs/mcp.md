@@ -946,9 +946,10 @@ content: image block (image/png, 3996 base64 chars) + text
 
 ## Troubleshooting
 
-- **`Executable not found in $PATH: kintsugi`** — the repository's own
-  `.mcp.json` uses a bare `kintsugi`; run `kintsugi mcp config <project> --client NAME` so the
-  generated entry carries the absolute path of the executable.
+- **`Executable not found in $PATH: kintsugi`** — the client's entry names a bare
+  `kintsugi` that is not on the client's `PATH`; run
+  `kintsugi mcp config <project> --client NAME --force` from the environment where
+  KINTSUGI is installed, so the entry carries the absolute path of the executable.
 - **Server shows "Pending approval"** — accept the workspace trust dialog in
   Claude Code; `.claude/settings.local.json` approvals are applied only in a
   trusted folder. `claude mcp reset-project-choices` clears earlier decisions.

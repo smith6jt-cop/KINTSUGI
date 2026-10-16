@@ -219,7 +219,7 @@ jobs:
           pip install -e ".[docs]" -r docs/requirements.txt
 
       - name: Check generated MCP tool reference is current
-        run: kintsugi mcp tools --check docs/mcp.md docs/cli.md README.md CLAUDE.md AGENTS.md
+        run: kintsugi mcp tools --check docs/mcp.md docs/cli.md README.md AGENTS.md
 
       - name: Build documentation (strict)
         run: |

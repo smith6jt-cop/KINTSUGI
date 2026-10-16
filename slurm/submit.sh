@@ -17,7 +17,7 @@
 #     kintsugi workflow run /path/to/project       # Submit via Snakemake
 #
 #   This script will be removed in KINTSUGI v3.0.0.
-#   See workflow/CLAUDE.md for full documentation.
+#   See workflow/AGENTS.md for full documentation.
 # =============================================================================
 
 set -e

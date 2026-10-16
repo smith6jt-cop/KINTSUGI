@@ -319,3 +319,50 @@ def test_configured_clients_reads_json_and_toml(tmp_path):
     (tmp_path / ".vscode").mkdir()
     (tmp_path / ".vscode" / "mcp.json").write_text("not json")
     assert mc.configured_clients(tmp_path) == ["codex"]
+
+
+def _user_platform_files(root):
+    """Files a user keeps for their own assistants (KINTSUGI must never touch them)."""
+    files = {
+        ".claude/commands/review.md": "# my command\n",
+        ".claude/settings.json": '{"permissions": {"allow": ["Bash(ls)"]}}\n',
+        ".cursor/rules/style.mdc": "---\ndescription: mine\n---\n",
+        ".gemini/GEMINI.md": "notes\n",
+        "CLAUDE.md": "@AGENTS.md\nMy own notes.\n",
+        "GEMINI.md": "My notes for Gemini.\n",
+    }
+    for rel, text in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    return files
+
+
+def test_user_platform_files_persist(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+
+    from kintsugi.cli import main
+    from kintsugi.project import KintsugiProject
+
+    monkeypatch.setattr(KintsugiProject, "setup_notebooks", lambda self, **kw: None)
+    root = tmp_path / "proj"
+    runner = CliRunner()
+    assert runner.invoke(main, ["init", str(root), "--force"]).exit_code == 0
+    files = _user_platform_files(root)
+    cursor = root / ".cursor" / "mcp.json"
+    cursor.write_text('{"mcpServers": {"mine": {"command": "x"}}, "other": 1}\n')
+
+    for argv in (
+        ["init", str(root), "--force"],
+        ["init", str(root), "--force", "--mcp-client", "cursor"],
+        ["mcp", "config", str(root), "--client", "cursor"],
+        ["mcp", "config", str(root), "--client", "cursor", "--force"],
+        ["init", str(root), "--force"],
+    ):
+        result = runner.invoke(main, argv)
+        assert result.exit_code == 0, (argv, result.output)
+        for rel, text in files.items():
+            assert (root / rel).read_text() == text, (argv, rel)
+
+    data = json.loads(cursor.read_text())
+    assert data["mcpServers"]["mine"] == {"command": "x"} and data["other"] == 1
+    assert set(data["mcpServers"]) == {"mine", "kintsugi"}
