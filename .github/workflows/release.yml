@@ -45,6 +45,8 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -73,6 +75,14 @@ jobs:
         run: |
           kintsugi --version
           kintsugi check --quiet
+
+      - name: Smoke-test the installed MCP server over stdio
+        # Runs from outside the checkout so the installed wheel (not src/) is
+        # exercised, and fails hard if the mcp SDK gate is unavailable.
+        run: |
+          pip install "mcp>=2.0,<3"
+          cp scripts/mcp_stdio_smoke.py "$RUNNER_TEMP/mcp_stdio_smoke.py"
+          cd "$RUNNER_TEMP" && python mcp_stdio_smoke.py
 
   publish-testpypi:
     name: Publish to TestPyPI

@@ -11,6 +11,11 @@ on:
     branches: [main, master]
     paths:
       - 'docs/**'
+      - 'src/kintsugi/mcp/**'
+      - 'README.md'
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:  # Allow manual trigger
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
@@ -53,17 +58,12 @@ jobs:
           rm -rf .doctrees .env .pytest_cache _build .cache
           cd ..
 
-      - name: Build documentation (strict - pushes)
-        if: github.event_name != 'pull_request'
+      # Strict on pull requests too: the deploy on main failed for months on
+      # toctree warnings that the non-strict PR build never surfaced.
+      - name: Build documentation (strict)
         run: |
           cd docs
           sphinx-build -M html . _build -W --keep-going
-
-      - name: Build documentation (non-strict - pull requests)
-        if: github.event_name == 'pull_request'
-        run: |
-          cd docs
-          sphinx-build -M html . _build --keep-going
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

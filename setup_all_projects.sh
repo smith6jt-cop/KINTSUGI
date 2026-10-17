@@ -2,27 +2,28 @@
 # setup_all_projects.sh - Create KINTSUGI projects from manifest
 set -euo pipefail
 
-MANIFEST="/blue/maigan/smith6jt/dataset_manifest.csv"
-BLUE_BASE="/blue/maigan/smith6jt/KINTSUGI_Projects"
-KINTSUGI_DIR="/blue/maigan/smith6jt/KINTSUGI"
-LOG="${BLUE_BASE}/setup.log"
+# Configuration (override via environment variables)
+MANIFEST="${KINTSUGI_MANIFEST:-/path/to/dataset_manifest.csv}"          # dataset manifest CSV
+PROJECTS_ROOT="${KINTSUGI_PROJECTS_ROOT:-/path/to/KINTSUGI_Projects}"   # where projects are created
+KINTSUGI_DIR="${KINTSUGI_REPO_DIR:-/path/to/KINTSUGI}"                  # KINTSUGI source checkout
+LOG="${PROJECTS_ROOT}/setup.log"
 
-mkdir -p "${BLUE_BASE}"
+mkdir -p "${PROJECTS_ROOT}"
 echo "Setup started: $(date)" | tee "$LOG"
 
 success=0
 failed=0
 
 # Read manifest (skip header)
-while IFS=',' read -r dataset orange_path \
+while IFS=',' read -r dataset source_path \
     n_cycles n_cycle_dirs channels tile_rows tile_cols n_zplanes \
     xy_pixel z_step na ri ch_file raw_gb first_cycle rest; do
 
-    PROJECT_DIR="${BLUE_BASE}/${dataset}"
+    PROJECT_DIR="${PROJECTS_ROOT}/${dataset}"
 
     echo "========================================" | tee -a "$LOG"
     echo "Setting up: ${dataset}" | tee -a "$LOG"
-    echo "  Source: ${orange_path}" | tee -a "$LOG"
+    echo "  Source: ${source_path}" | tee -a "$LOG"
     echo "  Cycles: ${n_cycles}, Grid: ${tile_rows}x${tile_cols}" | tee -a "$LOG"
     echo "========================================" | tee -a "$LOG"
 
@@ -35,24 +36,24 @@ while IFS=',' read -r dataset orange_path \
     mkdir -p "${PROJECT_DIR}/configs"
     mkdir -p "${PROJECT_DIR}/logs"
 
-    # 2. Copy metadata files from orange
-    if [ -f "${orange_path}/experiment.json" ]; then
+    # 2. Copy metadata files from the source dataset
+    if [ -f "${source_path}/experiment.json" ]; then
         echo "  Copying experiment.json..." | tee -a "$LOG"
-        cp "${orange_path}/experiment.json" "${PROJECT_DIR}/meta/"
+        cp "${source_path}/experiment.json" "${PROJECT_DIR}/meta/"
     else
-        echo "  ERROR: experiment.json not found at ${orange_path}" | tee -a "$LOG"
+        echo "  ERROR: experiment.json not found at ${source_path}" | tee -a "$LOG"
         failed=$((failed + 1))
         continue
     fi
 
     if [ "${ch_file}" != "MISSING" ]; then
-        # Check both orange_path and parent (wrapper) dir for channel names file
-        if [ -f "${orange_path}/${ch_file}" ]; then
+        # Check both source_path and parent (wrapper) dir for channel names file
+        if [ -f "${source_path}/${ch_file}" ]; then
             echo "  Copying ${ch_file} from data root..." | tee -a "$LOG"
-            cp "${orange_path}/${ch_file}" "${PROJECT_DIR}/meta/CHANNELNAMES.txt"
-        elif [ -f "$(dirname "${orange_path}")/${ch_file}" ]; then
+            cp "${source_path}/${ch_file}" "${PROJECT_DIR}/meta/CHANNELNAMES.txt"
+        elif [ -f "$(dirname "${source_path}")/${ch_file}" ]; then
             echo "  Copying ${ch_file} from wrapper dir..." | tee -a "$LOG"
-            cp "$(dirname "${orange_path}")/${ch_file}" "${PROJECT_DIR}/meta/CHANNELNAMES.txt"
+            cp "$(dirname "${source_path}")/${ch_file}" "${PROJECT_DIR}/meta/CHANNELNAMES.txt"
         else
             echo "  WARNING: ${ch_file} not found at expected locations" | tee -a "$LOG"
         fi

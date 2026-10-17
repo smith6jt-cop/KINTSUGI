@@ -202,7 +202,7 @@ class AutofluorescenceSubtractor:
         """Lazy initialization of learning engine."""
         if self._learning_engine is None and self.project_dir:
             try:
-                from kintsugi.claude.parameter_learning import ParameterLearningEngine
+                from kintsugi.assist.parameter_learning import ParameterLearningEngine
 
                 self._learning_engine = ParameterLearningEngine(str(self.project_dir))
             except ImportError as exc:

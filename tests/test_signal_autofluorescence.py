@@ -863,7 +863,7 @@ class TestSubtractorLearningEngine:
         """Regression: the engine was imported from a module that never exported it."""
         from kintsugi.signal.subtractor import AutofluorescenceSubtractor
 
-        with patch("kintsugi.claude.parameter_learning.ParameterLearningEngine") as engine_cls:
+        with patch("kintsugi.assist.parameter_learning.ParameterLearningEngine") as engine_cls:
             engine_cls.return_value.recommend_parameters.return_value = {
                 "status": "success",
                 "recommended_parameters": {"erosion": 3},

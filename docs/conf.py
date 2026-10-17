@@ -11,9 +11,14 @@ sys.path.insert(0, os.path.abspath("../src"))
 
 # -- Project information -----------------------------------------------------
 project = "KINTSUGI"
-copyright = "2025, Smith JT"
+copyright = "2024-2026, Smith JT"
 author = "Smith JT"
-release = "1.2.3"
+try:
+    from importlib.metadata import version as _pkg_version
+
+    release = _pkg_version("kintsugi")
+except Exception:  # package not installed in the docs build
+    release = "1.2.3"
 
 # -- General configuration ---------------------------------------------------
 extensions = [
@@ -22,13 +27,19 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.intersphinx",
     "myst_parser",  # For Markdown support
+    "sphinxcontrib.mermaid",  # Architecture diagrams in docs/mcp.md
 ]
+
+# Let ```mermaid fenced blocks in Markdown render as diagrams.
+myst_fence_as_directive = ["mermaid"]
 
 # Templates path
 templates_path = ["_templates"]
 
 # Patterns to exclude when looking for source files
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+# docs/skills/ holds Claude Code skill files bound for the Skills_Registry, not
+# site content; excluding them keeps the strict (-W) build free of orphan warnings.
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "skills/**"]
 
 # Source file suffixes
 source_suffix = {

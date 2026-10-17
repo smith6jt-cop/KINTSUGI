@@ -35,11 +35,11 @@ Open `notebooks/3_Signal_Isolation_QC.ipynb` and follow the step-by-step workflo
 
 1. **Install dependencies:**
    ```bash
-   pip install kintsugi[claude]
+   pip install -e ".[mcp]"   # or: kintsugi install mcp  (needs mcp>=2.0,<3)
    ```
 
 2. **Configure Claude Code:**
-   - If you used `kintsugi init`, configuration is already set up
+   - If you used `kintsugi init`, configuration (`.mcp.json` + `.claude/settings.local.json`) is already set up
    - For existing projects: `kintsugi mcp config /path/to/your/project`
 
 3. **Start using with Claude Code:**
@@ -49,7 +49,7 @@ Open `notebooks/3_Signal_Isolation_QC.ipynb` and follow the step-by-step workflo
 ### Option 2: Jupyter Interactive Tuners
 
 ```python
-from kintsugi.claude import (
+from kintsugi.assist import (
     blank_subtraction_tuner,
     denoise_tuner,
     clahe_tuner,
@@ -104,7 +104,7 @@ result = ini_params(
 #### New: MCP Tool or Parameter Tuner
 ```python
 # NEW Option 1: Jupyter tuner
-from kintsugi.claude import blank_subtraction_tuner
+from kintsugi.assist import blank_subtraction_tuner
 result = blank_subtraction_tuner(signal_channel, blank_channel)
 params = result.get_params()
 
@@ -162,7 +162,7 @@ result = await apply_clahe(
 )
 
 # Or via Jupyter tuner
-from kintsugi.claude import clahe_tuner
+from kintsugi.assist import clahe_tuner
 result = clahe_tuner(channel_name)
 ```
 
@@ -223,7 +223,7 @@ The new system learns from successful parameter choices:
 
 ```python
 # Parameters are automatically recorded when you approve results
-from kintsugi.claude import ParameterLearningEngine
+from kintsugi.assist import ParameterLearningEngine
 
 engine = ParameterLearningEngine("/path/to/project")
 
@@ -244,20 +244,10 @@ When using Claude Code, this happens automatically through the MCP tools.
 
 ## Available MCP Tools
 
-| Tool | Description |
-|------|-------------|
-| `load_channel` | Load channel image from project |
-| `subtract_blank` | Autofluorescence subtraction |
-| `denoise` | Basic denoising filters |
-| `denoise_advanced` | N2V, NLM, BM3D, etc. |
-| `apply_clahe` | Contrast enhancement |
-| `clean_background` | Background removal |
-| `gaussian_subtract` | Structured background removal |
-| `assess_quality` | Channel quality assessment |
-| `compute_snr` | Signal-to-noise ratio |
-| `suggest_parameters` | AI-powered suggestions |
-| `suggest_with_learning` | Suggestions using learned history |
-| `approve_and_learn` | Record successful params |
+The tool surface is generated from the server's registry — run `kintsugi mcp tools`
+(or `kintsugi mcp tools --markdown`) for the current list, and see
+[docs/mcp.md](../docs/mcp.md) for every tool's parameters, the resources, the
+`signal_isolation_workflow` prompt and the learning loop.
 
 ---
 
@@ -303,4 +293,4 @@ A: Yes, `Kutils.py` is still available in the notebooks folder and is used by th
 
 - Documentation: See `docs/` directory
 - Issues: https://github.com/smith6jt-cop/KINTSUGI/issues
-- Claude Code: Use `/help` for available tools
+- Claude Code: run `/mcp` — it lists the `kintsugi` server, its connection state and its tools

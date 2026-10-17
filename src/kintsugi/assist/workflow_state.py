@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from kintsugi.assist.state_dir import project_state_dir
+
 
 @dataclass
 class ChannelState:
@@ -96,11 +98,7 @@ class WorkflowState:
             use_sqlite: Whether to use SQLite for audit trail
         """
         self.project_path = Path(project_path).resolve()
-        self.state_dir = self.project_path / ".claude_workflow"
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-
-        self.json_path = self.state_dir / "workflow_state.json"
-        self.db_path = self.state_dir / "workflow_audit.db" if use_sqlite else None
+        self.use_sqlite = use_sqlite
 
         # Load or create state
         self._state: dict[str, Any] = self._load_state()
@@ -111,6 +109,21 @@ class WorkflowState:
 
         # Current session
         self._session: WorkflowSession | None = None
+
+    # The paths are resolved on every access, so an instance follows a migration of
+    # a legacy ``.claude_workflow/`` done later by another writer (for example after
+    # this instance's own move attempt failed).
+    @property
+    def state_dir(self) -> Path:
+        return project_state_dir(self.project_path, create=True)
+
+    @property
+    def json_path(self) -> Path:
+        return self.state_dir / "workflow_state.json"
+
+    @property
+    def db_path(self) -> Path | None:
+        return self.state_dir / "workflow_audit.db" if self.use_sqlite else None
 
     def _load_state(self) -> dict[str, Any]:
         """Load state from JSON file."""

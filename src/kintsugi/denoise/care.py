@@ -13,6 +13,7 @@ of fluorescence microscopy" Nature Methods, 2018.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -670,7 +671,8 @@ class CAREDenoiser:
         torch.save(
             {
                 "model_state": self.model.state_dict(),
-                "config": self.config,
+                # Stored as a plain dict so torch.load(weights_only=True) accepts it.
+                "config": dataclasses.asdict(self.config),
                 "mean": self._mean,
                 "std": self._std,
             },
@@ -683,8 +685,17 @@ class CAREDenoiser:
         """Load trained model."""
         import torch
 
-        checkpoint = torch.load(path, map_location="cpu")
-        self.config = checkpoint["config"]
+        # weights_only=True restricts unpickling to tensors and plain containers,
+        # so a crafted checkpoint cannot execute code on load.
+        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+        config = checkpoint["config"]
+        if isinstance(config, dict):
+            self.config = CAREConfig(**config)
+        else:  # pragma: no cover - legacy checkpoints saved before the dict change
+            raise RuntimeError(
+                f"{path} stores the config as a pickled object; re-save it with the current "
+                "version of KINTSUGI (checkpoints are loaded with weights_only=True)."
+            )
         self._mean = checkpoint["mean"]
         self._std = checkpoint["std"]
 

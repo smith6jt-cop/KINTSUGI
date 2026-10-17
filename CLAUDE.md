@@ -10,6 +10,8 @@ KINTSUGI (Knowledge Integration with New Technologies for Simplified User-Guided
 
 KINTSUGI includes an MCP (Model Context Protocol) server that exposes image processing tools to Claude Code. This enables Claude to act as an AI image processing assistant.
 
+**MCP server** (`src/kintsugi/mcp/`, canonical guide: `docs/mcp.md`): requires `mcp>=2.0,<3` — install with `pip install -e ".[mcp]"` or `kintsugi install mcp` (never `pip install kintsugi[mcp]`, which installs an unrelated PyPI package). Every tool carries a title and behaviour annotations (readOnly/destructive/idempotent/openWorld); the server publishes instructions; input schemas are derived from the handler signatures and enforced (bad enums/ranges are rejected with `isError` before the handler runs) and in-band errors are reported as `isError`; resources `kintsugi://session/images`, `kintsugi://session/history/{channel}`, `kintsugi://learning/stats` and `kintsugi://project/channels`; the `signal_isolation_workflow` prompt; progress notifications on long tools; `get_thumbnail` returns the preview as image content; typed output schemas for `get_image_stats`, `assess_quality`, `suggest_with_learning` and `get_session_state`; new tools `get_session_state` and `unload_channel`; model checkpoints are confined to the project, the server's project or `~/.kintsugi/models` and loaded with torch `weights_only=True`. `project_path` arguments default to the project the server was started for: `kintsugi mcp start --project-dir PATH` (what generated configs pass), else `KINTSUGI_PROJECT_DIR`, else the working directory if it is a KINTSUGI project; otherwise tools that need a project return an error instead of guessing. Project state (learning database, workflow state) lives in `<project>/.kintsugi/` (`kintsugi.assist.state_dir`); a legacy `.claude_workflow/` is read as is and moved there on the first write, and databases are created on the first write, never by a read.
+
 ### Creating a Project
 
 Use `kintsugi init` to create a new project with the standard directory structure:
@@ -29,12 +31,14 @@ my_project/
 │   └── CHANNELNAMES.txt   ← Channel/marker names (user-provided)
 ├── notebooks/         ← Working copies of processing notebooks
 ├── configs/           ← Processing configuration files
-├── .mcp.json          ← MCP server config (auto-generated, absolute path)
+├── AGENTS.md          ← Guidance for AI assistants (auto-generated if absent)
+├── .mcp.json          ← MCP server config for Claude Code (auto-generated, absolute path)
 ├── .claude/           ← Claude Code settings (auto-generated)
-└── .vscode/           ← VS Code settings (auto-generated)
+├── .vscode/           ← VS Code settings and mcp.json (auto-generated)
+└── .cursor/ .gemini/ .agents/ .codex/ .zed/  ← other MCP clients' configs
 ```
 
-The `.mcp.json` file is **automatically created** with the MCP server definition (using an absolute path to the `kintsugi` executable). The `.claude/settings.local.json` enables the server via `enabledMcpjsonServers`.
+`kintsugi init` (and `kintsugi mcp config`) writes the configuration of every MCP client that keeps it in the project (Claude Code, VS Code, Cursor, Gemini CLI, Antigravity, Codex, Zed; `kintsugi mcp clients` lists them), `AGENTS.md`, and `.gitignore` lines for the generated files; `--mcp-client NAME` / `--client NAME` restricts the set. For Claude Code, `.mcp.json` holds the server definition — `{"mcpServers": {"kintsugi": {"type": "stdio", "command": "<absolute path to kintsugi>", "args": ["mcp", "start", "--project-dir", "<absolute project root>"]}}}` — the project travels in `args` because MCP clients differ in the working directory and environment they give a server. `.claude/settings.local.json` approves only that server: `{"enabledMcpjsonServers": ["kintsugi"]}`. The equivalent CLI form is `claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start --project-dir /path/to/project`. See `docs/mcp.md`.
 
 ### Experiment Metadata
 
@@ -148,15 +152,15 @@ All processing (stitch, decon, EDF, registration) runs on GPU. CPU is 5-25x slow
 
 ## Development Workspace
 
-Use the VS Code multi-root workspace (`kintsugi-dev.code-workspace`) which combines:
+`kintsugi workspace` manages a VS Code multi-root workspace file (`kintsugi-dev.code-workspace`). Neither that file nor a test dataset is part of the repository: the workspace file lives outside the checkout (default location `_DEFAULT_WORKSPACE_FILE` in `cli.py`) and `test_data/` is gitignored, so a fresh clone has neither. A typical layout combines:
 
 | Workspace Folder | Path | Purpose |
 |------------------|------|---------|
 | KINTSUGI (repo) | `KINTSUGI/` | Source code |
-| Test Project | `KINTSUGI/test_data/mini_project/` | 2x2 test dataset |
-| Full Project | `KINTSUGI_Projects/.../1904CC1-1L/` | Real data |
+| Test Project | `KINTSUGI/test_data/<small_project>/` | Small local test dataset (gitignored) |
+| Full Project | `KINTSUGI_Projects/<project>/` | Real data |
 
-Notebooks default to mini_project for testing. Change `PROJECT_DIR` for other projects.
+Notebooks default to a local test project. Change `PROJECT_DIR` for other projects.
 
 To swap the **Full Project** slot to a different dataset without editing JSON by hand:
 
@@ -184,7 +188,7 @@ If you're not using `kintsugi init`, or need to add MCP support to an existing p
 kintsugi mcp config /path/to/project
 ```
 
-This creates `.mcp.json` at the project root with the MCP server definition (using an absolute path to the `kintsugi` executable) and `.claude/settings.local.json` to enable it. If `.mcp.json` already exists, it will add the KINTSUGI server to your existing configuration.
+This writes or merges the configuration of every project-scoped MCP client (for Claude Code: `.mcp.json` with an absolute path to the `kintsugi` executable and `.claude/settings.local.json` with `{"enabledMcpjsonServers": ["kintsugi"]}`), writes `AGENTS.md` if absent, and prints snippets for user- or IDE-configured clients (Claude Desktop, Windsurf, Cline, JetBrains). Existing entries for other servers are kept (`--force` overwrites an existing `kintsugi` entry); `--client NAME` restricts to one client; a directory without `kintsugi_project.json` is refused unless `--force`.
 
 Use `--print-only` to display the configuration without creating files:
 ```bash
@@ -194,45 +198,35 @@ kintsugi mcp config /path/to/project --print-only
 ### MCP Server Commands
 
 ```bash
-# Start the MCP server (usually called by Claude Code automatically)
-kintsugi mcp start
+# Start the MCP server (normally launched by your MCP client; stdout is the JSON-RPC stream)
+kintsugi mcp start --project-dir /path/to/project
 
-# List available tools
+# List available tools (the registry is the source of truth)
 kintsugi mcp tools
+kintsugi mcp tools --markdown                      # Markdown table
+kintsugi mcp tools --write CLAUDE.md docs/cli.md   # Regenerate the <!-- mcp-tools:* --> blocks in docs
+kintsugi mcp tools --check CLAUDE.md AGENTS.md docs/cli.md   # Fail if those blocks drifted (CI runs this)
+kintsugi mcp clients                               # MCP clients 'mcp config' can configure
+
+# Bootstrap the learning database from existing processed data
+kintsugi mcp pretrain /path/to/project --tissue-type tonsil [--dry-run] [--verbose]
 ```
 
 ### Available MCP Tools
 
-**Signal Isolation:**
-- `load_channel` - Load channel image from project
-- `subtract_blank` - Autofluorescence subtraction (`method="global"|"weighted"`)
-- `analyze_weighted_subtraction` - Preview per-range weights before applying
-- `denoise` - Basic denoising (median, Gaussian, bilateral)
-- `denoise_advanced` - Advanced denoising (N2V, NLM, BM3D, adaptive)
-- `apply_clahe` - Contrast enhancement
-- `clean_background` - Background removal
-- `gaussian_subtract` - Structured background removal
+The authoritative list is `kintsugi mcp tools` (`--markdown` for a table with titles, categories and annotations); the full reference — parameters, resources, the prompt, the learning loop and the security model — is `docs/mcp.md`. The block below is generated from `kintsugi.mcp.tool_specs.TOOL_SPECS` by `kintsugi mcp tools --write CLAUDE.md` and verified by `--check`; do not edit it by hand.
 
-**Quality Assessment:**
-- `assess_quality` - Automatic quality assessment
-- `compute_snr` - Signal-to-noise ratio
+<!-- mcp-tools:list:begin -->
+- **Signal isolation:** `load_channel`, `subtract_blank`, `analyze_weighted_subtraction`, `denoise`, `apply_clahe`, `clean_background`, `gaussian_subtract`, `denoise_advanced`, `cluster_channels`, `propagate_parameters`, `optimize_parameters`, `predict_parameters`, `estimate_background`
+- **Quality assessment:** `assess_quality`, `compute_snr`, `batch_assess_quality`
+- **Visualization:** `get_image_stats`, `get_thumbnail`, `compare_channels`, `get_intensity_profile`
+- **Workflow:** `list_channels`, `save_processed`, `get_processing_history`, `suggest_parameters`, `generate_jupyter_cell`, `get_session_state`, `unload_channel`
+- **Parameter learning:** `get_learned_parameters`, `record_successful_parameters`, `suggest_with_learning`, `approve_and_learn`, `get_learning_statistics`
 
-**Visualization:**
-- `get_image_stats` - Image statistics
-- `get_thumbnail` - Downsampled preview
+32 tools. Generated by `kintsugi mcp tools --write`; do not edit by hand.
+<!-- mcp-tools:list:end -->
 
-**Workflow:**
-- `list_channels` - List available channels
-- `save_processed` - Save processed output
-- `suggest_parameters` - AI-powered parameter suggestions
-- `generate_jupyter_cell` - Generate interactive tuning code
-
-**Parameter Learning:**
-- `get_learned_parameters` - Get recommendations from history
-- `record_successful_parameters` - Record approved params
-- `suggest_with_learning` - Combine analysis + learned history
-- `approve_and_learn` - Approve and record for future learning
-- `get_learning_statistics` - Database statistics
+`denoise` methods are `percentile`, `uniform` and `median`; `denoise_advanced` methods are `adaptive`, `bilateral`, `nlm`, `bm3d`, `n2v` and `patch_svd`. `subtract_blank` takes `method="global"|"weighted"`; preview the weighted plan first with `analyze_weighted_subtraction`.
 
 ### TissUUmaps Export
 
@@ -267,7 +261,7 @@ Blank/autofluorescence channels are excluded by default (use `--include-blanks` 
 pip install -e ".[dev]"
 
 # Install optional dependency groups via CLI
-kintsugi install --list            # Show all 12 available groups
+kintsugi install --list            # Show the optional groups (14 in OPTIONAL_GROUPS, incl. the `full` composite)
 kintsugi install gpu               # Install GPU acceleration
 kintsugi install gpu --conda       # Use conda instead of pip (where available)
 kintsugi install all               # Unified pip resolve via pyproject.toml extras
@@ -296,7 +290,7 @@ python -m build
 **Core Package** (`src/kintsugi/`):
 - `cli.py` - Click-based CLI with subcommands: check, register, template, info, mcp (config/start/tools/pretrain), init, install, workflow (config/check/run/export). `_resolve_project_dir()` auto-detects `workflow/` subdirectories for all workflow subcommands
 - `kreg.py`, `kstitch.py`, `kview2.py` - Bridge modules to notebook implementations
-- `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA). `OPTIONAL_GROUPS` dict is the single source of truth for all 12 install groups (gpu, viz, dl, analysis, bio, claude, dev, docs, kronos, denoise, rapids, full)
+- `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA). `OPTIONAL_GROUPS` dict is the single source of truth for all 14 install groups (gpu, viz, dl, analysis, bio, mcp, dev, docs, kronos, denoise, optimize, rapids, workflow, full)
 - `edf.py` - Extended depth of focus processing (CuPy GPU or NumPy CPU)
 - `project.py` - Project structure management (`KintsugiProject` class), `_resolve_kintsugi_executable()` for absolute-path MCP config
 - `deprecation.py` - Deprecation warnings and migration guidance
@@ -308,13 +302,19 @@ python -m build
 - `vessel3d.py` - 3D vessel segmentation: Frangi vesselness, presets, marker discovery, multichannel combination, skeletonization, graph morphometry
 - `vessel3d_viz.py` - Vessel visualization: ortho views, mask overlays, feature plots
 
-**MCP Server** (`src/kintsugi/mcp/`):
-- `server.py` - FastMCP server implementation
+**MCP Server** (`src/kintsugi/mcp/`, see `docs/mcp.md`):
+- `server.py` - `MCPServer` (mcp 2.x) wiring: `create_server()` registers tools, resources, the prompt and server instructions
+- `_sdk.py` - Import gate for `mcp>=2.0,<3`; distinguishes "not installed" from "unsupported 1.x"
+- `tool_specs.py` - Declarative `TOOL_SPECS` registry (name, handler, title, description, annotations); feeds `kintsugi mcp tools`
+- `docs_sync.py` - Renders the tool table/list into `<!-- mcp-tools:* -->` doc blocks (`--write`/`--check`)
+- `path_safety.py` - Path confinement (`ensure_within`, model checkpoint roots, numeric clamps)
+- `session.py` - Loaded-channel state and project resolution (`--project-dir` > `KINTSUGI_PROJECT_DIR` > a project working directory)
+- `schemas.py` / `prompts.py` - Typed output schemas and the `signal_isolation_workflow` prompt
 - `tools/signal_isolation.py` - Signal processing tools
 - `tools/quality_assessment.py` - QC tools
 - `tools/visualization.py` - Image preview tools
 - `tools/workflow.py` - Workflow management tools
-- `tools/learning.py` - Parameter learning with SQLite storage
+- `tools/learning.py` - MCP learning tools (the engine is `kintsugi.assist.parameter_learning.ParameterLearningEngine`)
 
 **Pure Python Modules** (`src/kintsugi/`):
 - `signal/` - Autofluorescence subtraction (global + weighted multi-range), bootstrap learning (`bootstrap.py`), multi-project batch orchestration (`batch_multi.py`)
@@ -404,13 +404,13 @@ See `workflow/CLAUDE.md` for batch processing documentation: data staging, clean
 
 Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, pyvips, seaborn, pqdm
 
-13 optional install groups defined in `deps.py` `OPTIONAL_GROUPS` (single source of truth, also used by `pyproject.toml` extras). Install via `kintsugi install <group>` (supports `--conda` for groups with conda recipes):
+14 optional install groups defined in `deps.py` `OPTIONAL_GROUPS` (single source of truth, also used by `pyproject.toml` extras). Install via `kintsugi install <group>` (supports `--conda` for groups with conda recipes):
 - `gpu` - PyTorch + CuPy for GPU acceleration
 - `viz` - Napari visualization
 - `dl` - Deep learning segmentation (InstanSeg)
 - `analysis` - scanpy, scimap for spatial analysis
 - `bio` - Bio formats I/O (OME-TIFF, LIF, etc.)
-- `claude` - MCP server for Claude Code integration
+- `mcp` - MCP server for AI assistants (any MCP client)
 - `dev` - Development tools (pytest, ruff, black, mypy)
 - `docs` - Documentation (Sphinx)
 - `kronos` - KRONOS foundation model (prints post-install note about cloning KRONOS repo)
@@ -458,7 +458,7 @@ Tests are in `tests/` with fixtures in `conftest.py`. Key fixtures: `sample_imag
 
 CI runs on Linux (ubuntu-latest) with Python 3.10-3.12.
 
-**Suite status** (Mar 2026): 814 collected, 10 skipped (GPU hardware + optional deps).
+**Suite status** (Oct 2026): 1100 collected (`pytest --collect-only -q tests/`); GPU-hardware and optional-dependency tests skip where those are absent.
 
 **GPU skip pattern**: On HPC login nodes, CuPy is installed (`CUPY_AVAILABLE=True`) but no GPU hardware exists. Tests that need actual GPU hardware must use `check_gpu()` from `kcorrect_gpu.py`, not `CUPY_AVAILABLE`:
 ```python
@@ -468,7 +468,7 @@ GPU_HARDWARE_AVAILABLE, _reason = check_gpu()
 @pytest.mark.skipif(not GPU_HARDWARE_AVAILABLE, reason="No GPU hardware available")
 ```
 
-**Dev dependencies**: `pytest-asyncio` is required for MCP tool tests (27 async tests). Install with `pip install pytest-asyncio` or `pip install -e ".[dev]"`.
+**Dev dependencies**: `pytest-asyncio` and `mcp>=2.0,<3` are required for the MCP tests — 206 collected across `tests/test_mcp_tools.py`, `test_mcp_path_safety.py`, `test_mcp_protocol.py`, `test_mcp_config.py`, `test_mcp_stdio.py` and `test_mcp_docs_sync.py` (recount with `pytest --collect-only -q <those files> | tail -1`). Install with `pip install -e ".[dev]"`. `KINTSUGI_REQUIRE_MCP=1` turns MCP skips into failures (CI sets it).
 
 ## Code Style
 
@@ -479,12 +479,13 @@ GPU_HARDWARE_AVAILABLE, _reason = check_gpu()
 
 ## Release and Versioning
 
-Uses [Conventional Commits](https://www.conventionalcommits.org/) with automatic semantic versioning. Format: `<type>(<scope>): <description>` — types: `feat` (MINOR), `fix` (PATCH), `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`. Add `!` for breaking changes (MAJOR).
+Uses [Conventional Commits](https://www.conventionalcommits.org/) with automatic semantic versioning via [commitizen](https://commitizen-tools.github.io/commitizen/) (`[tool.commitizen]` in `pyproject.toml`; `commitizen` is in the `dev` install group). Format: `<type>(<scope>): <description>` — types: `feat` (MINOR), `fix` (PATCH), `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`. Add `!` for breaking changes (MAJOR).
 
 ```bash
-pre-commit install && pre-commit install --hook-type commit-msg  # Enable hooks
-python scripts/release.py --auto                                  # Create release
-python scripts/release.py --dry-run --auto                       # Preview
+pre-commit install && pre-commit install --hook-type commit-msg  # Enable hooks (ruff + commitizen commit-msg lint)
+cz bump --dry-run                                                 # Preview the next version and changelog entry
+cz bump                                                           # Bump pyproject version, update CHANGELOG.md, tag vX.Y.Z
+git push --follow-tags                                            # Publishing the GitHub release runs .github/workflows/release.yml
 ```
 
 ## Notebook 4: Segmentation & Spatial Analysis

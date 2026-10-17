@@ -101,17 +101,17 @@ OPTIONAL_GROUPS = {
         "packages": ["bioio", "bioio-ome-tiff", "ome-zarr", "slideio", "readlif"],
         "install_cmd": "pip install bioio bioio-ome-tiff ome-zarr slideio readlif",
     },
-    "claude": {
-        "description": "Claude Code MCP integration",
-        "packages": ["mcp", "httpx"],
-        # mcp>=1.10 is required for FastMCP structured tool output (see pyproject
-        # claude extra); quote the spec so the shell does not treat < as redirect.
-        "install_cmd": "pip install 'mcp>=1.10.0,<2' httpx",
+    "mcp": {
+        "description": "MCP server for AI assistants (any MCP client)",
+        # Mirrors the pyproject `mcp` extra. mcp 2.x is required (the server
+        # uses MCPServer); quote the spec so the shell does not treat < as redirect.
+        "packages": ["mcp", "optuna", "smo"],
+        "install_cmd": "pip install 'mcp>=2.0,<3' 'optuna>=3.0' 'smo>=0.7'",
     },
     "dev": {
         "description": "Development tools (pytest, ruff, black, mypy)",
         "packages": ["pytest", "ruff", "black", "mypy", "pre_commit", "mcp"],
-        "install_cmd": "pip install pytest pytest-asyncio pytest-cov pytest-xdist 'mcp>=1.10.0,<2' ruff black mypy pre-commit commitizen",
+        "install_cmd": "pip install pytest pytest-asyncio pytest-cov pytest-xdist 'mcp>=2.0,<3' ruff black mypy pre-commit commitizen",
     },
     "docs": {
         "description": "Documentation (Sphinx)",
@@ -519,7 +519,7 @@ def install_optional(
         "dl",
         "analysis",
         "bio",
-        "claude",
+        "mcp",
         "dev",
         "docs",
         "kronos",
@@ -708,6 +708,10 @@ class DependencyChecker:
             ("bioio", "1.0.0", "bio"),
             ("ome-zarr", None, "bio"),
             ("slideio", None, "bio"),
+            # MCP server (mcp 2.x required: the 1.x API is not supported)
+            ("mcp", "2.0.0", "mcp"),
+            ("optuna", "3.0", "mcp"),
+            ("smo", None, "mcp"),
         ]
 
         for package, min_version, group in optional_packages:

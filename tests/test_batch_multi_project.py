@@ -340,7 +340,7 @@ class TestResolveRecipes:
         }
 
         with patch(
-            "kintsugi.claude.parameter_learning.ParameterLearningEngine",
+            "kintsugi.assist.parameter_learning.ParameterLearningEngine",
             return_value=mock_engine,
         ):
             resolved = resolve_recipes_for_project(
@@ -377,7 +377,7 @@ class TestResolveRecipes:
         }
 
         with patch(
-            "kintsugi.claude.parameter_learning.ParameterLearningEngine",
+            "kintsugi.assist.parameter_learning.ParameterLearningEngine",
             return_value=mock_engine,
         ):
             resolved = resolve_recipes_for_project(

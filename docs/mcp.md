@@ -1,0 +1,836 @@
+# Claude Code Integration (MCP Server)
+
+KINTSUGI ships a [Model Context Protocol](https://modelcontextprotocol.io) (MCP)
+server that turns the signal-isolation toolbox into tools an AI assistant can
+drive. Open a KINTSUGI project in [Claude Code](https://code.claude.com), and
+Claude can load channels, inspect them, suggest and apply autofluorescence
+subtraction, score the result, save it, and record what worked so the next
+session starts from it.
+
+```{contents}
+:local:
+:depth: 2
+```
+
+## What is different about this server
+
+- **Declarative, dependency-free registry.** `kintsugi.mcp.tool_specs.TOOL_SPECS`
+  lists every tool (name, handler, title, description, behaviour annotations)
+  without importing the SDK, so `kintsugi mcp tools`, the docs generator and
+  the tests work without the optional `claude` extra.
+- **Schemas derived from the handlers and enforced.** Parameter descriptions,
+  enums and numeric ranges live in the handler signatures
+  (`Annotated[int, Field(description=..., ge=1, le=99)]`, `Literal[...]`). The
+  SDK advertises them and rejects violations before the handler runs; there is
+  no second, hand-written copy that can drift.
+- **Structured output on every tool.** Results arrive as `structuredContent`
+  (machine-readable) plus a text block, and the tools the model reasons over
+  most (`get_image_stats`, `assess_quality`, `suggest_with_learning`,
+  `get_session_state`) declare typed output schemas.
+- **Path safety as a design rule.** Every path the model supplies is confined
+  to the project (`ensure_within` follows symlinks), filenames must be bare
+  names, numeric clamps reject NaN/inf/bool, and model checkpoints are only
+  loaded from directories the user controls. See [Security model](#security-model).
+- **A learning loop.** Parameters the user approves are stored in SQLite
+  (project and user-wide), normalised by tissue and marker aliases, and
+  recommended back with a confidence that combines match quality, outcome,
+  recency and consistency. `kintsugi mcp pretrain` bootstraps the database
+  from existing processed data.
+- **Tiered automation.** Heuristic suggestion → learned recall → Random Forest
+  prediction → Optuna search → parameter-free SMO background estimation, all as
+  tools, so the assistant can escalate when the cheap option is not enough.
+- **Evaluated, not assumed.** `evals/mcp/harness.py` measures the tool surface
+  (token cost, descriptions, titles, annotations, task coverage) and a strict
+  structural gate runs in CI; an optional agentic pass measures whether Claude
+  picks the right tool for realistic requests.
+
+## Sixty-second setup
+
+```bash
+pip install -e ".[mcp]"        # or: kintsugi install mcp  (needs mcp>=2.0)
+kintsugi init /path/to/project --name "My Experiment"   # new project
+kintsugi mcp config /path/to/project                    # existing project
+```
+
+`kintsugi init` and `kintsugi mcp config` write the configuration of every MCP
+client that keeps it in the project, an `AGENTS.md` for the assistant, and print
+the entry to paste for clients configured per user or in the IDE.
+`kintsugi mcp config <project> --client NAME` restricts to one client (repeat the
+option for several), `--print-only` shows everything without writing, and
+`kintsugi mcp clients` lists the registry:
+
+| Client | Written / printed | Servers key |
+|--------|-------------------|-------------|
+| Claude Code (`claude-code`) | `.mcp.json` + `.claude/settings.local.json` (approves only `kintsugi`) | `mcpServers` |
+| VS Code / Copilot (`vscode`) | `.vscode/mcp.json` | `servers` |
+| Cursor (`cursor`) | `.cursor/mcp.json` | `mcpServers` |
+| Gemini CLI (`gemini-cli`) | `.gemini/settings.json` (+ `context.fileName` = `AGENTS.md`, `GEMINI.md`) | `mcpServers` |
+| Antigravity (`antigravity`) | `.agents/mcp_config.json` | `mcpServers` |
+| OpenAI Codex CLI (`codex`) | `.codex/config.toml` (trusted projects only) | `[mcp_servers.kintsugi]` |
+| Zed (`zed`) | `.zed/settings.json` | `context_servers` |
+| Claude Desktop, Windsurf / Devin Desktop, Cline | snippet for the user's configuration file | `mcpServers` |
+| JetBrains AI Assistant | snippet for Settings > Tools > AI Assistant > MCP | `mcpServers` |
+
+Existing files are merged (other servers and settings are kept; an existing
+`kintsugi` entry is replaced only with `--force`), nothing is written outside the
+project, and the generated files are added to the project's `.gitignore` because
+they hold machine-specific absolute paths: collaborators run `kintsugi mcp config`
+on their own machine. `AGENTS.md` is created only when absent; an existing one only
+has its generated tool list refreshed. Both commands refuse a directory without
+`kintsugi_project.json` (the server would refuse it as `--project-dir`);
+`kintsugi init --mcp-client NAME` (or `none`) chooses the clients for a new project.
+
+For Claude Code the two files are:
+
+```json
+// .mcp.json — the server definition Claude Code reads
+{
+  "mcpServers": {
+    "kintsugi": {
+      "type": "stdio",
+      "command": "/path/to/env/bin/kintsugi",
+      "args": ["mcp", "start", "--project-dir", "/path/to/project"]
+    }
+  }
+}
+```
+
+```json
+// .claude/settings.local.json — approves exactly this server
+{ "enabledMcpjsonServers": ["kintsugi"] }
+```
+
+`command` is the absolute path of the `kintsugi` executable in the environment
+you ran the command from, so the client can start the server even when that
+environment's `bin/` is not on `PATH`. `--project-dir` tells the server which
+project `project_path` defaults to. MCP clients differ in the working directory
+and environment they give a server (several ignore a `cwd` field, and some pass
+on almost no environment variables), so the project travels in `args`, which
+every client supports. Where a client can set environment variables,
+`KINTSUGI_PROJECT_DIR` does the same; without either, the working directory is
+used only if it contains `kintsugi_project.json`, and tools that need a project
+otherwise ask for `project_path` instead of guessing. The equivalent Claude Code
+command is:
+
+```bash
+claude mcp add --scope project --transport stdio kintsugi -- \
+  kintsugi mcp start --project-dir /path/to/project
+```
+
+Then open the project folder in Claude Code, accept the workspace trust dialog,
+and run `/mcp`: the `kintsugi` server is listed with its tools, resources and
+prompt. The server speaks JSON-RPC over stdio; nothing else is written to
+stdout (diagnostics go to stderr), and a test spawns the real server over a
+pipe to keep it that way.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    CC[Claude Code] <-- "JSON-RPC over stdio" --> S[MCPServer<br/>kintsugi mcp start]
+    S --> R[tool_specs.py<br/>32 tools: name, title,<br/>description, annotations]
+    S --> ADP["handler adapter<br/>{'error': ...} → isError"]
+    ADP --> T1[tools/signal_isolation]
+    ADP --> T2[tools/quality_assessment]
+    ADP --> T3[tools/visualization]
+    ADP --> T4[tools/workflow]
+    ADP --> T5[tools/learning]
+    T1 & T2 & T3 & T4 --> SS[(session state<br/>loaded images, history)]
+    T5 --> DB[(SQLite learning DBs<br/>project + ~/.kintsugi)]
+    T1 & T4 --> FS[(project files<br/>data/raw, data/processed)]
+    S -. resources .-> SS
+    S -. resources .-> DB
+    S -. prompt .-> P[signal_isolation_workflow]
+    PS[path_safety.py] -.guards.-> T1 & T4
+```
+
+- **`kintsugi.mcp.server`** builds the `MCPServer` (name, title, version,
+  website, instructions), registers every tool from the registry with its
+  title and annotations, wraps each handler so an in-band `{"error": ...}`
+  becomes an MCP tool error, and registers the resources and the prompt.
+- **`kintsugi.mcp.tools.*`** are plain `async` functions returning dicts. They
+  are SDK-agnostic, which is why the unit tests can call them directly and why
+  the Jupyter tuners in `kintsugi.assist.param_tuner` can share them.
+- **Session state** lives in server memory for the lifetime of the Claude Code
+  session: loaded channels, intermediate results and per-channel history.
+  `get_session_state` shows it, `unload_channel` frees it.
+- **`kintsugi.mcp.path_safety`** holds the checks a JSON schema cannot express.
+- **`kintsugi.assist.parameter_learning`** is the learning engine behind the
+  `learning` tools.
+
+## Tools
+
+The table is generated from the registry by `kintsugi mcp tools --write
+docs/mcp.md`; CI fails if it drifts.
+
+<!-- mcp-tools:table:begin -->
+| Tool | Title | Category | Read-only | Destructive | Description |
+|------|-------|----------|:---------:|:------------:|-------------|
+| `load_channel` | Load channel | Signal isolation | no | no | Load a channel image from a KINTSUGI project. Returns image metadata and prepares it for processing. |
+| `subtract_blank` | Subtract blank (autofluorescence) | Signal isolation | no | no | Subtract autofluorescence/blank channel from signal. Uses optimized Dask operations for large images. |
+| `analyze_weighted_subtraction` | Preview weighted subtraction | Signal isolation | yes | no | Preview the per-intensity-range weights for weighted autofluorescence subtraction WITHOUT applying it. Use this to verify the plan before calling subtract_blank with method='weighted'. |
+| `denoise` | Denoise (basic filters) | Signal isolation | no | no | Apply denoising filters (percentile, uniform, median) to reduce noise. |
+| `apply_clahe` | Apply CLAHE contrast | Signal isolation | no | no | Apply Contrast Limited Adaptive Histogram Equalization to enhance local contrast. |
+| `clean_background` | Clean background | Signal isolation | no | no | Remove background and small objects from the image. |
+| `gaussian_subtract` | Gaussian background subtraction | Signal isolation | no | no | Subtract Gaussian-blurred version to remove structured background/autofluorescence. |
+| `denoise_advanced` | Denoise (advanced) | Signal isolation | no | no | Apply advanced denoising: adaptive (auto-select best filter), bilateral (edge- preserving), nlm (non-local means), bm3d (block matching 3D), n2v (self-supervised Noise2Void), or patch_svd. |
+| `assess_quality` | Assess quality | Quality assessment | yes | no | Assess channel quality with heuristic metrics (SNR, contrast, dynamic range, background) and flag channels that need manual review. Returns a 0-1 quality score, the metrics and recommendations. |
+| `compute_snr` | Compute SNR | Quality assessment | yes | no | Compute Signal-to-Noise Ratio for a channel. |
+| `batch_assess_quality` | Batch quality assessment | Quality assessment | yes | no | Assess several loaded channels at once: scores sorted worst-first and a review queue of the channels below the threshold. |
+| `get_image_stats` | Image statistics | Visualization | yes | no | Get statistics for a loaded image (min, max, mean, std, histogram). |
+| `get_thumbnail` | Thumbnail preview | Visualization | yes | no | Get a downsampled thumbnail of the image for preview. |
+| `compare_channels` | Compare two channels | Visualization | yes | no | Compare two loaded channels statistically (means, difference, correlation, SSIM) with a one-line interpretation; useful for before/after checks. |
+| `get_intensity_profile` | Intensity profile | Visualization | yes | no | Intensity values along a horizontal or vertical line through a loaded channel, for spotting gradients or uneven illumination. |
+| `list_channels` | List project channels | Workflow | yes | no | List all available channels in the current project/cycle. |
+| `save_processed` | Save processed channel | Workflow | no | yes | Save the processed channel to the project output directory. |
+| `get_processing_history` | Processing history | Workflow | yes | no | Get the processing history for a channel, showing all operations applied. |
+| `suggest_parameters` | Suggest parameters (heuristic) | Workflow | yes | no | Rule-based suggestions for every operation from the channel's intensity statistics, without the learning database. Prefer suggest_with_learning when the tissue type and marker are known. |
+| `generate_jupyter_cell` | Generate Jupyter tuning cell | Workflow | yes | no | Generate a Jupyter notebook cell for interactive parameter tuning with Kview2 widgets. |
+| `cluster_channels` | Cluster channels | Signal isolation | no | no | Cluster channels by image feature similarity. Groups channels that share similar intensity profiles, SNR, and texture so parameters can be tuned once per cluster. |
+| `propagate_parameters` | Propagate cluster parameters | Signal isolation | no | yes | Apply tuned signal isolation parameters from a representative channel to all members of a cluster. |
+| `get_session_state` | Session state | Workflow | yes | no | Show what this server session holds: the project root it serves, every loaded channel with shape/dtype/metadata, per-channel processing step counts, and memory usage. |
+| `unload_channel` | Unload channel | Workflow | no | no | Free server memory by dropping a loaded channel (or everything with clear_all). Files on disk are untouched. |
+| `get_learned_parameters` | Learned parameters | Parameter learning | yes | no | Get recommended parameters based on learned history from similar tissue/marker combinations. Returns parameters with confidence scores. |
+| `record_successful_parameters` | Record parameters | Parameter learning | no | no | Record a successful parameter set for future learning. Call after user approves processing results. |
+| `suggest_with_learning` | Suggest parameters (learned + heuristic) | Parameter learning | yes | no | Get comprehensive parameter suggestions combining image analysis AND learned history. This is the primary recommendation tool. |
+| `approve_and_learn` | Approve and learn | Parameter learning | no | no | Approve processing results and record ALL parameters for learning. Call when user approves final processed result. |
+| `get_learning_statistics` | Learning database statistics | Parameter learning | yes | no | Get statistics about the parameter learning database. |
+| `optimize_parameters` | Optimize parameters (Optuna) | Signal isolation | no | no | Find optimal signal isolation parameters via Bayesian optimization (Optuna). Automatically searches the parameter space — no manual slider adjustment needed. |
+| `predict_parameters` | Predict parameters (Random Forest) | Signal isolation | yes | no | Predict signal isolation parameters from image features using a trained Random Forest model. Includes confidence scores and uncertainty estimates. |
+| `estimate_background` | Estimate background (SMO) | Signal isolation | no | no | Estimate and subtract background using SMO (Silver Mountain Operator). Parameter- free — no blank channel needed. |
+
+32 tools. Generated by `kintsugi mcp tools --write`; do not edit by hand.
+<!-- mcp-tools:table:end -->
+
+Every tool returns `structuredContent`. "Read-only" and "Destructive" are the
+MCP behaviour annotations: read-only tools never change session state or files;
+destructive ones overwrite files on disk (`save_processed`,
+`propagate_parameters`). The full parameter contract of each tool (descriptions, enums,
+ranges) is what the server advertises in `tools/list`; `kintsugi mcp tools`
+prints the registry, and `python evals/mcp/harness.py` prints the advertised
+schemas' size and quality.
+
+### Resources and prompt
+
+| Kind | URI / name | Content |
+|------|------------|---------|
+| resource | `kintsugi://session/images` | Loaded channels, shape/dtype/metadata, history counts, memory |
+| resource template | `kintsugi://session/history/{channel}` | Every operation applied to a channel |
+| resource | `kintsugi://learning/stats` | Learning database statistics |
+| resource | `kintsugi://project/channels` | Image files in the project the server was started for |
+| prompt | `signal_isolation_workflow` | Guided checklist for one marker/blank pair |
+
+### Progress and images
+
+Long-running tools (`subtract_blank` with `method="weighted"`,
+`denoise_advanced`, `optimize_parameters`, `cluster_channels`,
+`propagate_parameters`) run their CPU work on a worker thread and send MCP
+progress notifications, so the client stays responsive and can cancel.
+`get_thumbnail` returns the preview as an **image content block** Claude can
+actually look at, alongside the structured metadata; pass
+`include_data_uri=true` only if you also want the base64 in the JSON.
+
+## The learning loop
+
+1. `suggest_with_learning` combines image analysis with records for the same
+   tissue and marker. Records are scored by exact or family match on tissue
+   and marker (+3 / +1.5 to +2), quality improvement, image-characteristic
+   similarity, a 30-day recency decay, and a 1.5x weight for project-local
+   records; confidence combines record count, exact matches, average
+   improvement and parameter consistency (coefficient of variation).
+2. `subtract_blank` (and the other processing tools) apply the parameters;
+   `assess_quality` scores the result.
+3. `approve_and_learn` records every operation's parameters with the before and
+   after quality, normalising tissue and marker names (`CD3e` → `cd3`,
+   `DAPI-01` → `dapi`, whole-token matching so `CD31` never becomes `cd3`).
+4. Next time, the recommendation confidence crosses the "learned" tier (> 0.5)
+   and the learned values take precedence over the heuristic.
+
+Databases: `<project>/.kintsugi/parameter_learning.db` and
+`~/.kintsugi/parameter_learning.db`. `kintsugi mcp pretrain <project>` seeds
+them from existing processed pairs; those bootstrap rows are visible to
+recommendations at reduced weight and can never push a recommendation above
+the 0.5 tier on their own. An existing `<project>/.claude_workflow/` from an
+earlier release is read as is and moved to `.kintsugi/` on the first write.
+Both databases are created when parameters are first recorded; looking up
+recommendations or statistics never creates them.
+
+## Security model
+
+The server is a **local, single-user stdio subprocess** started by Claude Code
+with the user's own permissions; there is no network listener, authentication
+or multi-tenancy, so the relevant threat is a model-supplied argument escaping
+the project.
+
+| Risk | Control |
+|------|---------|
+| Path traversal / symlink escape | `safe_filename` (bare names only), `ensure_within` (resolves symlinks, must stay under the project) on every path argument; `cycle` and `output_name` are validated the same way |
+| Loading a model file the model chose | `denoise_advanced` and `predict_parameters` only accept checkpoints under `project_path` (if it is a KINTSUGI project), the server's project or `~/.kintsugi/models` (`allowed_model_roots`); PyTorch checkpoints load with `weights_only=True` |
+| Resource exhaustion | Schema bounds (`filter_size` 1–99, `n_trials` ≤ 1000, `max_size` ≤ 4096, ...) enforced by the SDK, plus stricter in-body clamps that reject NaN, inf and booleans |
+| Over-broad approval | The generated `settings.local.json` approves only the `kintsugi` server; `enableAllProjectMcpServers` is never written |
+| Stdout corruption | The CLI banner and project loader write to stderr/logging; `tests/test_mcp_stdio.py` asserts the stream is pure JSON-RPC |
+| Writing where the client happened to start the server | Without `--project-dir`, `KINTSUGI_PROJECT_DIR` or a project working directory, tools that need a project return an error asking for `project_path`; nothing is written under an arbitrary working directory |
+
+Not applicable to this server, and deliberately absent: OAuth or API keys, rate
+limiting, DNS-rebinding protection, streamable HTTP. See `SECURITY.md` for how
+to report a vulnerability.
+
+### Why the tools are not prefixed `kintsugi_`
+
+The 32 names are valid, unique, verb-first `snake_case` names, and Claude Code
+already namespaces every MCP tool as `mcp__kintsugi__<tool>`. A prefix would
+duplicate that namespace while breaking existing permission rules, notebooks
+and evaluation tasks. The server's `instructions` and each tool's title carry
+the context instead.
+
+## Evaluation
+
+```bash
+python evals/mcp/harness.py            # structural pass, no network
+python evals/mcp/harness.py --strict   # what CI runs on every MCP change
+ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic   # tool-selection accuracy
+```
+
+The structural pass reports the token cost of the advertised tool definitions,
+missing descriptions, titles or annotations, confusable tool groups, eval tasks
+that name absent tools, and tools no task targets. `--strict` fails on any of
+those and on documentation drift, so the table above, the registry and the
+server can never disagree. The committed baseline lives in
+`evals/mcp/baseline.json`; `evals/mcp/README.md` explains the numbers.
+
+## A recorded session
+
+The transcript below is produced by `python evals/mcp/demo.py`, which creates a
+synthetic project, drives the real server through the in-process client and
+prints what each tool returned. `tests/test_mcp_demo.py` runs it in CI.
+
+<!-- mcp-demo:begin -->
+Server `kintsugi` 1.2.3, 32 tools, project `<project>`.
+
+**1. `list_channels`** `{"cycle": "1"}`
+
+```json
+{
+  "status": "success",
+  "project": "<project>",
+  "total_channels": 2,
+  "channels": [
+    {
+      "cycle": "cyc001",
+      "channel": "Blank",
+      "source": "raw",
+      "path": "<project>/data/raw/cyc001/Blank.tif",
+      "size_mb": 0.125
+    },
+    {
+      "cycle": "cyc001",
+      "channel": "CD3",
+      "source": "raw",
+      "path": "<project>/data/raw/cyc001/CD3.tif",
+      "size_mb": 0.125
+    }
+  ],
+  "currently_loaded": []
+}
+```
+
+**2. `load_channel`** `{"cycle": "1", "channel": "CD3"}`
+
+```json
+{
+  "status": "loaded",
+  "name": "cyc001_CD3",
+  "shape": [
+    256,
+    256
+  ],
+  "dtype": "uint16",
+  "source": "<project>/data/raw/cyc001/CD3.tif",
+  "stats": {
+    "min": 366.0,
+    "max": 4087.0,
+    "mean": 721.256,
+    "std": 533.247
+  }
+}
+```
+
+**3. `load_channel`** `{"cycle": "1", "channel": "Blank"}`
+
+```json
+{
+  "status": "loaded",
+  "name": "cyc001_Blank",
+  "shape": [
+    256,
+    256
+  ],
+  "dtype": "uint16",
+  "source": "<project>/data/raw/cyc001/Blank.tif",
+  "stats": {
+    "min": 365.0,
+    "max": 796.0,
+    "mean": 542.652,
+    "std": 81.496
+  }
+}
+```
+
+**4. `get_image_stats`** `{"channel": "cyc001_CD3"}`
+
+```json
+{
+  "status": "success",
+  "channel": "cyc001_CD3",
+  "statistics": {
+    "shape": [
+      256,
+      256
+    ],
+    "dtype": "uint16",
+    "min": 296.0,
+    "max": 4680.0,
+    "mean": 729.46,
+    "std": 540.832,
+    "median": 562.0,
+    "percentiles": {
+      "p1": 387.0,
+      "p5": 426.0,
+      "p10": 448.0,
+      "p25": 491.0,
+      "p50": 562.0,
+      "p75": 673.0,
+      "p90": 1144.0,
+      "p95": 1953.25,
+      "p99": 3286.65
+    },
+    "histogram": {
+      "counts": [
+        531,
+        10902,
+        20851,
+        13821,
+        7667,
+        2134,
+        "... (50 items)"
+      ],
+      "bin_edges": [
+        296.0,
+        383.68,
+        471.36,
+        559.04,
+        646.72,
+        734.4,
+        "... (51 items)"
+      ],
+      "bin_centers": [
+        339.84,
+        427.52,
+        515.2,
+        602.88,
+        690.56,
+        778.24,
+        "... (50 items)"
+      ]
+    },
+    "zero_pixels": 0,
+    "zero_ratio": 0.0,
+    "saturated_pixels": 0,
+    "saturation_ratio": 0.0,
+    "nonzero_mean": 729.46,
+    "nonzero_std": 540.832,
+    "nonzero_median": 562.0,
+    "nonzero_ratio": 1.0
+  }
+}
+```
+
+**5. `get_thumbnail`** `{"channel": "cyc001_CD3", "max_size": 64}`
+
+content: image block (image/png, 3996 base64 chars) + text
+```json
+{
+  "status": "success",
+  "channel": "cyc001_CD3",
+  "thumbnail": {
+    "width": 64,
+    "height": 64,
+    "format": "png"
+  },
+  "original_shape": [
+    256,
+    256
+  ]
+}
+```
+
+**6. `suggest_with_learning`** `{"channel": "cyc001_CD3", "tissue_type": "tonsil", "marker_name": "CD3", "blank_channel": "cyc001_Blank"}`
+
+```json
+{
+  "status": "success",
+  "channel": "cyc001_CD3",
+  "tissue_type": "tonsil",
+  "tissue_type_normalized": "tonsil",
+  "marker_name": "CD3",
+  "marker_name_normalized": "cd3",
+  "image_characteristics": {
+    "snr": 49.23,
+    "dynamic_range": 4384.0,
+    "sparsity": 0.9,
+    "background_level": 448.0
+  },
+  "operations": {
+    "blank_subtraction": {
+      "recommended_parameters": {
+        "blank_scale_factor": 1.0,
+        "blank_clip_factor": 423,
+        "smooth_low": false,
+        "smooth_high": false,
+        "erosion": 1
+      },
+      "confidence": 0.3,
+      "source": "heuristic",
+      "rationale": "Blank mean=545, Signal mean=729",
+      "learned_records": 0
+    },
+    "denoise": {
+      "recommended_parameters": {
+        "method": "median",
+        "filter_size": 1
+      },
+      "confidence": 0.3,
+      "source": "heuristic",
+      "rationale": "Low noise (std=23) - minimal filtering",
+      "learned_records": 0
+    },
+    "clahe": {
+      "recommended_parameters": {
+        "clip_limit": 0.02,
+        "tile_grid_size": 50,
+        "nbins": 128
+      },
+      "confidence": 0.3,
+      "source": "heuristic",
+      "rationale": "Low dynamic range (2900) - aggressive CLAHE",
+      "learned_records": 0
+    },
+    "clean_background": {
+      "recommended_parameters": {
+        "background_threshold": 224,
+        "remove_small_objects": true,
+        "min_object_size": 30
+      },
+      "confidence": 0.3,
+      "source": "heuristic",
+      "rationale": "Background level at p10=448",
+      "learned_records": 0
+    },
+    "gaussian_subtract": {
+      "recommended_parameters": {
+        "sigma": 10,
+        "scale_factor": 0.2
+      },
+      "confidence": 0.3,
+      "source": "heuristic",
+      "rationale": "Standard Gaussian subtraction",
+      "learned_records": 0
+    }
+  },
+  "suggested_order": [
+    "clahe",
+    "clean_background",
+    "blank_subtraction",
+    "denoise",
+    "gaussian_subtract"
+  ]
+}
+```
+
+**7. `analyze_weighted_subtraction`** `{"signal_channel": "cyc001_CD3", "blank_channel": "cyc001_Blank", "n_ranges": 3}`
+
+```json
+{
+  "status": "success",
+  "method": "weighted",
+  "n_ranges": 3,
+  "range_method": "percentile",
+  "base_scale_factor": 0.69,
+  "blank_clip_factor": 457,
+  "transition_width": 0.1,
+  "ranges": [
+    {
+      "lower_bound": 296.0,
+      "upper_bound": 512.0,
+      "weight": 0.826,
+      "label": "background",
+      "pixel_fraction": 0.33
+    },
+    {
+      "lower_bound": 512.0,
+      "upper_bound": 628.0,
+      "weight": 0.783,
+      "label": "dim",
+      "pixel_fraction": 0.335
+    },
+    {
+      "lower_bound": 628.0,
+      "upper_bound": 4680.0,
+      "weight": 0.914,
+      "label": "bright",
+      "pixel_fraction": 0.336
+    }
+  ],
+  "confidence": 0.75,
+  "analysis": {
+    "signal_blank_correlation": 0.247,
+    "af_contribution": 0.392
+  },
+  "tissue_type": "unknown",
+  "marker_name": null
+}
+```
+
+**8. `subtract_blank`** `{"signal_channel": "cyc001_CD3", "blank_channel": "cyc001_Blank", "method": "weighted", "n_ranges": 3, "tissue_type": "tonsil", "marker_name": "CD3"}`
+
+```json
+{
+  "status": "success",
+  "output_name": "cyc001_CD3_subtracted",
+  "method": "weighted",
+  "shape": [
+    256,
+    256
+  ],
+  "stats": {
+    "min": 0.0,
+    "max": 4186.0,
+    "mean": 311.459,
+    "std": 522.008
+  },
+  "parameters_used": {
+    "method": "weighted",
+    "blank_clip_factor": 457,
+    "base_scale_factor": 1.0,
+    "n_ranges": 3,
+    "range_method": "percentile",
+    "transition_width": 0.1
+  },
+  "range_metrics": [
+    {
+      "label": "background",
+      "weight": 0.826,
+      "pixel_count": 21631,
+      "snr": 21.85,
+      "af_removal": 1,
+      "signal_preservation": 0.901
+    },
+    {
+      "label": "dim",
+      "weight": 0.783,
+      "pixel_count": 21919,
+      "snr": 16.749,
+      "af_removal": 1,
+      "signal_preservation": 0.992
+    },
+    {
+      "label": "bright",
+      "weight": 0.914,
+      "pixel_count": 21985,
+      "snr": 47.53,
+      "af_removal": 0,
+      "signal_preservation": 0.985
+    }
+  ],
+  "quality": {
+    "snr_improvement": 0.001,
+    "af_removal": 1,
+    "signal_preservation": 0.959,
+    "residual_correlation": -0.036,
+    "quality_score": 0.849
+  }
+}
+```
+
+**9. `assess_quality`** `{"channel": "cyc001_CD3_subtracted"}`
+
+```json
+{
+  "status": "success",
+  "channel": "cyc001_CD3_subtracted",
+  "quality_score": 0.773,
+  "requires_review": true,
+  "metrics": {
+    "min_intensity": 0.0,
+    "max_intensity": 4186.0,
+    "mean_intensity": 311.459,
+    "std_intensity": 522.008,
+    "dynamic_range": 4186.0,
+    "snr": 35.861,
+    "signal_background_ratio": 24.111,
+    "coefficient_of_variation": 1.676,
+    "histogram_entropy": 5.229,
+    "saturation_ratio": 0.041,
+    "sharpness": 131.683,
+    "autofluorescence_score": 0.041
+  },
+  "recommendations": [
+    "\u26a0 Image quality is acceptable. Some processing recommended.",
+    "Low dynamic range. CLAHE may help enhance contrast."
+  ],
+  "threshold_used": 0.85
+}
+```
+
+**10. `save_processed`** `{"channel": "cyc001_CD3_subtracted", "output_name": "CD3_isolated"}`
+
+```json
+{
+  "status": "success",
+  "output_path": "<project>/data/processed/signal_isolated/CD3_isolated.tiff",
+  "history_path": "<project>/data/processed/signal_isolated/CD3_isolated_history.json",
+  "format": "tiff",
+  "shape": [
+    256,
+    256
+  ]
+}
+```
+
+**11. `approve_and_learn`** `{"channel": "cyc001_CD3_subtracted", "tissue_type": "tonsil", "marker_name": "CD3", "operations_params": {"blank_subtraction": {"method": "weighted", "n_ranges": 3}}, "quality_before": 0.4, "quality_after": 0.8}`
+
+```json
+{
+  "status": "success",
+  "message": "Processing approved and parameters recorded for learning",
+  "tissue_type": "tonsil",
+  "marker_name": "CD3",
+  "quality_improvement": 0.4,
+  "operations_recorded": [
+    {
+      "operation": "blank_subtraction",
+      "recorded": true,
+      "record_id": 1
+    }
+  ]
+}
+```
+
+**12. `get_learned_parameters`** `{"tissue_type": "tonsil", "marker_name": "CD3", "operation": "blank_subtraction"}`
+
+```json
+{
+  "status": "success",
+  "tissue_type": "tonsil",
+  "tissue_type_normalized": "tonsil",
+  "marker_name": "CD3",
+  "marker_name_normalized": "cd3",
+  "operation": "blank_subtraction",
+  "recommended_parameters": {
+    "method": "weighted",
+    "n_ranges": 3
+  },
+  "confidence": 0.444,
+  "confidence_level": "low",
+  "based_on_records": 1,
+  "approved_records": 1,
+  "bootstrap_records": 0,
+  "similar_records": [
+    {
+      "tissue": "tonsil",
+      "marker": "CD3",
+      "quality_improvement": 0.4,
+      "score": 12.45,
+      "parameters": {
+        "method": "weighted",
+        "n_ranges": 3
+      }
+    }
+  ]
+}
+```
+
+**13. `get_session_state`** `{}`
+
+```json
+{
+  "status": "success",
+  "project_root": "<project>",
+  "loaded_images": {
+    "cyc001_CD3": {
+      "shape": [
+        256,
+        256
+      ],
+      "dtype": "uint16",
+      "metadata": {
+        "source_path": "<project>/data/raw/cyc001/CD3.tif",
+        "cycle": "cyc001",
+        "channel": "CD3",
+        "project": "<project>"
+      }
+    },
+    "cyc001_Blank": {
+      "shape": [
+        256,
+        256
+      ],
+      "dtype": "uint16",
+      "metadata": {
+        "source_path": "<project>/data/raw/cyc001/Blank.tif",
+        "cycle": "cyc001",
+        "channel": "Blank",
+        "project": "<project>"
+      }
+    },
+    "cyc001_CD3_subtracted": {
+      "shape": [
+        256,
+        256
+      ],
+      "dtype": "uint16",
+      "metadata": {
+        "source": "cyc001_CD3",
+        "blank": "cyc001_Blank",
+        "operation": "subtract_blank_weighted",
+        "saved_path": "<project>/data/processed/signal_isolated/CD3_isolated.tiff"
+      }
+    }
+  },
+  "total_loaded": 3,
+  "processing_history": {
+    "cyc001_CD3": 0,
+    "cyc001_Blank": 0,
+    "cyc001_CD3_subtracted": 2
+  },
+  "memory_usage": {
+    "total_mb": 0.375,
+    "total_gb": 0.0
+  }
+}
+```
+<!-- mcp-demo:end -->
+
+## Compatibility
+
+| Component | Supported |
+|-----------|-----------|
+| `mcp` Python SDK | 2.x (`mcp>=2.0,<3`); 1.x is not supported |
+| Python | 3.10, 3.11, 3.12 |
+| Client | Any MCP client that speaks stdio; `kintsugi mcp clients` lists those `kintsugi mcp config` writes or prints configuration for |
+| Transport | stdio only |
+
+## Troubleshooting
+
+- **`Executable not found in $PATH: kintsugi`** — the repository's own
+  `.mcp.json` uses a bare `kintsugi`; run `kintsugi mcp config <project>` so the
+  generated entry carries the absolute path of the executable.
+- **Server shows "Pending approval"** — accept the workspace trust dialog in
+  Claude Code; `.claude/settings.local.json` approvals are applied only in a
+  trusted folder. `claude mcp reset-project-choices` clears earlier decisions.
+- **`mcp 1.x is installed but KINTSUGI requires mcp>=2.0`** — run
+  `pip install "mcp>=2.0,<3"` in the environment the server starts from.
+- **A tool call fails with a validation error** — the message names the
+  parameter and the allowed values; the schema is the contract.
+- **Running the server by hand** — `kintsugi mcp start` reads JSON-RPC on stdin;
+  pipe an `initialize` request to see the handshake.

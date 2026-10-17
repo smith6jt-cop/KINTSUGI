@@ -101,11 +101,13 @@ For detailed documentation including the weighted multi-range algorithm, paramet
 ### Option A: Claude-Guided Workflow (Recommended)
 
 Use Claude Code with the KINTSUGI MCP server for interactive, AI-assisted signal isolation.
+The server, its tools, resources and prompt, the learning loop and the security model are
+documented in [Claude Code Integration (MCP Server)](mcp.md).
 
 **Setup:**
 ```bash
-pip install kintsugi[claude]
-# If using kintsugi init, Claude config is automatic
+pip install -e ".[mcp]"   # or: kintsugi install mcp  (needs mcp>=2.0,<3)
+# If using kintsugi init, Claude config (.mcp.json + .claude/settings.local.json) is automatic
 # For existing projects: kintsugi mcp config /path/to/project
 ```
 

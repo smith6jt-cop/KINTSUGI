@@ -110,7 +110,7 @@ The Signal Isolation workflow has been replaced with:
    - Real-time preview with stackview
 
    ```python
-   from kintsugi.claude import blank_subtraction_tuner, denoise_tuner
+   from kintsugi.assist import blank_subtraction_tuner, denoise_tuner
 
    # Interactive blank subtraction
    result = blank_subtraction_tuner(signal_channel, blank_channel)
@@ -181,7 +181,7 @@ DEPRECATION_MAP = {
     # Notebook 3 functions
     "ini_params": {
         "replacement": "kintsugi.mcp.tools.signal_isolation.subtract_blank",
-        "message": "Use MCP subtract_blank tool or kintsugi.claude.blank_subtraction_tuner",
+        "message": "Use MCP subtract_blank tool or kintsugi.assist.blank_subtraction_tuner",
     },
     "ini_params_alt": {
         "replacement": "kintsugi.mcp.tools.signal_isolation.subtract_blank",

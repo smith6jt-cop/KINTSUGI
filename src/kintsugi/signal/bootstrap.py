@@ -270,7 +270,7 @@ def _analyze_and_record_pair(
     # Record to learning database
     recorded = False
     try:
-        from kintsugi.claude.parameter_learning import ParameterLearningEngine
+        from kintsugi.assist.parameter_learning import ParameterLearningEngine
 
         engine = ParameterLearningEngine(str(project_dir) if project_dir else None)
         engine.record_parameters(

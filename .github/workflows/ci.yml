@@ -60,14 +60,20 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,mcp]"
+          python -c "import importlib.metadata as m; print('mcp', m.version('mcp'))"
 
       - name: Run tests
+        env:
+          # The mcp extra is installed, so MCP protocol tests must run, not skip.
+          KINTSUGI_REQUIRE_MCP: "1"
         run: |
           pytest tests/ -v --tb=short -x
 
       - name: Run tests with coverage
         if: matrix.python-version == '3.10'
+        env:
+          KINTSUGI_REQUIRE_MCP: "1"
         run: |
           pytest tests/ --cov=src/kintsugi --cov-report=xml --cov-report=term
 
@@ -194,7 +200,6 @@ jobs:
   docs:
     name: Documentation
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
@@ -203,20 +208,20 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Validate README
+      - name: Install system dependencies
         run: |
-          python -c "
-          import re
-          with open('README.md') as f:
-              content = f.read()
+          sudo apt-get update
+          sudo apt-get install -y libvips-dev
 
-          # Check for broken links (basic check)
-          links = re.findall(r'\[([^\]]+)\]\(([^)]+)\)', content)
-          print(f'Found {len(links)} links in README')
+      - name: Install package and documentation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[docs]" -r docs/requirements.txt
 
-          # Check for required sections
-          required = ['Installation', 'Notebooks']
-          for section in required:
-              if section not in content:
-                  print(f'Warning: Missing section: {section}')
-          "
+      - name: Check generated MCP tool reference is current
+        run: kintsugi mcp tools --check docs/mcp.md docs/cli.md README.md CLAUDE.md AGENTS.md
+
+      - name: Build documentation (strict)
+        run: |
+          cd docs
+          sphinx-build -M html . _build -W --keep-going

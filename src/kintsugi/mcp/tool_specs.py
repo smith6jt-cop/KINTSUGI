@@ -2,883 +2,395 @@
 Declarative tool registry for the KINTSUGI MCP server.
 
 Each entry pairs a public MCP tool name with its handler (``module``/``attr`` in
-``kintsugi.mcp.tools``), a top-level ``description``, and the ``input_schema`` that
-is advertised to clients verbatim. Keeping this as plain data (no ``mcp`` import)
-lets ``kintsugi mcp tools`` and tests read the registry without the optional
-``[claude]`` dependency installed.
+``kintsugi.mcp.tools``), a human-readable ``title``, the top-level ``description``
+advertised to clients, and the MCP tool ``annotations`` (behaviour hints). Keeping
+this as plain data (no ``mcp`` import) lets ``kintsugi mcp tools``, the docs
+generator, and the tests read the registry without the optional ``[mcp]``
+dependency installed.
 
-The input schemas preserve the per-parameter descriptions and ``enum`` constraints
-that FastMCP's signature-derived schemas would otherwise drop. Argument *validation*
-still runs from each handler's function signature (types) plus the semantic
-``path_safety`` checks inside the handler body; this schema is the contract clients
-read when deciding how to call a tool.
+The *input schema* of every tool is derived by the SDK from the handler's own
+signature: parameter descriptions, enums and numeric ranges live in
+``typing.Annotated[..., pydantic.Field(...)]`` and ``typing.Literal[...]``
+annotations on the handler, where they are also enforced. There is no second,
+hand-written copy of the schema here.
+
+Annotation keys use the MCP wire spelling (``readOnlyHint`` etc.). ``openWorldHint``
+is false for every tool: the server only touches the local project directory
+and its own session state.
+
+Naming: tool names are deliberately *not* prefixed with ``kintsugi_``. They are
+valid, unique, verb-first snake_case names (SEP-986), and Claude Code already
+namespaces every MCP tool as ``mcp__kintsugi__<tool>``; a prefix would only
+duplicate that and break existing permission rules, notebooks and eval tasks.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-# name -> (handler module, handler attr, description, advertised input schema)
+# Behaviour-hint presets (MCP ToolAnnotations, camelCase wire keys).
+_READ_ONLY: dict[str, bool] = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": False,
+}
+# Adds/replaces an image in the in-memory session; re-running yields the same state.
+_PROCESSING: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": False,
+}
+# Appends a record (learning DB) or runs a stochastic search; repeats accumulate.
+_APPENDS: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": False,
+}
+# Writes files under the project and may overwrite existing output.
+_WRITES_FILES: dict[str, bool] = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": False,
+    "openWorldHint": False,
+}
+
 TOOL_SPECS: list[dict[str, Any]] = [
-    # ---- Signal Isolation ----
+    # ---- Signal isolation ----
     {
         "name": "load_channel",
         "module": "signal_isolation",
         "attr": "load_channel",
+        "title": "Load channel",
         "description": (
-            "Load a channel image from a KINTSUGI project. Returns image metadata "
-            "and prepares it for processing."
+            "Load a channel image from a KINTSUGI project. Returns image metadata and prepares it "
+            "for processing."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "project_path": {
-                    "type": "string",
-                    "description": "Path to the KINTSUGI project directory",
-                },
-                "cycle": {
-                    "type": "string",
-                    "description": "Cycle name or number (e.g., 'cyc001' or '1')",
-                },
-                "channel": {
-                    "type": "string",
-                    "description": "Channel name (e.g., 'CD3', 'DAPI')",
-                },
-            },
-            "required": ["project_path", "cycle", "channel"],
-        },
+        "annotations": _PROCESSING,
     },
     {
         "name": "subtract_blank",
         "module": "signal_isolation",
         "attr": "subtract_blank",
+        "title": "Subtract blank (autofluorescence)",
         "description": (
-            "Subtract autofluorescence/blank channel from signal. Uses optimized "
-            "Dask operations for large images."
+            "Subtract autofluorescence/blank channel from signal. Uses optimized Dask operations "
+            "for large images."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "signal_channel": {
-                    "type": "string",
-                    "description": "Name of loaded signal channel",
-                },
-                "blank_channel": {
-                    "type": "string",
-                    "description": "Name of loaded blank channel",
-                },
-                "blank_clip_factor": {
-                    "type": "integer",
-                    "description": "Clip blank values below this threshold to 0 (default: 0)",
-                    "default": 0,
-                },
-                "blank_scale_factor": {
-                    "type": "number",
-                    "description": "Scale factor for blank subtraction (default: 1.0)",
-                    "default": 1.0,
-                },
-                "smooth_low": {
-                    "type": "boolean",
-                    "description": "Apply smoothing to low-intensity regions",
-                    "default": False,
-                },
-                "smooth_high": {
-                    "type": "boolean",
-                    "description": "Apply smoothing to high-intensity regions",
-                    "default": False,
-                },
-                "erosion": {
-                    "type": "integer",
-                    "description": "Erosion disk size for void removal (default: 0)",
-                    "default": 0,
-                },
-            },
-            "required": ["signal_channel", "blank_channel"],
-        },
+        "annotations": _PROCESSING,
     },
     {
         "name": "analyze_weighted_subtraction",
         "module": "signal_isolation",
         "attr": "analyze_weighted_subtraction",
+        "title": "Preview weighted subtraction",
         "description": (
-            "Preview the per-intensity-range weights for weighted autofluorescence "
-            "subtraction WITHOUT applying it. Use this to verify the plan before calling "
-            "subtract_blank with method='weighted'."
+            "Preview the per-intensity-range weights for weighted autofluorescence subtraction "
+            "WITHOUT applying it. Use this to verify the plan before calling subtract_blank with "
+            "method='weighted'."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "signal_channel": {
-                    "type": "string",
-                    "description": "Name of loaded signal channel",
-                },
-                "blank_channel": {
-                    "type": "string",
-                    "description": "Name of loaded blank channel",
-                },
-                "n_ranges": {
-                    "type": "integer",
-                    "description": "Number of intensity ranges (default: 5)",
-                    "default": 5,
-                },
-                "range_method": {
-                    "type": "string",
-                    "enum": ["percentile", "otsu"],
-                    "description": "Range boundary method (default: percentile)",
-                    "default": "percentile",
-                },
-                "tissue_type": {
-                    "type": "string",
-                    "description": "Tissue type for context (optional)",
-                },
-                "marker_name": {
-                    "type": "string",
-                    "description": "Marker name for context (optional)",
-                },
-            },
-            "required": ["signal_channel", "blank_channel"],
-        },
+        "annotations": _READ_ONLY,
     },
     {
         "name": "denoise",
         "module": "signal_isolation",
         "attr": "denoise",
+        "title": "Denoise (basic filters)",
         "description": "Apply denoising filters (percentile, uniform, median) to reduce noise.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel to denoise",
-                },
-                "method": {
-                    "type": "string",
-                    "enum": ["percentile", "uniform", "median"],
-                    "description": "Denoising method",
-                },
-                "filter_size": {
-                    "type": "integer",
-                    "description": "Filter kernel size (default: 3)",
-                    "default": 3,
-                },
-                "percentile": {
-                    "type": "integer",
-                    "description": "Percentile value for percentile filter (default: 10)",
-                    "default": 10,
-                },
-            },
-            "required": ["channel", "method"],
-        },
+        "annotations": _PROCESSING,
     },
     {
         "name": "apply_clahe",
         "module": "signal_isolation",
         "attr": "apply_clahe",
-        "description": (
-            "Apply Contrast Limited Adaptive Histogram Equalization to enhance local contrast."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel",
-                },
-                "clip_limit": {
-                    "type": "number",
-                    "description": "Clip limit for contrast limiting (default: 0.01)",
-                    "default": 0.01,
-                },
-                "tile_grid_size": {
-                    "type": "integer",
-                    "description": "Size of grid for histogram equalization (default: 70)",
-                    "default": 70,
-                },
-                "nbins": {
-                    "type": "integer",
-                    "description": "Number of histogram bins (default: 128)",
-                    "default": 128,
-                },
-            },
-            "required": ["channel"],
-        },
+        "title": "Apply CLAHE contrast",
+        "description": "Apply Contrast Limited Adaptive Histogram Equalization to enhance local contrast.",
+        "annotations": _PROCESSING,
     },
     {
         "name": "clean_background",
         "module": "signal_isolation",
         "attr": "clean_background",
+        "title": "Clean background",
         "description": "Remove background and small objects from the image.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel",
-                },
-                "background_threshold": {
-                    "type": "integer",
-                    "description": "Intensity threshold below which pixels are set to 0 (default: 100)",
-                    "default": 100,
-                },
-                "remove_small_objects": {
-                    "type": "boolean",
-                    "description": "Whether to remove small connected components",
-                    "default": False,
-                },
-                "min_object_size": {
-                    "type": "integer",
-                    "description": "Minimum object size to keep (default: 30)",
-                    "default": 30,
-                },
-            },
-            "required": ["channel"],
-        },
+        "annotations": _PROCESSING,
     },
     {
         "name": "gaussian_subtract",
         "module": "signal_isolation",
         "attr": "gaussian_subtract",
-        "description": (
-            "Subtract Gaussian-blurred version to remove structured background/autofluorescence."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel",
-                },
-                "sigma": {
-                    "type": "integer",
-                    "description": "Gaussian sigma value (default: 10)",
-                    "default": 10,
-                },
-                "scale_factor": {
-                    "type": "number",
-                    "description": "Scale factor for subtraction (default: 0.1)",
-                    "default": 0.1,
-                },
-            },
-            "required": ["channel"],
-        },
+        "title": "Gaussian background subtraction",
+        "description": "Subtract Gaussian-blurred version to remove structured background/autofluorescence.",
+        "annotations": _PROCESSING,
     },
     {
         "name": "denoise_advanced",
         "module": "signal_isolation",
         "attr": "denoise_advanced",
+        "title": "Denoise (advanced)",
         "description": (
-            "Apply advanced denoising: adaptive (auto-select best filter), bilateral "
-            "(edge-preserving), nlm (non-local means), bm3d (block matching 3D), n2v "
-            "(self-supervised Noise2Void), or patch_svd."
+            "Apply advanced denoising: adaptive (auto-select best filter), bilateral (edge- "
+            "preserving), nlm (non-local means), bm3d (block matching 3D), n2v (self-supervised "
+            "Noise2Void), or patch_svd."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel to denoise",
-                },
-                "method": {
-                    "type": "string",
-                    "enum": ["adaptive", "bilateral", "nlm", "bm3d", "n2v", "patch_svd"],
-                    "description": "Advanced denoising method (default: adaptive)",
-                    "default": "adaptive",
-                },
-                "strength": {
-                    "type": "string",
-                    "enum": ["light", "medium", "strong", "auto"],
-                    "description": "Denoising strength (default: auto)",
-                    "default": "auto",
-                },
-                "preserve_edges": {
-                    "type": "boolean",
-                    "description": "Prioritize edge preservation (default: true)",
-                    "default": True,
-                },
-                "n2v_epochs": {
-                    "type": "integer",
-                    "description": "Training epochs for N2V method (default: 50)",
-                    "default": 50,
-                },
-                "model_path": {
-                    "type": "string",
-                    "description": "Path to pre-trained N2V model (optional, skip training if provided)",
-                },
-            },
-            "required": ["channel"],
-        },
+        "annotations": _PROCESSING,
     },
-    # ---- Quality Assessment ----
+    # ---- Quality assessment ----
     {
         "name": "assess_quality",
         "module": "quality_assessment",
         "attr": "assess_quality",
+        "title": "Assess quality",
         "description": (
-            "Assess channel quality using heuristic and/or deep learning metrics. "
-            "Returns SNR, contrast, and confidence scores."
+            "Assess channel quality with heuristic metrics (SNR, contrast, dynamic range, "
+            "background) and flag channels that need manual review. Returns a 0-1 quality "
+            "score, the metrics and recommendations."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel to assess",
-                },
-                "use_dl_model": {
-                    "type": "boolean",
-                    "description": "Use deep learning model if available (default: False)",
-                    "default": False,
-                },
-                "confidence_threshold": {
-                    "type": "number",
-                    "description": "Threshold below which manual review is flagged (default: 0.85)",
-                    "default": 0.85,
-                },
-            },
-            "required": ["channel"],
-        },
+        "annotations": _READ_ONLY,
     },
     {
         "name": "compute_snr",
         "module": "quality_assessment",
         "attr": "compute_snr",
+        "title": "Compute SNR",
         "description": "Compute Signal-to-Noise Ratio for a channel.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel",
-                },
-            },
-            "required": ["channel"],
-        },
+        "annotations": _READ_ONLY,
+    },
+    {
+        "name": "batch_assess_quality",
+        "module": "quality_assessment",
+        "attr": "batch_assess_quality",
+        "title": "Batch quality assessment",
+        "description": (
+            "Assess several loaded channels at once: scores sorted worst-first and a review "
+            "queue of the channels below the threshold."
+        ),
+        "annotations": _READ_ONLY,
     },
     # ---- Visualization ----
     {
         "name": "get_image_stats",
         "module": "visualization",
         "attr": "get_image_stats",
+        "title": "Image statistics",
         "description": "Get statistics for a loaded image (min, max, mean, std, histogram).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel",
-                },
-            },
-            "required": ["channel"],
-        },
+        "annotations": _READ_ONLY,
     },
     {
         "name": "get_thumbnail",
         "module": "visualization",
         "attr": "get_thumbnail",
+        "title": "Thumbnail preview",
         "description": "Get a downsampled thumbnail of the image for preview.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel",
-                },
-                "max_size": {
-                    "type": "integer",
-                    "description": "Maximum dimension of thumbnail (default: 512)",
-                    "default": 512,
-                },
-            },
-            "required": ["channel"],
-        },
+        "annotations": _READ_ONLY,
+    },
+    {
+        "name": "compare_channels",
+        "module": "visualization",
+        "attr": "compare_channels",
+        "title": "Compare two channels",
+        "description": (
+            "Compare two loaded channels statistically (means, difference, correlation, SSIM) "
+            "with a one-line interpretation; useful for before/after checks."
+        ),
+        "annotations": _READ_ONLY,
+    },
+    {
+        "name": "get_intensity_profile",
+        "module": "visualization",
+        "attr": "get_intensity_profile",
+        "title": "Intensity profile",
+        "description": (
+            "Intensity values along a horizontal or vertical line through a loaded channel, "
+            "for spotting gradients or uneven illumination."
+        ),
+        "annotations": _READ_ONLY,
     },
     # ---- Workflow ----
     {
         "name": "list_channels",
         "module": "workflow",
         "attr": "list_channels",
+        "title": "List project channels",
         "description": "List all available channels in the current project/cycle.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "project_path": {
-                    "type": "string",
-                    "description": "Path to KINTSUGI project",
-                },
-                "cycle": {
-                    "type": "string",
-                    "description": "Cycle name (optional - lists all if not specified)",
-                },
-            },
-            "required": ["project_path"],
-        },
+        "annotations": _READ_ONLY,
     },
     {
         "name": "save_processed",
         "module": "workflow",
         "attr": "save_processed",
+        "title": "Save processed channel",
         "description": "Save the processed channel to the project output directory.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of processed channel to save",
-                },
-                "output_name": {
-                    "type": "string",
-                    "description": "Output filename (optional - auto-generated if not provided)",
-                },
-                "format": {
-                    "type": "string",
-                    "enum": ["tiff", "zarr", "ome-tiff"],
-                    "description": "Output format (default: tiff)",
-                    "default": "tiff",
-                },
-            },
-            "required": ["channel"],
-        },
+        "annotations": _WRITES_FILES,
     },
     {
         "name": "get_processing_history",
         "module": "workflow",
         "attr": "get_processing_history",
-        "description": (
-            "Get the processing history for a channel, showing all operations applied."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of channel",
-                },
-            },
-            "required": ["channel"],
-        },
+        "title": "Processing history",
+        "description": "Get the processing history for a channel, showing all operations applied.",
+        "annotations": _READ_ONLY,
     },
     {
         "name": "suggest_parameters",
         "module": "workflow",
         "attr": "suggest_parameters",
+        "title": "Suggest parameters (heuristic)",
         "description": (
-            "Analyze channel and suggest processing parameters based on image characteristics."
+            "Rule-based suggestions for every operation from the channel's intensity "
+            "statistics, without the learning database. Prefer suggest_with_learning when "
+            "the tissue type and marker are known."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel",
-                },
-                "blank_channel": {
-                    "type": "string",
-                    "description": "Name of blank channel for AF estimation (optional)",
-                },
-            },
-            "required": ["channel"],
-        },
+        "annotations": _READ_ONLY,
     },
     {
         "name": "generate_jupyter_cell",
         "module": "workflow",
         "attr": "generate_jupyter_cell",
+        "title": "Generate Jupyter tuning cell",
         "description": (
             "Generate a Jupyter notebook cell for interactive parameter tuning with Kview2 widgets."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "operation": {
-                    "type": "string",
-                    "enum": [
-                        "blank_subtraction",
-                        "denoise",
-                        "clahe",
-                        "clean",
-                        "gaussian_subtract",
-                        "full_pipeline",
-                    ],
-                    "description": "Operation to create interactive tuner for",
-                },
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel",
-                },
-                "initial_params": {
-                    "type": "object",
-                    "description": "Initial parameter values (optional)",
-                },
-            },
-            "required": ["operation", "channel"],
-        },
+        "annotations": _READ_ONLY,
     },
-    # ---- Channel Clustering ----
+    # ---- Signal isolation ----
     {
         "name": "cluster_channels",
         "module": "signal_isolation",
         "attr": "cluster_channels_tool",
+        "title": "Cluster channels",
         "description": (
-            "Cluster channels by image feature similarity. Groups channels that share "
-            "similar intensity profiles, SNR, and texture so parameters can be tuned "
-            "once per cluster."
+            "Cluster channels by image feature similarity. Groups channels that share similar "
+            "intensity profiles, SNR, and texture so parameters can be tuned once per cluster."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "project_path": {
-                    "type": "string",
-                    "description": "Path to KINTSUGI project directory",
-                },
-                "n_clusters": {
-                    "type": "integer",
-                    "description": "Number of clusters (auto-select if omitted)",
-                },
-                "wavelength_aware": {
-                    "type": "boolean",
-                    "description": "Enforce same-wavelength clustering (default: true)",
-                    "default": True,
-                },
-            },
-            "required": ["project_path"],
-        },
+        "annotations": _PROCESSING,
     },
     {
         "name": "propagate_parameters",
         "module": "signal_isolation",
         "attr": "propagate_parameters_tool",
+        "title": "Propagate cluster parameters",
         "description": (
-            "Apply tuned signal isolation parameters from a representative channel to all "
-            "members of a cluster."
+            "Apply tuned signal isolation parameters from a representative channel to all members "
+            "of a cluster."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "project_path": {
-                    "type": "string",
-                    "description": "Path to KINTSUGI project directory",
-                },
-                "cluster_id": {
-                    "type": "integer",
-                    "description": "Cluster ID to propagate parameters to",
-                },
-                "params": {
-                    "type": "object",
-                    "description": "Processing parameters (blank_params and/or clean_params dicts)",
-                },
-                "output_dir": {
-                    "type": "string",
-                    "description": "Output directory (default: project signal_isolated dir)",
-                },
-            },
-            "required": ["project_path", "cluster_id", "params"],
-        },
+        "annotations": _WRITES_FILES,
     },
-    # ---- Parameter Learning ----
+    {
+        "name": "get_session_state",
+        "module": "workflow",
+        "attr": "get_session_state",
+        "title": "Session state",
+        "description": (
+            "Show what this server session holds: the project root it serves, every loaded "
+            "channel with shape/dtype/metadata, per-channel processing step counts, and memory "
+            "usage."
+        ),
+        "annotations": _READ_ONLY,
+    },
+    {
+        "name": "unload_channel",
+        "module": "workflow",
+        "attr": "unload_channel",
+        "title": "Unload channel",
+        "description": (
+            "Free server memory by dropping a loaded channel (or everything with clear_all). "
+            "Files on disk are untouched."
+        ),
+        "annotations": _PROCESSING,
+    },
+    # ---- Parameter learning ----
     {
         "name": "get_learned_parameters",
         "module": "learning",
         "attr": "get_learned_parameters",
+        "title": "Learned parameters",
         "description": (
             "Get recommended parameters based on learned history from similar tissue/marker "
             "combinations. Returns parameters with confidence scores."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "tissue_type": {
-                    "type": "string",
-                    "description": "Type of tissue (e.g., 'tonsil', 'lymph node', 'pancreas')",
-                },
-                "marker_name": {
-                    "type": "string",
-                    "description": "Marker name (e.g., 'CD3', 'CD20', 'DAPI')",
-                },
-                "operation": {
-                    "type": "string",
-                    "description": "Processing operation (e.g., 'blank_subtraction', 'denoise')",
-                },
-                "project_path": {
-                    "type": "string",
-                    "description": "Project path for project-specific learning (optional)",
-                },
-                "channel": {
-                    "type": "string",
-                    "description": "Channel name to get image characteristics from (optional)",
-                },
-            },
-            "required": ["tissue_type", "marker_name", "operation"],
-        },
+        "annotations": _READ_ONLY,
     },
     {
         "name": "record_successful_parameters",
         "module": "learning",
         "attr": "record_successful_parameters",
+        "title": "Record parameters",
         "description": (
             "Record a successful parameter set for future learning. Call after user approves "
             "processing results."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "tissue_type": {
-                    "type": "string",
-                    "description": "Type of tissue processed",
-                },
-                "marker_name": {
-                    "type": "string",
-                    "description": "Marker name",
-                },
-                "operation": {
-                    "type": "string",
-                    "description": "Processing operation",
-                },
-                "parameters": {
-                    "type": "object",
-                    "description": "Parameter dictionary that was used",
-                },
-                "quality_before": {
-                    "type": "number",
-                    "description": "Quality score before processing",
-                    "default": 0.0,
-                },
-                "quality_after": {
-                    "type": "number",
-                    "description": "Quality score after processing",
-                    "default": 0.0,
-                },
-                "user_approved": {
-                    "type": "boolean",
-                    "description": "Whether user approved the result",
-                    "default": True,
-                },
-                "user_notes": {
-                    "type": "string",
-                    "description": "Optional notes from user",
-                },
-                "channel": {
-                    "type": "string",
-                    "description": "Channel name (for characteristics)",
-                },
-                "project_path": {
-                    "type": "string",
-                    "description": "Project path",
-                },
-            },
-            "required": ["tissue_type", "marker_name", "operation", "parameters"],
-        },
+        "annotations": _APPENDS,
     },
     {
         "name": "suggest_with_learning",
         "module": "learning",
         "attr": "suggest_with_learning",
+        "title": "Suggest parameters (learned + heuristic)",
         "description": (
             "Get comprehensive parameter suggestions combining image analysis AND learned "
             "history. This is the primary recommendation tool."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Loaded channel name",
-                },
-                "tissue_type": {
-                    "type": "string",
-                    "description": "Tissue type",
-                },
-                "marker_name": {
-                    "type": "string",
-                    "description": "Marker name",
-                },
-                "blank_channel": {
-                    "type": "string",
-                    "description": "Blank channel for AF estimation (optional)",
-                },
-                "project_path": {
-                    "type": "string",
-                    "description": "Project path (optional)",
-                },
-            },
-            "required": ["channel", "tissue_type", "marker_name"],
-        },
+        "annotations": _READ_ONLY,
     },
     {
         "name": "approve_and_learn",
         "module": "learning",
         "attr": "approve_and_learn",
+        "title": "Approve and learn",
         "description": (
-            "Approve processing results and record ALL parameters for learning. Call when "
-            "user approves final processed result."
+            "Approve processing results and record ALL parameters for learning. Call when user "
+            "approves final processed result."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Channel name",
-                },
-                "tissue_type": {
-                    "type": "string",
-                    "description": "Tissue type",
-                },
-                "marker_name": {
-                    "type": "string",
-                    "description": "Marker name",
-                },
-                "operations_params": {
-                    "type": "object",
-                    "description": "Dict mapping operation names to their parameters",
-                },
-                "quality_before": {
-                    "type": "number",
-                    "description": "Quality score before all processing",
-                },
-                "quality_after": {
-                    "type": "number",
-                    "description": "Quality score after all processing",
-                },
-                "notes": {
-                    "type": "string",
-                    "description": "User notes",
-                    "default": "",
-                },
-                "project_path": {
-                    "type": "string",
-                    "description": "Project path",
-                },
-            },
-            "required": [
-                "channel",
-                "tissue_type",
-                "marker_name",
-                "operations_params",
-                "quality_before",
-                "quality_after",
-            ],
-        },
+        "annotations": _APPENDS,
     },
     {
         "name": "get_learning_statistics",
         "module": "learning",
         "attr": "get_learning_statistics",
+        "title": "Learning database statistics",
         "description": "Get statistics about the parameter learning database.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "project_path": {
-                    "type": "string",
-                    "description": "Project path (optional)",
-                },
-            },
-            "required": [],
-        },
+        "annotations": _READ_ONLY,
     },
-    # ---- Automated Optimization (Tier 2) ----
+    # ---- Signal isolation ----
     {
         "name": "optimize_parameters",
         "module": "signal_isolation",
         "attr": "optimize_parameters",
+        "title": "Optimize parameters (Optuna)",
         "description": (
             "Find optimal signal isolation parameters via Bayesian optimization (Optuna). "
             "Automatically searches the parameter space — no manual slider adjustment needed."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "signal_channel": {
-                    "type": "string",
-                    "description": "Name of loaded signal channel",
-                },
-                "blank_channel": {
-                    "type": "string",
-                    "description": "Name of loaded blank channel",
-                },
-                "n_trials": {
-                    "type": "integer",
-                    "description": "Maximum optimization trials (default: 80)",
-                    "default": 80,
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": "Maximum seconds for optimization (default: 300)",
-                    "default": 300,
-                },
-                "optimize_clean": {
-                    "type": "boolean",
-                    "description": "Also optimize background cleaning parameters (default: true)",
-                    "default": True,
-                },
-                "warm_start_params": {
-                    "type": "object",
-                    "description": "Initial parameter guess for faster convergence (optional)",
-                },
-                "project_path": {
-                    "type": "string",
-                    "description": "Project path for storing optimization study (optional)",
-                },
-            },
-            "required": ["signal_channel", "blank_channel"],
-        },
+        "annotations": _APPENDS,
     },
     {
         "name": "predict_parameters",
         "module": "signal_isolation",
         "attr": "predict_parameters",
+        "title": "Predict parameters (Random Forest)",
         "description": (
             "Predict signal isolation parameters from image features using a trained Random "
             "Forest model. Includes confidence scores and uncertainty estimates."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "signal_channel": {
-                    "type": "string",
-                    "description": "Name of loaded signal channel",
-                },
-                "blank_channel": {
-                    "type": "string",
-                    "description": "Name of loaded blank channel (optional)",
-                },
-                "project_path": {
-                    "type": "string",
-                    "description": "Project path containing predictor model (optional)",
-                },
-                "model_path": {
-                    "type": "string",
-                    "description": "Explicit path to predictor model .joblib (optional)",
-                },
-            },
-            "required": ["signal_channel"],
-        },
+        "annotations": _READ_ONLY,
     },
     {
         "name": "estimate_background",
         "module": "signal_isolation",
         "attr": "estimate_background",
+        "title": "Estimate background (SMO)",
         "description": (
-            "Estimate and subtract background using SMO (Silver Mountain Operator). "
-            "Parameter-free — no blank channel needed."
+            "Estimate and subtract background using SMO (Silver Mountain Operator). Parameter- "
+            "free — no blank channel needed."
         ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Name of loaded channel image",
-                },
-                "kernel_size": {
-                    "type": "integer",
-                    "description": "SMO kernel size (default: 7, robust across 5-15)",
-                    "default": 7,
-                },
-                "return_background": {
-                    "type": "boolean",
-                    "description": "Store estimated background as a loaded image (default: false)",
-                    "default": False,
-                },
-            },
-            "required": ["channel"],
-        },
+        "annotations": _PROCESSING,
     },
 ]
+
+
+def tool_names() -> list[str]:
+    """Public tool names in registry order."""
+    return [spec["name"] for spec in TOOL_SPECS]
