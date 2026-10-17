@@ -282,7 +282,7 @@ async def suggest_subtraction_parameters(
     learned_confidence = 0
     if use_learning and project_path and marker_name:
         try:
-            from kintsugi.mcp.tools.learning import ParameterLearningEngine
+            from kintsugi.claude.parameter_learning import ParameterLearningEngine
 
             engine = ParameterLearningEngine(project_path)
             recommendation = engine.recommend_parameters(
@@ -290,7 +290,7 @@ async def suggest_subtraction_parameters(
                 tissue_type=tissue_type,
                 marker_name=marker_name,
             )
-            if recommendation.get("found"):
+            if recommendation.get("status") == "success":
                 learned_params = recommendation.get("recommended_parameters", {})
                 learned_confidence = recommendation.get("confidence", 0)
         except Exception as e:

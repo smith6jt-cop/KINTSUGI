@@ -202,11 +202,11 @@ class AutofluorescenceSubtractor:
         """Lazy initialization of learning engine."""
         if self._learning_engine is None and self.project_dir:
             try:
-                from kintsugi.mcp.tools.learning import ParameterLearningEngine
+                from kintsugi.claude.parameter_learning import ParameterLearningEngine
 
                 self._learning_engine = ParameterLearningEngine(str(self.project_dir))
-            except ImportError:
-                logger.warning("Parameter learning not available. Install kintsugi[claude]")
+            except ImportError as exc:
+                logger.warning(f"Parameter learning not available: {exc}")
         return self._learning_engine
 
     def suggest_parameters(
@@ -255,7 +255,10 @@ class AutofluorescenceSubtractor:
                     tissue_type=tissue or "unknown",
                     marker_name=marker,
                 )
-                if recommendation.get("found") and recommendation.get("confidence", 0) > 0.5:
+                if (
+                    recommendation.get("status") == "success"
+                    and recommendation.get("confidence", 0) > 0.5
+                ):
                     learned_params = recommendation.get("recommended_parameters", {})
                     logger.info(
                         f"Using learned parameters for {marker} "
