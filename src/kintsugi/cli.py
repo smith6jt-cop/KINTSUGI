@@ -953,7 +953,7 @@ def start(project_dir: Path | None):
         from kintsugi.mcp._sdk import MCP_AVAILABLE, unavailable_message
 
         if not MCP_AVAILABLE:
-            err_console.print(f"[red]{unavailable_message()}[/red]")
+            err_console.print(Text(unavailable_message(), style="red"))
             raise SystemExit(1)
 
         from kintsugi.mcp import run_server
@@ -962,10 +962,10 @@ def start(project_dir: Path | None):
         asyncio.run(run_server())
 
     except ImportError as e:
-        err_console.print(f"[red]MCP dependencies not installed: {e}[/red]")
+        err_console.print(Text(f"MCP dependencies not installed: {e}", style="red"))
         from kintsugi.mcp._sdk import INSTALL_HINT
 
-        err_console.print(f"Install with: [bold]{INSTALL_HINT}[/bold]")
+        err_console.print(Text("Install with: ") + Text(INSTALL_HINT, style="bold"))
         raise SystemExit(1)
 
 
@@ -1044,6 +1044,54 @@ def tools(files: tuple[str, ...], markdown: bool, write_files: bool, check_files
     console.print("[dim]Learning tools remember successful parameters by tissue/marker[/dim]")
 
 
+def _interactive() -> bool:
+    """True when a person can answer prompts (stdin and stdout are terminals)."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _prompt_mcp_clients(default: str | None = None) -> list[str]:
+    """Ask which MCP client(s) to configure; returns names, ``["all"]`` or ``["none"]``.
+
+    Accepts names or table numbers, comma- or space-separated. ``default`` is
+    used for an empty answer; without one the question is repeated.
+    """
+    from kintsugi.mcp.clients import CLIENTS, ClientConfigError, resolve_clients
+
+    table = Table(title="MCP clients (AI assistants)")
+    table.add_column("#", justify="right")
+    table.add_column("Name", style="cyan")
+    table.add_column("Client")
+    table.add_column("Configuration", overflow="fold")
+    for i, client in enumerate(CLIENTS, 1):
+        where = client.path if client.scope == "project" else f"snippet for {client.path}"
+        table.add_row(str(i), client.name, client.display, where)
+    console.print(table)
+    question = "Which MCP client(s) should be configured? (names or numbers, 'all' or 'none')"
+    while True:
+        answer = click.prompt(question, default=default, show_default=default is not None)
+        names = []
+        for token in answer.replace(",", " ").split():
+            if token.isdigit() and 1 <= int(token) <= len(CLIENTS):
+                names.append(CLIENTS[int(token) - 1].name)
+            else:
+                names.append(token.strip().lower())
+        try:
+            resolve_clients(names)
+        except ClientConfigError as exc:
+            console.print(f"[red]{exc}[/red]")
+            continue
+        return names
+
+
+def _choose_mcp_clients(given: tuple[str, ...], *, default: str | None) -> list[str] | None:
+    """The clients the user chose: ``given``, else a prompt in a terminal, else None."""
+    if given:
+        return list(given)
+    if _interactive():
+        return _prompt_mcp_clients(default)
+    return None
+
+
 @mcp.command()
 @click.argument("project_path", type=click.Path(exists=True, file_okay=False))
 @click.option(
@@ -1051,8 +1099,9 @@ def tools(files: tuple[str, ...], markdown: bool, write_files: bool, check_files
     "client_names",
     multiple=True,
     metavar="NAME",
-    help="Only this MCP client (repeatable; see 'kintsugi mcp clients'). "
-    "Default: every client configured in the project, plus snippets for the others.",
+    help="MCP client to configure (repeatable; 'all' for every client; see "
+    "'kintsugi mcp clients'). There is no default: without --client you are asked "
+    "in a terminal, and elsewhere the command fails.",
 )
 @click.option("--print-only", is_flag=True, help="Show the configuration without writing files")
 @click.option(
@@ -1066,12 +1115,12 @@ def config(project_path: str, client_names: tuple[str, ...], print_only: bool, f
 
     PROJECT_PATH is the path to your KINTSUGI project directory.
 
-    Writes (or merges into) the configuration file of every MCP client that keeps
-    its configuration in the project (Claude Code, VS Code, Cursor, Gemini CLI,
-    Antigravity, Codex, Zed) and AGENTS.md, and prints the entry to paste for
-    clients configured per user (Claude Desktop, Windsurf, Cline) or in the IDE
-    (JetBrains). Nothing is written outside the project. Other servers and
-    settings in existing files are kept.
+    Configures the MCP client(s) you choose with --client (or at the prompt):
+    a client that keeps its configuration in the project gets that file written
+    or merged, plus AGENTS.md; a client configured per user or in the IDE gets
+    the entry to paste. 'kintsugi mcp clients' lists the clients. Nothing is
+    written outside the project, and other servers and settings in existing
+    files are kept.
     """
     from pathlib import Path
 
@@ -1079,14 +1128,20 @@ def config(project_path: str, client_names: tuple[str, ...], print_only: bool, f
     from kintsugi.project import _resolve_kintsugi_executable, write_mcp_config
 
     project_path = Path(project_path).resolve()
-    names = list(client_names) or None
+    names = _choose_mcp_clients(client_names, default=None)
+    if names is None:
+        console.print(
+            "[red]No MCP client chosen.[/red] Pass --client NAME (repeatable) or "
+            "--client all; 'kintsugi mcp clients' lists them."
+        )
+        raise SystemExit(2)
     try:
         selected = mcp_clients.resolve_clients(names)
     except mcp_clients.ClientConfigError as exc:
         raise click.BadParameter(str(exc), param_hint="--client") from exc
-    if names is None:
-        selected += [c for c in mcp_clients.CLIENTS if c.scope != "project"]
-        names = [c.name for c in selected]
+    if not selected:
+        console.print("No MCP client chosen; nothing written.")
+        return
 
     if print_only:
         command = _resolve_kintsugi_executable()
@@ -1128,6 +1183,48 @@ def config(project_path: str, client_names: tuple[str, ...], print_only: bool, f
     for client in selected:
         console.print(f"- {client.display}: {client.next_steps}")
     console.print("[dim]Details for every client: docs/mcp.md ('kintsugi mcp clients').[/dim]")
+
+
+@mcp.command("status")
+@click.argument("project_path", type=click.Path(exists=True, file_okay=False), default=".")
+def mcp_status_cmd(project_path: str):
+    """Show the persistent workflow state of a project (what get_workflow_status returns)."""
+    from pathlib import Path
+
+    from kintsugi.assist.workflow_state import WorkflowState
+    from kintsugi.mcp.session import is_kintsugi_project
+
+    root = Path(project_path).resolve()
+    if not is_kintsugi_project(root):
+        console.print(f"[red]{root} is not a KINTSUGI project (no kintsugi_project.json)[/red]")
+        raise SystemExit(2)
+    state = WorkflowState(root)
+    summary = state.summary()
+    channels = state.channels()
+    if not channels:
+        console.print(f"No workflow state recorded yet in {root}")
+        return
+    table = Table(title=f"Workflow state: {root.name}")
+    table.add_column("Channel", style="cyan")
+    table.add_column("Status")
+    table.add_column("Quality")
+    table.add_column("Steps")
+    table.add_column("Last operation")
+    table.add_column("Modified")
+    for name, ch in sorted(channels.items()):
+        table.add_row(
+            name,
+            ch.status,
+            "" if ch.quality_score is None else f"{ch.quality_score:.3f}",
+            str(len(ch.processing_steps)),
+            ch.processing_steps[-1]["operation"] if ch.processing_steps else "",
+            ch.modified[:19],
+        )
+    console.print(table)
+    breakdown = ", ".join(f"{k}: {v}" for k, v in sorted(summary["status_breakdown"].items()))
+    console.print(f"Session {summary['session_id']} ({summary['sessions']} in total); {breakdown}")
+    if summary["review_queue"]:
+        console.print("Awaiting review: " + ", ".join(summary["review_queue"]))
 
 
 @mcp.command("clients")
@@ -4627,8 +4724,9 @@ def workflow_spillover(project_dir: str, sample: str | None, element_shape: str,
     "mcp_client_names",
     multiple=True,
     metavar="NAME",
-    help="MCP client to configure (repeatable; 'none' for none; see 'kintsugi mcp clients'). "
-    "Default: every client configured in the project.",
+    help="MCP client to configure (repeatable; 'all', or 'none'; see 'kintsugi mcp clients'). "
+    "Optional: without it you are asked in a terminal, elsewhere no client is configured; "
+    "--force refreshes the clients the project already has.",
 )
 def init(
     project_path: str,
@@ -4663,16 +4761,17 @@ def init(
     """
     from pathlib import Path
 
-    from kintsugi.mcp.clients import ClientConfigError, resolve_clients
+    from kintsugi.mcp.clients import ClientConfigError, configured_clients, resolve_clients
     from kintsugi.project import ExistingDataReport, KintsugiProject, scan_existing_data
 
     project_path = Path(project_path).resolve()
     config_file = project_path / "kintsugi_project.json"
     mcp_clients = list(mcp_client_names) or None
-    try:
-        resolve_clients(mcp_clients)
-    except ClientConfigError as exc:
-        raise click.BadParameter(str(exc), param_hint="--mcp-client") from exc
+    if mcp_clients is not None:
+        try:
+            resolve_clients(mcp_clients)
+        except ClientConfigError as exc:
+            raise click.BadParameter(str(exc), param_hint="--mcp-client") from exc
 
     # Handle existing projects
     if config_file.exists():
@@ -4694,7 +4793,17 @@ def init(
             project.paths.create_all()
             project.setup_notebooks(overwrite=True)
             project._ensure_state_gitignored()
-            project._create_mcp_config(mcp_clients)
+            # Refresh the clients this project already uses; never add one unasked.
+            refresh = mcp_clients or configured_clients(project_path)
+            if not refresh:
+                refresh = _choose_mcp_clients((), default="none")
+            if refresh:
+                project._create_mcp_config(refresh)
+            else:
+                console.print(
+                    "  No MCP client configured (optional; 'kintsugi mcp config . "
+                    "--client NAME' adds one)"
+                )
             project._create_vscode_config()
 
             # Regenerate default_parameters.json
@@ -4930,6 +5039,10 @@ def init(
                         console.print("[yellow]Cancelled. No changes made.[/yellow]")
                         return
 
+        # MCP is optional: configure only the client(s) the user chooses.
+        if mcp_clients is None:
+            mcp_clients = _choose_mcp_clients((), default="none")
+
         # Create the project (apply defaults for None microscope params)
         KintsugiProject.create(
             project_path,
@@ -4965,10 +5078,10 @@ def init(
 
         console.print("\n[green]Project created successfully![/green]")
 
-        if mcp_clients != ["none"]:
+        if mcp_clients and mcp_clients != ["none"]:
             console.print(
-                "\n[dim]MCP clients configured (see AGENTS.md); 'kintsugi mcp config . "
-                "--client NAME' adds others, 'kintsugi mcp clients' lists them.[/dim]"
+                "\n[dim]MCP client configuration written (see AGENTS.md); 'kintsugi mcp "
+                "config . --client NAME' adds another, 'kintsugi mcp clients' lists them.[/dim]"
             )
 
     except Exception as e:

@@ -10,9 +10,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-import numpy as np
 from pydantic import Field
 
+from kintsugi.assist._coerce import plain as _plain
 from kintsugi.mcp.heuristics import (
     heuristic_suggestion,
     sample_image,
@@ -26,19 +26,6 @@ if TYPE_CHECKING:
     from kintsugi.assist.parameter_learning import ImageCharacteristics
 
 logger = logging.getLogger("kintsugi.mcp.learning")
-
-
-def _plain(value: Any) -> Any:
-    """Recursively turn numpy scalars/arrays into JSON-serialisable Python values."""
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, dict):
-        return {str(k): _plain(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(v) for v in value]
-    return value
 
 
 # Learning engines, one per project (key "" = the user-wide database only). A single
@@ -609,9 +596,22 @@ async def approve_and_learn(
         for (op, _params), record_id in zip(mapped_operations, record_ids, strict=True)
     ]
 
+    from kintsugi.mcp.workflow_store import record_approval
+
+    tracked = record_approval(
+        channel,
+        project_path,
+        # Keyed as the caller gave them: several tools share one learning category
+        # (denoise / denoise_advanced), and the workflow state keeps each.
+        final_params=dict(operations_params),
+        quality_score=quality_after,
+        notes=notes,
+    )
+
     return {
         "status": "success",
         "message": "Processing approved and parameters recorded for learning",
+        "workflow_channel": tracked,
         "tissue_type": tissue_type,
         "marker_name": marker_name,
         "quality_improvement": quality_after - quality_before,

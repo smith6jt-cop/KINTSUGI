@@ -73,45 +73,45 @@ All global parameters (`smooth_low`, `smooth_high`, `erosion`, etc.) are also av
 
 ## Usage
 
-### Claude-Guided (MCP) — Recommended
+### AI-Assisted (MCP, optional)
 
-The Claude Code MCP integration provides an interactive, AI-assisted workflow. Claude analyzes the image, suggests parameters, applies subtraction, and records successful parameters for future use.
+With the optional MCP server, the AI assistant you connect (any MCP client) analyzes the image, suggests parameters, applies subtraction, and records successful parameters for future use. The Python API below does the same without an assistant.
 
 **Setup:**
 ```bash
 pip install -e ".[mcp]"   # or: kintsugi install mcp  (needs mcp>=2.0,<3)
-kintsugi mcp config /path/to/project  # If not using kintsugi init
+kintsugi mcp config /path/to/project --client NAME  # your MCP client ('kintsugi mcp clients')
 ```
 
 The full server reference (every tool, resources, the `signal_isolation_workflow`
-prompt, security model, troubleshooting) is [Claude Code Integration (MCP Server)](mcp.md).
+prompt, security model, troubleshooting) is [MCP server](mcp.md).
 
 **Workflow:**
 
-1. **Preview range analysis** — Claude calls `analyze_weighted_subtraction()` to show the intensity ranges, per-range weights, and expected behavior before applying anything:
+1. **Preview range analysis** — the assistant calls `analyze_weighted_subtraction()` to show the intensity ranges, per-range weights, and expected behavior before applying anything:
 
    ```
    User: "Load CD163 from cycle 3 and analyze for weighted blank subtraction"
-   Claude: [Uses load_channel, then analyze_weighted_subtraction]
-   Claude: "Analysis shows 5 ranges. Very_dim range (weight 0.35) protects
+   Assistant: [Uses load_channel, then analyze_weighted_subtraction]
+   Assistant: "Analysis shows 5 ranges. Very_dim range (weight 0.35) protects
             the dim CD163+ cells. Bright range (weight 1.12) aggressively
             removes collagen AF."
    ```
 
-2. **Apply weighted subtraction** — Once the user approves the preview, Claude applies the subtraction:
+2. **Apply weighted subtraction** — Once the user approves the preview, the assistant applies the subtraction:
 
    ```
    User: "Apply those parameters"
-   Claude: [Uses subtract_blank with method="weighted"]
-   Claude: "Subtraction complete. Quality score: 0.82. SNR improved 1.4x."
+   Assistant: [Uses subtract_blank with method="weighted"]
+   Assistant: "Subtraction complete. Quality score: 0.82. SNR improved 1.4x."
    ```
 
 3. **Approve and learn** — Recording the successful parameters improves future recommendations:
 
    ```
    User: "That looks good, approve it"
-   Claude: [Uses approve_and_learn to record parameters]
-   Claude: "Parameters recorded for CD163/tonsil. Future recommendations
+   Assistant: [Uses approve_and_learn to record parameters]
+   Assistant: "Parameters recorded for CD163/tonsil. Future recommendations
             will use this as a baseline."
    ```
 
@@ -227,7 +227,7 @@ The bootstrap scanner:
 4. Records to the learning database with `algorithm_version="weighted_v1"`
 5. Marks as `user_approved=False` (auto-computed, not human-verified)
 
-This is useful when setting up a new project — run bootstrap first, then use Claude-guided or Python API for fine-tuning. The learning system weights human-approved parameters higher than bootstrapped ones.
+This is useful when setting up a new project — run bootstrap first, then use the Python API or an AI assistant (MCP) for fine-tuning. The learning system weights human-approved parameters higher than bootstrapped ones.
 
 ## Parameter Reference
 
@@ -312,7 +312,7 @@ print(f"Markers: {stats['markers']}")
 Or via the MCP tool:
 ```
 User: "Show me the learning database statistics"
-Claude: [Uses get_learning_statistics]
+Assistant: [Uses get_learning_statistics]
 ```
 
 ### Backwards compatibility

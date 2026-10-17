@@ -1,13 +1,13 @@
 """
 KINTSUGI MCP Server
 
-Exposes the KINTSUGI image-processing tools to Claude Code over the Model
+Exposes the KINTSUGI image-processing tools to any MCP client over the Model
 Context Protocol, built on :class:`mcp.server.mcpserver.MCPServer` from the
 official ``mcp`` SDK (2.x).
 
 Each tool returns a plain ``dict`` which the SDK emits as **structured content**
-(``structuredContent``) alongside the human-readable JSON text block, so Claude
-receives machine-readable results rather than only a serialized string. The tool
+(``structuredContent``) alongside the human-readable JSON text block, so the
+client receives machine-readable results rather than only a serialized string. The tool
 implementations live in :mod:`kintsugi.mcp.tools`; their input schemas are
 derived from the handlers' ``Annotated``/``Literal`` signatures (and enforced by
 the SDK), while names, titles, descriptions and behaviour annotations come from
@@ -24,6 +24,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from kintsugi.assist._coerce import plain
 from kintsugi.mcp._sdk import (
     MCP_AVAILABLE,
     MCPServer,
@@ -51,7 +52,9 @@ KINTSUGI processes multiplex immunofluorescence images. Tools act on a KINTSUGI
 project directory; project_path defaults to the project the server was started
 for (get_session_state shows it as project_root), so pass it only to work on
 another project. Loaded images stay in server memory for the session:
-get_session_state shows them, unload_channel frees them.
+get_session_state shows them, unload_channel frees them. Progress is also kept
+in the project (<project>/.kintsugi/) and survives restarts: get_workflow_status
+shows every channel's status and the review queue, so start there to resume.
 
 Typical signal-isolation session (also available as the
 signal_isolation_workflow prompt):
@@ -63,10 +66,12 @@ signal_isolation_workflow prompt):
    (method="weighted" is preferred); optionally denoise, clean_background,
    gaussian_subtract.
 5. assess_quality / compute_snr, then save_processed.
-6. approve_and_learn so the next session starts from what worked.
+6. Show the result to the user: approve_and_learn when they approve (so the
+   next session starts from what worked), set_review_decision otherwise.
 
 Resources: kintsugi://session/images, kintsugi://session/history/{channel},
-kintsugi://learning/stats, kintsugi://project/channels.
+kintsugi://learning/stats, kintsugi://project/channels,
+kintsugi://project/workflow.
 Failures are reported as tool errors (isError) whose text is a JSON object with
 an "error" message and, where possible, the next step to take.
 """
@@ -146,13 +151,19 @@ def _wrap_handler(handler: Callable[..., Awaitable[Any]]) -> Callable[..., Await
     gets the next-step hint. ``functools.wraps`` preserves the handler signature
     (and, through ``__wrapped__``, its module globals) so the SDK still derives
     the schema from the handler's own annotations.
+
+    Numpy scalars and arrays anywhere in a result dict are converted to plain
+    Python values first: the SDK's serializer rejects them (a ``numpy.bool_`` in
+    ``subtract_blank``'s parameters used to fail the whole call).
     """
 
     @functools.wraps(handler)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         result = await handler(*args, **kwargs)
-        if isinstance(result, dict) and "error" in result:
-            raise ToolError(json.dumps(result))
+        if isinstance(result, dict):
+            result = plain(result)
+            if "error" in result:
+                raise ToolError(json.dumps(result, default=str))
         return result
 
     return wrapper
@@ -214,6 +225,17 @@ def _register_resources(server: MCPServer) -> None:
     )
     async def project_channels() -> str:
         return json.dumps(await workflow.list_channels(), default=str)
+
+    @server.resource(
+        "kintsugi://project/workflow",
+        name="project_workflow",
+        title="Workflow status of the project",
+        description="Persistent per-channel status, quality scores and the processing and "
+        "review queues of the project the server was started for (survives restarts).",
+        mime_type="application/json",
+    )
+    async def project_workflow() -> str:
+        return json.dumps(await workflow.get_workflow_status(), default=str)
 
 
 def _register_prompts(server: MCPServer) -> None:

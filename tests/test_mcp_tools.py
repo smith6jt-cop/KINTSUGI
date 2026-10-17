@@ -58,6 +58,8 @@ EXPECTED_TOOL_NAMES = {
     "generate_jupyter_cell",
     "get_session_state",
     "unload_channel",
+    "get_workflow_status",
+    "set_review_decision",
     "cluster_channels",
     "propagate_parameters",
     "get_learned_parameters",
@@ -1300,6 +1302,7 @@ class TestStructuredOutput:
         assert result.structured_content == {
             "status": "success",
             "channel": "nope",
+            "source": "session",
             "steps": [],
             "total_steps": 0,
             "source_metadata": {},

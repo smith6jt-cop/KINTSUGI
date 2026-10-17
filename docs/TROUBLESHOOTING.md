@@ -17,7 +17,7 @@ This guide covers common issues and their solutions when installing or running K
   - [Stitched Image Quality Issues](#stitched-image-quality-issues)
   - [Registration Failures](#registration-failures)
 - [HPC/SLURM Issues](#hpcslurm-issues)
-- [MCP Server (Claude Code)](#mcp-server-claude-code)
+- [MCP Server (AI assistants)](#mcp-server-ai-assistants)
 - [Platform-Specific Issues](#platform-specific-issues)
   - [Windows](#windows)
   - [Linux](#linux)
@@ -38,7 +38,7 @@ no output, or fails with dependency conflicts.
    conda merges `.condarc` channels into every env-file solve; the KINTSUGI env files list
    `nodefaults` to block that, but the Anaconda Terms-of-Service plugin (conda >= 25.x)
    still gates `conda env create` on the configured channels. In a terminal it prompts;
-   without a terminal (scripts, IDE tasks, Claude Code) it raises
+   without a terminal (scripts, IDE tasks, AI coding assistants) it raises
    `CondaToSNonInteractiveError`. A conda-forge + defaults solve of this environment does
    not finish in 25 minutes.
    ```bash
@@ -504,41 +504,44 @@ tail /path/to/project/slurm/logs/snakemake/stitch_cyc01.log
 
 ---
 
-## MCP Server (Claude Code)
+## MCP Server (AI assistants)
 
-The KINTSUGI MCP server is started by Claude Code from the project's `.mcp.json`
-(written by `kintsugi init` or `kintsugi mcp config`). Run `/mcp` inside Claude Code to see
-the server's state and its tools. Full guide: [Claude Code Integration (MCP Server)](mcp.md).
+The optional KINTSUGI MCP server is started by your MCP client from the configuration
+`kintsugi mcp config --client NAME` (or `kintsugi init --mcp-client NAME`) wrote or printed.
+Each client shows the server's state in its own MCP view (in Claude Code and Gemini CLI,
+`/mcp`); [the client table](mcp.md#connect-your-client) lists where. Full guide:
+[MCP server](mcp.md).
 
 ### "Executable not found in $PATH: kintsugi"
 
-Claude Code could not find the `kintsugi` command — typically because the `.mcp.json` entry
-uses a bare `kintsugi` and Claude Code was launched outside the conda/venv environment.
-Regenerate the entry so it carries the absolute path of the executable:
+The client could not find the `kintsugi` command — typically because its entry uses a bare
+`kintsugi` and the client was launched outside the conda/venv environment. Regenerate the
+entry so it carries the absolute path of the executable:
 
 ```bash
 conda activate KINTSUGI             # the environment where kintsugi is installed
-kintsugi mcp config /path/to/project --force
-cat /path/to/project/.mcp.json      # "command" is now e.g. /home/you/envs/KINTSUGI/bin/kintsugi
+kintsugi mcp config /path/to/project --client NAME --force
+# the entry's "command" is now e.g. /home/you/envs/KINTSUGI/bin/kintsugi
 ```
 
 The generated entry is `{"type": "stdio", "command": "<absolute path>", "args": ["mcp", "start",
-"--project-dir", "<project>"]}`. Then restart your MCP client (in Claude Code, `/mcp` reconnects).
+"--project-dir", "<project>"]}`. Then restart or reconnect the server in your MCP client.
 
 ### "No project configured"
 
 The server was started without `--project-dir`, without `KINTSUGI_PROJECT_DIR`, and in a
 working directory that is not a KINTSUGI project, so it cannot guess which project a tool
-means. Regenerate the client configuration (`kintsugi mcp config /path/to/project --force`,
+means. Regenerate the client configuration (`kintsugi mcp config /path/to/project --client NAME --force`,
 which adds `--project-dir`), or pass `project_path` in the tool call.
 
 ### Server shows "Pending approval"
 
-Project-scoped servers run only in a trusted folder. Accept the workspace trust dialog when
-Claude Code opens the project; the approval written by `kintsugi mcp config` is
-`.claude/settings.local.json` → `{"enabledMcpjsonServers": ["kintsugi"]}`. If an earlier
-decision rejected the server, clear it with `claude mcp reset-project-choices` and reopen
-the project.
+Most clients start a project's servers only in a trusted folder or workspace and may ask
+you to enable the server; the last column of [the client table](mcp.md#connect-your-client)
+says what each one needs. For Claude Code, the approval `kintsugi mcp config --client
+claude-code` writes is `.claude/settings.local.json` → `{"enabledMcpjsonServers":
+["kintsugi"]}`; if an earlier decision rejected the server, clear it with
+`claude mcp reset-project-choices` and reopen the project.
 
 ### "mcp 1.x is installed but KINTSUGI requires mcp>=2.0,<3"
 
@@ -679,6 +682,6 @@ If you're still experiencing issues:
 | Snakemake not found | `pip install "snakemake>=8.0" snakemake-executor-plugin-slurm` |
 | SLURM OOM kill | GPU: 48 GB RAM; CPU: 128 GB RAM — increase in config.yaml |
 | SLURM_TRES_PER_TASK error | Patch jobstep plugin (see HPC section above) |
-| `Executable not found in $PATH: kintsugi` (MCP) | `kintsugi mcp config /path/to/project --force` from the activated env |
-| MCP server "Pending approval" | Accept the trust dialog; `claude mcp reset-project-choices` |
+| `Executable not found in $PATH: kintsugi` (MCP) | `kintsugi mcp config /path/to/project --client NAME --force` from the activated env |
+| MCP server "Pending approval" | Trust the folder and enable `kintsugi` in your client (see [the client table](mcp.md#connect-your-client)) |
 | `mcp 1.x is installed` (MCP) | `pip install "mcp>=2.0,<3"` |

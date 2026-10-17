@@ -5,8 +5,13 @@ name: MCP Eval
 #     PR as a fast, deterministic gate (no API key, --strict fails on regressions
 #     such as a documented-but-unregistered tool).
 #   * Agentic tool-selection pass: runs on manual dispatch and weekly schedule
-#     only, and only when an ANTHROPIC_API_KEY secret is configured (it spends
-#     API tokens and is nondeterministic, so it never runs on PRs).
+#     only (it spends API tokens and is nondeterministic, so it never runs on
+#     PRs). Nothing is assumed: the provider and model come from the dispatch
+#     inputs or, for the schedule, the repository variables EVAL_PROVIDER
+#     (anthropic | openai, see evals/mcp/providers.py), EVAL_MODEL and optionally
+#     EVAL_BASE_URL (an OpenAI-compatible endpoint). The API key is the secret
+#     ANTHROPIC_API_KEY or OPENAI_API_KEY. Unconfigured: skipped with a notice;
+#     half configured (provider without model or the reverse): the job fails.
 on:
   pull_request:
     branches: [main, develop]
@@ -20,14 +25,21 @@ on:
       - "docs/mcp.md"
       - "docs/cli.md"
       - "README.md"
-      - "CLAUDE.md"
       - "AGENTS.md"
       - ".github/workflows/mcp-eval.yml"
   workflow_dispatch:
     inputs:
+      provider:
+        description: "Model provider for the agentic eval ('none' = structural eval only)"
+        type: choice
+        options: [none, anthropic, openai]
+        default: none
       model:
-        description: "Model for the agentic tool-selection eval"
-        default: "claude-sonnet-4-6"
+        description: "Model identifier at that provider (required unless provider is 'none')"
+        default: ""
+      base_url:
+        description: "Endpoint base URL (optional; an OpenAI-compatible server for 'openai')"
+        default: ""
   schedule:
     - cron: "0 6 * * 1" # Mondays 06:00 UTC
 
@@ -55,21 +67,35 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,mcp]" anthropic
+          pip install -e ".[dev,mcp]"
 
-      - name: Run MCP evaluation
+      - name: Run structural evaluation
+        run: python evals/mcp/harness.py --strict --json mcp_eval_report.json
+
+      - name: Run agentic evaluation (provider and model chosen explicitly)
+        if: github.event_name != 'pull_request'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          EVAL_MODEL: ${{ github.event.inputs.model || 'claude-sonnet-4-6' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PROVIDER: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.provider || vars.EVAL_PROVIDER }}
+          MODEL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.model || vars.EVAL_MODEL }}
+          BASE_URL: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base_url || vars.EVAL_BASE_URL }}
         run: |
-          if [ -n "$ANTHROPIC_API_KEY" ] && [ "${{ github.event_name }}" != "pull_request" ]; then
-            python evals/mcp/harness.py --agentic --model "$EVAL_MODEL" --strict --json mcp_eval_report.json
-          else
-            if [ "${{ github.event_name }}" != "pull_request" ]; then
-              echo "::notice::ANTHROPIC_API_KEY secret not set — running the structural eval only."
-            fi
-            python evals/mcp/harness.py --strict --json mcp_eval_report.json
+          if [ "$PROVIDER" = "none" ]; then
+            echo "::notice::Provider 'none' chosen: structural eval only."
+            exit 0
           fi
+          if [ -z "$PROVIDER" ] && [ -z "$MODEL" ]; then
+            echo "::notice::Agentic eval not configured: choose a provider and model (dispatch inputs, or the EVAL_PROVIDER and EVAL_MODEL variables)."
+            exit 0
+          fi
+          if [ -z "$PROVIDER" ] || [ -z "$MODEL" ]; then
+            echo "::error::The agentic eval needs both a provider and a model (got provider='$PROVIDER', model='$MODEL')."
+            exit 1
+          fi
+          args=(--agentic --provider "$PROVIDER" --model "$MODEL" --json "mcp_eval_report_${PROVIDER}.json")
+          if [ -n "$BASE_URL" ]; then args+=(--base-url "$BASE_URL"); fi
+          python evals/mcp/harness.py "${args[@]}"
 
       - name: Write job summary
         if: always()
@@ -89,18 +115,20 @@ jobs:
           print(f"- Params missing description: {s['params_missing_description_count']}")
           gaps = s["task_coverage_gaps"]
           print(f"- Task coverage gaps: {gaps if gaps else 'none'}")
-          a = r.get("agentic")
-          if a:
-              print(f"\n### Agentic tool-selection: **{a['passed']}/{a['total']} = "
-                    f"{a['accuracy']:.0%}** (model `{a['model']}`)\n")
+          agentic = sorted(pathlib.Path().glob("mcp_eval_report_*.json"))
+          for path in agentic:
+              a = json.loads(path.read_text())["agentic"]
+              print(f"\n### Agentic tool-selection ({a['provider']}): **{a['passed']}/"
+                    f"{a['total']} = {a['accuracy']:.0%}** (model `{a['model']}`, "
+                    f"host `{a['host']}`)\n")
               fails = [x for x in a["results"] if not x["pass"]]
               if fails:
                   print("| task | chose | expected |")
                   print("|------|-------|----------|")
                   for x in fails:
                       print(f"| {x['task']} | {x['chosen']} | {', '.join(x['expected'])} |")
-          else:
-              print("\n_Agentic pass skipped (PR event or no ANTHROPIC_API_KEY secret)._")
+          if not agentic:
+              print("\n_Agentic pass skipped (PR event, or no provider and model chosen)._")
           PY
 
       - name: Upload report
@@ -108,4 +136,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mcp-eval-report
-          path: mcp_eval_report.json
+          path: mcp_eval_report*.json

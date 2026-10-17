@@ -1,57 +1,504 @@
 # AGENTS.md
 
-Guidance for AI coding assistants working in this repository (read by Codex,
-Cursor, VS Code, Gemini CLI, Windsurf, Cline, Zed, JetBrains and others; Claude
-Code reads `CLAUDE.md`, which holds the same project knowledge in more detail).
+Guidance for AI coding assistants working in this repository. Codex, Cursor, VS Code (Copilot), Zed, JetBrains and others read `AGENTS.md` directly; Gemini CLI reads it when `context.fileName` includes `AGENTS.md`; Claude Code reads it through the one-line `CLAUDE.md` (`@AGENTS.md`). Subdirectories (`src/kintsugi/`, `src/kintsugi/signal/`, `workflow/`, `notebooks/`) have their own `AGENTS.md` with feature notes.
 
-## Project
+## Project Overview
 
-KINTSUGI is a multiplex immunofluorescence image-processing pipeline (Smith et al.,
-2025, STAR Protocols): illumination correction, stitching, deconvolution, extended
-depth of focus, multi-cycle registration, autofluorescence removal, segmentation and
-spatial analysis. It ships an MCP server (`src/kintsugi/mcp/`) that gives AI
-assistants signal-isolation, quality, visualization and parameter-learning tools.
+KINTSUGI (Knowledge Integration with New Technologies for Simplified User-Guided Image processing) is a multiplex immunofluorescence image processing pipeline for scientific research (Smith et al., 2025, STAR Protocols). Key capabilities include illumination correction, image stitching, deconvolution, extended depth of focus, multi-cycle registration, autofluorescence removal, segmentation, and spatial analysis.
 
-## Layout
+## MCP Server (optional)
 
-- `src/kintsugi/` package: `cli.py` (Click CLI), `project.py` (project structure),
-  `mcp/` (MCP server), `assist/` (parameter learning, tuners, workflow state),
-  `signal/`, `denoise/`, `qc/`, `segment/`.
-- `notebooks/` processing notebooks and the modules they import (`Kreg/`, `Kstitch/`,
-  `Kview2/`, `KDecon/`, `Kio.py`, `Kprocess.py`).
-- `workflow/` Snakemake pipeline for HPC/SLURM; `tests/` pytest suite; `evals/mcp/`
-  MCP evaluation harness; `docs/` Sphinx documentation.
+KINTSUGI includes an optional MCP (Model Context Protocol) server that exposes image processing tools to any MCP client, so the AI assistant a user chooses can act as an image processing assistant. KINTSUGI (CLI, notebooks, Snakemake workflow) works without it, and no client is configured unless the user chooses one.
 
-## Build and test
+**MCP server** (`src/kintsugi/mcp/`, canonical guide: `docs/mcp.md`): requires `mcp>=2.0,<3` — install with `pip install -e ".[mcp]"` or `kintsugi install mcp` (never `pip install kintsugi[mcp]`, which installs an unrelated PyPI package). Every tool carries a title and behaviour annotations (readOnly/destructive/idempotent/openWorld); the server publishes instructions; input schemas are derived from the handler signatures and enforced (bad enums/ranges are rejected with `isError` before the handler runs) and in-band errors are reported as `isError`; resources `kintsugi://session/images`, `kintsugi://session/history/{channel}`, `kintsugi://learning/stats` and `kintsugi://project/channels`; the `signal_isolation_workflow` prompt; progress notifications on long tools; `get_thumbnail` returns the preview as image content; typed output schemas for `get_image_stats`, `assess_quality`, `suggest_with_learning` and `get_session_state`; new tools `get_session_state` and `unload_channel`; model checkpoints are confined to the project, the server's project or `~/.kintsugi/models` and loaded with torch `weights_only=True`. `project_path` arguments default to the project the server was started for: `kintsugi mcp start --project-dir PATH` (what generated configs pass), else `KINTSUGI_PROJECT_DIR`, else the working directory if it is a KINTSUGI project; otherwise tools that need a project return an error instead of guessing. Per-channel workflow state (status, steps, review decisions) persists across restarts in `<project>/.kintsugi/workflow_state.json` (`kintsugi.assist.workflow_state`, wired in through `mcp/workflow_store.py`; tools `get_workflow_status` and `set_review_decision`, resource `kintsugi://project/workflow`, CLI `kintsugi mcp status`). Project state (learning database, workflow state) lives in `<project>/.kintsugi/` (`kintsugi.assist.state_dir`); a legacy `.claude_workflow/` is read as is and moved there on the first write, and databases are created on the first write, never by a read.
+
+### Creating a Project
+
+Use `kintsugi init` to create a new project with the standard directory structure:
 
 ```bash
-pip install -e ".[dev,mcp]"
-pytest tests/ -q                      # KINTSUGI_REQUIRE_MCP=1 turns MCP skips into failures
-ruff check src/ tests/ evals/ && ruff format --check src/ tests/ evals/
-python evals/mcp/harness.py --strict  # MCP tool metadata and task coverage
-kintsugi mcp tools --check docs/mcp.md docs/cli.md README.md CLAUDE.md AGENTS.md
+kintsugi init /path/to/my_project --name "My Experiment"
 ```
 
-Conventions: Python 3.10+, line length 100, Ruff for lint and format, Conventional
-Commits (`feat:`, `fix:`, `docs:`; `!` marks a breaking change). `numpy<2.0`.
+This creates:
+```
+my_project/
+├── data/
+│   ├── raw/           ← Put your raw images here (cyc001/, cyc002/, etc.)
+│   └── processed/     ← Outputs go here automatically
+├── meta/              ← Experiment metadata
+│   ├── experiment.json    ← Microscope parameters (auto-generated)
+│   └── CHANNELNAMES.txt   ← Channel/marker names (user-provided)
+├── notebooks/         ← Working copies of processing notebooks
+├── configs/           ← Processing configuration files
+├── .vscode/           ← VS Code settings (auto-generated)
+├── AGENTS.md          ← Guidance for AI assistants (only when an MCP client is chosen)
+└── <client config>    ← Only for the MCP client(s) chosen, e.g. .mcp.json, .cursor/mcp.json
+```
 
-## MCP server
+MCP is optional and no client is configured by default. `kintsugi mcp config PROJECT --client NAME` (repeatable, or `all`) and `kintsugi init --mcp-client NAME` write the configuration of the chosen client(s) (`kintsugi mcp clients` lists Claude Code, VS Code, Cursor, Gemini CLI, Antigravity, Codex, Zed and the snippet-only clients), `AGENTS.md`, and `.gitignore` lines for the generated files. Without a choice, `mcp config` asks in a terminal and otherwise exits 2; `init` asks (default: none) or creates the project without MCP files; `init --force` refreshes only the clients already configured. With `--client claude-code`, `.mcp.json` holds the server definition — `{"mcpServers": {"kintsugi": {"type": "stdio", "command": "<absolute path to kintsugi>", "args": ["mcp", "start", "--project-dir", "<absolute project root>"]}}}` — the project travels in `args` because MCP clients differ in the working directory and environment they give a server. `.claude/settings.local.json` approves only that server: `{"enabledMcpjsonServers": ["kintsugi"]}`. The equivalent CLI form is `claude mcp add --scope project --transport stdio kintsugi -- kintsugi mcp start --project-dir /path/to/project`. See `docs/mcp.md`.
 
-`kintsugi mcp config <project>` writes the configuration for every MCP client that
-keeps it in the project and prints snippets for the others (`kintsugi mcp clients`
-lists them); the server starts as `kintsugi mcp start --project-dir <project>`. This
-repository's own `.mcp.json` runs the server without a project, so tools that read or
-write project files need an explicit `project_path`. Full reference: `docs/mcp.md`.
+### Experiment Metadata
 
-The tool list below is generated from `kintsugi.mcp.tool_specs.TOOL_SPECS`
-(`kintsugi mcp tools --write AGENTS.md`); do not edit it by hand.
+`/meta/experiment.json` stores microscope parameters (tile grid, pixel sizes, wavelengths, NA, RI). Auto-generated during `kintsugi init` with sensible defaults. CLI options: `--tile-rows`, `--tile-cols`, `--xy-pixel-size`, `--z-step-size`, `--numerical-aperture`, `--tissue-ri`.
+
+**CODEX/Akoya compatibility**: `ExperimentConfig.from_dict()` auto-translates CODEX fields (`numCycles`→`n_cycles`, `regionHeight`→`tile_rows`, `xyResolution`→`xy_pixel_size`, etc.). Flat wavelength lists mapped to (excitation, emission) pairs via `_CODEX_FILTER_SETS` in `project.py`. CODEX lacks RI — default **1.44** for uncleared tissue.
+
+### Channel Names
+
+Create `/meta/CHANNELNAMES.txt` with marker names for each channel. Supports multiple formats:
+
+**Simple list (CODEX format):**
+```
+DAPI-01
+Blank
+Blank
+Blank
+DAPI-02
+CD31
+CD8
+CD45
+```
+
+**Cycle-prefixed format:**
+```
+1: DAPI, Blank, Blank, Blank
+2: DAPI, CD31, CD8, CD45
+```
+
+SLURM scripts and notebooks automatically load channel names from this file.
+
+### Project Initialization Behavior
+
+`kintsugi init` handles existing data intelligently: raw data stays in place, processed data can be selectively deleted, existing projects get `--slurm` added or `--force` to refresh. Use `kintsugi scan /path/to/directory` to preview.
+
+### SLURM Job Submission (HPC)
+
+```bash
+kintsugi init /path/to/project --name "My Experiment" --slurm  # New project with SLURM
+kintsugi init /path/to/project --slurm    # Add SLURM to existing project
+kintsugi slurm init /path/to/project      # Equivalent SLURM-only command
+```
+
+Creates `slurm/` with auto-detected HPC settings (`config.sh`), job symlinks, and workflow README. SLURM scripts auto-load metadata from `experiment.json` and `CHANNELNAMES.txt`.
+
+```bash
+kintsugi slurm submit .                             # All steps
+kintsugi slurm submit . --steps decon,edf           # Specific steps
+kintsugi slurm submit . --cycles 1-5                # Specific cycles
+kintsugi slurm submit . --dry-run                   # Preview commands
+kintsugi slurm status .                             # Check job status
+```
+
+See `workflow/AGENTS.md` for processing modes, multi-account GPU scheduling, Snakemake workflow, registration, and batch processing.
+
+### Snakemake Workflow (Preferred)
+
+```bash
+kintsugi workflow config .                         # Generate config from experiment.json
+kintsugi workflow check .                          # Verify SLURM resources
+kintsugi workflow run .                            # Full pipeline (auto-generates config if missing)
+kintsugi workflow run . --dry-run                  # Preview
+kintsugi workflow run . --detach                   # Background (survives SSH disconnect)
+kintsugi workflow run . --dashboard                # Run with live progress dashboard
+kintsugi workflow run . --dashboard -i 15          # Custom refresh interval
+kintsugi workflow run . --cycles 1-5               # Specific cycles
+kintsugi workflow run . --local --cores 8          # Local (no SLURM)
+kintsugi workflow status . --watch                 # Standalone dashboard
+```
+
+`workflow run` auto-generates `workflow/config.yaml` from `meta/experiment.json` if the config is missing. The `--detach` flag runs Snakemake in a separate process group that survives SSH disconnects and terminal exits (log: `slurm/logs/snakemake/workflow_run_detached.log`, PID: `.kintsugi_run.pid`). The `--dashboard` flag launches snakemake in the background and displays a live progress dashboard; Ctrl+C detaches without killing SLURM jobs. **Without `--detach` or `--dashboard`, the Snakemake coordinator runs in the foreground** — if the terminal is killed, no new SLURM jobs will be submitted for dependent steps.
+
+**SLURM context warning**: When run inside a SLURM job (e.g., VS Code server) without `--detach` or `--dashboard`, the CLI warns that the coordinator must stay alive. Always use `--detach` for unattended/automated runs.
+
+**Path resolution**: All workflow subcommands use `_resolve_project_dir()` which auto-detects when you're inside a `workflow/` subdirectory and resolves to the parent project root. So `cd project/workflow && kintsugi workflow config .` works correctly.
+
+**Key function**: `generate_workflow_config(project_dir: Path) -> Path` in `cli.py` — standalone, reusable by both `workflow config` and `workflow run`.
+
+### Batch Processing (Multiple Datasets)
+
+**ALWAYS use the CLI command — NEVER write custom batch scripts:**
+
+```bash
+kintsugi workflow batch /path/to/projects_dir           # All eligible datasets
+kintsugi workflow batch /path/to/projects_dir --dry-run  # Preview what will run
+kintsugi workflow batch . -d CX_19-004                   # Single dataset by name
+kintsugi workflow batch . -p 2 --detach                  # Background, 2 concurrent
+kintsugi workflow batch . --force                        # Reprocess completed datasets
+kintsugi workflow stop /path/to/projects_dir             # Stop background batch
+```
+
+Eligibility: project has `workflow/config.yaml` + `data/raw/.staged`, and is missing `data/processed/signal_isolated/.snakemake_complete` (unless `--force`). The command validates GPU resources before starting and divides GPU slots across parallel processes.
+
+**NEVER do this:**
+- Do NOT write bash scripts that invoke `snakemake` directly
+- Do NOT use `subprocess.run(["snakemake", ...])` — use `kintsugi workflow run`
+- Do NOT omit `--profile profiles/slurm` — this causes CPU-only execution
+- Do NOT use `-j 1` — GPU pipelining requires `-j` >= total GPU slots (currently 2 on maigan)
+
+### GPU-Only Scheduling
+
+All processing (stitch, decon, EDF, registration) runs on GPU. CPU is 5-25x slower per step. QC rules (stitch/decon/edf/registration QC) run on CPU partition — they use pyvips + matplotlib, not GPU compute. The `-j` flag accounts for both GPU processing slots and CPU QC slots.
+
+`workflow run` will **hard-fail** if no GPU slots are detected, if no SLURM profile exists (unless `--local` is explicitly passed), or if every account has zero live availability. There is no silent CPU fallback.
+
+### Multi-Account State (Apr 8 2026)
+
+`BLOCKED_ACCOUNTS` in `src/kintsugi/hpc.py` contains `{brusko, clive}`. **Maigan is the only active account** (gpu_slots=2, cpu_slots=8). Clive was blocked because its QOS pool was throttled to 1 GPU/312.5 GB and is regularly saturated by other users on the shared investment QOS, causing chronic `QOSGrpMemLimit` blockages.
+
+`workflow run` injects per-account live availability into Snakemake via `--config live_accounts=<json>`. The Snakefile's `_build_cycle_assignment`, `_registration_assignment`, and `_qc_cpu_assignment` use the live data to skip accounts saturated by other users. See `workflow/AGENTS.md` "Resource Pool Calculation" and the `live-aware-account-routing` skill for details.
+
+## Development Workspace
+
+`kintsugi workspace` manages a VS Code multi-root workspace file (`kintsugi-dev.code-workspace`). Neither that file nor a test dataset is part of the repository: the workspace file lives outside the checkout (default location `_DEFAULT_WORKSPACE_FILE` in `cli.py`) and `test_data/` is gitignored, so a fresh clone has neither. A typical layout combines:
+
+| Workspace Folder | Path | Purpose |
+|------------------|------|---------|
+| KINTSUGI (repo) | `KINTSUGI/` | Source code |
+| Test Project | `KINTSUGI/test_data/<small_project>/` | Small local test dataset (gitignored) |
+| Full Project | `KINTSUGI_Projects/<project>/` | Real data |
+
+Notebooks default to a local test project. Change `PROJECT_DIR` for other projects.
+
+To swap the **Full Project** slot to a different dataset without editing JSON by hand:
+
+```bash
+kintsugi workspace list                              # show all candidate projects
+kintsugi workspace set-project CX_20-005_TH_CC1-A    # swap by name (resolved under KINTSUGI_Projects/)
+kintsugi workspace set-project /abs/path/to/project  # or by absolute path
+kintsugi workspace set-project NAME --dry-run        # preview the change
+kintsugi workspace set-project NAME --slot test      # update the Test Project slot instead
+```
+
+After switching, reload the VS Code window (Cmd/Ctrl+Shift+P -> "Reload Window").
+
+### Automatic Project Sync
+
+**Always edit `KINTSUGI/notebooks/` first** — never edit project folders directly. A git post-commit hook auto-syncs notebook modules and Python files to all project folders via `scripts/sync_to_projects.py` (MD5 checksum comparison). Manual sync: `python scripts/sync_to_projects.py [--dry-run|--force]`.
+
+**Auto-discovery**: `sync_to_projects.py` auto-discovers project folders by globbing `KINTSUGI_Projects/*/notebooks`. No manual updates to `DEFAULT_PROJECT_FOLDERS` are needed when new batch projects are added.
+
+### Adding MCP Support to Existing Projects
+
+If you're not using `kintsugi init`, or need to add MCP support to an existing project, run:
+
+```bash
+kintsugi mcp config /path/to/project --client NAME
+```
+
+This writes or merges the configuration of the chosen MCP client(s) (for `claude-code`: `.mcp.json` with an absolute path to the `kintsugi` executable and `.claude/settings.local.json` with `{"enabledMcpjsonServers": ["kintsugi"]}`), writes `AGENTS.md` if absent, and prints snippets for user- or IDE-configured clients (Claude Desktop, Windsurf, Cline, JetBrains). Existing entries for other servers are kept (`--force` overwrites an existing `kintsugi` entry); `--client` is repeatable, `--client all` selects every client, and without `--client` the command asks in a terminal or exits 2; a directory without `kintsugi_project.json` is refused unless `--force`.
+
+Use `--print-only` to display the configuration without creating files:
+```bash
+kintsugi mcp config /path/to/project --client NAME --print-only
+```
+
+### MCP Server Commands
+
+```bash
+# Start the MCP server (normally launched by your MCP client; stdout is the JSON-RPC stream)
+kintsugi mcp start --project-dir /path/to/project
+
+# List available tools (the registry is the source of truth)
+kintsugi mcp tools
+kintsugi mcp tools --markdown                      # Markdown table
+kintsugi mcp tools --write AGENTS.md docs/cli.md   # Regenerate the <!-- mcp-tools:* --> blocks in docs
+kintsugi mcp tools --check docs/mcp.md docs/cli.md README.md AGENTS.md   # Fail if those blocks drifted (CI runs this)
+kintsugi mcp clients                               # MCP clients 'mcp config' can configure
+kintsugi mcp status /path/to/project               # Persistent per-channel workflow state
+
+# Bootstrap the learning database from existing processed data
+kintsugi mcp pretrain /path/to/project --tissue-type tonsil [--dry-run] [--verbose]
+```
+
+### Available MCP Tools
+
+The authoritative list is `kintsugi mcp tools` (`--markdown` for a table with titles, categories and annotations); the full reference — parameters, resources, the prompt, the learning loop and the security model — is `docs/mcp.md`. The block below is generated from `kintsugi.mcp.tool_specs.TOOL_SPECS` by `kintsugi mcp tools --write AGENTS.md` and verified by `--check`; do not edit it by hand.
 
 <!-- mcp-tools:list:begin -->
 - **Signal isolation:** `load_channel`, `subtract_blank`, `analyze_weighted_subtraction`, `denoise`, `apply_clahe`, `clean_background`, `gaussian_subtract`, `denoise_advanced`, `cluster_channels`, `propagate_parameters`, `optimize_parameters`, `predict_parameters`, `estimate_background`
 - **Quality assessment:** `assess_quality`, `compute_snr`, `batch_assess_quality`
 - **Visualization:** `get_image_stats`, `get_thumbnail`, `compare_channels`, `get_intensity_profile`
-- **Workflow:** `list_channels`, `save_processed`, `get_processing_history`, `suggest_parameters`, `generate_jupyter_cell`, `get_session_state`, `unload_channel`
+- **Workflow:** `list_channels`, `save_processed`, `get_processing_history`, `suggest_parameters`, `generate_jupyter_cell`, `get_session_state`, `unload_channel`, `get_workflow_status`, `set_review_decision`
 - **Parameter learning:** `get_learned_parameters`, `record_successful_parameters`, `suggest_with_learning`, `approve_and_learn`, `get_learning_statistics`
 
-32 tools. Generated by `kintsugi mcp tools --write`; do not edit by hand.
+34 tools. Generated by `kintsugi mcp tools --write`; do not edit by hand.
 <!-- mcp-tools:list:end -->
+
+`denoise` methods are `percentile`, `uniform` and `median`; `denoise_advanced` methods are `adaptive`, `bilateral`, `nlm`, `bm3d`, `n2v` and `patch_svd`. `subtract_blank` takes `method="global"|"weighted"`; preview the weighted plan first with `analyze_weighted_subtraction`.
+
+### TissUUmaps Export
+
+Export processed images to web-optimized DZI tile pyramids for [TissUUmaps](https://github.com/TissUUmaps/TissUUmaps) visualization:
+
+```bash
+kintsugi workflow export prepare .              # Convert to DZI + generate .tmap
+kintsugi workflow export prepare . --dry-run    # Preview what would be exported
+kintsugi workflow export prepare . --force      # Reconvert everything
+kintsugi workflow export deploy . user@host:/path         # Deploy via rsync
+kintsugi workflow export deploy . user@host:/path -n      # Dry-run rsync
+kintsugi workflow export status .               # Show export status
+```
+
+**What it does:**
+1. Discovers registered images (`data/processed/registered/cyc##/*.tif`) and segmentation masks
+2. Converts each to DZI tile pyramid (256x256 PNG tiles) via `pyvips.dzsave()`
+3. Copies CSV overlays and h5ad files from `segmented/` and `analysis/`
+4. Generates `.tmap` project JSON with per-channel color mapping and `compositeMode: "lighter"`
+5. Writes `export_manifest.json` for skip-existing on re-runs (mtime + size comparison)
+
+**Output structure:** `data/exported/` with `images/`, `data/`, `regions/`, and `{project}.tmap`
+
+**Key files:** `src/kintsugi/export.py` (core logic), CLI commands in `cli.py` under `@workflow.group("export")`
+
+Blank/autofluorescence channels are excluded by default (use `--include-blanks` to include). 22 common immune markers have predefined color mappings (DAPI=blue, CD3=green, CD8=red, etc.).
+
+## Build and Development Commands
+
+```bash
+# Install in development mode
+pip install -e ".[dev]"
+
+# Install optional dependency groups via CLI
+kintsugi install --list            # Show the optional groups (14 in OPTIONAL_GROUPS, incl. the `full` composite)
+kintsugi install gpu               # Install GPU acceleration
+kintsugi install gpu --conda       # Use conda instead of pip (where available)
+kintsugi install all               # Unified pip resolve via pyproject.toml extras
+
+# Run tests
+pytest tests/ -v
+pytest tests/ --cov=src/kintsugi --cov-report=html
+
+# Linting and formatting
+ruff check src/ tests/ evals/
+ruff format --check src/ tests/ evals/
+
+# MCP tool metadata, task coverage and generated doc blocks
+python evals/mcp/harness.py --strict
+kintsugi mcp tools --check docs/mcp.md docs/cli.md README.md AGENTS.md
+
+# Type checking
+mypy src/ tests/
+
+# Build documentation (from docs/ directory)
+./make.bat html  # Windows
+make html        # Linux/macOS
+
+# Build package
+python -m build
+```
+
+## Architecture
+
+**Core Package** (`src/kintsugi/`):
+- `cli.py` - Click-based CLI with subcommands: check, register, template, info, mcp (config/start/tools/pretrain), init, install, workflow (config/check/run/export). `_resolve_project_dir()` auto-detects `workflow/` subdirectories for all workflow subcommands
+- `kreg.py`, `kstitch.py`, `kview2.py` - Bridge modules to notebook implementations
+- `deps.py` - Runtime dependency validation (Python packages, libvips, CUDA). `OPTIONAL_GROUPS` dict is the single source of truth for all 14 install groups (gpu, viz, dl, analysis, bio, mcp, dev, docs, kronos, denoise, optimize, rapids, workflow, full)
+- `edf.py` - Extended depth of focus processing (CuPy GPU or NumPy CPU)
+- `project.py` - Project structure management (`KintsugiProject` class), `_resolve_kintsugi_executable()` for absolute-path MCP config
+- `deprecation.py` - Deprecation warnings and migration guidance
+- `kcorrect_gpu.py` - GPU-accelerated BaSiC illumination correction (CuPy/SciPy)
+- `zarr_io.py` - OME-Zarr format I/O with Dask lazy loading
+- `parallel_io.py` - Parallel image loading/saving utilities
+- `dl_refinement.py` - Deep learning channel refinement
+- `export.py` - TissUUmaps export: DZI tile conversion, .tmap generation, rsync deploy
+- `vessel3d.py` - 3D vessel segmentation: Frangi vesselness, presets, marker discovery, multichannel combination, skeletonization, graph morphometry
+- `vessel3d_viz.py` - Vessel visualization: ortho views, mask overlays, feature plots
+
+**MCP Server** (`src/kintsugi/mcp/`, see `docs/mcp.md`):
+- `server.py` - `MCPServer` (mcp 2.x) wiring: `create_server()` registers tools, resources, the prompt and server instructions
+- `_sdk.py` - Import gate for `mcp>=2.0,<3`; distinguishes "not installed" from "unsupported 1.x"
+- `tool_specs.py` - Declarative `TOOL_SPECS` registry (name, handler, title, description, annotations); feeds `kintsugi mcp tools`
+- `docs_sync.py` - Renders the tool table/list into `<!-- mcp-tools:* -->` doc blocks (`--write`/`--check`)
+- `path_safety.py` - Path confinement (`ensure_within`, model checkpoint roots, numeric clamps)
+- `session.py` - Loaded-channel state and project resolution (`--project-dir` > `KINTSUGI_PROJECT_DIR` > a project working directory)
+- `schemas.py` / `prompts.py` - Typed output schemas and the `signal_isolation_workflow` prompt
+- `tools/signal_isolation.py` - Signal processing tools
+- `tools/quality_assessment.py` - QC tools
+- `tools/visualization.py` - Image preview tools
+- `tools/workflow.py` - Workflow management tools
+- `tools/learning.py` - MCP learning tools (the engine is `kintsugi.assist.parameter_learning.ParameterLearningEngine`)
+
+**Pure Python Modules** (`src/kintsugi/`):
+- `signal/` - Autofluorescence subtraction (global + weighted multi-range), bootstrap learning (`bootstrap.py`), multi-project batch orchestration (`batch_multi.py`)
+- `denoise/` - Denoising algorithms (median, Gaussian, bilateral, NLM, N2V, CARE, BM3D-lite)
+- `qc/` - Quality control:
+  - `artifact_scanner.py` - Unified `ArtifactScanner` with project/Zarr integration
+  - `stripe_artifact.py` - Core detection algorithms (`scan_zstack`, `detect_stripe_artifact`)
+  - `stripe_mitigation.py` - Correction methods (notch filter, directional filter, z-plane interpolation)
+  - `ImageQC`, `CellQC`, `MarkerQC`, `BatchQC` - Standard QC classes
+- `segment/` - Segmentation (SAM wrapper, watershed, postprocessing)
+- `assist/` - Parameter learning, Jupyter tuners, persistent workflow state (`workflow_state.py`), project state directory (`state_dir.py`)
+
+**Notebook Modules** (`notebooks/`):
+- `Kreg/` - Registration system (15 modules) wrapping VALIS for rigid/non-rigid registration
+- `Kstitch/` - GPU-accelerated image stitching with CuPy
+- `Kview2/` - 20+ interactive visualization functions for Jupyter
+- `KDecon/` - Deconvolution utilities (pure Python, replaces MATLAB)
+- `Kio.py` - I/O and parallel processing: channel name parsing, OME-TIFF extraction, parallel tile/stack loading, ProcessingConfig dataclass, ProgressCounter
+- `Kprocess.py` - GPU-accelerated QC statistics and visualization: `compute_*_stats_gpu()`, `collect_*_stats_parallel()`, `plot_summary_heatmaps()`, `run_*_qc()` convenience functions
+- `instanseg/` - Instance segmentation models (local customized version)
+- `Kutils.py` - Signal isolation utilities (legacy, used by interactive tuners)
+
+**Processing Notebooks** (sequential workflow):
+1. `1_Single_Channel_Eval.ipynb` - Parameter tuning and setup
+2. `2_Cycle_Processing.ipynb` - Batch cycle processing
+3. `3_Signal_Isolation_QC.ipynb` - Signal isolation with integrated QC (interactive, or AI-assisted through the optional MCP server)
+4. `4_Segmentation_Analysis.ipynb` - Segmentation, feature extraction, SOM clustering & spatial analysis
+
+## Jupyter Notebook Workflow
+
+**CRITICAL**: Autoreload is enabled in all KINTSUGI notebooks — **NEVER tell the user to restart the kernel** after editing Python modules. Just re-run the relevant cell.
+
+See `notebooks/AGENTS.md` for full details on autoreload behavior, troubleshooting "Function Not Found" errors, and cell execution order.
+
+## Key Patterns
+
+- **Lazy loading**: `__init__.py` uses lazy imports to avoid loading heavy dependencies at startup
+- **Bridge pattern**: `src/kintsugi/*.py` modules wrap notebook implementations for package use
+- **Configuration-driven**: Registration and processing pipelines use JSON config files (see `notebooks/config_example.json`)
+- **Platform-specific**: Windows/Linux/macOS have different environment files (`envs/`) and dependency handling
+- **Parameter learning**: Successful parameters are stored in SQLite databases, indexed by tissue type and marker name
+- **MCP integration**: any MCP client can use the image processing tools through the optional MCP server
+
+## Critical Fixes & Enhancements (Jan–Feb 2026)
+
+These bugs have been fixed in the current codebase. Listed here for context when investigating image quality issues.
+
+| Component | Issue | Fix | Key Detail |
+|-----------|-------|-----|------------|
+| Deconvolution | Horizontal banding (Gibbs ringing) | Enabled Tukey window edge apodization | `_create_tukey_window_3d` existed but was never called (`Kdecon/deconvolution.py`) |
+| Deconvolution | Intensity scaling saturated output | Scale to `raw_max` instead of 65535 | Preserves relative channel intensities (`Kdecon/main.py`) |
+| BaSiC Correction | Negative flatfield on sparse markers | Falls back to uniform flatfield | `flatfield_min=0.1` clamp in `transform()` (`kcorrect_gpu.py`) |
+| Stitching | Vertical stripe artifacts (~30px) | Reprocess with current code | Stripes from old pipeline code, NOT raw data. Script: `scripts/reprocess_striped_zplanes.py` |
+| EDF | Detail loss from sigma smoothing | Smooth variance map, not input image | CLIJ2-matching defaults: radius=2, sigma=10 (`edf.py`) |
+| Vessel3D | Frangi Ra formula wrong (Ra=\|λ₁\|/\|λ₂\|) | Ra=\|λ₂\|/\|λ₃\| per Frangi 1998 eq. 11 | Tube response was suppressed — small/faint vessels missed (`vessel3d.py`) |
+| Vessel3D | L4 GPU OOM on isotropic volumes | VRAM guard + CPU fallback when <40 GB | Queries `cp.cuda.Device().mem_info` before GPU path (`vessel3d.py`) |
+
+**GPU Processing:**
+- Multi-GPU with `device_id` parameter, queue-based allocation, automatic OOM retry
+- EDF: `blend_depth` and `z_smooth_sigma` for smooth z-transitions
+
+**Quality Control:**
+- `ArtifactScanner` — unified artifact detection for TIFF/Zarr with JSON reports
+- `QualityGate` — pre-processing validation (stripe, saturation, low signal detection)
+- `validate_stats_cache()` / `invalidate_phase_cache()` in `Kio.py` — stale cache prevention
+- `quantify_processing_pipeline()` in `Kutils.py` — SNR/uniformity/sharpness metrics
+
+**When investigating artifacts**: Always verify raw data is clean before attributing to data quality. Most historical "artifacts" were caused by the deconvolution apodization bug (now fixed). Compare fresh reprocessing vs existing files first.
+
+**Skills Registry** (`Skills_Registry/` submodule): the maintainer's registry of learnings from earlier sessions. Its assistant-specific commands are local maintainer tooling and are not part of the repository.
+
+## Registration
+
+See `workflow/AGENTS.md` for comprehensive registration documentation: tuned non-rigid parameters, three critical bug fixes (params unpacking, coarse NR, Valis init), VALIS dimension parameters, sigma math, smoothing methods, validated results, batch re-registration, and tuning guide.
+
+## Signal Isolation
+
+See `src/kintsugi/signal/AGENTS.md` for weighted autofluorescence subtraction (per-intensity-range weights), single-project batch signal isolation (recipe-driven multi-step processing, auto method selection, background cleaning, parameter learning, QC reporting), and multi-project batch orchestration (cascading recipe resolution, cross-project reports).
+
+## Batch Processing (Multi-Dataset)
+
+See `workflow/AGENTS.md` for batch processing documentation: data staging, cleanup with QC guard, full pipeline lifecycle, and sentinel validation.
+
+**Sentinel validation** (`scripts/create_si_sentinels.py`): Validates signal isolation output (manifest JSON + TIF existence/size) and creates missing `.snakemake_complete` sentinels for projects processed outside Snakemake (e.g., by batch scripts). Supports `--dry-run`. Used to promote 25 batch-processed projects to "signal_isolated" status (Feb 2026).
+
+## Dependencies
+
+Core: numpy<2.0, scipy, pandas, scikit-image, opencv-contrib-python-headless, pyvips, seaborn, pqdm
+
+14 optional install groups defined in `deps.py` `OPTIONAL_GROUPS` (single source of truth, also used by `pyproject.toml` extras). Install via `kintsugi install <group>` (supports `--conda` for groups with conda recipes):
+- `gpu` - PyTorch + CuPy for GPU acceleration
+- `viz` - Napari visualization
+- `dl` - Deep learning segmentation (InstanSeg)
+- `analysis` - scanpy, scimap for spatial analysis
+- `bio` - Bio formats I/O (OME-TIFF, LIF, etc.)
+- `mcp` - MCP server for AI assistants (any MCP client)
+- `dev` - Development tools (pytest, ruff, black, mypy)
+- `docs` - Documentation (Sphinx)
+- `kronos` - KRONOS foundation model (prints post-install note about cloning KRONOS repo)
+- `denoise` - Advanced denoising (N2V, CARE)
+- `optimize` - Parameter optimization (Optuna + SMO)
+- `workflow` - Snakemake workflow orchestration (HPC/SLURM)
+- `rapids` - RAPIDS GPU-accelerated data science
+- `full` - All optional features (composite)
+
+`kintsugi install all` uses a single `pip install -e ".[gpu,viz,dl,...]"` pass via pyproject.toml extras to avoid cascading dependency conflicts. Skips `full` (composite) and `rapids` (needs NVIDIA channel). Falls back to sequential install + constraint repair if pyproject.toml not found. Conda mode (`--conda`) installs conda groups first, then remaining via pip extras.
+
+**External requirements**: libvips (native library). Java/Maven no longer required.
+
+### Dependency Safety
+
+**Constraint guards** prevent known-bad dependency combinations:
+- `constraints.txt` at repo root enforces `numpy<2.0` — auto-injected into all `kintsugi install` pip commands
+- All torch-using groups (`gpu`, `dl`, `denoise`, `kronos`) use `--index-url https://download.pytorch.org/whl/cu128` to avoid CPU-only torch (cu128 supports Blackwell/B200 sm_100)
+- `analysis`, `bio`, `kronos` groups have explicit `numpy>=1.24.0,<2.0.0` in pyproject.toml extras
+- Pre-install guards warn before installing groups that would break existing packages
+
+**Validation**: `kintsugi check --strict` catches:
+- numpy >= 2.0 installed (ERROR)
+- CPU-only PyTorch build (ERROR)
+- CuPy missing CUDA runtime libraries (ERROR)
+- SLURM TRES patch not applied (ERROR on HPC)
+
+**SLURM TRES patch**: `kintsugi patch slurm` auto-applies the `SLURM_TRES_PER_TASK` fix. Also applied automatically by `kintsugi install all` and `kintsugi install workflow`.
+
+See `docs/DEPENDENCY_GUIDE.md` for full troubleshooting guide.
+
+### CuPy & HPC Cache (IMPORTANT)
+
+**CuPy IS INSTALLED** (`cupy-cuda12x`). Do NOT reinstall. `gpu.cupy_available` returns `False` on login nodes (no GPU hardware) — this is normal. Use `gpu.cupy_installed` for import-only check. Only reinstall via `kintsugi install gpu` after a full env rebuild.
+
+**HPC cache**: SLURM jobs use account-specific caches (`~/.use_conda_{account}.sh` → `~/.cache_redirect.sh`). Never install packages or modify caches directly.
+
+## Git Submodules
+
+`Skills_Registry/` is a Git submodule. Clone with `--recurse-submodules` or run `git submodule update --init --recursive`.
+
+## Testing
+
+Tests are in `tests/` with fixtures in `conftest.py`. Key fixtures: `sample_image`, `sample_multichannel_image`, `sample_stack`, `sample_tiff`, `sample_config`, `temp_dir`.
+
+CI runs on Linux (ubuntu-latest) with Python 3.10-3.12.
+
+**Suite status** (Oct 2026): 1272 collected (`pytest --collect-only -q tests/`); GPU-hardware and optional-dependency tests skip where those are absent.
+
+**GPU skip pattern**: On HPC login nodes, CuPy is installed (`CUPY_AVAILABLE=True`) but no GPU hardware exists. Tests that need actual GPU hardware must use `check_gpu()` from `kcorrect_gpu.py`, not `CUPY_AVAILABLE`:
+```python
+from kintsugi.kcorrect_gpu import check_gpu
+GPU_HARDWARE_AVAILABLE, _reason = check_gpu()
+
+@pytest.mark.skipif(not GPU_HARDWARE_AVAILABLE, reason="No GPU hardware available")
+```
+
+**Dev dependencies**: `pytest-asyncio` and `mcp>=2.0,<3` are required for the MCP tests — 215 collected across `tests/test_mcp_tools.py`, `test_mcp_path_safety.py`, `test_mcp_protocol.py`, `test_mcp_config.py`, `test_mcp_stdio.py` and `test_mcp_docs_sync.py` (recount with `pytest --collect-only -q <those files> | tail -1`). Install with `pip install -e ".[dev]"`. `KINTSUGI_REQUIRE_MCP=1` turns MCP skips into failures (CI sets it).
+
+## Code Style
+
+- Line length: 100 characters
+- Formatter: Black
+- Linter: Ruff (with isort, pyupgrade, flake8-bugbear)
+- Python 3.10+ required
+
+## Release and Versioning
+
+Uses [Conventional Commits](https://www.conventionalcommits.org/) with automatic semantic versioning via [commitizen](https://commitizen-tools.github.io/commitizen/) (`[tool.commitizen]` in `pyproject.toml`; `commitizen` is in the `dev` install group). Format: `<type>(<scope>): <description>` — types: `feat` (MINOR), `fix` (PATCH), `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`. Add `!` for breaking changes (MAJOR).
+
+```bash
+pre-commit install && pre-commit install --hook-type commit-msg  # Enable hooks (ruff + commitizen commit-msg lint)
+cz bump --dry-run                                                 # Preview the next version and changelog entry
+cz bump                                                           # Bump pyproject version, update CHANGELOG.md, tag vX.Y.Z
+git push --follow-tags                                            # Publishing the GitHub release runs .github/workflows/release.yml
+```
+
+## Notebook 4: Segmentation & Spatial Analysis
+
+See `notebooks/AGENTS.md` for Notebook 4 capabilities (InstanSeg segmentation, feature extraction, SOM clustering, spatial analysis with scanpy/scimap), key dependencies, and migration notes.
+
+## Subdirectory Documentation
+
+Feature-specific documentation lives in `AGENTS.md` files near the code:
+- `src/kintsugi/AGENTS.md` — KRONOS foundation model, 3D vessel segmentation, pipeline-aware cleanup
+- `src/kintsugi/signal/AGENTS.md` — Weighted AF subtraction, single-project batch isolation, multi-project batch orchestration
+- `workflow/AGENTS.md` — Snakemake workflow, registration, batch processing, SLURM scheduling
+- `notebooks/AGENTS.md` — Jupyter autoreload, Notebook 4 segmentation/analysis

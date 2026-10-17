@@ -31,12 +31,15 @@ def _no_configured_mcp_project(monkeypatch):
     monkeypatch.delenv("KINTSUGI_PROJECT_DIR", raising=False)
     try:
         from kintsugi.mcp.session import set_project_root
+        from kintsugi.mcp.workflow_store import clear_workflow_stores
     except ImportError:  # pragma: no cover - package not importable
         yield
         return
     set_project_root(None)
+    clear_workflow_stores()
     yield
     set_project_root(None)
+    clear_workflow_stores()
 
 
 @pytest.fixture(scope="session", autouse=True)

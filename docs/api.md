@@ -283,7 +283,7 @@ from kintsugi.cli import main
 
 Click-based CLI with command groups: `main`, `mcp`, `slurm`, `workflow`. See [CLI Reference](cli.md) for full command documentation.
 
-## mcp Module (Claude Code MCP server)
+## mcp Module (optional MCP server)
 
 ```python
 from kintsugi.mcp import create_server          # build the MCPServer (needs mcp>=2.0,<3)
@@ -319,6 +319,6 @@ from kintsugi.assist.parameter_learning import ParameterLearningEngine
   (`<project>/.kintsugi/`); reads fall back to a legacy `.claude_workflow/`, which the
   first write moves to `.kintsugi/`.
 
-See [Claude Code Integration (MCP Server)](mcp.md) for the tool reference, resources,
+See [MCP server](mcp.md) for the tool reference, resources,
 prompt, security model and a recorded session.
 

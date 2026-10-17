@@ -1,5 +1,5 @@
 """
-Interactive Parameter Tuning for Claude-Guided Workflow
+Interactive Parameter Tuning (Jupyter widgets)
 
 Provides Jupyter widgets for real-time parameter adjustment
 with visual feedback using Kview2 visualization tools.

@@ -13,7 +13,6 @@ on:
       - 'docs/**'
       - 'src/kintsugi/mcp/**'
       - 'README.md'
-      - 'CLAUDE.md'
       - 'AGENTS.md'
       - '.github/workflows/docs.yml'
   workflow_dispatch:  # Allow manual trigger

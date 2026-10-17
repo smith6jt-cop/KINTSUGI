@@ -8,10 +8,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **evals**: the agentic tool-selection eval is provider-pluggable.
+  `evals/mcp/providers.py` (standard library only) speaks the Anthropic Messages API
+  (`--provider anthropic`) and the OpenAI Chat Completions API (`--provider openai`),
+  which also reaches other platforms and local servers such as Ollama and vLLM through
+  `OPENAI_BASE_URL` or `--base-url`. The report records the provider, model and
+  endpoint host. There is no default provider or model: the harness takes
+  `--provider` and `--model`, asks for them in a terminal, and otherwise exits with a
+  usage error. The `mcp-eval` workflow runs the pass only when a provider and model are
+  chosen (dispatch inputs `provider`, `model`, `base_url`; for the schedule, variables
+  `EVAL_PROVIDER`, `EVAL_MODEL`, `EVAL_BASE_URL`) and writes
+  `mcp_eval_report_<provider>.json`.
+- **mcp**: persistent per-project workflow state. `load_channel`, the processing tools,
+  `save_processed`, `propagate_parameters` and `approve_and_learn` record channel status
+  and steps in `<project>/.kintsugi/workflow_state.json` (with an `audit_log` in
+  `workflow_audit.db`), which survives server restarts. New tools `get_workflow_status`
+  (typed output) and `set_review_decision`, resource `kintsugi://project/workflow`, CLI
+  `kintsugi mcp status`; `get_session_state` gains a `workflow` summary and
+  `get_processing_history` a `source` key, falling back to persisted steps for a channel
+  that is no longer loaded. Derived images inherit `project`, `cycle` and `root` from
+  the image they were computed from. 34 tools.
 - **mcp**: client registry `kintsugi.mcp.clients` (11 clients), `kintsugi mcp config
-  --client NAME` (repeatable), `kintsugi mcp clients`, `kintsugi init --mcp-client NAME`
-  (repeatable, or `none`); existing client files are merged and only the `kintsugi`
-  entry is replaced, with `--force`. Generated projects get an `AGENTS.md` (an existing
+  --client NAME` (repeatable, or `all`), `kintsugi mcp clients`, `kintsugi init
+  --mcp-client NAME` (repeatable, `all` or `none`). No client is configured unless
+  chosen: without `--client`, `mcp config` asks in a terminal and otherwise exits 2;
+  `init` asks (default: none) or creates the project without MCP files, and `init
+  --force` refreshes only the clients already configured. KINTSUGI works without the
+  `mcp` package and without any assistant. Existing client files are merged and only
+  the `kintsugi` entry is replaced, with `--force`. Generated projects get an `AGENTS.md` (an existing
   one only has its tool list refreshed); the repository gains a root `AGENTS.md`, and
   `kintsugi mcp tools --check` covers it in CI.
 - **mcp**: every tool is advertised with a title and MCP behaviour annotations
@@ -56,10 +80,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   citation; the README BibTeX entry now carries the full author list and DOI.
 
 ### Changed
+- **docs**: the documentation, notebooks, docstrings and package metadata describe the
+  MCP server as optional and usable with any MCP client; client names appear only
+  where a sentence is about that client. `docs/mcp.md` is titled "MCP server" and has
+  a "Connect your client" section whose table is generated from the client registry
+  (new `mcp-tools:clients` block, checked like the tool tables) plus setup for any
+  other client (stdio entry, MCP Inspector, Python SDK). `pyproject.toml` and
+  `CITATION.cff` no longer describe KINTSUGI as "for Claude Code" (keywords
+  `mcp-server`, `ai-assistant`).
+- **deprecation**: the Notebook 3/5 notices list the Python API first and the MCP
+  route as optional for any client; `DEPRECATION_MAP` points `ini_params*` to
+  `kintsugi.signal.subtract_autofluorescence` / `subtract_autofluorescence_dask`
+  instead of an MCP tool function.
+- **docs**: guidance for AI coding assistants lives in `AGENTS.md` files (repository
+  root, `src/kintsugi/`, `src/kintsugi/signal/`, `workflow/`, `notebooks/`), read by
+  any assistant; each `CLAUDE.md` is now the one line `@AGENTS.md`. The generated tool
+  list is checked in `AGENTS.md` only.
+- **BREAKING (evals)**: `evals/mcp/harness.py --agentic` requires `--provider` and
+  `--model` (no default model, no provider inferred from API keys) and no longer uses
+  the `anthropic` SDK; the `mcp-eval` workflow has no default model and runs the
+  agentic pass only when a provider and model are configured. `ruff` in CI now also
+  checks `evals/`.
 - **BREAKING**: `kintsugi.project.write_claude_config` is replaced by
-  `write_mcp_config(root, clients=None, *, force=False, require_project=True)`.
-  `kintsugi init` and `kintsugi mcp config` now write the configuration of every MCP
-  client that keeps it in the project (Claude Code `.mcp.json` +
+  `write_mcp_config(root, clients, *, force=False, require_project=True)`, where
+  `clients` is required (no default client). `kintsugi init` no longer writes Claude
+  Code files by default: it and `kintsugi mcp config` write the configuration of the
+  client(s) the user chooses among those that keep it in the project (Claude Code `.mcp.json` +
   `.claude/settings.local.json`, VS Code `.vscode/mcp.json`, Cursor `.cursor/mcp.json`,
   Gemini CLI `.gemini/settings.json`, Antigravity `.agents/mcp_config.json`, Codex
   `.codex/config.toml`, Zed `.zed/settings.json`), an `AGENTS.md`, and `.gitignore`
@@ -154,6 +200,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   use them; `approve_and_learn` now reports each `record_id`.
 
 ### Removed
+- The repository no longer ships MCP client configuration: the root `.mcp.json` and
+  `.claude/commands/` are untracked and gitignored, together with the other clients'
+  directories, so each contributor keeps their own. A clone that pulls this change
+  loses its tracked copies; restore them as local, ignored files with
+  `git restore --source=a0645c3 --worktree -- .mcp.json .claude/commands`.
 - **mcp**: the unregistered, untested `set_project_context` handler and the
   `_basic_parameter_suggestion` fallback (its only trigger, `kintsugi.signal`
   failing to import, cannot happen with the core dependencies).
@@ -162,6 +213,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instructions in `TROUBLESHOOTING.md`.
 
 ### Fixed
+- **release**: `cz bump` failed (`TypeError: unhashable type: 'Table'`) because
+  `[tool.commitizen.changelog_format]` was a table, and `major_version_zero = true`
+  would have kept a breaking change below 2.0.0; `changelog_file` is now a plain key
+  and `major_version_zero` is removed, so `cz bump --dry-run` reports 1.2.3 → 2.0.0.
+- **mcp**: numpy values in a tool result are converted before serialisation; a
+  default (global) `subtract_blank` call returned a `numpy.bool_` and failed with
+  "Error executing tool" over the protocol.
+- **mcp**: `assess_quality` and `predict_parameters` (read-only tools) no longer append to
+  the processing history; `assess_quality` stores its score in the image metadata.
+  `estimate_background` records its history on the corrected output, so saving it
+  writes a non-empty history file. `save_processed` serialises numpy values in the
+  history file.
+- **assist**: `WorkflowState` creates nothing until the first change, merges concurrent
+  writers under a lock with atomic writes, no longer replaces an existing channel in
+  `add_channel`, and reports unknown channels instead of ignoring them.
 - **cli**: `kintsugi mcp config --print-only` printed `args` without `--project-dir`.
 - **learning**: constructing `ParameterLearningEngine` no longer creates directories or
   databases; they are created on the first recorded parameters, so read-only MCP tools

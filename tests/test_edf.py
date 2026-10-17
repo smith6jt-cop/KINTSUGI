@@ -440,7 +440,7 @@ class TestSigmaFixRegression:
     def test_default_parameters_match_clij2(self, simple_zstack):
         """Test that default parameters (radius=2, sigma=10) work correctly.
 
-        These are the CLIJ2 defaults mentioned in the CLAUDE.md fix notes.
+        These are the CLIJ2 defaults mentioned in the AGENTS.md fix notes.
         """
         result = extended_depth_of_focus_variance(simple_zstack, radius_x=2, radius_y=2, sigma=10.0)
 

@@ -91,19 +91,15 @@ This notebook is DEPRECATED and will be removed in KINTSUGI v2.0.0.
 
 The Signal Isolation workflow has been replaced with:
 
-1. CLAUDE-GUIDED WORKFLOW (Recommended):
-   - Uses the MCP server for Claude Code integration
-   - Interactive parameter suggestions based on image analysis
-   - Learns from successful parameters for future recommendations
-
-   To use:
+1. PURE PYTHON MODULES:
    ```python
-   # Start the MCP server
-   kintsugi mcp start
+   from kintsugi.signal import subtract_autofluorescence
 
-   # Configure Claude Code with KINTSUGI tools
-   kintsugi mcp config /path/to/project
+   result = subtract_autofluorescence(signal, blank)
    ```
+   - kintsugi.signal: global and weighted autofluorescence subtraction, batch runs
+   - kintsugi.denoise: Advanced denoising (N2V, NLM, BM3D)
+   - kintsugi.qc: Quality control modules
 
 2. JUPYTER PARAMETER TUNERS:
    - Interactive widgets for manual parameter tuning
@@ -119,9 +115,15 @@ The Signal Isolation workflow has been replaced with:
    params = result.get_params()
    ```
 
-3. PURE PYTHON MODULES:
-   - kintsugi.denoise: Advanced denoising (N2V, NLM, BM3D)
-   - kintsugi.qc: Quality control modules
+3. AI-ASSISTED WORKFLOW (optional, any MCP client):
+   - The KINTSUGI MCP server lets the AI assistant you choose load channels,
+     suggest parameters and record what worked for future recommendations
+   - Requires the optional mcp extra: pip install -e ".[mcp]"
+
+   ```bash
+   kintsugi mcp clients                                  # the supported clients
+   kintsugi mcp config /path/to/project --client NAME    # configure yours
+   ```
 
 For detailed migration instructions, see:
   notebooks/MIGRATION_GUIDE.md
@@ -138,17 +140,7 @@ This notebook is DEPRECATED and will be removed in KINTSUGI v2.0.0.
 
 The DL Channel Refinement workflow has been replaced with:
 
-1. MCP SERVER QUALITY ASSESSMENT:
-   - assess_quality tool for automatic channel quality assessment
-   - compute_snr for Signal-to-Noise ratio calculation
-   - Heuristic and DL-based quality metrics
-
-   To use with Claude Code:
-   ```
-   Use the assess_quality tool on the loaded channel
-   ```
-
-2. QC MODULE:
+1. QC MODULE:
    ```python
    from kintsugi.qc import ImageQC, CellQC, MarkerQC
 
@@ -160,6 +152,10 @@ The DL Channel Refinement workflow has been replaced with:
    marker_qc = MarkerQC()
    result = marker_qc.assess(intensities, marker_name="CD3")
    ```
+
+2. AI-ASSISTED QUALITY ASSESSMENT (optional, any MCP client):
+   - The assess_quality and compute_snr tools of the KINTSUGI MCP server
+   - Configure your client with: kintsugi mcp config /path/to/project --client NAME
 
 3. PARAMETER LEARNING:
    - Parameters are automatically learned from successful runs
@@ -180,16 +176,19 @@ For detailed migration instructions, see:
 DEPRECATION_MAP = {
     # Notebook 3 functions
     "ini_params": {
-        "replacement": "kintsugi.mcp.tools.signal_isolation.subtract_blank",
-        "message": "Use MCP subtract_blank tool or kintsugi.assist.blank_subtraction_tuner",
+        "replacement": "kintsugi.signal.subtract_autofluorescence",
+        "message": (
+            "Use kintsugi.signal.subtract_autofluorescence or "
+            "kintsugi.assist.blank_subtraction_tuner"
+        ),
     },
     "ini_params_alt": {
-        "replacement": "kintsugi.mcp.tools.signal_isolation.subtract_blank",
-        "message": "Use MCP subtract_blank tool",
+        "replacement": "kintsugi.signal.subtract_autofluorescence",
+        "message": "Use kintsugi.signal.subtract_autofluorescence",
     },
     "ini_params_full": {
-        "replacement": "kintsugi.mcp.tools.signal_isolation.subtract_blank",
-        "message": "Use MCP subtract_blank tool with Dask support",
+        "replacement": "kintsugi.signal.subtract_autofluorescence_dask",
+        "message": "Use kintsugi.signal.subtract_autofluorescence_dask for Dask arrays",
     },
     "ini_params_SNR": {
         "replacement": "kintsugi.qc.image_qc.assess_image_quality",

@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "kintsugi": {
-      "command": "kintsugi",
-      "args": ["mcp", "start"]
-    }
-  }
-}

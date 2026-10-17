@@ -1,9 +1,9 @@
 {
   "structural": {
-    "tool_count": 32,
-    "total_definition_tokens_est": 8087,
-    "mean_tokens_per_tool_est": 252.7,
-    "tools_with_output_schema": 32,
+    "tool_count": 34,
+    "total_definition_tokens_est": 8641,
+    "mean_tokens_per_tool_est": 254.1,
+    "tools_with_output_schema": 34,
     "top_tools_by_tokens": [
       [
         "subtract_blank",
@@ -68,6 +68,21 @@
         "tools": [
           "record_successful_parameters",
           "approve_and_learn"
+        ]
+      },
+      {
+        "theme": "session vs project state",
+        "tools": [
+          "get_session_state",
+          "get_workflow_status",
+          "get_processing_history"
+        ]
+      },
+      {
+        "theme": "review outcome",
+        "tools": [
+          "approve_and_learn",
+          "set_review_decision"
         ]
       }
     ],

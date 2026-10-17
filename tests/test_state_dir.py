@@ -111,11 +111,12 @@ def test_workflow_state_follows_a_later_migration(tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "rename", refuse)
     state = WorkflowState(tmp_path)
-    assert state.state_dir == legacy
+    state.add_channel("cyc001_CD3")  # the move fails, so this write lands in the legacy dir
+    assert state.state_dir == legacy and (legacy / "workflow_state.json").exists()
 
     monkeypatch.setattr(Path, "rename", real_rename)
     project_state_dir(tmp_path, create=True)  # e.g. a learning write moves it
-    state.new_session()
+    state.record("cyc001_CD3", "denoise", {"filter_size": 3})
     assert state.json_path == tmp_path / STATE_DIR_NAME / "workflow_state.json"
-    assert state.json_path.exists()
     assert not legacy.exists()
+    assert len(state.get_channel("cyc001_CD3").processing_steps) == 1

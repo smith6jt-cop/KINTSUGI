@@ -1,7 +1,7 @@
 """
 Visualization Tools for KINTSUGI MCP Server
 
-Provides image statistics and thumbnail generation for Claude to understand images.
+Provides image statistics and thumbnails so an assistant can inspect images.
 """
 
 from __future__ import annotations

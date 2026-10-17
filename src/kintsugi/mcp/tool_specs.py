@@ -19,9 +19,9 @@ is false for every tool: the server only touches the local project directory
 and its own session state.
 
 Naming: tool names are deliberately *not* prefixed with ``kintsugi_``. They are
-valid, unique, verb-first snake_case names (SEP-986), and Claude Code already
-namespaces every MCP tool as ``mcp__kintsugi__<tool>``; a prefix would only
-duplicate that and break existing permission rules, notebooks and eval tasks.
+valid, unique, verb-first snake_case names (SEP-986), and MCP clients namespace
+tools by server (Claude Code, for example, as ``mcp__kintsugi__<tool>``); a prefix
+would only duplicate that and break existing permission rules, notebooks and eval tasks.
 """
 
 from __future__ import annotations
@@ -300,6 +300,31 @@ TOOL_SPECS: list[dict[str, Any]] = [
             "Files on disk are untouched."
         ),
         "annotations": _PROCESSING,
+    },
+    {
+        "name": "get_workflow_status",
+        "module": "workflow",
+        "attr": "get_workflow_status",
+        "title": "Workflow status",
+        "description": (
+            "Show the project's persistent workflow state, which survives server restarts: "
+            "every channel's status (pending, processing, review, approved, rejected, "
+            "needs_adjustment), quality score and step count, plus the processing and review "
+            "queues. Call it first to resume earlier work."
+        ),
+        "annotations": _READ_ONLY,
+    },
+    {
+        "name": "set_review_decision",
+        "module": "workflow",
+        "attr": "set_review_decision",
+        "title": "Record review decision",
+        "description": (
+            "Record a review decision other than approval (rejected, needs_adjustment, or "
+            "pending to reset) for a channel in the project's workflow state; works for "
+            "channels that are no longer loaded. Use approve_and_learn to approve."
+        ),
+        "annotations": _APPENDS,
     },
     # ---- Parameter learning ----
     {

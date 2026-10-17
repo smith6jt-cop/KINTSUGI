@@ -1,8 +1,9 @@
 """Generate and verify the MCP tool reference embedded in the documentation.
 
-The tool table in ``docs/mcp.md``, ``docs/cli.md`` and ``README.md`` (and the
-name lists in ``CLAUDE.md`` and ``AGENTS.md``) are rendered from
-:data:`kintsugi.mcp.tool_specs.TOOL_SPECS` and spliced between marker comments::
+The tool table in ``docs/mcp.md``, ``docs/cli.md`` and ``README.md`` and the
+name list in ``AGENTS.md`` are rendered from
+:data:`kintsugi.mcp.tool_specs.TOOL_SPECS`, and the client table in ``docs/mcp.md``
+from :data:`kintsugi.mcp.clients.CLIENTS`; each is spliced between marker comments::
 
     <!-- mcp-tools:table:begin -->
     ...generated...
@@ -30,7 +31,7 @@ CATEGORY_LABELS: dict[str, str] = {
     "learning": "Parameter learning",
 }
 
-BLOCKS = ("table", "list")
+BLOCKS = ("table", "list", "clients")
 
 
 class DocsSyncError(ValueError):
@@ -89,11 +90,39 @@ def render_tool_list() -> str:
     return "\n".join(lines)
 
 
+def render_client_table() -> str:
+    """Markdown table of the MCP clients ``kintsugi mcp config`` knows (from the registry)."""
+    from kintsugi.mcp.clients import CLIENTS
+
+    lines = [
+        "| Client | `--client` | Configuration | After configuring | Client docs |",
+        "|--------|------------|---------------|-------------------|-------------|",
+    ]
+    for client in CLIENTS:
+        where = (
+            f"`{client.path}` (written)"
+            if client.scope == "project"
+            else f"snippet to paste: {client.path}"
+        )
+        cells = [client.display, f"`{client.name}`", where, client.next_steps]
+        cells = [cell.replace("|", "\\|") for cell in cells]
+        cells.append(f"[docs]({client.docs_url})")
+        lines.append("| " + " | ".join(cells) + " |")
+    lines.append("")
+    lines.append(
+        f"{len(CLIENTS)} clients. Generated from `kintsugi.mcp.clients` by "
+        "`kintsugi mcp tools --write`; do not edit by hand."
+    )
+    return "\n".join(lines)
+
+
 def render_block(kind: str) -> str:
     if kind == "table":
         return render_tool_table()
     if kind == "list":
         return render_tool_list()
+    if kind == "clients":
+        return render_client_table()
     raise DocsSyncError(f"unknown block kind {kind!r}; expected one of {BLOCKS}")
 
 

@@ -35,6 +35,25 @@ def test_list_groups_every_tool():
     assert "**Parameter learning:**" in listing
 
 
+def test_client_table_lists_every_registered_client():
+    from kintsugi.mcp.clients import CLIENTS
+
+    table = docs_sync.render_block("clients")
+    for client in CLIENTS:
+        assert f"| `{client.name}` |" in table
+        assert client.next_steps.replace("|", "\\|") in table
+        assert client.docs_url in table
+    assert f"{len(CLIENTS)} clients." in table
+
+
+def test_mcp_guide_carries_the_client_table():
+    from pathlib import Path
+
+    guide = Path(__file__).resolve().parents[1] / "docs" / "mcp.md"
+    assert "clients" in docs_sync.find_blocks(guide.read_text())
+    assert docs_sync.check_files([guide]) == []
+
+
 def test_splice_is_idempotent_and_preserves_surroundings():
     once = docs_sync.splice_block(TEMPLATE, "table")
     twice = docs_sync.splice_block(once, "table")

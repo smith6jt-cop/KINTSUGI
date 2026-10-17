@@ -87,7 +87,7 @@ still pinned `mcp<2`. This skill records what holds on 2.x.
 
 ## Verification
 - `pytest tests/test_mcp_tools.py tests/test_mcp_path_safety.py tests/test_mcp_protocol.py tests/test_mcp_config.py tests/test_mcp_stdio.py tests/test_mcp_docs_sync.py` (`KINTSUGI_REQUIRE_MCP=1` makes MCP skips fail).
-- `python evals/mcp/harness.py --strict` and `kintsugi mcp tools --check docs/mcp.md docs/cli.md README.md CLAUDE.md`.
+- `python evals/mcp/harness.py --strict` and `kintsugi mcp tools --check docs/mcp.md docs/cli.md README.md AGENTS.md`.
 - Preserve the `create_server()` `ImportError` contract by simulating
   `MCP_AVAILABLE = False` in `_sdk.py` (don't swallow the import in a bare `except`).
 
