@@ -6,6 +6,8 @@ critical for removing autofluorescent signal from multiplex immunofluorescence
 images.
 """
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 
@@ -852,3 +854,26 @@ class TestWeightedSubtractionQuality:
             assert "snr" in pr
             assert "af_removal" in pr
             assert "signal_preservation" in pr
+
+
+class TestSubtractorLearningEngine:
+    """AutofluorescenceSubtractor must reach the real learning engine module."""
+
+    def test_suggest_parameters_consults_learned_history(self, signal_image, blank_image, tmp_path):
+        """Regression: the engine was imported from a module that never exported it."""
+        from kintsugi.signal.subtractor import AutofluorescenceSubtractor
+
+        with patch("kintsugi.assist.parameter_learning.ParameterLearningEngine") as engine_cls:
+            engine_cls.return_value.recommend_parameters.return_value = {
+                "status": "success",
+                "recommended_parameters": {"erosion": 3},
+                "confidence": 0.9,
+            }
+            subtractor = AutofluorescenceSubtractor(project_dir=tmp_path, tissue_type="tonsil")
+            params = subtractor.suggest_parameters(signal_image, blank_image, marker="CD3")
+
+        engine_cls.assert_called_once_with(str(tmp_path))
+        engine_cls.return_value.recommend_parameters.assert_called_once_with(
+            operation="blank_subtraction", tissue_type="tonsil", marker_name="CD3"
+        )
+        assert params.erosion == 3

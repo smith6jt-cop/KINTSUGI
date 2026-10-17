@@ -386,6 +386,82 @@ class TestSubtractBlank:
         assert len(history) >= 1
         assert any(h["operation"] == "subtract_blank" for h in history)
 
+    @requires_dask_image
+    @pytest.mark.asyncio
+    async def test_subtract_blank_consults_learned_parameters(
+        self, sample_uint16_image, sample_blank_image, tmp_path, clear_mcp_state
+    ):
+        """Auto-suggest reaches the learning engine and applies its recommendation.
+
+        Regression test: the suggester used to import ParameterLearningEngine from
+        kintsugi.mcp.tools.learning, which never exports it, so the ImportError was
+        swallowed and learned parameters were silently ignored.
+        """
+        from kintsugi.mcp.tools.signal_isolation import _store_image, subtract_blank
+
+        _store_image("signal_ch", sample_uint16_image)
+        _store_image("blank_ch", sample_blank_image)
+
+        with patch("kintsugi.assist.parameter_learning.ParameterLearningEngine") as engine_cls:
+            engine_cls.return_value.recommend_parameters.return_value = {
+                "status": "success",
+                "recommended_parameters": {"blank_scale_factor": 0.3, "erosion": 3},
+                "confidence": 0.9,
+            }
+            result = await subtract_blank(
+                signal_channel="signal_ch",
+                blank_channel="blank_ch",
+                tissue_type="tonsil",
+                marker_name="CD3",
+                project_path=str(tmp_path),
+            )
+
+        # Handle missing dependency error
+        if "error" in result and "Missing dependency" in result["error"]:
+            pytest.skip(f"Missing dependency: {result['error']}")
+
+        engine_cls.assert_called_once_with(str(tmp_path))
+        engine_cls.return_value.recommend_parameters.assert_called_once_with(
+            operation="blank_subtraction", tissue_type="tonsil", marker_name="CD3"
+        )
+        assert result["status"] == "success"
+        # Non-blended fields are taken from the learned set once confidence > 0.5.
+        assert result["parameters_used"]["erosion"] == 3
+
+    @pytest.mark.asyncio
+    async def test_suggest_subtraction_parameters_reports_learned_source(
+        self, sample_uint16_image, sample_blank_image, tmp_path, clear_mcp_state
+    ):
+        """With use_learning=True a successful recommendation is merged into the suggestion."""
+        from kintsugi.mcp.tools.signal_isolation import (
+            _store_image,
+            suggest_subtraction_parameters,
+        )
+
+        _store_image("signal_ch", sample_uint16_image)
+        _store_image("blank_ch", sample_blank_image)
+
+        with patch("kintsugi.assist.parameter_learning.ParameterLearningEngine") as engine_cls:
+            engine_cls.return_value.recommend_parameters.return_value = {
+                "status": "success",
+                "recommended_parameters": {"blank_scale_factor": 0.3, "erosion": 3},
+                "confidence": 0.9,
+            }
+            result = await suggest_subtraction_parameters(
+                signal_channel="signal_ch",
+                blank_channel="blank_ch",
+                tissue_type="tonsil",
+                marker_name="CD3",
+                use_learning=True,
+                project_path=str(tmp_path),
+            )
+
+        engine_cls.return_value.recommend_parameters.assert_called_once()
+        assert result["status"] == "success"
+        assert result["source"] == "analysis+learned"
+        assert result["learned_parameters"] == {"available": True, "confidence": 0.9}
+        assert result["suggested_parameters"]["erosion"] == 3
+
 
 class TestDenoise:
     """Tests for the denoise tool."""
