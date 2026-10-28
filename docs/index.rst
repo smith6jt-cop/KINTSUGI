@@ -60,6 +60,7 @@ Quick Links
    contributing
    DOCS_MAINTENANCE
    SUBMODULES
+   marimo/MIGRATION_PLAN
 
 .. toctree::
    :maxdepth: 1
