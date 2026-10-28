@@ -147,8 +147,18 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-# Claude Code local settings (project commands in .claude/commands/ should be tracked)
-.claude/settings.local.json
+# AI assistant / MCP client files are personal: each contributor keeps their own
+# (the repository ships none; see CONTRIBUTING.md). Guidance lives in AGENTS.md.
+.mcp.json
+.claude/
+.cursor/
+.gemini/
+.agents/
+.codex/
+.zed/
+.windsurf/
+.devin/
+.vscode/mcp.json
 
 # VS Code local settings (extensions.json can be tracked for recommendations)
 .vscode/settings.json

@@ -1,0 +1,57 @@
+cff-version: 1.2.0
+message: >-
+  If you use KINTSUGI, please cite the STAR Protocols article below
+  (preferred-citation) and, where appropriate, the software release.
+type: software
+title: "KINTSUGI: Knowledge Integration with New Technologies for Simplified User-Guided Image processing"
+abstract: >-
+  Multiplex immunofluorescence image processing pipeline (illumination correction,
+  stitching, deconvolution, extended depth of focus, multi-cycle registration,
+  autofluorescence removal, segmentation and spatial analysis) with an optional
+  Model Context Protocol (MCP) server for AI assistants.
+version: 1.2.3
+license: MIT
+repository-code: "https://github.com/smith6jt-cop/KINTSUGI"
+url: "https://kintsugi.readthedocs.io/"
+doi: 10.5281/zenodo.14984518
+authors:
+  - family-names: Smith
+    given-names: Justin A.
+    affiliation: "University of Florida"
+keywords:
+  - image-processing
+  - microscopy
+  - immunofluorescence
+  - multiplex-imaging
+  - spatial-analysis
+  - registration
+  - model-context-protocol
+  - mcp-server
+  - ai-assistant
+preferred-citation:
+  type: article
+  title: "Protocol for processing and analyzing multiplexed images improves lymphatic cell identification and spatial architecture in human tissue"
+  authors:
+    - family-names: Smith
+      given-names: Justin A.
+    - family-names: Bloss
+      given-names: Drew T.
+    - family-names: Williams
+      given-names: MacKenzie D.
+    - family-names: Posgai
+      given-names: Amanda L.
+    - family-names: Brusko
+      given-names: Todd M.
+    - family-names: Atkinson
+      given-names: Mark A.
+    - family-names: Wasserfall
+      given-names: Clive H.
+    - family-names: Brusko
+      given-names: Maigan A.
+  journal: "STAR Protocols"
+  volume: 6
+  issue: 3
+  start: 103976
+  year: 2025
+  month: 7
+  doi: 10.1016/j.xpro.2025.103976

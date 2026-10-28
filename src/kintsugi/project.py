@@ -23,15 +23,19 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 import shutil
 import sys
 import warnings
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar, Literal
+
+logger = logging.getLogger(__name__)
 
 # Project configuration filename
 PROJECT_CONFIG_FILE = "kintsugi_project.json"
@@ -65,6 +69,138 @@ def _resolve_kintsugi_executable() -> str:
 
     # Last resort: bare command name (resolved from PATH at launch time).
     return "kintsugi"
+
+
+def write_mcp_config(
+    root: str | Path,
+    clients: Sequence[str],
+    *,
+    force: bool = False,
+    require_project: bool = True,
+    project_name: str | None = None,
+) -> dict[str, Any]:
+    """Write the MCP client configuration and ``AGENTS.md`` for a project.
+
+    ``clients`` names clients from :data:`kintsugi.mcp.clients.CLIENTS`, or is
+    ``["all"]`` or ``["none"]``. There is no default client: an empty selection
+    raises :class:`kintsugi.mcp.clients.ClientConfigError` (see
+    :func:`kintsugi.mcp.clients.resolve_clients`). Each project-scoped client
+    file is created or merged (other servers and settings are kept; an existing
+    ``kintsugi`` entry is replaced only with ``force``). The server entry runs the absolute path of the
+    ``kintsugi`` executable (see :func:`_resolve_kintsugi_executable`) with
+    ``mcp start --project-dir <root>``, so the client needs neither ``PATH`` nor
+    a particular working directory or environment. Clients configured per user
+    or in an IDE dialog get a snippet instead; nothing is written outside
+    ``root``.
+
+    For Claude Code, ``.claude/settings.local.json`` also gains
+    ``enabledMcpjsonServers: ["kintsugi"]``, which approves exactly this server
+    (``enableAllProjectMcpServers`` is never set). ``AGENTS.md`` is created when
+    absent; an existing one only has its generated tool block refreshed. The
+    generated client files hold machine-specific absolute paths, so they are
+    added to the project's ``.gitignore``.
+
+    Raises ``ValueError`` for a directory that is not a KINTSUGI project (no
+    ``kintsugi_project.json``) when ``require_project`` is true (the generated
+    ``--project-dir`` would be refused when the server starts), and
+    :class:`kintsugi.mcp.clients.ClientConfigError` for an unknown client or an
+    existing file that cannot be merged safely.
+
+    Returns ``{"written": [Path], "unchanged": [Path], "snippets": {name: str},
+    "agents_md": Path | None, "server": dict}``.
+    """
+    from kintsugi.mcp import clients as mcp_clients
+
+    root = Path(root).resolve()
+    if require_project and not (root / PROJECT_CONFIG_FILE).exists():
+        raise ValueError(
+            f"{root} is not a KINTSUGI project (no {PROJECT_CONFIG_FILE}); "
+            "run 'kintsugi init' there first"
+        )
+    selected = mcp_clients.resolve_clients(clients)
+    command = _resolve_kintsugi_executable()
+
+    project_scoped = [c for c in selected if c.scope == "project"]
+    written, unchanged = mcp_clients.write_project_configs(
+        root, project_scoped, command, force=force
+    )
+    snippets = {
+        c.name: mcp_clients.snippet(c, root, command) for c in selected if c.scope != "project"
+    }
+
+    if any(c.name == "claude-code" for c in project_scoped):
+        settings_file = _approve_claude_code_server(root)
+        if settings_file is not None:
+            written.append(settings_file)
+        _ensure_gitignored(
+            root,
+            ".claude/settings.local.json",
+            "Per-user Claude Code settings written by kintsugi",
+        )
+    if project_scoped:
+        _ensure_gitignored(
+            root,
+            [c.path for c in project_scoped],
+            "kintsugi: MCP client configs (machine-specific absolute paths)",
+        )
+
+    agents_md = None
+    if selected:
+        name = project_name or root.name
+        config_file = root / PROJECT_CONFIG_FILE
+        if project_name is None and config_file.exists():
+            try:
+                name = (json.loads(config_file.read_text()).get("config") or {}).get("name") or name
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        agents_md = mcp_clients.write_agents_md(root, name)
+
+    return {
+        "written": written,
+        "unchanged": unchanged,
+        "snippets": snippets,
+        "agents_md": agents_md,
+        "server": {"command": command, "args": ["mcp", "start", "--project-dir", str(root)]},
+    }
+
+
+def _approve_claude_code_server(root: Path) -> Path | None:
+    """Add ``kintsugi`` to ``enabledMcpjsonServers``; return the file if it changed."""
+    settings_file = root / ".claude" / "settings.local.json"
+    settings: dict = {}
+    if settings_file.exists():
+        with open(settings_file) as f:
+            settings = json.load(f) or {}
+    enabled = list(settings.get("enabledMcpjsonServers", []))
+    if "kintsugi" in enabled:
+        return None
+    enabled.append("kintsugi")
+    settings["enabledMcpjsonServers"] = enabled
+    settings_file.parent.mkdir(exist_ok=True)
+    with open(settings_file, "w") as f:
+        json.dump(settings, f, indent=2)
+        f.write("\n")
+    return settings_file
+
+
+def _ensure_gitignored(root: Path, patterns: str | Sequence[str], comment: str) -> Path:
+    """Add the missing ``patterns`` to ``root/.gitignore`` under one ``# comment`` line.
+
+    Patterns already present (ignoring leading/trailing slashes) are not repeated;
+    nothing is written when all are present.
+    """
+    gitignore = root / ".gitignore"
+    lines = gitignore.read_text().splitlines() if gitignore.exists() else []
+    present = {line.strip().strip("/") for line in lines}
+    wanted = [patterns] if isinstance(patterns, str) else list(patterns)
+    missing = [p for p in dict.fromkeys(wanted) if p.strip("/") not in present]
+    if not missing:
+        return gitignore
+    with open(gitignore, "a") as f:
+        if lines and lines[-1].strip():
+            f.write("\n")
+        f.write(f"# {comment}\n" + "".join(f"{p}\n" for p in missing))
+    return gitignore
 
 
 # Common image file extensions
@@ -788,6 +924,8 @@ def scan_existing_data(
             ".claude",
             ".vscode",
             ".git",
+            ".kintsugi",
+            ".claude_workflow",
             "__pycache__",
             "configs",
         }:
@@ -1164,6 +1302,9 @@ class KintsugiProject:
         self.root = Path(root).resolve()
         self.paths = ProjectPaths.from_root(self.root)
         self.config = config or ProjectConfig(name=self.root.name)
+        # MCP clients to configure (None = every project-scoped client).
+        self._mcp_clients: list[str] | None = None
+        self._mcp_configured = False
 
         # Detect or use provided KINTSUGI path
         if kintsugi_path:
@@ -1251,6 +1392,7 @@ class KintsugiProject:
         z_step_size: float = 1500.0,
         numerical_aperture: float = 0.75,
         tissue_refractive_index: float = 1.44,
+        mcp_clients: list[str] | None = None,
     ) -> KintsugiProject:
         """
         Create a new KINTSUGI project.
@@ -1294,6 +1436,11 @@ class KintsugiProject:
             Objective numerical aperture (default: 0.75)
         tissue_refractive_index : float
             Tissue refractive index (default: 1.44)
+        mcp_clients : list of str, optional
+            MCP clients to write configuration for (names from
+            ``kintsugi mcp clients``, or ``["all"]``). None (the default) or
+            ``["none"]`` writes no MCP configuration: the project works without
+            any AI assistant, and ``kintsugi mcp config`` adds one later.
 
         Returns
         -------
@@ -1323,6 +1470,7 @@ class KintsugiProject:
         )
 
         project = cls(root, config, kintsugi_path)
+        project._mcp_clients = mcp_clients
 
         # Store discovered metadata in project config
         if existing_data_report.has_data:
@@ -1381,7 +1529,6 @@ class KintsugiProject:
         print("  +-- logs/             <- Processing logs")
         if slurm:
             print("  +-- slurm/            <- SLURM job submission")
-        print("  +-- .claude/          <- Claude Code config")
         print("  +-- .vscode/          <- VS Code config")
         print()
 
@@ -1404,6 +1551,11 @@ class KintsugiProject:
             print("  1. Copy raw images to data/raw/")
         print("  2. Open folder in VS Code: code .")
         print("  3. Start with notebooks/1_Single_Channel_Eval.ipynb")
+        if not project._mcp_configured:
+            print(
+                "  Optional: connect an AI assistant with "
+                "'kintsugi mcp config . --client NAME' ('kintsugi mcp clients' lists them)"
+            )
 
         return project
 
@@ -1465,9 +1617,14 @@ class KintsugiProject:
 
         project = cls(root, config, kintsugi_path)
 
-        print(f"[OK] Loaded project: {project.config.name}")
-        print(f"  Created: {project.config.created[:10]}")
-        print(f"  Modified: {project.config.modified[:10]}")
+        # Log rather than print: load() runs inside the MCP server, whose stdout
+        # carries the JSON-RPC stream and must stay clean.
+        logger.info(
+            "Loaded project %s (created %s, modified %s)",
+            project.config.name,
+            project.config.created[:10],
+            project.config.modified[:10],
+        )
 
         return project
 
@@ -1914,48 +2071,52 @@ class KintsugiProject:
             overwrite=False,
         )
 
-        # Create Claude Code configuration
-        self._create_claude_config()
+        self._ensure_state_gitignored()
+
+        # MCP client configuration and AGENTS.md
+        self._create_mcp_config()
 
         # Create VS Code configuration
         self._create_vscode_config()
 
-    def _create_claude_config(self) -> None:
-        """Create Claude Code MCP configuration.
+    def _ensure_state_gitignored(self) -> None:
+        """Keep project state (learning database, workflow state) out of git."""
+        _ensure_gitignored(
+            self.paths.root,
+            ".kintsugi/",
+            "KINTSUGI project state (learning database, workflow state)",
+        )
 
-        Creates .mcp.json at project root (MCP server definition) and
-        .claude/settings.local.json (enables the server).
+    def _create_mcp_config(self, clients: Sequence[str] | None = None) -> None:
+        """Write MCP client configuration and ``AGENTS.md`` (see :func:`write_mcp_config`).
+
+        ``clients`` defaults to the selection given to :meth:`create`. Nothing is
+        written when no client was chosen (None, empty or ``["none"]``). The
+        project marker may not be saved yet when this runs from :meth:`create`, so
+        it is not required here.
         """
-        # Create .mcp.json with the MCP server definition
-        mcp_file = self.paths.root / ".mcp.json"
-        if not mcp_file.exists():
-            mcp_config = {
-                "mcpServers": {
-                    "kintsugi": {
-                        "command": _resolve_kintsugi_executable(),
-                        "args": ["mcp", "start"],
-                        "cwd": str(self.paths.root),
-                    }
-                }
-            }
-            with open(mcp_file, "w") as f:
-                json.dump(mcp_config, f, indent=2)
-                f.write("\n")
-            print("  Created .mcp.json")
+        if clients is None:
+            clients = self._mcp_clients
+        if not clients or list(clients) == ["none"]:
+            return
+        result = write_mcp_config(
+            self.paths.root,
+            clients,
+            require_project=False,
+            project_name=self.config.name,
+        )
+        self._mcp_configured = True
+        for path in [*result["written"], result["agents_md"]]:
+            if path is not None:
+                print(f"  Wrote {path.relative_to(self.paths.root)}")
+        if result["snippets"]:
+            from kintsugi.mcp.clients import by_name
 
-        # Create .claude/settings.local.json to enable the MCP server
-        claude_dir = self.paths.root / ".claude"
-        claude_dir.mkdir(exist_ok=True)
-        settings_file = claude_dir / "settings.local.json"
-        if not settings_file.exists():
-            settings_config = {
-                "enableAllProjectMcpServers": True,
-                "enabledMcpjsonServers": ["kintsugi"],
-            }
-            with open(settings_file, "w") as f:
-                json.dump(settings_config, f, indent=2)
-                f.write("\n")
-            print("  Created .claude/settings.local.json")
+            registry = by_name()
+            for name, text in result["snippets"].items():
+                client = registry[name]
+                print(f"  {client.display}: paste into {client.path}:")
+                print("\n".join(f"    {line}" for line in text.splitlines()))
 
     def _create_vscode_config(self) -> None:
         """Create VS Code configuration."""

@@ -9,16 +9,24 @@ tasks instead of guessing. It has two modes.
   * Flags curated confusable tool groups (consolidation candidates).
   * Confirms every eval task's expected tool exists on the live server.
 
-**Agentic** (``--agentic``, requires ``ANTHROPIC_API_KEY`` + ``anthropic`` SDK):
-  * Presents the live tool schemas to Claude for each task with
-    ``tool_choice=auto`` and records the model's *first* tool call.
+**Agentic** (``--agentic --provider NAME --model MODEL``, see ``providers.py``):
+  * Presents the live tool schemas to the model for each task with automatic
+    tool choice and records the model's *first* tool call.
   * Scores tool **selection** (did it pick an acceptable tool?). Because we only
     measure selection, no image data or handler execution is required.
+  * ``--provider anthropic`` uses the Anthropic Messages API; ``--provider openai``
+    uses the OpenAI Chat Completions API, which other platforms and local servers
+    (Ollama, vLLM) also serve (``OPENAI_BASE_URL`` / ``--base-url``).
+  * There is no default provider or model. In a terminal the harness asks for a
+    missing one; otherwise it exits with a usage error.
 
 Run::
 
     python evals/mcp/harness.py                 # structural only
-    ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic
+    ANTHROPIC_API_KEY=... python evals/mcp/harness.py --agentic --provider anthropic --model MODEL
+    OPENAI_API_KEY=... python evals/mcp/harness.py --agentic --provider openai --model MODEL
+    OPENAI_BASE_URL=http://localhost:11434/v1 python evals/mcp/harness.py \
+        --agentic --provider openai --model MODEL      # local model (Ollama)
     python evals/mcp/harness.py --json report.json
 """
 
@@ -27,12 +35,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import providers  # noqa: E402  (local sibling module)
 from tasks import TASKS  # noqa: E402  (local sibling module)
 
 # Curated groups whose members are easy to confuse and are candidates for
@@ -40,15 +48,18 @@ from tasks import TASKS  # noqa: E402  (local sibling module)
 CONFUSABLE_GROUPS: list[tuple[str, list[str]]] = [
     ("denoising", ["denoise", "denoise_advanced"]),
     ("background removal", ["subtract_blank", "gaussian_subtract", "estimate_background"]),
-    ("quality", ["assess_quality", "compute_snr"]),
+    ("quality", ["assess_quality", "compute_snr", "batch_assess_quality"]),
     (
         "parameter suggestion",
         ["suggest_parameters", "suggest_with_learning", "get_learned_parameters"],
     ),
     ("record learning", ["record_successful_parameters", "approve_and_learn"]),
+    (
+        "session vs project state",
+        ["get_session_state", "get_workflow_status", "get_processing_history"],
+    ),
+    ("review outcome", ["approve_and_learn", "set_review_decision"]),
 ]
-
-DEFAULT_MODEL = "claude-sonnet-4-6"
 
 
 def estimate_tokens(text: str) -> int:
@@ -57,25 +68,50 @@ def estimate_tokens(text: str) -> int:
 
 
 def load_tools() -> list[dict[str, Any]]:
-    """Build the live FastMCP server and return its advertised tool definitions."""
+    """Build the live MCP server and return its advertised tool definitions.
+
+    Tools are read through the SDK's in-process client, so what the harness
+    measures is exactly what a connected MCP client receives.
+    """
     try:
-        from kintsugi.mcp.server import MCP_AVAILABLE, create_server
+        from kintsugi.mcp._sdk import MCP_AVAILABLE, unavailable_message
+        from kintsugi.mcp.server import create_server
     except Exception as exc:  # pragma: no cover
         raise SystemExit(f"Could not import the MCP server: {exc}")
     if not MCP_AVAILABLE:
-        raise SystemExit("mcp is not installed. Install with: pip install 'mcp>=1.10.0,<2'")
+        raise SystemExit(unavailable_message())
 
-    server = create_server()
-    tools = asyncio.run(server.list_tools())
+    async def _list() -> list[Any]:
+        from mcp.client import Client
+
+        async with Client(create_server()) as client:
+            return list((await client.list_tools()).tools)
+
     return [
         {
             "name": t.name,
+            "title": t.title,
             "description": t.description or "",
-            "input_schema": t.inputSchema or {},
-            "output_schema": t.outputSchema,
+            "input_schema": t.input_schema or {},
+            "output_schema": t.output_schema,
+            "annotations": (
+                t.annotations.model_dump(by_alias=True, exclude_none=True)
+                if t.annotations
+                else None
+            ),
         }
-        for t in tools
+        for t in tools_sorted(await_(_list()))
     ]
+
+
+def await_(coro: Any) -> Any:
+    """Run a coroutine to completion from synchronous code."""
+    return asyncio.run(coro)
+
+
+def tools_sorted(tools: list[Any]) -> list[Any]:
+    """Stable order for reports."""
+    return sorted(tools, key=lambda t: t.name)
 
 
 def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> dict[str, Any]:
@@ -90,6 +126,8 @@ def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> 
 
     # Schema quality.
     missing_tool_desc = [t["name"] for t in tools if len(t["description"].strip()) < 20]
+    missing_title = [t["name"] for t in tools if not (t.get("title") or "").strip()]
+    missing_annotations = [t["name"] for t in tools if not t.get("annotations")]
     params_missing_desc: list[str] = []
     have_output_schema = 0
     for t in tools:
@@ -100,12 +138,15 @@ def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> 
             if not (pschema.get("description") or "").strip():
                 params_missing_desc.append(f"{t['name']}.{pname}")
 
-    # Task coverage.
+    # Task coverage, both directions: tasks that name absent tools, and tools no
+    # task ever targets (which the agentic pass can therefore never measure).
     coverage_gaps = [
         {"task": task["id"], "missing": sorted(set(task["expected"]) - names)}
         for task in tasks
         if not set(task["expected"]) & names
     ]
+    targeted = set().union(*(set(task["expected"]) for task in tasks)) if tasks else set()
+    untargeted_tools = sorted(names - targeted)
 
     report = {
         "tool_count": len(tools),
@@ -116,7 +157,10 @@ def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> 
             :5
         ],
         "tools_missing_description": missing_tool_desc,
+        "tools_missing_title": missing_title,
+        "tools_missing_annotations": missing_annotations,
         "params_missing_description_count": len(params_missing_desc),
+        "untargeted_tools": untargeted_tools,
         "confusable_groups": [
             {"theme": theme, "tools": [m for m in members if m in names]}
             for theme, members in CONFUSABLE_GROUPS
@@ -137,6 +181,9 @@ def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> 
     )
     print(f"Params missing a description:     {report['params_missing_description_count']}")
     print(f"Tools with weak/no description:   {missing_tool_desc or 'none'}")
+    print(f"Tools missing a title:            {missing_title or 'none'}")
+    print(f"Tools missing annotations:        {missing_annotations or 'none'}")
+    print(f"Tools no eval task targets:       {untargeted_tools or 'none'}")
     print("\nHeaviest tools (token est.):")
     for name, tok in report["top_tools_by_tokens"]:
         print(f"   {tok:>5}  {name}")
@@ -153,36 +200,27 @@ def run_structural(tools: list[dict[str, Any]], tasks: list[dict[str, Any]]) -> 
 
 
 def run_agentic(
-    tools: list[dict[str, Any]], tasks: list[dict[str, Any]], model: str
+    tools: list[dict[str, Any]],
+    tasks: list[dict[str, Any]],
+    *,
+    provider: str,
+    model: str,
+    base_url: str | None = None,
 ) -> dict[str, Any]:
     """Score tool *selection*: does the model pick an acceptable tool per task?"""
-    try:
-        import anthropic
-    except ImportError:
-        raise SystemExit("Agentic mode needs the SDK: pip install anthropic")
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise SystemExit("Agentic mode needs ANTHROPIC_API_KEY in the environment.")
-
-    client = anthropic.Anthropic()
-    api_tools = [
-        {"name": t["name"], "description": t["description"], "input_schema": t["input_schema"]}
-        for t in tools
-    ]
-
+    host = providers.endpoint_host(provider, base_url)
     results = []
     passed = 0
     print("\n" + "=" * 70)
-    print(f"AGENTIC TOOL-SELECTION EVALUATION  (model={model})")
+    print(f"AGENTIC TOOL-SELECTION EVALUATION  (provider={provider}, model={model}, host={host})")
     print("=" * 70)
     for task in tasks:
-        msg = client.messages.create(
-            model=model,
-            max_tokens=512,
-            tools=api_tools,
-            tool_choice={"type": "auto"},
-            messages=[{"role": "user", "content": task["prompt"]}],
-        )
-        chosen = next((b.name for b in msg.content if getattr(b, "type", "") == "tool_use"), None)
+        try:
+            chosen = providers.select_tool(
+                provider, model, task["prompt"], tools, base_url=base_url
+            )
+        except providers.ProviderError as exc:
+            raise SystemExit(f"Agentic eval stopped at task {task['id']}: {exc}") from None
         ok = chosen in task["expected"]
         passed += int(ok)
         results.append(
@@ -196,7 +234,9 @@ def run_agentic(
     accuracy = passed / max(1, len(tasks))
     print(f"\nTool-selection accuracy: {passed}/{len(tasks)} = {accuracy:.0%}")
     return {
+        "provider": provider,
         "model": model,
+        "host": host,
         "accuracy": accuracy,
         "passed": passed,
         "total": len(tasks),
@@ -204,39 +244,117 @@ def run_agentic(
     }
 
 
+DOCS_WITH_TOOL_BLOCKS = ("docs/mcp.md", "docs/cli.md", "README.md", "AGENTS.md")
+
+
+def _docs_drift() -> list[str]:
+    """Documented tool tables that no longer match the registry (see kintsugi.mcp.docs_sync)."""
+    from kintsugi.mcp import docs_sync
+
+    repo = Path(__file__).resolve().parents[2]
+    present = [repo / rel for rel in DOCS_WITH_TOOL_BLOCKS if (repo / rel).exists()]
+    return docs_sync.check_files(present)
+
+
+def _interactive() -> bool:
+    """True when a person can answer prompts (stdin and stdout are terminals)."""
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _choose_provider_and_model(args: argparse.Namespace) -> None:
+    """Fill ``args.provider`` and ``args.model``: never a default, asked for in a terminal."""
+    if args.provider and args.model:
+        return
+    usage = (
+        f"--agentic requires --provider {{{','.join(providers.PROVIDERS)}}} and --model MODEL "
+        "(there is no default provider or model)"
+    )
+    if not _interactive():
+        raise ValueError(usage)
+    try:
+        while not args.provider:
+            answer = input(f"Model provider ({', '.join(providers.PROVIDERS)}): ").strip()
+            if answer in providers.PROVIDERS:
+                args.provider = answer
+            elif not answer:
+                raise ValueError(usage)
+            else:
+                print(f"Unknown provider {answer!r}.")
+        if not args.model:
+            args.model = input(f"Model identifier at {args.provider}: ").strip()
+            if not args.model:
+                raise ValueError(usage)
+    except EOFError:
+        raise ValueError(usage) from None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Evaluate the KINTSUGI MCP tool surface.")
     parser.add_argument(
         "--agentic",
         action="store_true",
-        help="Run the live tool-selection eval (needs ANTHROPIC_API_KEY).",
+        help="Run the live tool-selection eval against a model (needs --provider and --model).",
     )
-    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Model (default: {DEFAULT_MODEL}).")
+    parser.add_argument(
+        "--provider",
+        choices=providers.PROVIDERS,
+        help=(
+            "API format: 'anthropic' (Messages API) or 'openai' (Chat Completions, also "
+            "served by other platforms and local servers). Required with --agentic; "
+            "asked for in a terminal."
+        ),
+    )
+    parser.add_argument(
+        "--model",
+        help="Model identifier at the provider. Required with --agentic; asked for in a terminal.",
+    )
+    parser.add_argument(
+        "--base-url",
+        help="Endpoint base URL (default: ANTHROPIC_BASE_URL / OPENAI_BASE_URL, else the vendor's).",
+    )
     parser.add_argument("--json", metavar="PATH", help="Write the full report as JSON.")
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Exit non-zero on structural problems (coverage gaps, missing descriptions).",
+        help=(
+            "Exit non-zero on structural problems (coverage gaps, untargeted tools, "
+            "missing descriptions/titles/annotations)."
+        ),
     )
     args = parser.parse_args(argv)
+    if args.agentic:
+        try:
+            _choose_provider_and_model(args)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     tools = load_tools()
     structural = run_structural(tools, TASKS)
     report: dict[str, Any] = {"structural": structural}
     if args.agentic:
-        report["agentic"] = run_agentic(tools, TASKS, args.model)
+        report["agentic"] = run_agentic(
+            tools, TASKS, provider=args.provider, model=args.model, base_url=args.base_url
+        )
 
     if args.json:
         Path(args.json).write_text(json.dumps(report, indent=2))
         print(f"\nWrote report to {args.json}")
 
-    if args.strict and (
-        structural["task_coverage_gaps"]
-        or structural["tools_missing_description"]
-        or structural["params_missing_description_count"]
-    ):
-        print("\nstrict: structural problems detected — failing.", file=sys.stderr)
-        return 1
+    if args.strict:
+        docs_drift = _docs_drift()
+        problems = {
+            "docs_drift": docs_drift,
+            "task_coverage_gaps": structural["task_coverage_gaps"],
+            "tools_missing_description": structural["tools_missing_description"],
+            "tools_missing_title": structural["tools_missing_title"],
+            "tools_missing_annotations": structural["tools_missing_annotations"],
+            "params_missing_description_count": structural["params_missing_description_count"],
+            "untargeted_tools": structural["untargeted_tools"],
+        }
+        failing = {k: v for k, v in problems.items() if v}
+        if failing:
+            print(f"\nstrict: structural problems detected — failing: {failing}", file=sys.stderr)
+            return 1
     return 0
 
 

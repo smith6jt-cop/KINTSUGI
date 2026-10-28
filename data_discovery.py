@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Scan orange storage and build a dataset manifest from experiment.json files."""
+"""Scan a datasets root and build a dataset manifest from experiment.json files.
 
-import json, csv, sys
+Configuration (environment variables, with defaults):
+    KINTSUGI_DATASETS_ROOT  Directory containing one sub-directory per raw dataset
+                            (default: /path/to/datasets)
+    KINTSUGI_MANIFEST       Output CSV path (default: /path/to/dataset_manifest.csv)
+"""
+
+import json, csv, os, sys
 from pathlib import Path
 
-ORANGE_ROOT = Path("/orange/maigan/HuBMAP_CODEX_LN-SP_Datasets")
-OUTPUT_CSV = Path("/blue/maigan/smith6jt/dataset_manifest.csv")
+DATASETS_ROOT = Path(os.environ.get("KINTSUGI_DATASETS_ROOT", "/path/to/datasets"))
+OUTPUT_CSV = Path(os.environ.get("KINTSUGI_MANIFEST", "/path/to/dataset_manifest.csv"))
 
 # Possible names for the channel names file
 CHANNEL_FILE_NAMES = [
@@ -25,7 +31,7 @@ def get(exp, *keys, default="?"):
             return v
     return default
 
-all_dirs = sorted(d for d in ORANGE_ROOT.iterdir() if d.is_dir())
+all_dirs = sorted(d for d in DATASETS_ROOT.iterdir() if d.is_dir())
 total = len(all_dirs)
 
 for i, dataset_dir in enumerate(all_dirs, 1):
@@ -110,7 +116,7 @@ for i, dataset_dir in enumerate(all_dirs, 1):
 
     rows.append({
         "dataset":        dataset_dir.name,
-        "orange_path":    str(data_root),
+        "source_path":    str(data_root),
         "n_cycles":       n_cycles,
         "n_cycle_dirs":   n_cycle_dirs,
         "channels":       n_ch,

@@ -60,6 +60,7 @@ def optimize_signal_isolation(
     storage_path: Path | None = None,
     n_startup_trials: int = 15,
     show_progress: bool = True,
+    trial_callback: Callable[[int, int], None] | None = None,
 ) -> dict:
     """
     Find optimal signal isolation parameters via Bayesian optimization.
@@ -96,6 +97,10 @@ def optimize_signal_isolation(
         Number of random trials before Bayesian optimization begins.
     show_progress : bool
         Display Optuna progress bar.
+    trial_callback : callable, optional
+        Called as ``trial_callback(completed, n_trials)`` after each trial
+        finishes, where ``completed`` counts the trials run by this call
+        (1-based). Lets callers such as the MCP server report progress.
 
     Returns
     -------
@@ -191,11 +196,25 @@ def optimize_signal_isolation(
         return qc["quality_score"]
 
     # Run optimization
+    callbacks = []
+    if trial_callback is not None:
+        completed = 0
+
+        def _on_trial_end(study, trial):
+            # Count trials run by this call rather than using trial.number,
+            # which keeps counting from a resumed study's earlier trials.
+            nonlocal completed
+            completed += 1
+            trial_callback(completed, n_trials)
+
+        callbacks.append(_on_trial_end)
+
     study.optimize(
         objective,
         n_trials=n_trials,
         timeout=timeout,
         show_progress_bar=show_progress,
+        callbacks=callbacks or None,
     )
 
     elapsed = time.time() - start_time

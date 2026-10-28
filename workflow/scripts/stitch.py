@@ -117,7 +117,7 @@ if REQUESTED_DEVICE_MODE == "gpu":
         # A silent CPU fallback here wastes a GPU allocation and produces
         # output indistinguishable from a GPU run until someone notices
         # the runtime. Match the "GPU-only scheduling" policy documented
-        # in workflow/CLAUDE.md and the stitch_images() no-fallback contract.
+        # in workflow/AGENTS.md and the stitch_images() no-fallback contract.
         raise RuntimeError(
             f"GPU mode requested by Snakemake rule but CUDA initialization "
             f"failed: {e}. This job was allocated a GPU slot; refusing to "

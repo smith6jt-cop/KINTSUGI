@@ -333,10 +333,20 @@ class ParameterPredictor:
         )
 
     def _load(self, path: Path):
-        """Load saved model from disk."""
+        """Load saved model from disk.
+
+        joblib has no safe-load mode (it unpickles arbitrary objects), so callers
+        must confine ``path`` to a trusted directory before calling this; the MCP
+        ``predict_parameters`` tool does so with ``path_safety.allowed_model_roots``.
+        """
         import joblib
 
         data = joblib.load(path)
+        required = {"model", "scaler", "n_training_examples", "validation_r2"}
+        if not isinstance(data, dict) or not required <= set(data):
+            raise ValueError(
+                f"{path} is not a KINTSUGI predictor model (missing {sorted(required)})"
+            )
         self.model = data["model"]
         self.scaler = data["scaler"]
         self.n_training_examples = data["n_training_examples"]

@@ -2,9 +2,25 @@
 
 ## Quick Start (All Platforms)
 
-1. **Install Miniconda** (if not already installed):
-   - Download from [Anaconda](https://www.anaconda.com/download/success#miniconda)
-   - Follow platform-specific installation instructions
+1. **Install Miniforge** (if you do not already have conda):
+   - Download from [conda-forge/miniforge](https://github.com/conda-forge/miniforge)
+   - Miniforge is configured for conda-forge only and ships the `mamba` and libmamba solver,
+     which is what the KINTSUGI environment files are written for.
+   - **Already using Miniconda or Anaconda?** Remove the `defaults` channel first. It is not
+     needed, it triggers the Anaconda Terms-of-Service prompt on every `conda env create`
+     (an error when stdin is not a terminal), and a conda-forge + defaults solve of this
+     environment does not finish in 25 minutes:
+     ```bash
+     conda config --remove channels defaults
+     conda config --add channels conda-forge
+     conda config --set channel_priority strict
+     # if 'defaults' comes from the install's own .condarc:
+     conda config --file "$(conda info --base)/.condarc" --remove channels defaults
+     conda config --set solver libmamba          # conda < 23.10 only
+     ```
+     `channel_priority strict` matters for solve time: with Miniconda's default `flexible`
+     priority conda 26.7 was still solving `env-linux.yml` after 18 minutes; with `strict`
+     it took under 2 minutes.
 
 2. **Clone and Install KINTSUGI**:
 
@@ -98,9 +114,18 @@ sudo apt-get install -y libvips-dev
 git clone https://github.com/smith6jt-cop/KINTSUGI.git
 cd KINTSUGI
 
+# Pinned lock file (x86_64): no solver run, about 90 s, then the pip-only packages
+conda create -n KINTSUGI --file envs/env-linux.lock.txt
+conda activate KINTSUGI
+pip install -e ".[workflow]"
+
+# Or solve the environment file (slower and variable, see Troubleshooting)
 conda env create -f envs/env-linux.yml
 conda activate KINTSUGI
 ```
+
+The lock file is generated from `envs/env-linux.yml`; regenerate it after editing the YAML
+(command in the lock file header).
 
 ## macOS Installation
 
@@ -189,6 +214,23 @@ accelerator = get_multi_gpu_accelerator(tile_shape)
 
 For GPU-accelerated single-cell analysis (clustering, UMAP, spatial analysis with RAPIDS),
 see the dedicated repository: [rapids_singlecell](https://github.com/smith6jt-cop/rapids_singlecell)
+
+## AI assistants (MCP server, optional)
+
+KINTSUGI's optional MCP server lets the AI assistant you use (any MCP client) drive signal
+isolation. Nothing else needs it. It needs the 2.x Python SDK (`mcp>=2.0,<3`), installed
+through the `mcp` group — from a clone of the repository:
+
+```bash
+pip install -e ".[mcp]"      # or: kintsugi install mcp
+kintsugi mcp clients                                    # the clients it can configure
+kintsugi mcp config /path/to/project --client NAME      # configure yours
+```
+
+Do **not** run `pip install kintsugi[mcp]` — that installs an unrelated package from PyPI.
+`kintsugi check` reports the server as unavailable when `mcp` is missing or a 1.x release is
+installed (`pip install "mcp>=2.0,<3"` upgrades it). Setup, the tool reference and
+troubleshooting are in [MCP server](mcp.md).
 
 ## External Dependencies
 

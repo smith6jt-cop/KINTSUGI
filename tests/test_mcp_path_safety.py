@@ -7,7 +7,6 @@ Run with: pytest tests/test_mcp_path_safety.py -v
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -232,12 +231,18 @@ async def test_load_channel_rejects_glob_wildcards(tmp_path, channel):
 
 async def test_get_thumbnail_canonicalizes_jpg(loaded_channel):
     pytest.importorskip("PIL")
+    from kintsugi.mcp._sdk import MCP_AVAILABLE
+
+    if not MCP_AVAILABLE:
+        pytest.skip("mcp 2.x not installed (get_thumbnail builds a CallToolResult)")
     from kintsugi.mcp.tools import visualization as vis
 
     result = await vis.get_thumbnail(channel=loaded_channel, format="jpg")
     # "jpg" alias must be canonicalized to JPEG and succeed (not error in Pillow).
-    assert result.get("status") == "success", result
-    assert result["thumbnail"]["format"] == "jpeg"
+    assert not result.is_error, result.structured_content
+    assert result.content[0].type == "image"
+    assert result.content[0].mime_type == "image/jpeg"
+    assert result.structured_content["thumbnail"]["format"] == "jpeg"
 
 
 # =============================================================================
@@ -252,17 +257,46 @@ def test_resolve_executable_returns_nonempty():
     assert isinstance(cmd, str) and cmd
 
 
-def test_committed_mcp_json_is_portable():
-    """The repo's own .mcp.json must not hardcode a machine-specific path."""
-    repo_root = Path(__file__).resolve().parents[1]
-    mcp_file = repo_root / ".mcp.json"
-    if not mcp_file.exists():
-        pytest.skip(".mcp.json not present")
+# =============================================================================
+# Model-path confinement
+# =============================================================================
 
-    config = json.loads(mcp_file.read_text())
-    server = config["mcpServers"]["kintsugi"]
 
-    assert server["command"] == "kintsugi", "command should be a PATH-resolvable name"
-    assert not Path(server["command"]).is_absolute()
-    # No hardcoded absolute cwd that ties the repo to one machine/account.
-    assert "cwd" not in server or not Path(server["cwd"]).is_absolute()
+def test_ensure_within_any_accepts_any_listed_root(tmp_path):
+    from kintsugi.mcp.path_safety import ensure_within_any
+
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    target = b / "model.pt"
+    target.write_bytes(b"")
+    assert ensure_within_any(target, [a, b]) == target.resolve()
+
+
+def test_ensure_within_any_rejects_outside_paths(tmp_path):
+    from kintsugi.mcp.path_safety import PathSafetyError, ensure_within_any
+
+    a = tmp_path / "a"
+    a.mkdir()
+    with pytest.raises(PathSafetyError, match="outside the allowed directories"):
+        ensure_within_any(tmp_path / "elsewhere.pt", [a])
+
+
+def test_allowed_model_roots_uses_configured_project_and_user_dir(tmp_path, monkeypatch):
+    from kintsugi.mcp.path_safety import allowed_model_roots
+
+    monkeypatch.setenv("KINTSUGI_PROJECT_DIR", str(tmp_path / "configured"))
+    monkeypatch.setenv("KINTSUGI_MODEL_DIR", str(tmp_path / "models"))
+    project = tmp_path / "proj"
+    project.mkdir()
+    # A bare directory supplied as project_path does not widen the sandbox...
+    assert allowed_model_roots(project) == [tmp_path / "configured", tmp_path / "models"]
+    assert allowed_model_roots("/") == [tmp_path / "configured", tmp_path / "models"]
+    # ...only a real KINTSUGI project (with its marker file) does.
+    (project / "kintsugi_project.json").write_text("{}")
+    assert allowed_model_roots(project) == [project, tmp_path / "configured", tmp_path / "models"]
+
+    monkeypatch.delenv("KINTSUGI_PROJECT_DIR")
+    monkeypatch.delenv("KINTSUGI_MODEL_DIR")
+    roots = allowed_model_roots(None)
+    assert roots == [Path.home() / ".kintsugi" / "models"]

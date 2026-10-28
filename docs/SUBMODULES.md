@@ -6,7 +6,7 @@ This document provides instructions for working with Git submodules in the KINTS
 
 | Submodule | Path | Purpose |
 |-----------|------|---------|
-| Skills_Registry | `Skills_Registry/` | Shared skills and learnings repository for Claude Code |
+| Skills_Registry | `Skills_Registry/` | The maintainer's registry of learnings from earlier development sessions (optional for building or using KINTSUGI) |
 
 ## Quick Start
 

@@ -6,72 +6,158 @@ Wraps Kutils functions for blank subtraction, denoising, and signal enhancement.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import numpy as np
+from pydantic import Field
 
+from kintsugi.mcp._sdk import Context
 from kintsugi.mcp.path_safety import (
     PathSafetyError,
+    allowed_model_roots,
     clamp_float,
     clamp_int,
     ensure_within,
+    ensure_within_any,
     safe_filename,
     validate_choice,
 )
+from kintsugi.mcp.session import (  # noqa: F401  (some names re-exported for other modules/tests)
+    PROJECT_PATH_HELP,
+    ProjectNotConfigured,
+    _add_history,
+    _as_numpy,
+    _get_image,
+    _loaded_images,
+    _processing_history,
+    _store_image,
+    clear_session,
+    learning_project_root,
+    resolve_project_path,
+)
+from kintsugi.mcp.workflow_store import register_channel, track
 
 logger = logging.getLogger("kintsugi.mcp.signal_isolation")
 
-# Session state - shared with server
-_loaded_images: dict[str, Any] = {}
-_processing_history: dict[str, list] = {}
+
+async def _report_progress(
+    ctx: Context | None, progress: float, total: float, message: str
+) -> None:
+    """Send a progress notification when the call carries a request context.
+
+    Direct in-process calls pass no ``ctx`` and get no notifications. The SDK
+    itself drops the notification when the client sent no progress token, so
+    this is safe to call unconditionally inside a handler.
+    """
+    if ctx is None:
+        return
+    try:
+        await ctx.report_progress(progress, total, message)
+    except Exception:  # progress is advisory; never fail the tool over it
+        logger.debug("progress notification failed", exc_info=True)
 
 
-def _get_image(name: str) -> Any:
-    """Get a loaded image by name."""
-    if name not in _loaded_images:
-        raise ValueError(f"Image not loaded: {name}. Use load_channel first.")
-    return _loaded_images[name]["data"]
+def _log_progress_failure(future: Any) -> None:
+    if not future.cancelled() and future.exception() is not None:
+        logger.debug("progress notification failed: %s", future.exception())
 
 
-def _store_image(name: str, data: Any, metadata: dict[str, Any] = None):
-    """Store an image with metadata."""
-    _loaded_images[name] = {
-        "data": data,
-        "metadata": metadata or {},
-        "dtype": str(data.dtype) if hasattr(data, "dtype") else "unknown",
-        "shape": data.shape if hasattr(data, "shape") else None,
-    }
-    if name not in _processing_history:
-        _processing_history[name] = []
+def _thread_progress_reporter(
+    ctx: Context | None, loop: asyncio.AbstractEventLoop
+) -> Callable[[float, float, str], None]:
+    """Build a plain callable that a worker thread can use to report progress.
+
+    ``ctx.report_progress`` is a coroutine that must run on the event loop, so
+    the callable hands it back to ``loop`` with
+    :func:`asyncio.run_coroutine_threadsafe` instead of awaiting in the thread.
+    """
+
+    def report(progress: float, total: float, message: str) -> None:
+        if ctx is None:
+            return
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                ctx.report_progress(progress, total, message), loop
+            )
+        except RuntimeError:  # loop already closed (request cancelled/finished)
+            return
+        future.add_done_callback(_log_progress_failure)
+
+    return report
 
 
-def _add_history(name: str, operation: str, params: dict[str, Any]):
-    """Add an operation to processing history."""
-    if name not in _processing_history:
-        _processing_history[name] = []
-    _processing_history[name].append(
-        {
-            "operation": operation,
-            "params": params,
-        }
-    )
+_IMAGE_SUFFIXES = (".ome.tif", ".ome.tiff", ".tif", ".tiff", ".zarr")
+
+
+def _match_rank(channel: str, path: Path) -> int | None:
+    """Rank how well ``path`` names ``channel`` (case-insensitive).
+
+    0 = the file stem is exactly the channel, 1 = the channel is a whole token of
+    the stem (``cyc001_CD3_registered``), 2 = plain substring (``CD3`` in ``CD31``),
+    None = no match.
+    """
+    stem = path.name.lower()
+    for suffix in _IMAGE_SUFFIXES:
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    needle = channel.lower()
+    if stem == needle:
+        return 0
+    if needle in re.split(r"[^a-z0-9]+", stem):
+        return 1
+    if needle in stem:
+        return 2
+    return None
+
+
+def _find_channel_file(search_dir: Path, channel: str) -> tuple[Path | None, list[Path]]:
+    """Return the best-ranked image file for ``channel`` and every file tied with it.
+
+    Files are visited in sorted order and ranked by :func:`_match_rank`, so the
+    result never depends on filesystem iteration order and ``CD3`` prefers
+    ``CD3.tif`` over ``CD31.tif``. A tie at the best rank is reported back to the
+    caller as an ambiguity instead of being resolved silently.
+    """
+    ranked: list[tuple[int, Path]] = []
+    for path in sorted(search_dir.iterdir()):
+        name = path.name.lower()
+        if not (name.endswith((".tif", ".tiff")) or (name.endswith(".zarr") and path.is_dir())):
+            continue
+        rank = _match_rank(channel, path)
+        if rank is not None:
+            ranked.append((rank, path))
+    if not ranked:
+        return None, []
+    best = min(rank for rank, _ in ranked)
+    candidates = [path for rank, path in ranked if rank == best]
+    return candidates[0], candidates
 
 
 async def load_channel(
-    project_path: str,
-    cycle: str,
-    channel: str,
+    cycle: Annotated[str, Field(description="Cycle name or number (e.g., 'cyc001' or '1')")],
+    channel: Annotated[str, Field(description="Channel name (e.g., 'CD3', 'DAPI')")],
+    project_path: Annotated[str | None, Field(description=PROJECT_PATH_HELP)] = None,
 ) -> dict[str, Any]:
     """
     Load a channel image from a KINTSUGI project.
 
-    Returns image metadata and prepares it for processing.
+    Returns image metadata and prepares it for processing. When ``project_path``
+    is omitted the project the server was started for is used.
     """
+    try:
+        project_path = resolve_project_path(project_path)
+    except ProjectNotConfigured as e:
+        return {"error": str(e)}
 
-    # cycle and channel become path/glob components below, so reject any value
-    # that could traverse out of the project tree or broaden the glob search.
+    # cycle and channel become path components below, so reject any value that
+    # could traverse out of the project tree. Wildcards are rejected too so a
+    # pattern can never be mistaken for a channel name.
     # Validate cheap inputs before importing heavy optional dependencies.
     try:
         cycle = safe_filename(str(cycle), "cycle")
@@ -122,22 +208,18 @@ async def load_channel(
         if not search_dir.exists():
             continue
 
-        # Look for files matching the channel name
-        patterns = [
-            f"*{channel}*.tif*",
-            f"*{channel}*.zarr",
-            f"*{channel.upper()}*.tif*",
-            f"*{channel.lower()}*.tif*",
-        ]
-
-        for pattern in patterns:
-            matches = list(search_dir.glob(pattern))
-            if matches:
-                image_path = matches[0]
-                break
-
-        if image_path:
-            break
+        best, candidates = _find_channel_file(search_dir, channel)
+        if best is None:
+            continue
+        if len(candidates) > 1:
+            names = ", ".join(c.name for c in candidates)
+            return {
+                "error": f"Channel '{channel}' is ambiguous in {search_dir}: {names}. "
+                "Pass the exact file stem as the channel name.",
+                "candidates": [str(c) for c in candidates],
+            }
+        image_path = best
+        break
 
     if image_path is None:
         return {
@@ -189,6 +271,7 @@ async def load_channel(
             "project": str(project_path),
         },
     )
+    register_channel(_loaded_images[image_name]["metadata"])
 
     # Compute basic stats (sample for large images)
     try:
@@ -261,13 +344,7 @@ async def suggest_subtraction_parameters(
         signal_np = np.array(signal_data)
         blank_np = np.array(blank_data)
 
-    # Use the intelligent analysis
-    try:
-        from kintsugi.signal import analyze_for_subtraction
-    except ImportError:
-        # Fallback to basic analysis
-        logger.warning("kintsugi.signal module not available, using basic analysis")
-        return _basic_parameter_suggestion(signal_np, blank_np)
+    from kintsugi.signal.autofluorescence import analyze_for_subtraction
 
     # Get analysis-based suggestions
     analysis = analyze_for_subtraction(
@@ -280,17 +357,18 @@ async def suggest_subtraction_parameters(
     # Try to get learned parameters
     learned_params = None
     learned_confidence = 0
-    if use_learning and project_path and marker_name:
+    learning_root = project_path or learning_project_root()
+    if use_learning and learning_root and marker_name:
         try:
-            from kintsugi.mcp.tools.learning import ParameterLearningEngine
+            from kintsugi.assist.parameter_learning import ParameterLearningEngine
 
-            engine = ParameterLearningEngine(project_path)
+            engine = ParameterLearningEngine(learning_root)
             recommendation = engine.recommend_parameters(
                 operation="blank_subtraction",
                 tissue_type=tissue_type,
                 marker_name=marker_name,
             )
-            if recommendation.get("found"):
+            if recommendation.get("status") == "success":
                 learned_params = recommendation.get("recommended_parameters", {})
                 learned_confidence = recommendation.get("confidence", 0)
         except Exception as e:
@@ -356,44 +434,22 @@ async def suggest_subtraction_parameters(
     }
 
 
-def _basic_parameter_suggestion(signal: np.ndarray, blank: np.ndarray) -> dict:
-    """Fallback basic parameter suggestion without the signal module."""
-    # Simple correlation
-    flat_s = signal.ravel().astype(np.float64)
-    flat_b = blank.ravel().astype(np.float64)
-    mask = (flat_s > 0) | (flat_b > 0)
-    corr = np.corrcoef(flat_s[mask], flat_b[mask])[0, 1] if np.sum(mask) > 100 else 0
-
-    # Basic suggestions
-    clip = int(np.percentile(blank, 10))
-    scale = 1.0 + max(0, corr - 0.5) * 0.8
-
-    return {
-        "status": "success",
-        "suggested_parameters": {
-            "blank_clip_factor": clip,
-            "blank_scale_factor": round(scale, 2),
-            "smooth_low": False,
-            "low_size": 2,
-            "low_percentile": 60,
-            "smooth_high": False,
-            "high_size": 2,
-            "high_percentile": 90,
-            "erosion": 1 if corr > 0.6 else 0,
-        },
-        "confidence": 0.4,
-        "source": "basic_analysis",
-        "analysis": {"correlation": round(corr, 4)},
-    }
-
-
 async def analyze_weighted_subtraction(
-    signal_channel: str,
-    blank_channel: str,
-    n_ranges: int = 5,
-    range_method: str = "percentile",
-    tissue_type: str = "unknown",
-    marker_name: str | None = None,
+    signal_channel: Annotated[str, Field(description="Name of loaded signal channel")],
+    blank_channel: Annotated[str, Field(description="Name of loaded blank channel")],
+    n_ranges: Annotated[
+        int, Field(description="Number of intensity ranges (default: 5)", ge=3, le=10)
+    ] = 5,
+    range_method: Annotated[
+        Literal["percentile", "otsu"],
+        Field(description="Range boundary method (default: percentile)"),
+    ] = "percentile",
+    tissue_type: Annotated[
+        str, Field(description="Tissue type for context (optional)")
+    ] = "unknown",
+    marker_name: Annotated[
+        str | None, Field(description="Marker name for context (optional)")
+    ] = None,
 ) -> dict[str, Any]:
     """
     Preview range assignments and suggested weights without performing subtraction.
@@ -409,6 +465,11 @@ async def analyze_weighted_subtraction(
     - tissue_type: Tissue type for context
     - marker_name: Marker name for context
     """
+    try:
+        clamp_int(n_ranges, "n_ranges", minimum=3, maximum=10)
+    except ValueError as e:
+        return {"error": str(e)}
+
     try:
         signal_data = _get_image(signal_channel)
         blank_data = _get_image(blank_channel)
@@ -461,27 +522,129 @@ async def analyze_weighted_subtraction(
 
 
 async def subtract_blank(
-    signal_channel: str,
-    blank_channel: str,
-    blank_clip_factor: int | None = None,
-    blank_scale_factor: float | None = None,
-    smooth_low: bool | None = None,
-    low_size: int | None = None,
-    low_percentile: int | None = None,
-    smooth_high: bool | None = None,
-    high_size: int | None = None,
-    high_percentile: int | None = None,
-    erosion: int | None = None,
-    auto_suggest: bool = True,
-    tissue_type: str = "unknown",
-    marker_name: str | None = None,
-    project_path: str | None = None,
-    record_success: bool = True,
-    quality_threshold: float = 0.5,
-    method: str = "global",
-    n_ranges: int = 5,
-    range_method: str = "percentile",
-    transition_width: float = 0.1,
+    signal_channel: Annotated[str, Field(description="Name of loaded signal channel")],
+    blank_channel: Annotated[str, Field(description="Name of loaded blank channel")],
+    blank_clip_factor: Annotated[
+        int | None,
+        Field(
+            description="Clip blank values below this threshold to 0; None = auto-suggest "
+            "(default: 0)",
+            ge=0,
+        ),
+    ] = None,
+    blank_scale_factor: Annotated[
+        float | None,
+        Field(
+            description="Scale factor applied to the blank before subtraction; None = "
+            "auto-suggest (default: 1.0)",
+            ge=0.0,
+            allow_inf_nan=False,
+        ),
+    ] = None,
+    smooth_low: Annotated[
+        bool | None,
+        Field(description="Apply smoothing to low-intensity regions; None = auto-suggest"),
+    ] = None,
+    low_size: Annotated[
+        int | None,
+        Field(
+            description="Uniform filter size in pixels for low-intensity smoothing; None = "
+            "auto-suggest (default: 2)",
+            ge=1,
+        ),
+    ] = None,
+    low_percentile: Annotated[
+        int | None,
+        Field(
+            description="Intensity percentile (0-100) below which pixels count as low-intensity; "
+            "None = auto-suggest (default: 60)",
+            ge=0,
+            le=100,
+        ),
+    ] = None,
+    smooth_high: Annotated[
+        bool | None,
+        Field(description="Apply smoothing to high-intensity regions; None = auto-suggest"),
+    ] = None,
+    high_size: Annotated[
+        int | None,
+        Field(
+            description="Uniform filter size in pixels for high-intensity smoothing; None = "
+            "auto-suggest (default: 2)",
+            ge=1,
+        ),
+    ] = None,
+    high_percentile: Annotated[
+        int | None,
+        Field(
+            description="Intensity percentile (0-100) above which pixels count as "
+            "high-intensity; None = auto-suggest (default: 90)",
+            ge=0,
+            le=100,
+        ),
+    ] = None,
+    erosion: Annotated[
+        int | None,
+        Field(
+            description="Erosion disk size in pixels for void removal; None = auto-suggest "
+            "(default: 0)",
+            ge=0,
+            le=50,
+        ),
+    ] = None,
+    auto_suggest: Annotated[
+        bool,
+        Field(
+            description="Auto-suggest every parameter left as None from image analysis and "
+            "learned history (default: true)"
+        ),
+    ] = True,
+    tissue_type: Annotated[
+        str,
+        Field(
+            description="Tissue type (e.g., 'tonsil') used to look up learned parameters "
+            "(default: 'unknown')"
+        ),
+    ] = "unknown",
+    marker_name: Annotated[
+        str | None,
+        Field(description="Marker name (e.g., 'CD3') used to look up learned parameters"),
+    ] = None,
+    project_path: Annotated[
+        str | None,
+        Field(description="KINTSUGI project directory used for parameter learning"),
+    ] = None,
+    method: Annotated[
+        Literal["global", "weighted"],
+        Field(
+            description="'global' applies one scale factor everywhere; 'weighted' applies "
+            "per-intensity-range weights, which analyze_weighted_subtraction previews "
+            "(default: global)"
+        ),
+    ] = "global",
+    n_ranges: Annotated[
+        int,
+        Field(
+            description="Number of intensity ranges for method='weighted' (default: 5)",
+            ge=3,
+            le=10,
+        ),
+    ] = 5,
+    range_method: Annotated[
+        Literal["percentile", "otsu"],
+        Field(description="Range boundary method for method='weighted' (default: percentile)"),
+    ] = "percentile",
+    transition_width: Annotated[
+        float,
+        Field(
+            description="Fractional width of the blend between adjacent intensity ranges for "
+            "method='weighted' (default: 0.1)",
+            ge=0.0,
+            le=0.5,
+            allow_inf_nan=False,
+        ),
+    ] = 0.1,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """
     Subtract autofluorescence/blank channel from signal.
@@ -507,8 +670,10 @@ async def subtract_blank(
     - tissue_type: Tissue type for parameter suggestion
     - marker_name: Marker name for parameter suggestion
     - project_path: Project path for parameter learning
-    - record_success: Record successful parameters to learning database
-    - quality_threshold: Minimum quality score to consider successful
+    - method: "global" (single scale factor) or "weighted" (per-intensity-range weights)
+    - n_ranges: Number of intensity ranges for the weighted method
+    - range_method: Range boundary method for the weighted method
+    - transition_width: Blend width between adjacent ranges for the weighted method
     """
     # Validate untrusted arguments (the low-level server does not enforce schema).
     try:
@@ -532,13 +697,10 @@ async def subtract_blank(
 
     # ---- Weighted method path ----
     if method == "weighted":
-        # Convert to numpy for weighted processing
-        if hasattr(signal_data, "compute"):
-            signal_np = signal_data.compute()
-            blank_np = blank_data.compute()
-        else:
-            signal_np = np.array(signal_data)
-            blank_np = np.array(blank_data)
+        await _report_progress(ctx, 0, 3, "loading images")
+        # Materialize on a worker thread so the event loop keeps serving pings.
+        signal_np = await asyncio.to_thread(_as_numpy, signal_data)
+        blank_np = await asyncio.to_thread(_as_numpy, blank_data)
 
         try:
             from kintsugi.signal.autofluorescence import (
@@ -563,7 +725,9 @@ async def subtract_blank(
             blank_clip_factor = blank_clip_factor or 0
             base_scale = blank_scale_factor if blank_scale_factor is not None else 1.0
 
-            result_np = subtract_autofluorescence_weighted(
+            await _report_progress(ctx, 1, 3, "weighted subtraction")
+            result_np = await asyncio.to_thread(
+                subtract_autofluorescence_weighted,
                 signal_np,
                 blank_np,
                 blank_clip_factor=blank_clip_factor,
@@ -579,6 +743,7 @@ async def subtract_blank(
                 high_percentile=high_percentile or 90,
                 erosion=erosion or 0,
             )
+            await _report_progress(ctx, 2, 3, "scoring result")
 
             # Compute quality with ranges
             signal_f = signal_np.astype(np.float32)
@@ -629,6 +794,7 @@ async def subtract_blank(
                 "std": float(np.std(result_np)),
             }
 
+            await _report_progress(ctx, 3, 3, "done")
             return {
                 "status": "success",
                 "output_name": output_name,
@@ -660,6 +826,8 @@ async def subtract_blank(
         from skimage import morphology
     except ImportError as e:
         return {"error": f"Missing dependency: {e}"}
+
+    await _report_progress(ctx, 0, 2, "preparing subtraction")
 
     # Auto-suggest parameters if needed
     suggested_params = None
@@ -781,9 +949,10 @@ async def subtract_blank(
         },
     )
 
-    # Compute stats for result
+    # Compute stats for result (this evaluates the dask graph, so keep it off
+    # the event loop).
     try:
-        sample = result[::10, ::10].compute()
+        sample = await asyncio.to_thread(result[::10, ::10].compute)
         stats = {
             "min": float(np.min(sample)),
             "max": float(np.max(sample)),
@@ -792,7 +961,9 @@ async def subtract_blank(
         }
     except Exception:
         stats = {}
+    await _report_progress(ctx, 1, 2, "subtraction computed")
 
+    await _report_progress(ctx, 2, 2, "done")
     return {
         "status": "success",
         "output_name": output_name,
@@ -811,11 +982,25 @@ async def subtract_blank(
 
 
 async def denoise(
-    channel: str,
-    method: str = "median",
-    filter_size: int = 3,
-    percentile: int = 10,
-    upper: bool = False,
+    channel: Annotated[str, Field(description="Name of loaded channel to denoise")],
+    method: Annotated[
+        Literal["percentile", "uniform", "median"],
+        Field(description="Denoising method (default: median)"),
+    ] = "median",
+    filter_size: Annotated[
+        int, Field(description="Filter kernel size in pixels (default: 3)", ge=1, le=99)
+    ] = 3,
+    percentile: Annotated[
+        int,
+        Field(description="Percentile value for percentile filter (default: 10)", ge=0, le=100),
+    ] = 10,
+    upper: Annotated[
+        bool,
+        Field(
+            description="Use the upper percentile band instead of the lower one; only affects "
+            "method='percentile' (default: false)"
+        ),
+    ] = False,
 ) -> dict[str, Any]:
     """
     Apply denoising filters to reduce noise.
@@ -889,10 +1074,29 @@ async def denoise(
 
 
 async def apply_clahe(
-    channel: str,
-    clip_limit: float = 0.01,
-    tile_grid_size: int = 70,
-    nbins: int = 128,
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+    clip_limit: Annotated[
+        float,
+        Field(
+            description="Clip limit for contrast limiting, as a fraction of the histogram "
+            "(default: 0.01)",
+            ge=0.0,
+            le=1.0,
+            allow_inf_nan=False,
+        ),
+    ] = 0.01,
+    tile_grid_size: Annotated[
+        int,
+        Field(
+            description="Size of grid for histogram equalization; the kernel is image height "
+            "divided by this value (default: 70)",
+            ge=1,
+            le=10000,
+        ),
+    ] = 70,
+    nbins: Annotated[
+        int, Field(description="Number of histogram bins (default: 128)", ge=2, le=65536)
+    ] = 128,
 ) -> dict[str, Any]:
     """
     Apply Contrast Limited Adaptive Histogram Equalization.
@@ -968,12 +1172,35 @@ async def apply_clahe(
 
 
 async def clean_background(
-    channel: str,
-    background_threshold: int = 100,
-    smooth: bool = False,
-    smooth_threshold: int = 100,
-    remove_small_objects: bool = False,
-    min_object_size: int = 30,
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+    background_threshold: Annotated[
+        int,
+        Field(
+            description="Intensity threshold below which pixels are set to 0 (default: 100)",
+            ge=0,
+        ),
+    ] = 100,
+    smooth: Annotated[
+        bool,
+        Field(
+            description="Apply a 3x3 median filter to pixels below smooth_threshold to soften "
+            "transition zones after thresholding (default: false)"
+        ),
+    ] = False,
+    smooth_threshold: Annotated[
+        int,
+        Field(
+            description="Intensity below which pixels are median-smoothed when smooth=True "
+            "(default: 100)",
+            ge=0,
+        ),
+    ] = 100,
+    remove_small_objects: Annotated[
+        bool, Field(description="Whether to remove small connected components")
+    ] = False,
+    min_object_size: Annotated[
+        int, Field(description="Minimum object size in pixels to keep (default: 30)", ge=1)
+    ] = 30,
 ) -> dict[str, Any]:
     """
     Remove background and small objects from the image.
@@ -1051,11 +1278,34 @@ async def clean_background(
 
 
 async def gaussian_subtract(
-    channel: str,
-    sigma: int = 10,
-    scale_factor: float = 0.1,
-    low_clip: int = 0,
-    high_clip: int = 65535,
+    channel: Annotated[str, Field(description="Name of loaded channel")],
+    sigma: Annotated[
+        int, Field(description="Gaussian sigma value in pixels (default: 10)", ge=1, le=1000)
+    ] = 10,
+    scale_factor: Annotated[
+        float,
+        Field(
+            description="Scale factor for subtraction (default: 0.1)",
+            ge=0.0,
+            allow_inf_nan=False,
+        ),
+    ] = 0.1,
+    low_clip: Annotated[
+        int,
+        Field(
+            description="Lower intensity clip bound on the Gaussian-blurred background: blurred "
+            "values at or below it are zeroed before subtraction (16-bit range, default: 0)",
+            ge=0,
+        ),
+    ] = 0,
+    high_clip: Annotated[
+        int,
+        Field(
+            description="Upper intensity clip bound on the Gaussian-blurred background: blurred "
+            "values at or above it are zeroed before subtraction (16-bit range, default: 65535)",
+            ge=0,
+        ),
+    ] = 65535,
 ) -> dict[str, Any]:
     """
     Subtract Gaussian-blurred version to remove structured background.
@@ -1121,12 +1371,33 @@ async def gaussian_subtract(
 
 
 async def denoise_advanced(
-    channel: str,
-    method: str = "adaptive",
-    strength: str = "auto",
-    preserve_edges: bool = True,
-    n2v_epochs: int = 50,
-    model_path: str | None = None,
+    channel: Annotated[str, Field(description="Name of loaded channel to denoise")],
+    method: Annotated[
+        Literal["adaptive", "bilateral", "nlm", "bm3d", "n2v", "patch_svd"],
+        Field(description="Advanced denoising method (default: adaptive)"),
+    ] = "adaptive",
+    strength: Annotated[
+        Literal["light", "medium", "strong", "auto"],
+        Field(description="Denoising strength (default: auto)"),
+    ] = "auto",
+    preserve_edges: Annotated[
+        bool, Field(description="Prioritize edge preservation (default: true)")
+    ] = True,
+    n2v_epochs: Annotated[
+        int, Field(description="Training epochs for N2V method (default: 50)", ge=1, le=10000)
+    ] = 50,
+    model_path: Annotated[
+        str | None,
+        Field(
+            description="Path to a pre-trained N2V checkpoint (.pt/.pth); skips training. Must "
+            "lie inside project_path, the server's project, or ~/.kintsugi/models"
+        ),
+    ] = None,
+    project_path: Annotated[
+        str | None,
+        Field(description="KINTSUGI project directory that model_path may be loaded from"),
+    ] = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """
     Apply advanced denoising using N2V, CARE, or adaptive methods.
@@ -1153,11 +1424,17 @@ async def denoise_advanced(
     try:
         clamp_int(n2v_epochs, "n2v_epochs", minimum=1, maximum=10000)
         if model_path is not None:
-            resolved_model = Path(model_path).resolve()
+            # Loading a checkpoint deserializes a file the model chose: confine it
+            # to directories the user controls before torch sees it.
+            resolved_model = ensure_within_any(
+                model_path, allowed_model_roots(project_path), "model_path"
+            )
+            if resolved_model.suffix.lower() not in {".pt", ".pth"}:
+                return {"error": f"model_path must be a .pt/.pth checkpoint: {model_path}"}
             if not resolved_model.is_file():
                 return {"error": f"model_path does not exist or is not a file: {model_path}"}
             model_path = str(resolved_model)
-    except ValueError as e:
+    except ValueError as e:  # PathSafetyError is a ValueError
         return {"error": str(e)}
 
     try:
@@ -1165,14 +1442,13 @@ async def denoise_advanced(
     except ValueError as e:
         return {"error": str(e)}
 
-    # Convert to numpy if needed
-    if hasattr(data, "compute"):
+    await _report_progress(ctx, 0, 3, "loading image")
+
+    # Convert to numpy if needed (off the event loop: compute() can be heavy)
+    if hasattr(data, "compute") and (data.shape[0] > 4000 or data.shape[1] > 4000):
         # For large images, process a reasonable subset or use tiled approach
-        if data.shape[0] > 4000 or data.shape[1] > 4000:
-            logger.warning("Large image detected, computing full array...")
-        img = data.compute()
-    else:
-        img = np.array(data)
+        logger.warning("Large image detected, computing full array...")
+    img = await asyncio.to_thread(_as_numpy, data)
 
     # Estimate noise level before denoising
     try:
@@ -1182,53 +1458,63 @@ async def denoise_advanced(
     except ImportError:
         noise_before = float(np.std(img[img < np.percentile(img, 20)]))
 
-    # Apply denoising based on method
+    # Pick the denoiser, then run it on a worker thread so the server keeps
+    # answering pings/cancellation while it works.
+    await _report_progress(ctx, 1, 3, f"denoising ({method})")
     try:
+        denoiser: Callable[..., np.ndarray]
+        kwargs: dict[str, Any]
         if method == "adaptive":
             from kintsugi.denoise.filters import adaptive_denoise
 
-            result = adaptive_denoise(img, strength=strength, preserve_edges=preserve_edges)
+            denoiser = adaptive_denoise
+            kwargs = {"strength": strength, "preserve_edges": preserve_edges}
 
         elif method == "bilateral":
             from kintsugi.denoise.filters import denoise_bilateral
 
             sigma_spatial = 1.0 if strength == "light" else (2.0 if strength == "medium" else 3.0)
-            result = denoise_bilateral(img, sigma_spatial=sigma_spatial)
+            denoiser = denoise_bilateral
+            kwargs = {"sigma_spatial": sigma_spatial}
 
         elif method == "nlm":
             from kintsugi.denoise.filters import denoise_nlm
 
             patch_size = 5 if strength in ("light", "auto") else 7
-            result = denoise_nlm(img, patch_size=patch_size)
+            denoiser = denoise_nlm
+            kwargs = {"patch_size": patch_size}
 
         elif method == "bm3d":
             from kintsugi.denoise.patch_based import denoise_bm3d_lite
 
-            result = denoise_bm3d_lite(img, sigma=noise_before if strength == "auto" else None)
+            denoiser = denoise_bm3d_lite
+            kwargs = {"sigma": noise_before if strength == "auto" else None}
 
         elif method == "n2v":
             from kintsugi.denoise.n2v import denoise_n2v
 
-            result = denoise_n2v(
-                img,
-                n_epochs=n2v_epochs,
-                model_path=model_path,
-            )
+            denoiser = denoise_n2v
+            kwargs = {"n_epochs": n2v_epochs, "model_path": model_path}
 
         elif method == "patch_svd":
             from kintsugi.denoise.patch_based import denoise_svd_patch
 
             rank = None if strength == "auto" else (5 if strength == "light" else 10)
-            result = denoise_svd_patch(img, rank=rank)
+            denoiser = denoise_svd_patch
+            kwargs = {"rank": rank}
 
         else:
             return {"error": f"Unknown advanced denoise method: {method}"}
+
+        result = await asyncio.to_thread(denoiser, img, **kwargs)
 
     except ImportError as e:
         return {
             "error": f"Required module not available: {e}",
             "hint": "Install with: pip install kintsugi[denoise] for N2V/CARE support",
         }
+
+    await _report_progress(ctx, 2, 3, "estimating residual noise")
 
     # Estimate noise after
     try:
@@ -1262,6 +1548,7 @@ async def denoise_advanced(
         },
     )
 
+    await _report_progress(ctx, 3, 3, "done")
     return {
         "status": "success",
         "output_name": output_name,
@@ -1298,16 +1585,15 @@ def get_processing_history(channel: str) -> list:
     return _processing_history.get(channel, [])
 
 
-def clear_session():
-    """Clear all loaded images and history."""
-    _loaded_images.clear()
-    _processing_history.clear()
-
-
 async def cluster_channels_tool(
-    project_path: str,
-    n_clusters: int | None = None,
-    wavelength_aware: bool = True,
+    project_path: Annotated[str, Field(description="Path to KINTSUGI project directory")],
+    n_clusters: Annotated[
+        int | None, Field(description="Number of clusters; None = auto-select", ge=2)
+    ] = None,
+    wavelength_aware: Annotated[
+        bool, Field(description="Enforce same-wavelength clustering (default: true)")
+    ] = True,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """
     Cluster project channels by image feature similarity.
@@ -1323,6 +1609,8 @@ async def cluster_channels_tool(
 
     project_path_obj = Path(project_path).resolve()
 
+    await _report_progress(ctx, 0, 3, "discovering channel images")
+
     # Discover channel images
     search_dirs = [
         project_path_obj / "data" / "processed" / "registered",
@@ -1331,31 +1619,42 @@ async def cluster_channels_tool(
     ]
 
     marker_dict: dict[str, Any] = {}
+    path_by_name: dict[str, Path] = {}
     for search_dir in search_dirs:
         if not search_dir.exists():
             continue
         for tif in sorted(search_dir.rglob("*.tif")):
             name = tif.stem
-            if name not in marker_dict:
-                try:
-                    import tifffile
+            if name in marker_dict:
+                continue
+            try:
+                # rglob follows symlinks; keep every file inside the project.
+                tif = ensure_within(tif, project_path_obj, "channel file")
+            except PathSafetyError as e:
+                logger.warning(str(e))
+                continue
+            try:
+                import tifffile
 
-                    marker_dict[name] = tifffile.imread(str(tif))
-                except Exception as e:
-                    logger.warning(f"Failed to load {tif}: {e}")
+                marker_dict[name] = tifffile.imread(str(tif))
+                path_by_name[name] = tif
+            except Exception as e:
+                logger.warning(f"Failed to load {tif}: {e}")
         if marker_dict:
             break
 
     if not marker_dict:
         return {"error": "No channel images found in project"}
 
-    # Extract features
+    # Extract features (heavy, CPU-bound: run on a worker thread)
+    await _report_progress(ctx, 1, 3, f"extracting features from {len(marker_dict)} channels")
     try:
-        features = batch_extract_features(marker_dict, progress=False)
+        features = await asyncio.to_thread(batch_extract_features, marker_dict, progress=False)
     except Exception as e:
         return {"error": f"Feature extraction failed: {e}"}
 
     # Cluster
+    await _report_progress(ctx, 2, 3, "clustering channels")
     try:
         assignments = cluster_channels(
             features,
@@ -1365,6 +1664,33 @@ async def cluster_channels_tool(
         representatives = get_cluster_representatives(features, assignments)
     except Exception as e:
         return {"error": f"Clustering failed: {e}"}
+
+    # Keep every clustered channel in the session, tagged with its cluster and
+    # project, so propagate_parameters can find the members. Earlier clustering
+    # results are dropped first: cluster ids are only meaningful per run.
+    for stale in [
+        n for n, info in _loaded_images.items() if "cluster_id" in info.get("metadata", {})
+    ]:
+        del _loaded_images[stale]
+        _processing_history.pop(stale, None)
+    for name, cid in assignments.items():
+        # Track the channel under the name load_channel gives it (cyc001_CD3 for
+        # .../cyc001/CD3.tif), so both tools add to one workflow entry.
+        cycle_dir = path_by_name[name].parent.name
+        cycle = cycle_dir.lower() if re.fullmatch(r"cyc\d+", cycle_dir, re.IGNORECASE) else None
+        _store_image(
+            name,
+            marker_dict[name],
+            {
+                "cluster_id": int(cid),
+                "source_path": str(path_by_name[name]),
+                "project": str(project_path_obj),
+                "cycle": cycle or "unknown",
+                "root": f"{cycle}_{name}" if cycle else name,
+                "wavelength_group": features[name].get("wavelength_group"),
+            },
+        )
+        register_channel(_loaded_images[name]["metadata"])
 
     # Format result
     cluster_info = {}
@@ -1377,20 +1703,32 @@ async def cluster_channels_tool(
             "wavelength_group": features[rep_name]["wavelength_group"],
         }
 
+    await _report_progress(ctx, 3, 3, "done")
     return {
         "status": "success",
         "n_channels": len(assignments),
         "n_clusters": len(representatives),
-        "assignments": assignments,
+        "assignments": {name: int(cid) for name, cid in assignments.items()},
         "clusters": cluster_info,
+        "loaded_channels": sorted(assignments),
     }
 
 
 async def propagate_parameters_tool(
-    project_path: str,
-    cluster_id: int,
-    params: dict,
-    output_dir: str | None = None,
+    project_path: Annotated[str, Field(description="Path to KINTSUGI project directory")],
+    cluster_id: Annotated[int, Field(description="Cluster ID to propagate parameters to", ge=0)],
+    params: Annotated[
+        dict[str, Any],
+        Field(description="Processing parameters (blank_params and/or clean_params dicts)"),
+    ],
+    output_dir: Annotated[
+        str | None,
+        Field(
+            description="Output directory, which must lie inside the project; None = the "
+            "project's data/processed/signal_isolated directory"
+        ),
+    ] = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """
     Propagate tuned parameters to all members of a cluster.
@@ -1415,11 +1753,13 @@ async def propagate_parameters_tool(
     if not loaded:
         return {"error": "No images loaded. Use cluster_channels first to load images."}
 
-    # Get member channels for this cluster
+    # Get member channels for this cluster, scoped to this project so channels
+    # clustered for another project can never be processed into this one.
     members = [
         name
         for name, info in loaded.items()
         if info.get("metadata", {}).get("cluster_id") == cluster_id
+        and info.get("metadata", {}).get("project") == str(project_path_obj)
     ]
 
     if not members:
@@ -1434,10 +1774,14 @@ async def propagate_parameters_tool(
         if name in members
     }
 
+    await _report_progress(ctx, 0, 2, f"propagating parameters to {len(members)} channels")
     try:
-        results = propagate_cluster_parameters(marker_dict_local, members, params, blank_map, out)
+        results = await asyncio.to_thread(
+            propagate_cluster_parameters, marker_dict_local, members, params, blank_map, out
+        )
     except Exception as e:
         return {"error": f"Propagation failed: {e}"}
+    await _report_progress(ctx, 1, 2, "propagation complete")
 
     summary = {
         name: {
@@ -1448,7 +1792,20 @@ async def propagate_parameters_tool(
         for name, r in results.items()
     }
 
+    for name, r in results.items():
+        if name in _loaded_images:
+            succeeded = r["status"] == "success"
+            track(
+                name,
+                _loaded_images[name]["metadata"],
+                "propagate_parameters",
+                {**params, "output_path": summary[name]["output_path"]},
+                quality_after=r.get("quality_score") if succeeded else None,
+                status="review" if succeeded else "processing",
+            )
+
     successes = sum(1 for r in results.values() if r["status"] == "success")
+    await _report_progress(ctx, 2, 2, "done")
     return {
         "status": "success",
         "cluster_id": cluster_id,
@@ -1459,13 +1816,28 @@ async def propagate_parameters_tool(
 
 
 async def optimize_parameters(
-    signal_channel: str,
-    blank_channel: str,
-    n_trials: int = 80,
-    timeout: int = 300,
-    optimize_clean: bool = True,
-    warm_start_params: dict | None = None,
-    project_path: str | None = None,
+    signal_channel: Annotated[str, Field(description="Name of loaded signal channel")],
+    blank_channel: Annotated[str, Field(description="Name of loaded blank channel")],
+    n_trials: Annotated[
+        int, Field(description="Maximum optimization trials (default: 80)", ge=1, le=1000)
+    ] = 80,
+    timeout: Annotated[
+        int,
+        Field(description="Maximum seconds for optimization (default: 300)", ge=1, le=86400),
+    ] = 300,
+    optimize_clean: Annotated[
+        bool,
+        Field(description="Also optimize background cleaning parameters (default: true)"),
+    ] = True,
+    warm_start_params: Annotated[
+        dict[str, Any] | None,
+        Field(description="Initial parameter guess for faster convergence (optional)"),
+    ] = None,
+    project_path: Annotated[
+        str | None,
+        Field(description="Project path for storing optimization study (optional)"),
+    ] = None,
+    ctx: Context | None = None,
 ) -> dict[str, Any]:
     """
     Find optimal signal isolation parameters via Bayesian optimization (Optuna).
@@ -1502,13 +1874,11 @@ async def optimize_parameters(
     except ValueError as e:
         return {"error": str(e)}
 
-    # Convert to numpy
-    if hasattr(signal_data, "compute"):
-        signal_np = signal_data.compute()
-        blank_np = blank_data.compute()
-    else:
-        signal_np = np.array(signal_data)
-        blank_np = np.array(blank_data)
+    await _report_progress(ctx, 0, n_trials, f"trial 0/{n_trials}")
+
+    # Convert to numpy (off the event loop)
+    signal_np = await asyncio.to_thread(_as_numpy, signal_data)
+    blank_np = await asyncio.to_thread(_as_numpy, blank_data)
 
     # Storage path
     storage_path = None
@@ -1517,8 +1887,16 @@ async def optimize_parameters(
         storage_dir.mkdir(parents=True, exist_ok=True)
         storage_path = storage_dir / f"{signal_channel}_optimization.db"
 
+    # Optuna runs on a worker thread; each finished trial schedules a progress
+    # notification back onto the event loop (never awaited from the thread).
+    report = _thread_progress_reporter(ctx, asyncio.get_running_loop())
+
+    def _on_trial(completed: int, total: int) -> None:
+        report(completed, total, f"trial {completed}/{total}")
+
     try:
-        result = optimize_signal_isolation(
+        result = await asyncio.to_thread(
+            optimize_signal_isolation,
             signal=signal_np,
             blank=blank_np,
             n_trials=n_trials,
@@ -1527,9 +1905,17 @@ async def optimize_parameters(
             optimize_clean=optimize_clean,
             storage_path=storage_path,
             show_progress=False,
+            trial_callback=_on_trial if ctx is not None else None,
         )
     except Exception as e:
         return {"error": f"Optimization failed: {e}"}
+
+    await _report_progress(
+        ctx,
+        n_trials,
+        n_trials,
+        f"optimization complete ({result['n_trials_completed']} trials)",
+    )
 
     _add_history(
         signal_channel,
@@ -1545,10 +1931,16 @@ async def optimize_parameters(
 
 
 async def predict_parameters(
-    signal_channel: str,
-    blank_channel: str | None = None,
-    project_path: str | None = None,
-    model_path: str | None = None,
+    signal_channel: Annotated[str, Field(description="Name of loaded signal channel")],
+    blank_channel: Annotated[
+        str | None, Field(description="Name of loaded blank channel (optional)")
+    ] = None,
+    project_path: Annotated[
+        str | None, Field(description="Project path containing predictor model (optional)")
+    ] = None,
+    model_path: Annotated[
+        str | None, Field(description="Path to a trained predictor .joblib (optional)")
+    ] = None,
 ) -> dict[str, Any]:
     """
     Predict signal isolation parameters from image features using a trained model.
@@ -1601,10 +1993,18 @@ async def predict_parameters(
     )
     fv = features_to_vector(features)
 
-    # Find model path
+    # Find model path. joblib.load unpickles arbitrary objects, so an explicit
+    # path must lie in a directory the user controls.
     predictor_path = None
     if model_path:
-        predictor_path = Path(model_path)
+        try:
+            predictor_path = ensure_within_any(
+                model_path, allowed_model_roots(project_path), "model_path"
+            )
+        except PathSafetyError as e:
+            return {"error": str(e)}
+        if predictor_path.suffix.lower() != ".joblib":
+            return {"error": f"model_path must be a .joblib predictor model: {model_path}"}
     elif project_path:
         predictor_path = Path(project_path) / "configs" / "parameter_predictor.joblib"
 
@@ -1621,22 +2021,23 @@ async def predict_parameters(
     predictor = ParameterPredictor(model_path=predictor_path)
     result = predictor.predict(fv)
 
-    _add_history(
-        signal_channel,
-        "predict_parameters",
-        {
-            "confidence": result.get("confidence", 0),
-            "status": result["status"],
-        },
-    )
-
     return result
 
 
 async def estimate_background(
-    channel: str,
-    kernel_size: int = 7,
-    return_background: bool = False,
+    channel: Annotated[str, Field(description="Name of loaded channel image")],
+    kernel_size: Annotated[
+        int,
+        Field(
+            description="SMO kernel size in pixels (default: 7, robust across 5-15)",
+            ge=1,
+            le=999,
+        ),
+    ] = 7,
+    return_background: Annotated[
+        bool,
+        Field(description="Store estimated background as a loaded image (default: false)"),
+    ] = False,
 ) -> dict[str, Any]:
     """
     Estimate and subtract background using SMO (Silver Mountain Operator).
@@ -1694,7 +2095,7 @@ async def estimate_background(
     )
 
     _add_history(
-        channel,
+        corrected_name,
         "estimate_background_smo",
         {"kernel_size": kernel_size, "background_mean": result["background_mean"]},
     )

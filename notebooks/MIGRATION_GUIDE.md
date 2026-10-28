@@ -27,29 +27,28 @@ The old notebooks have been replaced with a single, more powerful notebook:
 
 Open `notebooks/3_Signal_Isolation_QC.ipynb` and follow the step-by-step workflow. The notebook supports three approaches:
 
-1. **Claude-Guided**: AI recommends parameters, learns from success
+1. **AI-assisted (optional MCP server)**: the assistant you connect recommends parameters, learns from success
 2. **Interactive Tuners**: Widget-based parameter adjustment
 3. **Python API**: Direct programmatic control
 
-### Option 1: Claude Code Integration (Recommended for AI-assisted workflow)
+### Option 1: AI Assistant through the MCP server (optional, any MCP client)
 
 1. **Install dependencies:**
    ```bash
-   pip install kintsugi[claude]
+   pip install -e ".[mcp]"   # or: kintsugi install mcp  (needs mcp>=2.0,<3)
    ```
 
-2. **Configure Claude Code:**
-   - If you used `kintsugi init`, configuration is already set up
-   - For existing projects: `kintsugi mcp config /path/to/your/project`
+2. **Configure your MCP client:**
+   - `kintsugi mcp config /path/to/your/project --client NAME` (`kintsugi mcp clients` lists the clients; nothing is configured by default)
 
-3. **Start using with Claude Code:**
-   - Claude can now load channels, suggest parameters, and process images
+3. **Open the project in your client** and approve the server (see the client table in `docs/mcp.md`):
+   - The assistant can now load channels, suggest parameters, and process images
    - Parameters are learned and improve over time
 
 ### Option 2: Jupyter Interactive Tuners
 
 ```python
-from kintsugi.claude import (
+from kintsugi.assist import (
     blank_subtraction_tuner,
     denoise_tuner,
     clahe_tuner,
@@ -104,7 +103,7 @@ result = ini_params(
 #### New: MCP Tool or Parameter Tuner
 ```python
 # NEW Option 1: Jupyter tuner
-from kintsugi.claude import blank_subtraction_tuner
+from kintsugi.assist import blank_subtraction_tuner
 result = blank_subtraction_tuner(signal_channel, blank_channel)
 params = result.get_params()
 
@@ -162,7 +161,7 @@ result = await apply_clahe(
 )
 
 # Or via Jupyter tuner
-from kintsugi.claude import clahe_tuner
+from kintsugi.assist import clahe_tuner
 result = clahe_tuner(channel_name)
 ```
 
@@ -223,7 +222,7 @@ The new system learns from successful parameter choices:
 
 ```python
 # Parameters are automatically recorded when you approve results
-from kintsugi.claude import ParameterLearningEngine
+from kintsugi.assist import ParameterLearningEngine
 
 engine = ParameterLearningEngine("/path/to/project")
 
@@ -238,26 +237,16 @@ print(f"Recommended params: {recommendations['recommended_parameters']}")
 print(f"Confidence: {recommendations['confidence']}")
 ```
 
-When using Claude Code, this happens automatically through the MCP tools.
+With an AI assistant connected through the MCP server, this happens automatically through the MCP tools.
 
 ---
 
 ## Available MCP Tools
 
-| Tool | Description |
-|------|-------------|
-| `load_channel` | Load channel image from project |
-| `subtract_blank` | Autofluorescence subtraction |
-| `denoise` | Basic denoising filters |
-| `denoise_advanced` | N2V, NLM, BM3D, etc. |
-| `apply_clahe` | Contrast enhancement |
-| `clean_background` | Background removal |
-| `gaussian_subtract` | Structured background removal |
-| `assess_quality` | Channel quality assessment |
-| `compute_snr` | Signal-to-noise ratio |
-| `suggest_parameters` | AI-powered suggestions |
-| `suggest_with_learning` | Suggestions using learned history |
-| `approve_and_learn` | Record successful params |
+The tool surface is generated from the server's registry — run `kintsugi mcp tools`
+(or `kintsugi mcp tools --markdown`) for the current list, and see
+[docs/mcp.md](../docs/mcp.md) for every tool's parameters, the resources, the
+`signal_isolation_workflow` prompt and the learning loop.
 
 ---
 
@@ -285,7 +274,7 @@ When using Claude Code, this happens automatically through the MCP tools.
 
 ## FAQ
 
-**Q: What if I don't use Claude Code?**
+**Q: What if I don't use an AI assistant?**
 A: You can use the Jupyter interactive tuners (Kview2 + Kutils) or direct Python API. The MCP server is optional.
 
 **Q: Will my existing parameters work?**
@@ -303,4 +292,4 @@ A: Yes, `Kutils.py` is still available in the notebooks folder and is used by th
 
 - Documentation: See `docs/` directory
 - Issues: https://github.com/smith6jt-cop/KINTSUGI/issues
-- Claude Code: Use `/help` for available tools
+- MCP server: your client's MCP view lists the `kintsugi` server, its connection state and its tools (in Claude Code and Gemini CLI, `/mcp`)

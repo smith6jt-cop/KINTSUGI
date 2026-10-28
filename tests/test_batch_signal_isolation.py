@@ -1085,6 +1085,14 @@ class TestBatchWithRecipes:
 
 
 class TestLearningIntegration:
+    @pytest.fixture(autouse=True)
+    def _isolated_home(self, tmp_path, monkeypatch):
+        """Keep the user-wide learning database out of the real home directory."""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+
     def test_learn_flag_creates_db(self, synthetic_project, tmp_path):
         """With --learn and tissue_type, learning DB gets records."""
         recipe_path = tmp_path / "recipes"
@@ -1108,17 +1116,17 @@ class TestLearningIntegration:
             force=True,
         )
 
-        # Verify the learning DB was created
+        # The learning DB is created in the project's state directory
         db_path = synthetic_project / ".kintsugi" / "parameter_learning.db"
-        if db_path.exists():
-            import sqlite3
+        assert db_path.exists()
+        import sqlite3
 
-            conn = sqlite3.connect(str(db_path))
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM parameter_records")
-            count = cursor.fetchone()[0]
-            conn.close()
-            assert count > 0
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM parameter_records")
+        count = cursor.fetchone()[0]
+        conn.close()
+        assert count > 0
 
     def test_no_learn_flag(self, synthetic_project, tmp_path):
         """With --no-learn, no DB records created."""

@@ -1,13 +1,13 @@
 """Realistic tool-selection tasks for the KINTSUGI MCP evaluation harness.
 
-Each task is a natural-language request a scientist might make to Claude while
-driving the MCP server. ``expected`` is the set of *acceptable* first tool calls
+Each task is a natural-language request a scientist might make to an AI
+assistant driving the MCP server. ``expected`` is the set of *acceptable* first tool calls
 (more than one is allowed where genuinely ambiguous). Several tasks are
-deliberately chosen to probe confusable pairs on the 26-tool surface
+deliberately chosen to probe confusable pairs on the tool surface
 (``denoise`` vs ``denoise_advanced``; the three background-removal tools;
 ``assess_quality`` vs ``compute_snr``; the learning-recall vs record tools).
 
-Keeping these as plain data (no MCP/anthropic import) lets the harness load them
+Keeping these as plain data (no MCP or provider import) lets the harness load them
 in any environment.
 """
 
@@ -122,5 +122,131 @@ TASKS: list[EvalTask] = [
         "prompt": "Save the processed CD8 channel as an OME-TIFF.",
         "expected": {"save_processed"},
         "rationale": "Persist a processed channel to disk.",
+    },
+    {
+        "id": "clahe",
+        "prompt": "The tissue structures are hard to see. Boost the local contrast of the loaded CD31 channel.",
+        "expected": {"apply_clahe"},
+        "rationale": "Local contrast enhancement = CLAHE.",
+    },
+    {
+        "id": "clean_background",
+        "prompt": (
+            "Zero out the dim background pixels below 100 counts and drop the tiny specks "
+            "smaller than 30 pixels from the loaded channel."
+        ),
+        "expected": {"clean_background"},
+        "rationale": "Threshold + small-object removal = clean_background.",
+    },
+    {
+        "id": "jupyter_tuner",
+        "prompt": (
+            "Give me a notebook cell with sliders so I can tune the blank-subtraction "
+            "parameters for CD3 interactively."
+        ),
+        "expected": {"generate_jupyter_cell"},
+        "rationale": "Interactive widget code for a notebook = generate_jupyter_cell.",
+    },
+    {
+        "id": "image_stats",
+        "prompt": "What are the min, max, mean and intensity histogram of the loaded DAPI channel?",
+        "expected": {"get_image_stats"},
+        "rationale": "Numeric statistics (not a visual preview, not a quality score).",
+    },
+    {
+        "id": "learning_stats",
+        "prompt": "How many parameter records does the learning database hold, and for which tissues?",
+        "expected": {"get_learning_statistics"},
+        "rationale": "Database-level statistics, not a recommendation.",
+    },
+    {
+        "id": "history",
+        "prompt": "List every processing step that has been applied to the CD8 channel so far.",
+        "expected": {"get_processing_history"},
+        "rationale": "Session provenance for one channel.",
+    },
+    {
+        "id": "predict",
+        "prompt": (
+            "Use the trained predictor model to estimate the signal-isolation parameters for "
+            "the loaded CD4 channel from its image features."
+        ),
+        "expected": {"predict_parameters"},
+        "rationale": "Model-based prediction (Random Forest), not heuristic suggestion or search.",
+    },
+    {
+        "id": "propagate",
+        "prompt": (
+            "Apply the parameters I tuned on the representative channel to every other "
+            "channel in cluster 2."
+        ),
+        "expected": {"propagate_parameters"},
+        "rationale": "Apply tuned parameters across a cluster's members.",
+    },
+    {
+        "id": "suggest_heuristic",
+        "prompt": (
+            "Based only on the image itself (no learned history), what processing parameters "
+            "would you start with for the loaded CD68 channel?"
+        ),
+        "expected": {"suggest_parameters"},
+        "rationale": "Image-analysis heuristic suggestion without the learning database.",
+    },
+    {
+        "id": "session_state",
+        "prompt": "Which channels are currently loaded in this session, and how much memory do they use?",
+        "expected": {"get_session_state"},
+        "rationale": "Session introspection (not the project's channel list on disk).",
+    },
+    {
+        "id": "unload",
+        "prompt": "I'm done with the DAPI channel; free its memory on the server.",
+        "expected": {"unload_channel"},
+        "rationale": "Drop a loaded channel from the session.",
+    },
+    {
+        "id": "batch_quality",
+        "prompt": (
+            "Score all five channels I loaded from cycle 3 in one go and tell me which "
+            "ones need a second look."
+        ),
+        "expected": {"batch_assess_quality"},
+        "rationale": "Several channels at once with a review queue; not one assess_quality per channel.",
+    },
+    {
+        "id": "compare_before_after",
+        "prompt": (
+            "How different is cyc001_CD3_subtracted from the original cyc001_CD3? "
+            "Give me the correlation and SSIM between them."
+        ),
+        "expected": {"compare_channels"},
+        "rationale": "Two-channel statistical comparison, not a single-channel quality score.",
+    },
+    {
+        "id": "intensity_profile",
+        "prompt": (
+            "Is there an illumination gradient across the loaded DAPI channel? Show me the "
+            "intensity along a horizontal line through the middle of the image."
+        ),
+        "expected": {"get_intensity_profile"},
+        "rationale": "A line profile answers a gradient question; get_image_stats does not.",
+    },
+    {
+        "id": "workflow_status",
+        "prompt": (
+            "I'm back after yesterday's session. Which channels did we already approve, and "
+            "which are still waiting for my review?"
+        ),
+        "expected": {"get_workflow_status"},
+        "rationale": "Persistent state across restarts, not the in-memory session.",
+    },
+    {
+        "id": "review_decision",
+        "prompt": (
+            "The CD20 result from cycle 3 still has too much autofluorescence in the follicles; "
+            "mark it as needing another pass."
+        ),
+        "expected": {"set_review_decision"},
+        "rationale": "A non-approval review outcome; approve_and_learn is only for approvals.",
     },
 ]

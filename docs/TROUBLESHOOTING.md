@@ -5,7 +5,7 @@ This guide covers common issues and their solutions when installing or running K
 ## Table of Contents
 
 - [Installation Issues](#installation-issues)
-  - [Conda Environment Creation Fails](#conda-environment-creation-fails)
+  - [Conda Environment Creation Fails or Hangs](#conda-environment-creation-fails-or-hangs)
   - [Package Installation Errors](#package-installation-errors)
 - [Dependency Issues](#dependency-issues)
   - [libvips Not Found](#libvips-not-found)
@@ -17,6 +17,7 @@ This guide covers common issues and their solutions when installing or running K
   - [Stitched Image Quality Issues](#stitched-image-quality-issues)
   - [Registration Failures](#registration-failures)
 - [HPC/SLURM Issues](#hpcslurm-issues)
+- [MCP Server (AI assistants)](#mcp-server-ai-assistants)
 - [Platform-Specific Issues](#platform-specific-issues)
   - [Windows](#windows)
   - [Linux](#linux)
@@ -26,34 +27,67 @@ This guide covers common issues and their solutions when installing or running K
 
 ## Installation Issues
 
-### Conda Environment Creation Fails
+### Conda Environment Creation Fails or Hangs
 
-**Symptom**: `conda env create` command fails with dependency conflicts.
+**Symptom**: `conda env create` sits at `Solving environment` for 15+ minutes, stops with
+no output, or fails with dependency conflicts.
 
-**Solutions**:
+**Solutions** (check in order):
 
-1. **Use libmamba solver** (faster and more reliable):
+1. **Remove the `defaults` channel** (Miniconda and Anaconda ship `channels: [defaults]`).
+   conda merges `.condarc` channels into every env-file solve; the KINTSUGI env files list
+   `nodefaults` to block that, but the Anaconda Terms-of-Service plugin (conda >= 25.x)
+   still gates `conda env create` on the configured channels. In a terminal it prompts;
+   without a terminal (scripts, IDE tasks, AI coding assistants) it raises
+   `CondaToSNonInteractiveError`. A conda-forge + defaults solve of this environment does
+   not finish in 25 minutes.
+   ```bash
+   conda config --show channels                 # is 'defaults' listed?
+   conda config --remove channels defaults
+   conda config --add channels conda-forge
+   conda config --set channel_priority strict
+   # if 'defaults' comes from the install's own .condarc:
+   conda config --file "$(conda info --base)/.condarc" --remove channels defaults
+   ```
+   Or install [Miniforge](https://github.com/conda-forge/miniforge), which is conda-forge-only.
+
+2. **Set strict channel priority** (Miniforge's default; Miniconda uses `flexible`):
+   ```bash
+   conda config --set channel_priority strict
+   ```
+   With `flexible`, conda 26.7 + libmamba solved the pinned `env-linux.yml` in 79 s once
+   and was still solving a repeat run after 18 minutes; with `strict` the same solve took
+   93 s and 48 s in two runs. The unpinned file never finished within 32 minutes.
+
+3. **Use the libmamba solver** (default since conda 23.10):
    ```bash
    conda install -n base conda-libmamba-solver
    conda config --set solver libmamba
    conda env create -f envs/env-linux.yml
    ```
 
-2. **Update conda**:
+4. **Skip the solver with the lock file** (Linux x86_64). `envs/env-linux.lock.txt` is
+   an explicit, md5-pinned list generated from `envs/env-linux.yml`; conda installs it
+   without solving (about 90 s), then add the pip-only packages:
+   ```bash
+   conda create -n KINTSUGI --file envs/env-linux.lock.txt
+   conda activate KINTSUGI
+   pip install -e ".[workflow]"
+   ```
+
+5. **Update conda and the env file**:
    ```bash
    conda update -n base conda
+   git pull        # envs/*.yml carry solver pins and nodefaults
    ```
+   micromamba 2.9 (the solver core behind Miniforge's `mamba env create`) solved both the
+   old and the new `env-linux.yml` in under 75 s in every run.
 
-3. **Try the streamlined environment**:
+6. **Create a minimal environment and add packages**:
    ```bash
-   conda env create -f env_streamlined.yml
-   ```
-
-4. **Create minimal environment and add packages**:
-   ```bash
-   conda create -n KINTSUGI python=3.10
+   conda create -n KINTSUGI -c conda-forge --override-channels python=3.11 pip libvips
    conda activate KINTSUGI
-   pip install -e .
+   pip install -e ".[workflow]"
    # Install additional dependencies as needed
    ```
 
@@ -135,51 +169,10 @@ print(f"libvips version: {pyvips.version(0)}.{pyvips.version(1)}.{pyvips.version
 > **Note:** Java, Maven, and FIJI/CLIJ2 are no longer required. KINTSUGI now uses pure Python
 > implementations for all processing. This section is kept for users of older versions.
 
-**Symptom**: `java.lang.Exception` or `JVMNotFoundException`.
-
-#### Check Java Installation
-
-```bash
-java -version
-echo $JAVA_HOME  # Linux/macOS
-echo %JAVA_HOME%  # Windows
-```
-
-#### Fix Missing Java
-
-1. **Install via conda** (recommended):
-   ```bash
-   conda install openjdk=11
-   ```
-
-2. **Download from Zenodo** (Windows):
-   - Download java-jdk21 from Zenodo
-   - Extract to KINTSUGI folder
-
-3. **Set JAVA_HOME**:
-   ```bash
-   # Linux/macOS
-   export JAVA_HOME=/path/to/java
-   export PATH=$JAVA_HOME/bin:$PATH
-
-   # Windows PowerShell
-   $env:JAVA_HOME = "C:\Users\[username]\KINTSUGI\java-jdk21"
-   $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
-   ```
-
-#### JVM Already Started Error
-
-**Symptom**: `JVMAlreadyStarted` exception.
-
-This occurs when trying to start JVM multiple times. Solutions:
-
-1. **Restart Python kernel** (in Jupyter)
-2. **Single JVM initialization**:
-   ```python
-   import jpype
-   if not jpype.isJVMStarted():
-       jpype.startJVM()
-   ```
+If an older notebook, environment file or error message still mentions `jpype`,
+`scyjava`, `JAVA_HOME` or Maven, you are running code from a pre-1.0 release:
+update to the current version and recreate the environment from `envs/`. No
+current KINTSUGI component installs or starts a JVM.
 
 ---
 
@@ -511,6 +504,60 @@ tail /path/to/project/slurm/logs/snakemake/stitch_cyc01.log
 
 ---
 
+## MCP Server (AI assistants)
+
+The optional KINTSUGI MCP server is started by your MCP client from the configuration
+`kintsugi mcp config --client NAME` (or `kintsugi init --mcp-client NAME`) wrote or printed.
+Each client shows the server's state in its own MCP view (in Claude Code and Gemini CLI,
+`/mcp`); [the client table](mcp.md#connect-your-client) lists where. Full guide:
+[MCP server](mcp.md).
+
+### "Executable not found in $PATH: kintsugi"
+
+The client could not find the `kintsugi` command — typically because its entry uses a bare
+`kintsugi` and the client was launched outside the conda/venv environment. Regenerate the
+entry so it carries the absolute path of the executable:
+
+```bash
+conda activate KINTSUGI             # the environment where kintsugi is installed
+kintsugi mcp config /path/to/project --client NAME --force
+# the entry's "command" is now e.g. /home/you/envs/KINTSUGI/bin/kintsugi
+```
+
+The generated entry is `{"type": "stdio", "command": "<absolute path>", "args": ["mcp", "start",
+"--project-dir", "<project>"]}`. Then restart or reconnect the server in your MCP client.
+
+### "No project configured"
+
+The server was started without `--project-dir`, without `KINTSUGI_PROJECT_DIR`, and in a
+working directory that is not a KINTSUGI project, so it cannot guess which project a tool
+means. Regenerate the client configuration (`kintsugi mcp config /path/to/project --client NAME --force`,
+which adds `--project-dir`), or pass `project_path` in the tool call.
+
+### Server shows "Pending approval"
+
+Most clients start a project's servers only in a trusted folder or workspace and may ask
+you to enable the server; the last column of [the client table](mcp.md#connect-your-client)
+says what each one needs. For Claude Code, the approval `kintsugi mcp config --client
+claude-code` writes is `.claude/settings.local.json` → `{"enabledMcpjsonServers":
+["kintsugi"]}`; if an earlier decision rejected the server, clear it with
+`claude mcp reset-project-choices` and reopen the project.
+
+### "mcp 1.x is installed but KINTSUGI requires mcp>=2.0,<3"
+
+The server targets the 2.x SDK (`mcp.server.mcpserver.MCPServer`); the 1.x
+`mcp.server.fastmcp` API is not supported. Upgrade in the environment the server starts from:
+
+```bash
+pip install "mcp>=2.0,<3"           # or: pip install -e ".[mcp]"  /  kintsugi install mcp
+kintsugi check                      # should list the MCP server as available
+```
+
+`kintsugi mcp start` prints the same message to stderr (stdout is reserved for JSON-RPC).
+Never run `pip install kintsugi[mcp]` — it installs an unrelated PyPI package.
+
+---
+
 ## Platform-Specific Issues
 
 ### Windows
@@ -635,3 +682,6 @@ If you're still experiencing issues:
 | Snakemake not found | `pip install "snakemake>=8.0" snakemake-executor-plugin-slurm` |
 | SLURM OOM kill | GPU: 48 GB RAM; CPU: 128 GB RAM — increase in config.yaml |
 | SLURM_TRES_PER_TASK error | Patch jobstep plugin (see HPC section above) |
+| `Executable not found in $PATH: kintsugi` (MCP) | `kintsugi mcp config /path/to/project --client NAME --force` from the activated env |
+| MCP server "Pending approval" | Trust the folder and enable `kintsugi` in your client (see [the client table](mcp.md#connect-your-client)) |
+| `mcp 1.x is installed` (MCP) | `pip install "mcp>=2.0,<3"` |

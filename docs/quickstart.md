@@ -37,8 +37,11 @@ my_project/
 │   └── CHANNELNAMES.txt   ← Channel/marker names (user-provided)
 ├── notebooks/         ← Working copies of processing notebooks
 ├── configs/           ← Processing configuration files
-└── .claude/           ← Claude Code MCP config (auto-generated)
+└── .vscode/           ← VS Code settings
 ```
+
+MCP client files (for example `.mcp.json` or `.cursor/mcp.json`) and `AGENTS.md`
+appear only for the client you choose (see [AI assistants](#ai-assistants-optional)).
 
 ### Channel Names
 
@@ -113,37 +116,47 @@ from kintsugi.segment import segment_nuclei_watershed
 nuclei = segment_nuclei_watershed(dapi_image)
 ```
 
-## Claude Code Integration
+## AI Assistants (optional)
 
-KINTSUGI includes an MCP server for Claude Code integration, enabling AI-assisted image processing.
+KINTSUGI includes an optional MCP server, so the AI assistant you use (any MCP
+client) can drive the image-processing tools. Everything else in this guide works
+without it.
 
 ### Setup
 
 ```bash
-# Install Claude Code dependencies
-pip install kintsugi[claude]
+# Install the MCP server dependencies (mcp>=2.0,<3)
+pip install -e ".[mcp]"   # or: kintsugi install mcp
 ```
 
-**If creating a new project:** Use `kintsugi init` - Claude Code configuration is created automatically.
+Choose your client (`kintsugi mcp clients` lists them); nothing is configured by default:
 
-**If adding to an existing project:**
 ```bash
-kintsugi mcp config /path/to/your/project
+kintsugi mcp config /path/to/your/project --client NAME
 ```
+
+`kintsugi init --mcp-client NAME` does the same while creating a project.
+
+Then open the project in your client and approve the server; the
+[client table](mcp.md#connect-your-client) says how for each client.
 
 ### Usage
 
-Once configured, Claude Code can:
+Once configured, the assistant can:
 - Load and analyze channels
 - Suggest optimal processing parameters
 - Apply denoising, CLAHE, and background subtraction
 - Learn from successful parameters for future recommendations
 
-Example interaction:
+Illustrative interaction (paraphrased, not a recorded transcript):
 ```
 User: "Load the CD3 channel and suggest denoising parameters"
-Claude: [Analyzes image and provides recommendations based on learned history]
+Assistant: [calls load_channel, then suggest_with_learning, and reports the recommendation]
 ```
+
+For a real, recorded transcript of the server driven end to end, see
+[A recorded session](mcp.md#a-recorded-session) in the MCP guide, which also lists every
+tool (`kintsugi mcp tools`), the resources and the prompt.
 
 See `notebooks/MIGRATION_GUIDE.md` for transitioning from legacy notebooks.
 
@@ -160,17 +173,17 @@ Batch processing for illumination correction, stitching, deconvolution, EDoF, an
 - `notebooks/2_Cycle_Processing.ipynb`
 
 ### 3. Signal Isolation & Quality Control (NEW)
-Combined signal isolation and QC with Claude Code integration.
+Combined signal isolation and QC, interactive or AI-assisted (optional MCP server).
 - `notebooks/3_Signal_Isolation_QC.ipynb`
-- Features: Claude-guided workflow, parameter learning, integrated QC
+- Features: interactive tuning, optional AI-assisted workflow, parameter learning, integrated QC
 
 ### 4. Segmentation Analysis
 InstanSeg segmentation, feature extraction, and spatial analysis.
 - `notebooks/4_Segmentation_Analysis.ipynb`
 
-### 5. Vessel Analysis
-Specialized analysis for vessel structures.
-- `notebooks/Vessel_Analysis.ipynb`
+### 2.5. 3D Vessel Segmentation
+Frangi vesselness, marker discovery, skeletonization and graph morphometry on z-stacks.
+- `notebooks/2.5_Vessel_3D_Segmentation.ipynb`
 
 > **Note:** Old notebooks 3 and 5 are deprecated. Use `3_Signal_Isolation_QC.ipynb`.
 

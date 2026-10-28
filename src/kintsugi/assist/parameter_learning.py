@@ -17,12 +17,17 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import numpy as np
+
+from kintsugi.assist.state_dir import project_state_dir
+
+T = TypeVar("T")
 
 # Common tissue type aliases for normalization
 TISSUE_ALIASES = {
@@ -92,31 +97,103 @@ MARKER_ALIASES = {
     "blank": ["blank", "af", "autofluorescence", "auto", "empty"],
 }
 
+# Operation names the learning database is keyed by (``parameter_records.operation``).
+LEARNING_OPERATIONS: tuple[str, ...] = (
+    "blank_subtraction",
+    "denoise",
+    "clahe",
+    "clean_background",
+    "gaussian_subtract",
+)
+
+# The MCP session history (``_add_history`` in ``kintsugi.mcp.tools.signal_isolation``)
+# records *tool* names such as ``subtract_blank`` or ``denoise_advanced``, whereas the
+# learning database is keyed by the *operation* names in ``LEARNING_OPERATIONS``.
+# This maps history tool names onto learning operations (identity for names that are
+# already operations) so ``approve_and_learn`` can record straight from the history.
+HISTORY_TO_LEARNING_OP: dict[str, str] = {
+    "subtract_blank": "blank_subtraction",
+    "subtract_blank_weighted": "blank_subtraction",
+    "denoise": "denoise",
+    "denoise_advanced": "denoise",
+    "clahe": "clahe",
+    "clean_background": "clean_background",
+    "gaussian_subtract": "gaussian_subtract",
+}
+
+
+def _clean(name: str) -> str:
+    """Lowercase and collapse every non-alphanumeric run to a single space."""
+    return re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+
+
+def _build_alias_index(
+    aliases: dict[str, list[str]],
+) -> tuple[dict[str, str], list[tuple[tuple[str, ...], str]]]:
+    """Precompute exact-match and token-sequence lookups for an alias table.
+
+    Returns ``(exact, sequences)``: ``exact`` maps both the spaced ("pd l1") and the
+    compact ("pdl1") cleaned form of every alias to its canonical name; ``sequences``
+    lists ``(alias_tokens, canonical)`` longest-first for whole-token matching.
+    """
+    exact: dict[str, str] = {}
+    sequences: list[tuple[tuple[str, ...], str]] = []
+    for canonical, names in aliases.items():
+        for alias in names:
+            spaced = _clean(alias)
+            if not spaced:
+                continue
+            exact.setdefault(spaced, canonical)
+            exact.setdefault(spaced.replace(" ", ""), canonical)
+            sequences.append((tuple(spaced.split()), canonical))
+    sequences.sort(key=lambda item: len(item[0]), reverse=True)
+    return exact, sequences
+
+
+_TISSUE_EXACT, _TISSUE_SEQUENCES = _build_alias_index(TISSUE_ALIASES)
+_MARKER_EXACT, _MARKER_SEQUENCES = _build_alias_index(MARKER_ALIASES)
+
+
+def _normalize(
+    name: str, exact: dict[str, str], sequences: list[tuple[tuple[str, ...], str]]
+) -> str:
+    """Map ``name`` to a canonical alias key, or to a cleaned fallback.
+
+    Matching is deliberately token-based, never substring-based: ``CD31`` must not
+    become ``cd3`` and ``smooth muscle actin`` must not become ``cd4`` via the ``th``
+    alias, which the previous bidirectional ``in`` test allowed.
+
+    1. The whole cleaned name (spaced or compact) equals an alias.
+    2. An alias appears as a complete token sequence inside the name
+       (``DAPI-01`` -> ``dapi``, ``anti CD20 B cell`` -> ``cd20``), longest alias first.
+    3. Otherwise the cleaned name with ``_`` separators.
+    """
+    spaced = _clean(name)
+    if not spaced:
+        return ""
+    compact = spaced.replace(" ", "")
+    if spaced in exact:
+        return exact[spaced]
+    if compact in exact:
+        return exact[compact]
+    tokens = spaced.split()
+    for alias_tokens, canonical in sequences:
+        n = len(alias_tokens)
+        if n > len(tokens):
+            continue
+        if any(tuple(tokens[i : i + n]) == alias_tokens for i in range(len(tokens) - n + 1)):
+            return canonical
+    return spaced.replace(" ", "_")
+
 
 def normalize_tissue_type(tissue: str) -> str:
-    """Normalize tissue type to canonical form."""
-    tissue_lower = tissue.lower().strip()
-
-    for canonical, aliases in TISSUE_ALIASES.items():
-        for alias in aliases:
-            if alias in tissue_lower or tissue_lower in alias:
-                return canonical
-
-    # Return cleaned version if no match
-    return re.sub(r"[^a-z0-9]", "_", tissue_lower)
+    """Normalize tissue type to canonical form (see :func:`_normalize`)."""
+    return _normalize(tissue, _TISSUE_EXACT, _TISSUE_SEQUENCES)
 
 
 def normalize_marker_name(marker: str) -> str:
-    """Normalize marker name to canonical form."""
-    marker_lower = marker.lower().strip()
-
-    for canonical, aliases in MARKER_ALIASES.items():
-        for alias in aliases:
-            if alias in marker_lower or marker_lower in alias:
-                return canonical
-
-    # Return cleaned version if no match
-    return re.sub(r"[^a-z0-9]", "_", marker_lower)
+    """Normalize marker name to canonical form (see :func:`_normalize`)."""
+    return _normalize(marker, _MARKER_EXACT, _MARKER_SEQUENCES)
 
 
 @dataclass
@@ -238,6 +315,11 @@ class ParameterRecord:
         return d
 
 
+# Score multiplier for records that were not user-approved (e.g. ``kintsugi mcp pretrain``
+# bootstrap rows): they inform recommendations but never outrank approved evidence.
+BOOTSTRAP_WEIGHT = 0.6
+
+
 class ParameterLearningEngine:
     """
     Learns and recommends processing parameters based on tissue type and marker.
@@ -263,6 +345,8 @@ class ParameterLearningEngine:
         )
     """
 
+    DB_NAME = "parameter_learning.db"
+
     def __init__(self, project_path: str | None = None, global_db: bool = True):
         """
         Initialize the learning engine.
@@ -274,21 +358,69 @@ class ParameterLearningEngine:
         self.project_path = Path(project_path) if project_path else None
         self.global_db = global_db
 
-        # Project-specific database
-        if self.project_path:
-            self.project_db_path = self.project_path / ".claude_workflow" / "parameter_learning.db"
-            self.project_db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._init_db(self.project_db_path)
-        else:
-            self.project_db_path = None
+        # Global database (user-wide learning). Nothing is created here: both
+        # databases are created on the first write (see _writable_db), so reading
+        # recommendations or statistics never leaves files behind.
+        self.global_db_path = Path.home() / ".kintsugi" / self.DB_NAME if global_db else None
+        self._schema_ready: set[Path] = set()
 
-        # Global database (user-wide learning)
-        if global_db:
-            self.global_db_path = Path.home() / ".kintsugi" / "parameter_learning.db"
-            self.global_db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._init_db(self.global_db_path)
+    @property
+    def project_db_path(self) -> Path | None:
+        """The project database: ``<project>/.kintsugi/parameter_learning.db``.
+
+        Before the first write this may point at a legacy ``.claude_workflow/``
+        database, which is read as is. It is recomputed on every access, so a
+        cached engine follows a migration done by another engine or process.
+        """
+        if self.project_path is None:
+            return None
+        return project_state_dir(self.project_path) / self.DB_NAME
+
+    def _writable_db(self, scope: str) -> Path:
+        """Create (if needed) and return the project or global database for writing."""
+        if scope == "project":
+            assert self.project_path is not None
+            db_path = project_state_dir(self.project_path, create=True) / self.DB_NAME
         else:
-            self.global_db_path = None
+            assert self.global_db_path is not None
+            db_path = self.global_db_path
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_schema(db_path)
+        return db_path
+
+    def _readable_db(self, db_path: Path | None) -> Path | None:
+        """``db_path`` with an up-to-date schema if the database exists, else ``None``."""
+        if db_path is None or not db_path.exists():
+            return None
+        self._ensure_schema(db_path)
+        return db_path
+
+    def _read_db(self, scope: str, read: Callable[[Path], T]) -> T | None:
+        """Run ``read(path)`` on the project or global database if it exists.
+
+        Returns ``None`` (and creates nothing) when the database does not exist.
+        If another engine or process moves a legacy ``.claude_workflow/`` to
+        ``.kintsugi/`` between resolving the path and opening it, the open fails
+        on the vanished path; the path is then resolved again and read once more.
+        """
+        db_path = self.project_db_path if scope == "project" else self.global_db_path
+        for attempt in range(2):
+            try:
+                path = self._readable_db(db_path)
+                if path is None:
+                    return None
+                return read(path)
+            except sqlite3.OperationalError:
+                if scope != "project" or attempt or db_path is None or db_path.exists():
+                    raise
+                db_path = self.project_db_path  # moved by a concurrent first write
+        return None  # pragma: no cover - the loop returns or raises
+
+    def _ensure_schema(self, db_path: Path) -> None:
+        """Run :meth:`_init_db` once per database (it is idempotent)."""
+        if db_path not in self._schema_ready:
+            self._init_db(db_path)
+            self._schema_ready.add(db_path)
 
     def _init_db(self, db_path: Path):
         """Initialize SQLite database schema."""
@@ -378,14 +510,96 @@ class ParameterLearningEngine:
         Returns:
             Record ID
         """
-        # Determine algorithm version from parameters if not explicit
-        if algorithm_version is None:
-            algorithm_version = parameters.get("algorithm_version", "v1")
-
         # Support quality_score as alternative to quality_after
         if quality_score is not None and quality_after == 0.0:
             quality_after = quality_score
+        return self.record_parameters_many(
+            [
+                {
+                    "operation": operation,
+                    "parameters": parameters,
+                    "algorithm_version": algorithm_version,
+                }
+            ],
+            tissue_type=tissue_type,
+            marker_name=marker_name,
+            quality_before=quality_before,
+            quality_after=quality_after,
+            user_approved=user_approved,
+            user_notes=user_notes,
+            characteristics=characteristics,
+            channel_name=channel_name,
+            to_global=to_global,
+        )[0]
 
+    def record_parameters_many(
+        self,
+        entries: Sequence[dict[str, Any]],
+        *,
+        tissue_type: str,
+        marker_name: str,
+        quality_before: float = 0.0,
+        quality_after: float = 0.0,
+        user_approved: bool = False,
+        user_notes: str = "",
+        characteristics: ImageCharacteristics | None = None,
+        channel_name: str = "",
+        to_global: bool = True,
+    ) -> list[int]:
+        """
+        Record several parameter sets that share one outcome, in one transaction per database.
+
+        Each entry is ``{"operation": str, "parameters": dict}`` with an optional
+        ``"algorithm_version"``. This is what ``approve_and_learn`` uses: one
+        approval covers every operation of a processing run, so the records are
+        written together instead of one connection and commit per operation.
+
+        Returns:
+            The id of every record in entry order, from the project database when
+            the engine has one and otherwise from the global database.
+        """
+        records = [
+            self._make_record(
+                tissue_type=tissue_type,
+                marker_name=marker_name,
+                operation=entry["operation"],
+                parameters=entry["parameters"],
+                quality_before=quality_before,
+                quality_after=quality_after,
+                user_approved=user_approved,
+                user_notes=user_notes,
+                characteristics=characteristics,
+                channel_name=channel_name,
+                algorithm_version=entry.get("algorithm_version"),
+            )
+            for entry in entries
+        ]
+        if not records:
+            return []
+        ids: list[int] = []
+        if self.project_path is not None:
+            ids = self._insert_records(self._writable_db("project"), records)
+        if to_global and self.global_db_path:
+            global_ids = self._insert_records(self._writable_db("global"), records)
+            ids = ids or global_ids
+        return ids or [0] * len(records)
+
+    def _make_record(
+        self,
+        *,
+        tissue_type: str,
+        marker_name: str,
+        operation: str,
+        parameters: dict[str, Any],
+        quality_before: float,
+        quality_after: float,
+        user_approved: bool,
+        user_notes: str,
+        characteristics: ImageCharacteristics | None,
+        channel_name: str,
+        algorithm_version: str | None,
+    ) -> ParameterRecord:
+        """Build a ``ParameterRecord`` with normalized names and the algorithm version."""
         record = ParameterRecord(
             tissue_type=tissue_type,
             tissue_type_normalized=normalize_tissue_type(tissue_type),
@@ -402,63 +616,58 @@ class ParameterLearningEngine:
             project_path=str(self.project_path) if self.project_path else "",
             channel_name=channel_name,
         )
+        # Determine algorithm version from parameters if not explicit
+        if algorithm_version is None:
+            algorithm_version = parameters.get("algorithm_version", "v1")
         record.algorithm_version = algorithm_version
-
-        record_id = None
-
-        # Save to project database
-        if self.project_db_path:
-            record_id = self._insert_record(self.project_db_path, record)
-
-        # Save to global database
-        if to_global and self.global_db_path:
-            self._insert_record(self.global_db_path, record)
-
-        return record_id or 0
+        return record
 
     def _insert_record(self, db_path: Path, record: ParameterRecord) -> int:
         """Insert a record into the database."""
+        return self._insert_records(db_path, [record])[0]
+
+    def _insert_records(self, db_path: Path, records: Sequence[ParameterRecord]) -> list[int]:
+        """Insert records into ``db_path`` in one transaction; return their ids in order."""
         conn = sqlite3.connect(str(db_path))
-        cursor = conn.cursor()
-
-        algo_version = getattr(record, "algorithm_version", "v1")
-
-        cursor.execute(
-            """
-            INSERT INTO parameter_records (
-                timestamp, tissue_type, tissue_type_normalized,
-                marker_name, marker_name_normalized,
-                characteristics_json, operation, parameters_json,
-                quality_before, quality_after, quality_improvement,
-                user_approved, user_notes, project_path, channel_name,
-                algorithm_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                record.timestamp,
-                record.tissue_type,
-                record.tissue_type_normalized,
-                record.marker_name,
-                record.marker_name_normalized,
-                json.dumps(record.characteristics.to_dict()),
-                record.operation,
-                json.dumps(record.parameters),
-                record.quality_before,
-                record.quality_after,
-                record.quality_improvement,
-                1 if record.user_approved else 0,
-                record.user_notes,
-                record.project_path,
-                record.channel_name,
-                algo_version,
-            ),
-        )
-
-        record_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-
-        return record_id
+        try:
+            cursor = conn.cursor()
+            ids: list[int] = []
+            for record in records:
+                cursor.execute(
+                    """
+                    INSERT INTO parameter_records (
+                        timestamp, tissue_type, tissue_type_normalized,
+                        marker_name, marker_name_normalized,
+                        characteristics_json, operation, parameters_json,
+                        quality_before, quality_after, quality_improvement,
+                        user_approved, user_notes, project_path, channel_name,
+                        algorithm_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        record.timestamp,
+                        record.tissue_type,
+                        record.tissue_type_normalized,
+                        record.marker_name,
+                        record.marker_name_normalized,
+                        json.dumps(record.characteristics.to_dict()),
+                        record.operation,
+                        json.dumps(record.parameters),
+                        record.quality_before,
+                        record.quality_after,
+                        record.quality_improvement,
+                        1 if record.user_approved else 0,
+                        record.user_notes,
+                        record.project_path,
+                        record.channel_name,
+                        getattr(record, "algorithm_version", "v1"),
+                    ),
+                )
+                ids.append(int(cursor.lastrowid))
+            conn.commit()
+        finally:
+            conn.close()
+        return ids
 
     def recommend_parameters(
         self,
@@ -467,12 +676,20 @@ class ParameterLearningEngine:
         operation: str,
         characteristics: ImageCharacteristics | None = None,
         min_quality_improvement: float = 0.0,
-        approved_only: bool = True,
+        approved_only: bool = False,
         max_results: int = 5,
         algorithm_version: str | None = None,
     ) -> dict[str, Any]:
         """
         Recommend parameters based on similar tissue/marker combinations.
+
+        Records that were not user-approved (for example the bootstrap rows written by
+        ``kintsugi mcp pretrain``) are included by default but down-weighted: they score
+        at ``BOOTSTRAP_WEIGHT`` of an approved record and the confidence of a
+        recommendation is scaled by ``0.5 + 0.5 * approved_fraction``, so a result that
+        rests only on bootstrap data never exceeds 0.5 (the "learned" tier threshold).
+
+        Single-operation form of :meth:`recommend_parameters_many`.
 
         Args:
             tissue_type: Target tissue type
@@ -480,49 +697,112 @@ class ParameterLearningEngine:
             operation: Operation to get parameters for
             characteristics: Current image characteristics for similarity matching
             min_quality_improvement: Minimum quality improvement to consider
-            approved_only: Only use user-approved records
+            approved_only: Only use user-approved records (default: include bootstrap
+                records at reduced weight)
             max_results: Maximum number of similar records to consider
 
         Returns:
             Dictionary with recommended parameters and confidence
         """
+        return self.recommend_parameters_many(
+            tissue_type,
+            marker_name,
+            [operation],
+            characteristics=characteristics,
+            min_quality_improvement=min_quality_improvement,
+            approved_only=approved_only,
+            max_results=max_results,
+            algorithm_version=algorithm_version,
+        )[operation]
+
+    def recommend_parameters_many(
+        self,
+        tissue_type: str,
+        marker_name: str,
+        operations: Sequence[str],
+        characteristics: ImageCharacteristics | None = None,
+        min_quality_improvement: float = 0.0,
+        approved_only: bool = False,
+        max_results: int = 5,
+        algorithm_version: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Recommend parameters for several operations with one query per database.
+
+        ``suggest_with_learning`` asks for all five learning operations at once;
+        querying them together costs two round trips (project + global database)
+        instead of two per operation. Scoring, aggregation and confidence are the
+        same as :meth:`recommend_parameters`, applied per operation.
+
+        Returns:
+            ``{operation: recommendation}`` with one entry per requested operation.
+        """
+        operations = list(dict.fromkeys(operations))
         tissue_norm = normalize_tissue_type(tissue_type)
         marker_norm = normalize_marker_name(marker_name)
 
-        # Query both databases
-        all_records = []
+        by_operation: dict[str, list[dict[str, Any]]] = {op: [] for op in operations}
+        seen: dict[str, set[tuple[Any, ...]]] = {op: set() for op in operations}
+        for source, weight in (("project", 1.5), ("global", 1.0)):  # project weighs more
+            found = self._read_db(
+                source,
+                lambda path: self._query_similar_records_many(
+                    path,
+                    tissue_norm,
+                    marker_norm,
+                    operations,
+                    min_quality_improvement,
+                    approved_only,
+                    algorithm_version=algorithm_version,
+                ),
+            )
+            if found is None:
+                continue
+            for op, records in found.items():
+                for r in records:
+                    # record_parameters() mirrors every project record into the
+                    # user-wide database; count each recording once, keeping the
+                    # (higher-weighted) project copy that is read first.
+                    key = (
+                        r["timestamp"],
+                        r["tissue_type"],
+                        r["marker_name"],
+                        r["quality_improvement"],
+                        json.dumps(r["parameters"], sort_keys=True),
+                    )
+                    if key in seen[op]:
+                        continue
+                    seen[op].add(key)
+                    r["source"] = source
+                    r["weight"] = weight
+                    by_operation[op].append(r)
 
-        if self.project_db_path and self.project_db_path.exists():
-            records = self._query_similar_records(
-                self.project_db_path,
+        return {
+            op: self._build_recommendation(
+                tissue_type,
+                marker_name,
                 tissue_norm,
                 marker_norm,
-                operation,
-                min_quality_improvement,
-                approved_only,
-                algorithm_version=algorithm_version,
+                op,
+                records,
+                characteristics,
+                max_results,
             )
-            # Project records get higher weight
-            for r in records:
-                r["source"] = "project"
-                r["weight"] = 1.5
-            all_records.extend(records)
+            for op, records in by_operation.items()
+        }
 
-        if self.global_db_path and self.global_db_path.exists():
-            records = self._query_similar_records(
-                self.global_db_path,
-                tissue_norm,
-                marker_norm,
-                operation,
-                min_quality_improvement,
-                approved_only,
-                algorithm_version=algorithm_version,
-            )
-            for r in records:
-                r["source"] = "global"
-                r["weight"] = 1.0
-            all_records.extend(records)
-
+    def _build_recommendation(
+        self,
+        tissue_type: str,
+        marker_name: str,
+        tissue_norm: str,
+        marker_norm: str,
+        operation: str,
+        all_records: list[dict[str, Any]],
+        characteristics: ImageCharacteristics | None,
+        max_results: int,
+    ) -> dict[str, Any]:
+        """Score, rank and aggregate the records found for one operation."""
         if not all_records:
             return {
                 "status": "no_history",
@@ -546,8 +826,10 @@ class ParameterLearningEngine:
         # Aggregate parameters with weighted voting
         recommended_params = self._aggregate_parameters(top_records)
 
-        # Calculate confidence
+        # Calculate confidence; bootstrap-only evidence is capped at 0.5.
         confidence = self._calculate_confidence(top_records, tissue_norm, marker_norm)
+        approved_count = sum(1 for r in top_records if r.get("user_approved"))
+        confidence *= 0.5 + 0.5 * (approved_count / len(top_records))
 
         return {
             "status": "success",
@@ -560,6 +842,8 @@ class ParameterLearningEngine:
             "confidence": round(confidence, 3),
             "confidence_level": self._confidence_level(confidence),
             "based_on_records": len(top_records),
+            "approved_records": approved_count,
+            "bootstrap_records": len(top_records) - approved_count,
             "similar_records": [
                 {
                     "tissue": r["tissue_type"],
@@ -570,6 +854,106 @@ class ParameterLearningEngine:
                 }
                 for r in top_records[:3]
             ],
+        }
+
+    # Window functions (ROW_NUMBER ... OVER) need SQLite 3.25 (2018).
+    _WINDOW_FUNCTIONS = sqlite3.sqlite_version_info >= (3, 25, 0)
+
+    def _query_similar_records_many(
+        self,
+        db_path: Path,
+        tissue_norm: str,
+        marker_norm: str,
+        operations: Sequence[str],
+        min_improvement: float,
+        approved_only: bool,
+        algorithm_version: str | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """:meth:`_query_similar_records` for several operations in one round trip.
+
+        Returns the 50 most relevant records per operation (the same ordering as
+        the single-operation query), keyed by operation; operations without
+        records map to an empty list.
+        """
+        operations = list(operations)
+        if not operations:
+            return {}
+        if not self._WINDOW_FUNCTIONS:  # pragma: no cover - SQLite < 3.25
+            return {
+                op: self._query_similar_records(
+                    db_path,
+                    tissue_norm,
+                    marker_norm,
+                    op,
+                    min_improvement,
+                    approved_only,
+                    algorithm_version=algorithm_version,
+                )
+                for op in operations
+            }
+
+        where = f"operation IN ({','.join('?' * len(operations))}) AND quality_improvement >= ?"
+        where_params: list[Any] = [*operations, min_improvement]
+        if approved_only:
+            where += " AND user_approved = 1"
+        if algorithm_version:
+            where += " AND algorithm_version = ?"
+            where_params.append(algorithm_version)
+
+        # Positional parameters bind in textual order: the window ORDER BY first,
+        # then the WHERE clause.
+        query = f"""
+            SELECT * FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY operation
+                    ORDER BY
+                        CASE
+                            WHEN tissue_type_normalized = ? AND marker_name_normalized = ? THEN 4
+                            WHEN tissue_type_normalized = ? THEN 3
+                            WHEN marker_name_normalized = ? THEN 2
+                            ELSE 1
+                        END DESC,
+                        quality_improvement DESC,
+                        timestamp DESC
+                ) AS relevance_rank
+                FROM parameter_records
+                WHERE {where}
+            )
+            WHERE relevance_rank <= 50
+            ORDER BY operation, relevance_rank
+        """
+        params = [tissue_norm, marker_norm, tissue_norm, marker_norm, *where_params]
+
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            rows = conn.execute(query, params).fetchall()
+        finally:
+            conn.close()
+
+        result: dict[str, list[dict[str, Any]]] = {op: [] for op in operations}
+        for row in rows:
+            result[row["operation"]].append(self._row_to_record(row))
+        return result
+
+    @staticmethod
+    def _row_to_record(row: sqlite3.Row) -> dict[str, Any]:
+        """Convert a ``parameter_records`` row into the dict the scorer works on."""
+        return {
+            "id": row["id"],
+            "timestamp": row["timestamp"],
+            "tissue_type": row["tissue_type"],
+            "tissue_type_normalized": row["tissue_type_normalized"],
+            "marker_name": row["marker_name"],
+            "marker_name_normalized": row["marker_name_normalized"],
+            "characteristics": (
+                json.loads(row["characteristics_json"]) if row["characteristics_json"] else {}
+            ),
+            "parameters": json.loads(row["parameters_json"]),
+            "quality_before": row["quality_before"],
+            "quality_after": row["quality_after"],
+            "quality_improvement": row["quality_improvement"],
+            "user_approved": bool(row["user_approved"]),
         }
 
     def _query_similar_records(
@@ -621,30 +1005,7 @@ class ParameterLearningEngine:
         rows = cursor.fetchall()
         conn.close()
 
-        records = []
-        for row in rows:
-            records.append(
-                {
-                    "id": row["id"],
-                    "timestamp": row["timestamp"],
-                    "tissue_type": row["tissue_type"],
-                    "tissue_type_normalized": row["tissue_type_normalized"],
-                    "marker_name": row["marker_name"],
-                    "marker_name_normalized": row["marker_name_normalized"],
-                    "characteristics": (
-                        json.loads(row["characteristics_json"])
-                        if row["characteristics_json"]
-                        else {}
-                    ),
-                    "parameters": json.loads(row["parameters_json"]),
-                    "quality_before": row["quality_before"],
-                    "quality_after": row["quality_after"],
-                    "quality_improvement": row["quality_improvement"],
-                    "user_approved": bool(row["user_approved"]),
-                }
-            )
-
-        return records
+        return [self._row_to_record(row) for row in rows]
 
     def _score_records(
         self,
@@ -674,7 +1035,8 @@ class ParameterLearningEngine:
             # Quality improvement bonus
             score += min(2.0, record["quality_improvement"] * 2)
 
-            # User approved bonus
+            # User approved bonus; unapproved (bootstrap) records are down-weighted
+            # below, so approved evidence always ranks first.
             if record.get("user_approved"):
                 score += 1.0
 
@@ -695,6 +1057,8 @@ class ParameterLearningEngine:
 
             # Apply source weight
             score *= record.get("weight", 1.0)
+            if not record.get("user_approved"):
+                score *= BOOTSTRAP_WEIGHT
 
             record["score"] = score
 
@@ -917,32 +1281,38 @@ class ParameterLearningEngine:
             "operations": {},
         }
 
-        for db_path, key in [(self.project_db_path, "project"), (self.global_db_path, "global")]:
-            if db_path and db_path.exists():
-                conn = sqlite3.connect(str(db_path))
+        def summarize(db_path: Path) -> tuple[int, list[Any], list[Any], list[Any]]:
+            conn = sqlite3.connect(str(db_path))
+            try:
                 cursor = conn.cursor()
-
                 cursor.execute("SELECT COUNT(*) FROM parameter_records")
-                stats[f"{key}_records"] = cursor.fetchone()[0]
-
+                count = cursor.fetchone()[0]
                 cursor.execute("SELECT DISTINCT tissue_type_normalized FROM parameter_records")
-                stats["unique_tissues"].update(r[0] for r in cursor.fetchall() if r[0])
-
+                tissues = [r[0] for r in cursor.fetchall() if r[0]]
                 cursor.execute("SELECT DISTINCT marker_name_normalized FROM parameter_records")
-                stats["unique_markers"].update(r[0] for r in cursor.fetchall() if r[0])
-
+                markers = [r[0] for r in cursor.fetchall() if r[0]]
                 cursor.execute("""
                     SELECT operation, COUNT(*), AVG(quality_improvement)
                     FROM parameter_records
                     GROUP BY operation
                 """)
-                for op, count, avg_improvement in cursor.fetchall():
-                    if op not in stats["operations"]:
-                        stats["operations"][op] = {"count": 0, "avg_improvement": 0}
-                    stats["operations"][op]["count"] += count
-                    stats["operations"][op]["avg_improvement"] = avg_improvement or 0
-
+                return count, tissues, markers, cursor.fetchall()
+            finally:
                 conn.close()
+
+        for key in ("project", "global"):
+            summary = self._read_db(key, summarize)
+            if summary is None:
+                continue
+            count, tissues, markers, operations = summary
+            stats[f"{key}_records"] = count
+            stats["unique_tissues"].update(tissues)
+            stats["unique_markers"].update(markers)
+            for op, op_count, avg_improvement in operations:
+                if op not in stats["operations"]:
+                    stats["operations"][op] = {"count": 0, "avg_improvement": 0}
+                stats["operations"][op]["count"] += op_count
+                stats["operations"][op]["avg_improvement"] = avg_improvement or 0
 
         stats["unique_tissues"] = list(stats["unique_tissues"])
         stats["unique_markers"] = list(stats["unique_markers"])
@@ -956,27 +1326,29 @@ class ParameterLearningEngine:
 
         all_records = []
 
-        for db_path, source in [(self.project_db_path, "project"), (self.global_db_path, "global")]:
-            if db_path and db_path.exists():
-                conn = sqlite3.connect(str(db_path))
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-
-                cursor.execute("SELECT * FROM parameter_records WHERE user_approved = 1")
-                for row in cursor.fetchall():
-                    all_records.append(
-                        {
-                            "source": source,
-                            "tissue_type": row["tissue_type"],
-                            "marker_name": row["marker_name"],
-                            "operation": row["operation"],
-                            "parameters": json.loads(row["parameters_json"]),
-                            "quality_improvement": row["quality_improvement"],
-                            "timestamp": row["timestamp"],
-                        }
-                    )
-
+        def approved_rows(db_path: Path) -> list[sqlite3.Row]:
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            try:
+                return conn.execute(
+                    "SELECT * FROM parameter_records WHERE user_approved = 1"
+                ).fetchall()
+            finally:
                 conn.close()
+
+        for source in ("project", "global"):
+            for row in self._read_db(source, approved_rows) or []:
+                all_records.append(
+                    {
+                        "source": source,
+                        "tissue_type": row["tissue_type"],
+                        "marker_name": row["marker_name"],
+                        "operation": row["operation"],
+                        "parameters": json.loads(row["parameters_json"]),
+                        "quality_improvement": row["quality_improvement"],
+                        "timestamp": row["timestamp"],
+                    }
+                )
 
         export_data = {
             "exported": datetime.now().isoformat(),

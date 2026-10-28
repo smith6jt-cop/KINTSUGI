@@ -73,56 +73,49 @@ All global parameters (`smooth_low`, `smooth_high`, `erosion`, etc.) are also av
 
 ## Usage
 
-### Claude-Guided (MCP) — Recommended
+### AI-Assisted (MCP, optional)
 
-The Claude Code MCP integration provides an interactive, AI-assisted workflow. Claude analyzes the image, suggests parameters, applies subtraction, and records successful parameters for future use.
+With the optional MCP server, the AI assistant you connect (any MCP client) analyzes the image, suggests parameters, applies subtraction, and records successful parameters for future use. The Python API below does the same without an assistant.
 
 **Setup:**
 ```bash
-pip install kintsugi[claude]
-kintsugi mcp config /path/to/project  # If not using kintsugi init
+pip install -e ".[mcp]"   # or: kintsugi install mcp  (needs mcp>=2.0,<3)
+kintsugi mcp config /path/to/project --client NAME  # your MCP client ('kintsugi mcp clients')
 ```
+
+The full server reference (every tool, resources, the `signal_isolation_workflow`
+prompt, security model, troubleshooting) is [MCP server](mcp.md).
 
 **Workflow:**
 
-1. **Preview range analysis** — Claude calls `analyze_weighted_subtraction()` to show the intensity ranges, per-range weights, and expected behavior before applying anything:
+1. **Preview range analysis** — the assistant calls `analyze_weighted_subtraction()` to show the intensity ranges, per-range weights, and expected behavior before applying anything:
 
    ```
    User: "Load CD163 from cycle 3 and analyze for weighted blank subtraction"
-   Claude: [Uses load_channel, then analyze_weighted_subtraction]
-   Claude: "Analysis shows 5 ranges. Very_dim range (weight 0.35) protects
+   Assistant: [Uses load_channel, then analyze_weighted_subtraction]
+   Assistant: "Analysis shows 5 ranges. Very_dim range (weight 0.35) protects
             the dim CD163+ cells. Bright range (weight 1.12) aggressively
             removes collagen AF."
    ```
 
-2. **Apply weighted subtraction** — Once the user approves the preview, Claude applies the subtraction:
+2. **Apply weighted subtraction** — Once the user approves the preview, the assistant applies the subtraction:
 
    ```
    User: "Apply those parameters"
-   Claude: [Uses subtract_blank with method="weighted"]
-   Claude: "Subtraction complete. Quality score: 0.82. SNR improved 1.4x."
+   Assistant: [Uses subtract_blank with method="weighted"]
+   Assistant: "Subtraction complete. Quality score: 0.82. SNR improved 1.4x."
    ```
 
 3. **Approve and learn** — Recording the successful parameters improves future recommendations:
 
    ```
    User: "That looks good, approve it"
-   Claude: [Uses approve_and_learn to record parameters]
-   Claude: "Parameters recorded for CD163/tonsil. Future recommendations
+   Assistant: [Uses approve_and_learn to record parameters]
+   Assistant: "Parameters recorded for CD163/tonsil. Future recommendations
             will use this as a baseline."
    ```
 
-**Available MCP tools:**
-
-| Tool | Purpose |
-|------|---------|
-| `load_channel` | Load a channel image from the project |
-| `analyze_weighted_subtraction` | Preview per-range weights without applying |
-| `subtract_blank` | Apply subtraction (`method="global"` or `"weighted"`) |
-| `suggest_with_learning` | Get recommendations combining analysis + learned history |
-| `approve_and_learn` | Record approved parameters for future learning |
-| `assess_quality` | Run quality assessment on the result |
-| `get_learned_parameters` | Query the learning database directly |
+**Available MCP tools:** the tools used above (`load_channel`, `analyze_weighted_subtraction`, `subtract_blank`, `assess_quality`, `suggest_with_learning`, `get_learned_parameters`, `approve_and_learn`) and the rest of the surface are listed by `kintsugi mcp tools` and documented in [mcp.md](mcp.md#tools).
 
 ### Python API
 
@@ -234,7 +227,7 @@ The bootstrap scanner:
 4. Records to the learning database with `algorithm_version="weighted_v1"`
 5. Marks as `user_approved=False` (auto-computed, not human-verified)
 
-This is useful when setting up a new project — run bootstrap first, then use Claude-guided or Python API for fine-tuning. The learning system weights human-approved parameters higher than bootstrapped ones.
+This is useful when setting up a new project — run bootstrap first, then use the Python API or an AI assistant (MCP) for fine-tuning. The learning system weights human-approved parameters higher than bootstrapped ones.
 
 ## Parameter Reference
 
@@ -292,17 +285,24 @@ KINTSUGI's parameter learning system builds a database of successful parameters 
 
 ### Database location
 
-The learning database is stored per-project at:
+Two SQLite databases are used — a per-project one and a user-wide one:
 ```
-<project_dir>/data/.kintsugi_learning.db
+<project_dir>/.kintsugi/parameter_learning.db   # project-local (records here weigh 1.5x)
+~/.kintsugi/parameter_learning.db               # user-wide, shared across projects
 ```
+An existing `<project>/.claude_workflow/` from an earlier release is read as is and moved
+to `.kintsugi/` on the first write. Both databases are created when parameters are first
+recorded; looking up recommendations or statistics never creates them.
+MCP learning tools use `<project_dir>` from their `project_path` argument; when it is
+omitted they use the project the server was started for (`kintsugi mcp start
+--project-dir` or `KINTSUGI_PROJECT_DIR`), and with no project only the user-wide database.
 
 ### Checking learning statistics
 
 ```python
-from kintsugi.mcp.tools.learning import ParameterLearningEngine
+from kintsugi.assist.parameter_learning import ParameterLearningEngine
 
-engine = ParameterLearningEngine(str(project_dir))
+engine = ParameterLearningEngine(str(project_dir))   # project_path=None -> user-wide DB only
 stats = engine.get_statistics()
 print(f"Total records: {stats['total_records']}")
 print(f"Tissue types: {stats['tissue_types']}")
@@ -312,7 +312,7 @@ print(f"Markers: {stats['markers']}")
 Or via the MCP tool:
 ```
 User: "Show me the learning database statistics"
-Claude: [Uses get_learning_statistics]
+Assistant: [Uses get_learning_statistics]
 ```
 
 ### Backwards compatibility
