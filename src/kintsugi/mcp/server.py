@@ -22,7 +22,9 @@ import json
 import logging
 import sys
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from kintsugi.assist._coerce import plain
 from kintsugi.mcp._sdk import (
@@ -83,8 +85,12 @@ def _server_version() -> str:
     return __version__
 
 
-def create_server() -> MCPServer:
-    """Create and configure the KINTSUGI MCP server."""
+def create_server(auth_provider: Any = None, auth_settings: Any = None) -> MCPServer:
+    """Create and configure the KINTSUGI MCP server.
+
+    ``auth_provider`` / ``auth_settings`` are only used by the remote (streamable
+    HTTP) transport; see :mod:`kintsugi.mcp.remote_auth`.
+    """
     if not MCP_AVAILABLE:
         raise ImportError(unavailable_message())
 
@@ -94,6 +100,8 @@ def create_server() -> MCPServer:
         instructions=SERVER_INSTRUCTIONS,
         website_url=SERVER_WEBSITE,
         version=_server_version(),
+        auth_server_provider=auth_provider,
+        auth=auth_settings,
     )
     _register_tools(server)
     _register_resources(server)
@@ -159,6 +167,12 @@ def _wrap_handler(handler: Callable[..., Awaitable[Any]]) -> Callable[..., Await
 
     @functools.wraps(handler)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        from kintsugi.mcp.session import ProjectOutsideRoot, check_project_path
+
+        try:
+            check_project_path(kwargs.get("project_path"))
+        except ProjectOutsideRoot as exc:
+            raise ToolError(json.dumps({"error": str(exc)})) from None
         result = await handler(*args, **kwargs)
         if isinstance(result, dict):
             result = plain(result)
@@ -262,6 +276,121 @@ async def run_server() -> None:
     server = create_server()
     logger.info("Starting KINTSUGI MCP server (%d tools)...", len(TOOL_SPECS))
     await server.run_stdio_async()
+
+
+#: Concurrent MCP sessions a remote server accepts. Session state (loaded
+#: channels) is process-wide, so the remote server is for one user.
+REMOTE_MAX_SESSIONS = 8
+MCP_PATH = "/mcp"
+
+
+@dataclass(frozen=True)
+class HttpConfig:
+    """Settings of the remote (streamable HTTP) transport."""
+
+    secret: str
+    host: str = "127.0.0.1"
+    port: int = 8000
+    public_url: str | None = None
+    allowed_hosts: tuple[str, ...] = ()
+    extra_redirect_uris: tuple[str, ...] = ()
+
+    @property
+    def origin(self) -> str:
+        """Public origin (scheme://host[:port]) clients use to reach the server."""
+        if self.public_url:
+            return self.public_url.rstrip("/")
+        return f"http://{_format_host(self.host)}:{self.port}"
+
+    @property
+    def resource_url(self) -> str:
+        return f"{self.origin}{MCP_PATH}"
+
+    def host_headers(self) -> list[str]:
+        """``Host`` header values accepted (DNS-rebinding protection)."""
+        hosts = set(self.allowed_hosts)
+        hosts.add(urlparse(self.origin).netloc)
+        if self.host in {"127.0.0.1", "localhost", "::1", "0.0.0.0", "::"}:
+            hosts.update({"127.0.0.1:*", "localhost:*", "[::1]:*"})
+        return sorted(hosts)
+
+    def origins(self) -> list[str]:
+        """``Origin`` header values accepted from browsers."""
+        from kintsugi.mcp.remote_auth import CLAUDE_AI_CALLBACK
+
+        claude = "{0.scheme}://{0.netloc}".format(urlparse(CLAUDE_AI_CALLBACK))
+        return sorted({self.origin, claude, "http://localhost:*", "http://127.0.0.1:*"})
+
+
+def _format_host(host: str) -> str:
+    return f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+
+def create_http_app(config: HttpConfig) -> tuple[Any, Any]:
+    """Build the authenticated streamable-HTTP app: ``(starlette_app, provider)``.
+
+    Turns on project-path confinement (:func:`kintsugi.mcp.session.set_confined`):
+    over a network the caller is not the local user.
+    """
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    from kintsugi.mcp.remote_auth import (
+        SingleUserOAuthProvider,
+        auth_settings,
+        register_login_route,
+    )
+    from kintsugi.mcp.session import set_confined
+
+    provider = SingleUserOAuthProvider(
+        secret=config.secret,
+        public_url=config.origin,
+        resource_url=config.resource_url,
+        extra_redirect_uris=config.extra_redirect_uris,
+    )
+    server = create_server(
+        auth_provider=provider, auth_settings=auth_settings(config.origin, config.resource_url)
+    )
+    register_login_route(server, provider)
+    set_confined(True)
+    app = server.streamable_http_app(
+        streamable_http_path=MCP_PATH,
+        max_sessions=REMOTE_MAX_SESSIONS,
+        host=config.host,
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=config.host_headers(),
+            allowed_origins=config.origins(),
+        ),
+    )
+    return app, provider
+
+
+async def run_http_server(config: HttpConfig) -> None:
+    """Serve the authenticated streamable-HTTP transport with uvicorn."""
+    import uvicorn
+
+    if not MCP_AVAILABLE:
+        print(f"Error: {unavailable_message()}", file=sys.stderr)
+        sys.exit(1)
+
+    app, _ = create_http_app(config)
+    logger.info(
+        "Starting KINTSUGI MCP server (%d tools) on http://%s:%d%s (public: %s)",
+        len(TOOL_SPECS),
+        _format_host(config.host),
+        config.port,
+        MCP_PATH,
+        config.resource_url,
+    )
+    uv_config = uvicorn.Config(
+        app,
+        host=config.host,
+        port=config.port,
+        log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips="*" if config.public_url else None,
+    )
+    await uvicorn.Server(uv_config).serve()
 
 
 def main() -> None:
