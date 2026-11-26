@@ -1,0 +1,54 @@
+# KINTSUGI MCP server behind Caddy (automatic HTTPS) on one small VM.
+#
+#   cp .env.example .env   # then edit it
+#   docker compose up -d --build
+#
+# Only Caddy publishes ports (80 for the ACME challenge and redirect, 443 for
+# HTTPS); the MCP server is reachable only on the internal network.
+name: kintsugi-mcp
+
+services:
+  kintsugi:
+    build:
+      context: ../..
+      dockerfile: deploy/oracle/Dockerfile
+    image: kintsugi-mcp:latest
+    restart: unless-stopped
+    environment:
+      KINTSUGI_MCP_TOKEN: ${KINTSUGI_MCP_TOKEN:?set KINTSUGI_MCP_TOKEN in .env}
+      KINTSUGI_MCP_PUBLIC_URL: https://${PUBLIC_HOST:?set PUBLIC_HOST in .env}
+    volumes:
+      - ${PROJECT_DIR:?set PROJECT_DIR in .env}:/project
+      - kintsugi-state:/home/kintsugi/.kintsugi
+    expose:
+      - "8000"
+    # Oracle Always Free A1: 12 GB RAM in total; leave room for the OS and Caddy.
+    mem_limit: ${KINTSUGI_MEM_LIMIT:-9g}
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      - kintsugi
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  kintsugi-state:
+  caddy-data:
+  caddy-config:

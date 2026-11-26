@@ -1,0 +1,10 @@
+# Only pyproject.toml, constraints.txt, README.md, License.txt and src/ are
+# needed by deploy/oracle/Dockerfile.
+*
+!pyproject.toml
+!constraints.txt
+!README.md
+!License.txt
+!src/
+src/**/__pycache__
+src/**/*.pyc

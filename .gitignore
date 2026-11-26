@@ -203,3 +203,6 @@ cython_debug/
 
 # Windows null device artifacts (created when bash interprets 2>nul literally)
 nul
+
+# Deployment secrets (deploy/oracle/.env.example is the template)
+deploy/**/.env
