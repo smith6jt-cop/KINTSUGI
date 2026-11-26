@@ -372,6 +372,8 @@ Nothing is configured for any assistant unless you choose it: without `--client`
 
 Then open the project in your client and approve the server where the client asks (in Claude Code: accept the trust dialog; `/mcp` lists the server with its tools, resources and prompt). [docs/mcp.md](docs/mcp.md#connect-your-client) has the steps for each client. `--project-dir` sets the project that `project_path` defaults to (`KINTSUGI_PROJECT_DIR` does the same), whatever working directory the client starts the server in.
 
+**Remote use.** `kintsugi mcp start --transport streamable-http` serves the same tools over authenticated HTTPS for Claude Code (`--transport http`) and claude.ai custom connectors (OAuth). [docs/hubmap_deployment.md](docs/hubmap_deployment.md) documents a complete example: a public HuBMAP CODEX dataset processed on HiPerGator and the server deployed on an Oracle Cloud Always Free VM (`deploy/oracle/`).
+
 **Tools** (generated from the registry by `kintsugi mcp tools --write README.md`; CI fails on drift)
 
 <!-- mcp-tools:list:begin -->
