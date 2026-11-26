@@ -179,13 +179,64 @@ def configured_project_root() -> Path | None:
     return cwd.resolve() if is_kintsugi_project(cwd) else None
 
 
+# ---------------------------------------------------------------------------
+# Confinement (remote transports)
+# ---------------------------------------------------------------------------
+
+_confined = False
+
+
+class ProjectOutsideRoot(ValueError):
+    """A ``project_path`` outside the configured project while the server is confined."""
+
+
+def set_confined(flag: bool) -> None:
+    """Confine every ``project_path`` to the configured project root.
+
+    ``kintsugi mcp start --transport streamable-http`` turns this on: over a
+    network the caller is not the local user, so a model-supplied
+    ``project_path`` may not name any other directory the server can reach.
+    """
+    global _confined
+    _confined = bool(flag)
+
+
+def is_confined() -> bool:
+    """True when ``project_path`` arguments are confined to the configured root."""
+    return _confined
+
+
+def check_project_path(project_path: str | os.PathLike[str] | None) -> None:
+    """Raise :class:`ProjectOutsideRoot` if a confined server is given a foreign project.
+
+    A no-op when the server is not confined or ``project_path`` is ``None``. While
+    confined, the path (symlinks and ``..`` resolved) must be the configured root
+    or lie inside it; a blank string resolves to the working directory and is
+    checked like any other path.
+    """
+    if not _confined or project_path is None:
+        return
+    root = configured_project_root()
+    if root is None:
+        raise ProjectOutsideRoot("This server is confined but has no configured project.")
+    resolved = Path(project_path).resolve()
+    if not resolved.is_relative_to(root.resolve()):
+        raise ProjectOutsideRoot(
+            f"project_path {resolved} is outside the project this server serves ({root}); "
+            "omit project_path to use it."
+        )
+
+
 def resolve_project_path(project_path: str | os.PathLike[str] | None) -> str:
     """Return ``project_path``, defaulting to the configured project.
 
     Raises :class:`ProjectNotConfigured` when neither is available; tools turn
-    that into an in-band error the model can act on.
+    that into an in-band error the model can act on. On a confined server
+    (remote transport) a ``project_path`` outside the configured root raises
+    :class:`ProjectOutsideRoot`.
     """
     if project_path:
+        check_project_path(project_path)
         return str(Path(project_path))
     root = configured_project_root()
     if root is None:

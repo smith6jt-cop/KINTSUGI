@@ -368,10 +368,12 @@ client and a notebook) on one project do not overwrite each other.
 
 ## Security model
 
-The server is a **local, single-user stdio subprocess** started by the MCP
-client with the user's own permissions; there is no network listener, authentication
-or multi-tenancy, so the relevant threat is a model-supplied argument escaping
-the project.
+By default the server is a **local, single-user stdio subprocess** started by the
+MCP client with the user's own permissions; there is no network listener,
+authentication or multi-tenancy, so the relevant threat is a model-supplied
+argument escaping the project. The optional remote mode
+(`--transport streamable-http`, [below](#remote-mode-streamable-http)) adds a
+network listener and the controls that come with it.
 
 | Risk | Control |
 |------|---------|
@@ -382,9 +384,30 @@ the project.
 | Stdout corruption | The CLI banner and project loader write to stderr/logging; `tests/test_mcp_stdio.py` asserts the stream is pure JSON-RPC |
 | Writing where the client happened to start the server | Without `--project-dir`, `KINTSUGI_PROJECT_DIR` or a project working directory, tools that need a project return an error asking for `project_path`; nothing is written under an arbitrary working directory |
 
-Not applicable to this server, and deliberately absent: OAuth or API keys, rate
-limiting, DNS-rebinding protection, streamable HTTP. See `SECURITY.md` for how
-to report a vulnerability.
+See `SECURITY.md` for how to report a vulnerability.
+
+### Remote mode (streamable HTTP)
+
+`kintsugi mcp start --transport streamable-http` serves the same tools at `/mcp`
+for clients on other machines (Claude Code over HTTP, claude.ai custom
+connectors). It is meant for one user and one project, behind an HTTPS reverse
+proxy; `docs/hubmap_deployment.md` walks through a complete deployment.
+
+```bash
+export KINTSUGI_MCP_TOKEN=$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
+kintsugi mcp start --transport streamable-http --project-dir /srv/project \
+    --host 0.0.0.0 --port 8000 --public-url https://kintsugi.example.org
+```
+
+| Risk | Control |
+|------|---------|
+| Unauthenticated access | Every `/mcp` request needs a Bearer token: `KINTSUGI_MCP_TOKEN` itself (≥ 32 characters, compared in constant time) or an OAuth access token. The server refuses to start without the secret |
+| OAuth-only clients (claude.ai) | Built-in single-user OAuth 2.1 authorization server (`kintsugi.mcp.remote_auth`): dynamic client registration limited to `https://claude.ai/api/mcp/auth_callback`, loopback redirects and `--oauth-redirect` URIs; the user types the secret on `/login`; PKCE (S256), one-time codes (5 min), access tokens bound to the `/mcp` resource (1 h), rotating refresh tokens (30 days); all in memory, so a restart signs clients out |
+| Password guessing on `/login` | Five wrong secrets lock the form for five minutes |
+| Reading or writing outside the served project | `--project-dir` is required and every `project_path` argument must resolve (symlinks included) inside it (`session.check_project_path`), on top of the per-argument checks above |
+| DNS rebinding / foreign browsers | `Host` must be the public host or loopback; `Origin`, when present, must be the public origin, `https://claude.ai` or loopback |
+| Exposure without TLS | A non-loopback `--host` requires `--public-url`, which must be `https`; TLS terminates at the reverse proxy (Caddy in `deploy/oracle/`) |
+| Several users | Session state (loaded channels) is process-wide: run one server per user; at most 8 concurrent MCP sessions |
 
 ### Why the tools are not prefixed `kintsugi_`
 
@@ -1007,8 +1030,8 @@ content: image block (image/png, 3996 base64 chars) + text
 |-----------|-----------|
 | `mcp` Python SDK | 2.x (`mcp>=2.0,<3`); 1.x is not supported |
 | Python | 3.10, 3.11, 3.12 |
-| Client | Any MCP client that speaks stdio; `kintsugi mcp clients` lists those `kintsugi mcp config` writes or prints configuration for |
-| Transport | stdio only |
+| Client | Any MCP client that speaks stdio; `kintsugi mcp clients` lists those `kintsugi mcp config` writes or prints configuration for. Remote clients (Claude Code `--transport http`, claude.ai custom connectors) through the streamable-HTTP transport |
+| Transport | stdio (default); streamable HTTP with Bearer/OAuth authentication (`--transport streamable-http`) |
 
 ## Troubleshooting
 

@@ -121,6 +121,28 @@ status and errors go to stderr. MCP clients start it from their configuration (s
 project that `project_path` arguments default to; `KINTSUGI_PROJECT_DIR` does the same, and
 without either the working directory is used only if it is a KINTSUGI project.
 
+Remote clients use the streamable-HTTP transport instead (see
+[Remote mode](mcp.md#remote-mode-streamable-http) and the
+[HuBMAP deployment](hubmap_deployment.md)):
+
+```bash
+export KINTSUGI_MCP_TOKEN=...                         # >= 32 characters; Bearer token and /login secret
+kintsugi mcp start --transport streamable-http --project-dir /path/to/project   # http://127.0.0.1:8000/mcp
+kintsugi mcp start --transport streamable-http --project-dir /srv/project \
+    --host 0.0.0.0 --public-url https://kintsugi.example.org   # behind an HTTPS reverse proxy
+```
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `--transport` | `stdio` | `stdio` or `streamable-http` |
+| `--host` / `--port` | `127.0.0.1` / `8000` | HTTP bind address and port |
+| `--public-url` | `KINTSUGI_MCP_PUBLIC_URL` | HTTPS origin clients use; required for a non-loopback `--host`; the OAuth issuer |
+| `--allowed-host` | — | Extra accepted `Host` header (repeatable) |
+| `--oauth-redirect` | — | Extra OAuth redirect URI besides claude.ai and loopback (repeatable) |
+
+The HTTP transport requires `--project-dir` (every `project_path` is confined to it) and
+`KINTSUGI_MCP_TOKEN`; it exits with status 2 when either is missing.
+
 ### kintsugi mcp tools
 
 List the registered MCP tools, or sync the generated tool reference in the docs.
@@ -403,10 +425,35 @@ Cancel all KINTSUGI SLURM jobs for a project.
 kintsugi slurm cancel /path/to/project
 ```
 
+## HuBMAP Commands
+
+Fetch and stage public [HuBMAP](https://portal.hubmapconsortium.org) CODEX datasets. The
+download itself goes over Globus with the HuBMAP transfer tool (`pip install hubmap-clt`).
+A worked example is [HuBMAP processing and remote MCP deployment](hubmap_deployment.md).
+
+```bash
+kintsugi hubmap info HBM283.GNGR.785                      # UUID, DOI, assay, access level
+kintsugi hubmap manifest HBM283.GNGR.785 -o manifest.txt  # hubmap-clt manifest (public datasets only)
+hubmap-clt transfer manifest.txt -d downloads/            # Globus download (hubmap-clt login first)
+kintsugi init HBM283_LN --name HBM283_LN
+kintsugi hubmap stage downloads/HBM283.GNGR.785 HBM283_LN --hubmap-id HBM283.GNGR.785
+```
+
+`kintsugi hubmap stage` finds the cycle directories (`Cyc1_reg1/`, `cyc001_reg001_*/`, any
+Globus nesting), symlinks them as `data/raw/cyc###` (`--copy` copies), translates
+`experiment.json` into `meta/experiment.json` (the original is kept as
+`meta/experiment.source.json`), copies `channelnames.txt` to `meta/CHANNELNAMES.txt`, writes
+`data/raw/.staged`, and records the source, dataset metadata and required citation in
+`meta/hubmap_provenance.json`. Options: `--region N`, `--offline` (no API lookup), `--force`
+(replace existing staging).
+
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
+| `KINTSUGI_PROJECT_DIR` | Project the MCP server serves when `--project-dir` is not given |
+| `KINTSUGI_MCP_TOKEN` | Secret for the streamable-HTTP MCP transport (Bearer token and `/login` passphrase; ≥ 32 characters) |
+| `KINTSUGI_MCP_PUBLIC_URL` | Default for `kintsugi mcp start --public-url` |
 | `KINTSUGI_DATA_DIR` | Default data directory |
 | `KINTSUGI_DEVICE_MODE` | Processing backend: `gpu` or `cpu` (set by Snakemake) |
 | `VIPS_PATH` | libvips binary directory (Windows) |

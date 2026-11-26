@@ -1035,6 +1035,9 @@ class TestFindCycleDir:
             f"cyc{cycle_num:03d}_*",
             f"cyc{cycle_num:02d}_*",
             f"Cyc{cycle_num:02d}_*",
+            # HuBMAP / CODEX instrument raw data: Cyc1_reg1, cyc1_reg001
+            f"Cyc{cycle_num}_reg*",
+            f"cyc{cycle_num}_reg*",
         ]
         for pattern in glob_patterns:
             matches = list(raw_dir.glob(pattern))
@@ -1162,3 +1165,26 @@ class TestSentinelFormat:
             legacy = f"stage={expected_stage}" in content
             json_format = f'"stage": "{expected_stage}"' in content
             assert legacy or json_format, f"{script_name} missing stage={expected_stage}"
+
+
+class TestFindCycleDirHubmap:
+    """HuBMAP raw CODEX cycle directories (``Cyc1_reg1``)."""
+
+    _find_cycle_dir = TestFindCycleDir._find_cycle_dir
+
+    def test_hubmap_unpadded_region_suffix(self, tmp_path):
+        (tmp_path / "Cyc1_reg1").mkdir()
+        (tmp_path / "Cyc10_reg1").mkdir()
+        assert self._find_cycle_dir(tmp_path, 1).name == "Cyc1_reg1"
+        assert self._find_cycle_dir(tmp_path, 10).name == "Cyc10_reg1"
+
+    def test_stitch_script_has_the_hubmap_patterns(self):
+        source = (Path(__file__).parents[1] / "workflow" / "scripts" / "stitch.py").read_text()
+        assert 'f"Cyc{cycle_num}_reg*"' in source
+        assert 'f"cyc{cycle_num}_reg*"' in source
+
+    def test_snakefile_resolver_has_the_hubmap_patterns(self):
+        snakefile = (Path(__file__).parents[1] / "workflow" / "Snakefile").read_text()
+        resolver = snakefile.split("def _resolve_raw_cycle_dir", 1)[1].split("\ndef ", 1)[0]
+        assert 'f"Cyc{cycle_num}_reg*"' in resolver
+        assert 'f"cyc{cycle_num}_reg*"' in resolver

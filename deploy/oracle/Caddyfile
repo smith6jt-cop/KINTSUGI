@@ -1,0 +1,26 @@
+# Caddy obtains and renews a Let's Encrypt certificate for PUBLIC_HOST
+# automatically (ports 80 and 443 must be reachable from the internet). No ACME
+# account e-mail is configured: it is optional, and Let's Encrypt no longer
+# sends expiry notices.
+
+{$PUBLIC_HOST} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+
+	# MCP endpoint, OAuth endpoints (/authorize, /token, /register, /revoke,
+	# /.well-known/*), the /login page and /healthz are all served by KINTSUGI.
+	reverse_proxy kintsugi:8000 {
+		# Streamable HTTP uses server-sent events: do not buffer responses.
+		flush_interval -1
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

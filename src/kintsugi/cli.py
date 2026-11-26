@@ -914,6 +914,73 @@ def mcp():
     pass
 
 
+_LOOPBACK_BIND = {"127.0.0.1", "localhost", "::1"}
+
+
+def _http_transport_config(
+    project_dir: Path | None,
+    host: str,
+    port: int,
+    public_url: str | None,
+    allowed_hosts: tuple[str, ...],
+    oauth_redirects: tuple[str, ...],
+):
+    """Validate the streamable-HTTP options; exit 2 with a message when unusable."""
+    import os
+    from urllib.parse import urlparse
+
+    if project_dir is None:
+        err_console.print(
+            "[red]--transport streamable-http requires --project-dir: a network server "
+            "serves exactly one project.[/red]"
+        )
+        raise SystemExit(2)
+    if host not in _LOOPBACK_BIND and not public_url:
+        err_console.print(
+            f"[red]Binding {host} exposes the server beyond this machine: pass --public-url "
+            "(the HTTPS origin of your reverse proxy).[/red]"
+        )
+        raise SystemExit(2)
+    if public_url:
+        parsed = urlparse(public_url)
+        loopback = (parsed.hostname or "") in _LOOPBACK_BIND
+        bad_path = parsed.path not in {"", "/"}
+        if parsed.scheme not in {"https", "http"} or not parsed.netloc or bad_path:
+            err_console.print(
+                f"[red]--public-url must be an origin such as https://host, got {public_url}[/red]"
+            )
+            raise SystemExit(2)
+        if parsed.scheme != "https" and not (loopback and host in _LOOPBACK_BIND):
+            err_console.print(
+                f"[red]--public-url must use https unless both it and --host are loopback "
+                f"addresses (got --public-url {public_url}, --host {host}).[/red]"
+            )
+            raise SystemExit(2)
+
+    from kintsugi.mcp._sdk import MCP_AVAILABLE, unavailable_message
+
+    if not MCP_AVAILABLE:
+        err_console.print(Text(unavailable_message(), style="red"))
+        raise SystemExit(1)
+
+    from kintsugi.mcp.remote_auth import TOKEN_ENV, SecretError, validate_secret
+    from kintsugi.mcp.server import HttpConfig
+
+    try:
+        secret = validate_secret(os.environ.get(TOKEN_ENV))
+    except SecretError as exc:
+        err_console.print(Text(str(exc), style="red"))
+        raise SystemExit(2) from None
+    return HttpConfig(
+        secret=secret,
+        host=host,
+        port=port,
+        public_url=public_url.rstrip("/") if public_url else None,
+        allowed_hosts=tuple(allowed_hosts),
+        extra_redirect_uris=tuple(oauth_redirects),
+    )
+
+
 @mcp.command()
 @click.option(
     "--project-dir",
@@ -921,21 +988,71 @@ def mcp():
     default=None,
     help="KINTSUGI project that project_path defaults to (must contain kintsugi_project.json).",
 )
-def start(project_dir: Path | None):
+@click.option(
+    "--transport",
+    type=click.Choice(["stdio", "streamable-http"]),
+    default="stdio",
+    show_default=True,
+    help="stdio: subprocess of a local MCP client. streamable-http: network listener "
+    "(requires --project-dir and KINTSUGI_MCP_TOKEN).",
+)
+@click.option("--host", default="127.0.0.1", show_default=True, help="HTTP bind address.")
+@click.option("--port", default=8000, show_default=True, type=int, help="HTTP port.")
+@click.option(
+    "--public-url",
+    default=None,
+    envvar="KINTSUGI_MCP_PUBLIC_URL",
+    help="Public HTTPS origin clients use (e.g. https://kintsugi.example.org); required "
+    "when binding a non-loopback address. Used as the OAuth issuer.",
+)
+@click.option(
+    "--allowed-host",
+    "allowed_hosts",
+    multiple=True,
+    help="Extra Host header value to accept (repeatable).",
+)
+@click.option(
+    "--oauth-redirect",
+    "oauth_redirects",
+    multiple=True,
+    help="Extra OAuth redirect URI to allow besides claude.ai and loopback (repeatable).",
+)
+def start(
+    project_dir: Path | None,
+    transport: str,
+    host: str,
+    port: int,
+    public_url: str | None,
+    allowed_hosts: tuple[str, ...],
+    oauth_redirects: tuple[str, ...],
+):
     """
-    Start the KINTSUGI MCP server (stdio; works with any MCP client).
+    Start the KINTSUGI MCP server (stdio by default; works with any MCP client).
 
     The server exposes image processing tools for signal isolation, quality
-    assessment and parameter learning. It speaks JSON-RPC over stdio, so this
-    command writes nothing to stdout itself; status and errors go to stderr.
+    assessment and parameter learning. Over stdio it speaks JSON-RPC on stdout,
+    so this command writes nothing to stdout itself; status and errors go to stderr.
 
     --project-dir sets the project that tools use when project_path is omitted;
     KINTSUGI_PROJECT_DIR does the same. Without either, the working directory is
     used only if it is a KINTSUGI project.
 
+    --transport streamable-http serves the same tools over HTTP at /mcp for remote
+    clients. It requires --project-dir (every project_path is then confined to it)
+    and a secret of at least 32 characters in KINTSUGI_MCP_TOKEN, accepted as a
+    Bearer token or, for OAuth clients such as claude.ai, typed on the /login page.
+    Put it behind an HTTPS reverse proxy and pass --public-url. See
+    docs/hubmap_deployment.md.
+
     Run 'kintsugi mcp config <project_path>' to generate client configuration,
     or use 'kintsugi init', which creates it automatically.
     """
+    http_config = None
+    if transport == "streamable-http":
+        http_config = _http_transport_config(
+            project_dir, host, port, public_url, allowed_hosts, oauth_redirects
+        )
+
     if project_dir is not None:
         from kintsugi.mcp.session import PROJECT_MARKER, is_kintsugi_project, set_project_root
 
@@ -955,6 +1072,16 @@ def start(project_dir: Path | None):
         if not MCP_AVAILABLE:
             err_console.print(Text(unavailable_message(), style="red"))
             raise SystemExit(1)
+
+        if http_config is not None:
+            from kintsugi.mcp.server import run_http_server
+
+            err_console.print(
+                f"[bold green]Starting KINTSUGI MCP server on "
+                f"{http_config.resource_url}[/bold green]"
+            )
+            asyncio.run(run_http_server(http_config))
+            return
 
         from kintsugi.mcp import run_server
 
@@ -5202,6 +5329,130 @@ def scan(directory: str, depth: int, samples: int):
             console.print(f"\n[bold]Channel names found:[/bold] {', '.join(sorted(all_channels))}")
 
     console.print(f"\n[dim]To create a project here: kintsugi init {directory}[/dim]")
+
+
+@main.group()
+def hubmap():
+    """Fetch and stage public HuBMAP CODEX datasets.
+
+    \b
+    kintsugi hubmap info HBM283.GNGR.785
+    kintsugi hubmap manifest HBM283.GNGR.785 -o manifest.txt
+    hubmap-clt transfer manifest.txt -d downloads/        # Globus download
+    kintsugi init my_project --name HBM283_LN
+    kintsugi hubmap stage downloads/HBM283.GNGR.785 my_project --hubmap-id HBM283.GNGR.785
+
+    See docs/hubmap_deployment.md.
+    """
+
+
+@hubmap.command("info")
+@click.argument("hubmap_id")
+@click.option("--json", "as_json", is_flag=True, help="Print the metadata as JSON.")
+def hubmap_info(hubmap_id: str, as_json: bool):
+    """Show public metadata of a HuBMAP dataset (UUID, DOI, assay, access level)."""
+    import json as _json
+    from dataclasses import asdict
+
+    from kintsugi.hubmap import HubmapError, fetch_dataset
+
+    try:
+        info = fetch_dataset(hubmap_id)
+    except HubmapError as exc:
+        err_console.print(Text(str(exc), style="red"))
+        raise SystemExit(1) from None
+    if as_json:
+        click.echo(_json.dumps({**asdict(info), "portal_url": info.portal_url}, indent=2))
+        return
+    console.print(f"[bold]{info.hubmap_id}[/bold]  {info.title}")
+    console.print(f"  UUID:    {info.uuid}")
+    console.print(f"  Type:    {info.dataset_type} ({info.status}, {info.data_access_level})")
+    console.print(f"  DOI:     {info.doi_url or '-'}")
+    console.print(f"  Group:   {info.group_name}")
+    console.print(f"  Portal:  {info.portal_url}")
+    for key, value in info.acquisition.items():
+        console.print(f"  {key}: {value}")
+
+
+@hubmap.command("manifest")
+@click.argument("hubmap_id")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help="Write the manifest here instead of stdout.",
+)
+def hubmap_manifest(hubmap_id: str, output: Path | None):
+    """Write the hubmap-clt download manifest for a public HuBMAP dataset."""
+    from kintsugi.hubmap import HubmapError, fetch_dataset, manifest_text
+
+    try:
+        fetch_dataset(hubmap_id)  # refuses unknown and non-public datasets
+        text = manifest_text(hubmap_id)
+    except HubmapError as exc:
+        err_console.print(Text(str(exc), style="red"))
+        raise SystemExit(1) from None
+    if output is None:
+        click.echo(text, nl=False)
+        return
+    output.write_text(text)
+    err_console.print(f"Wrote {output}. Download with: hubmap-clt transfer {output} -d <dir>")
+
+
+@hubmap.command("stage")
+@click.argument("download_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.argument("project_dir", type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--hubmap-id", default=None, help="Dataset ID, recorded with DOI and citation.")
+@click.option("--region", default=1, show_default=True, type=int, help="CODEX region to stage.")
+@click.option("--copy", is_flag=True, help="Copy cycle directories instead of symlinking.")
+@click.option("--offline", is_flag=True, help="Do not query the HuBMAP API for metadata.")
+@click.option("--force", is_flag=True, help="Replace existing data/raw/cyc### and metadata.")
+def hubmap_stage(
+    download_dir: Path,
+    project_dir: Path,
+    hubmap_id: str | None,
+    region: int,
+    copy: bool,
+    offline: bool,
+    force: bool,
+):
+    """Stage a downloaded raw CODEX dataset into a KINTSUGI project.
+
+    Links the cycle directories into data/raw/cyc###, writes meta/experiment.json
+    and meta/CHANNELNAMES.txt, marks data/raw/.staged and records provenance and
+    citation in meta/hubmap_provenance.json. Then run 'kintsugi workflow run'.
+    """
+    from kintsugi.hubmap import HubmapError, fetch_dataset, stage_dataset
+
+    dataset = None
+    try:
+        if hubmap_id and not offline:
+            dataset = fetch_dataset(hubmap_id)
+        report = stage_dataset(
+            download_dir,
+            project_dir,
+            region=region,
+            hubmap_id=hubmap_id,
+            dataset=dataset,
+            copy=copy,
+            force=force,
+        )
+    except HubmapError as exc:
+        err_console.print(Text(str(exc), style="red"))
+        raise SystemExit(1) from None
+
+    console.print(f"[green]Staged {len(report.cycles)} cycles from {report.source}[/green]")
+    for cycle, tiles in sorted(report.tiles_per_cycle.items()):
+        console.print(f"  cyc{cycle:03d}: {tiles} tile files")
+    if report.experiment_json:
+        console.print(f"  experiment: {report.experiment_json}")
+    if report.channel_names:
+        console.print(f"  channels:   {report.channel_names}")
+    console.print(f"  provenance: {report.provenance}")
+    for warning in report.warnings:
+        console.print(f"[yellow]  ! {warning}[/yellow]")
+    console.print(f"\nNext: kintsugi workflow run {report.project} --detach")
 
 
 # Standalone entry points

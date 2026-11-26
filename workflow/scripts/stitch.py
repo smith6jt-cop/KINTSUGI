@@ -157,6 +157,9 @@ def find_cycle_dir(raw_dir, cycle_num):
         f"cyc{cycle_num:03d}_*",
         f"cyc{cycle_num:02d}_*",
         f"Cyc{cycle_num:02d}_*",
+        # HuBMAP / CODEX instrument raw data: Cyc1_reg1, cyc1_reg001
+        f"Cyc{cycle_num}_reg*",
+        f"cyc{cycle_num}_reg*",
     ]
     for pattern in glob_patterns:
         matches = list(raw_dir.glob(pattern))

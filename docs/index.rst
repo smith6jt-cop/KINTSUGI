@@ -40,6 +40,7 @@ Quick Links
 
    workflows
    mcp
+   hubmap_deployment
    signal_isolation
    cli
    api
