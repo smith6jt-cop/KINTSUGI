@@ -950,9 +950,10 @@ def _http_transport_config(
                 f"[red]--public-url must be an origin such as https://host, got {public_url}[/red]"
             )
             raise SystemExit(2)
-        if parsed.scheme != "https" and not loopback:
+        if parsed.scheme != "https" and not (loopback and host in _LOOPBACK_BIND):
             err_console.print(
-                "[red]--public-url must use https unless it is a loopback address.[/red]"
+                f"[red]--public-url must use https unless both it and --host are loopback "
+                f"addresses (got --public-url {public_url}, --host {host}).[/red]"
             )
             raise SystemExit(2)
 

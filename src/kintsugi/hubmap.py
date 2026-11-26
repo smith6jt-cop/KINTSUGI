@@ -258,6 +258,44 @@ class StageReport:
     warnings: list[str] = field(default_factory=list)
 
 
+def _preflight(
+    source: Path,
+    raw: Path,
+    cycles: list[CycleDir],
+    targets: dict[int, Path],
+    force: bool,
+) -> None:
+    """Refuse a staging that would destroy its own source or stop half-way.
+
+    Runs before anything is linked, copied or deleted: the source may not be the
+    project's own ``data/raw`` (or inside it), no cycle may live inside a
+    directory that staging would replace, and without ``force`` every existing
+    target is reported at once.
+    """
+    raw_resolved = raw.resolve()
+    if source.resolve().is_relative_to(raw_resolved):
+        raise HubmapError(
+            f"The download directory {source} is inside the project's raw data "
+            f"({raw_resolved}); stage from the HuBMAP download instead."
+        )
+    existing = [t for t in targets.values() if t.exists() or t.is_symlink()]
+    for cyc in cycles:
+        cyc_path = cyc.path.absolute()
+        cyc_real = cyc.path.resolve()
+        for target in existing:
+            replaced_dir = target.is_dir() and not target.is_symlink()
+            if cyc_path == target.absolute() or (
+                replaced_dir and cyc_real.is_relative_to(target.resolve())
+            ):
+                raise HubmapError(
+                    f"Source {cyc.path} overlaps the staging target {target}; "
+                    "staging would delete it."
+                )
+    if existing and not force:
+        names = ", ".join(str(t) for t in existing)
+        raise HubmapError(f"Already staged: {names}; pass force=True to replace them.")
+
+
 def stage_dataset(
     download_dir: str | os.PathLike[str],
     project_dir: str | os.PathLike[str],
@@ -305,13 +343,15 @@ def stage_dataset(
 
     warnings: list[str] = []
     raw = project.paths.raw
+    ordered = sorted(cycles, key=lambda c: c.cycle)
+    targets = {c.cycle: raw / f"cyc{c.cycle:03d}" for c in ordered}
+    _preflight(source, raw, ordered, targets, force)
+
     raw.mkdir(parents=True, exist_ok=True)
     staged: dict[int, str] = {}
-    for cyc in sorted(cycles, key=lambda c: c.cycle):
-        target = raw / f"cyc{cyc.cycle:03d}"
+    for cyc in ordered:
+        target = targets[cyc.cycle]
         if target.exists() or target.is_symlink():
-            if not force:
-                raise HubmapError(f"{target} already exists; pass force=True to replace it.")
             if target.is_symlink() or target.is_file():
                 target.unlink()
             else:

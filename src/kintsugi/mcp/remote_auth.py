@@ -64,6 +64,15 @@ REFRESH_TTL_S = 30 * 24 * 3600
 MAX_FAILURES = 5
 LOCKOUT_S = 300
 
+# Bounds on state that unauthenticated callers can create (registration and
+# authorization requests need no secret, so they must not grow without limit).
+MAX_CLIENTS = 64
+MAX_PENDING = 32
+CLIENT_IDLE_TTL_S = 24 * 3600
+RATE_WINDOW_S = 60
+MAX_UNAUTH_PER_WINDOW = 30
+MAX_CONSUMED_REFRESH = 1024
+
 
 class SecretError(ValueError):
     """``KINTSUGI_MCP_TOKEN`` is missing or too short for a network listener."""
@@ -120,6 +129,28 @@ class _Throttle:
 
 
 @dataclass
+class _RateLimit:
+    """Sliding-window limit on unauthenticated registration/authorization calls."""
+
+    limit: int = MAX_UNAUTH_PER_WINDOW
+    window: float = RATE_WINDOW_S
+    events: list[float] = field(default_factory=list)
+
+    def allow(self, now: float) -> bool:
+        self.events = [t for t in self.events if now - t < self.window]
+        if len(self.events) >= self.limit:
+            return False
+        self.events.append(now)
+        return True
+
+
+def _evict_oldest(store: dict, limit: int) -> None:
+    """Drop the oldest entries (dicts keep insertion order) until below ``limit``."""
+    while len(store) >= limit:
+        del store[next(iter(store))]
+
+
+@dataclass
 class SingleUserOAuthProvider:
     """In-memory OAuth authorization server for one secret-holding user.
 
@@ -138,6 +169,13 @@ class SingleUserOAuthProvider:
     access_tokens: dict[str, AccessToken] = field(default_factory=dict)
     refresh_tokens: dict[str, RefreshToken] = field(default_factory=dict)
     throttle: _Throttle = field(default_factory=_Throttle)
+    rate: _RateLimit = field(default_factory=_RateLimit)
+    #: client_id -> last time it registered or authorized (idle expiry).
+    client_seen: dict[str, float] = field(default_factory=dict)
+    #: token (access or refresh) -> token family; one family per authorization.
+    family_of: dict[str, str] = field(default_factory=dict)
+    #: refresh tokens already exchanged -> (family, expiry); replay revokes the family.
+    consumed: dict[str, tuple[str, float]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         validate_secret(self.secret)
@@ -152,6 +190,7 @@ class SingleUserOAuthProvider:
     # -- clients -----------------------------------------------------------
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
+        self._expire(time.time())
         return self.clients.get(client_id)
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
@@ -166,7 +205,15 @@ class SingleUserOAuthProvider:
             )
         if client_info.client_id is None:
             raise RegistrationError("invalid_client_metadata", "client_id was not assigned")
+        now = time.time()
+        if not self.rate.allow(now):
+            raise RegistrationError(
+                "invalid_client_metadata", "too many requests; try again in a minute"
+            )
+        self._expire(now)
+        _evict_oldest(self.clients, MAX_CLIENTS)
         self.clients[client_info.client_id] = client_info
+        self.client_seen[client_info.client_id] = now
 
     # -- authorization -----------------------------------------------------
 
@@ -175,10 +222,15 @@ class SingleUserOAuthProvider:
     ) -> str:
         if client.client_id is None:
             raise AuthorizeError("unauthorized_client", "unknown client")
-        self._expire(time.time())
+        now = time.time()
+        if not self.rate.allow(now):
+            raise AuthorizeError("temporarily_unavailable", "too many requests")
+        self._expire(now)
+        self.client_seen[client.client_id] = now
+        _evict_oldest(self.pending, MAX_PENDING)
         request_id = secrets.token_urlsafe(32)
         self.pending[request_id] = _PendingLogin(
-            client_id=client.client_id, params=params, expires_at=time.time() + REQUEST_TTL_S
+            client_id=client.client_id, params=params, expires_at=now + REQUEST_TTL_S
         )
         return f"{self.public_url}{LOGIN_PATH}?request={request_id}"
 
@@ -236,8 +288,12 @@ class SingleUserOAuthProvider:
     ) -> OAuthToken:
         if self.codes.pop(authorization_code.code, None) is None:
             raise TokenError("invalid_grant", "authorization code already used")
+        self.client_seen[authorization_code.client_id] = time.time()
         return self._issue(
-            authorization_code.client_id, authorization_code.scopes, authorization_code.resource
+            authorization_code.client_id,
+            authorization_code.scopes,
+            authorization_code.resource,
+            family=secrets.token_urlsafe(16),
         )
 
     # -- refresh -----------------------------------------------------------
@@ -245,6 +301,12 @@ class SingleUserOAuthProvider:
     async def load_refresh_token(
         self, client: OAuthClientInformationFull, refresh_token: str
     ) -> RefreshToken | None:
+        replay = self.consumed.get(refresh_token)
+        if replay is not None:
+            # A rotated-out refresh token was presented again: it was stolen or
+            # leaked, so revoke every token descended from the same authorization.
+            self._revoke_family(replay[0])
+            return None
         token = self.refresh_tokens.get(refresh_token)
         if token is None or token.client_id != client.client_id:
             return None
@@ -259,11 +321,18 @@ class SingleUserOAuthProvider:
         refresh_token: RefreshToken,
         scopes: list[str],
     ) -> OAuthToken:
-        # Rotate: the presented refresh token is single-use.
+        # Rotate: the presented refresh token is single-use; remember it so a
+        # later replay revokes the whole family.
         if self.refresh_tokens.pop(refresh_token.token, None) is None:
             raise TokenError("invalid_grant", "refresh token already used")
+        family = self.family_of.pop(refresh_token.token, None) or secrets.token_urlsafe(16)
+        _evict_oldest(self.consumed, MAX_CONSUMED_REFRESH)
+        self.consumed[refresh_token.token] = (family, time.time() + REFRESH_TTL_S)
         return self._issue(
-            refresh_token.client_id, scopes or refresh_token.scopes, refresh_token.resource
+            refresh_token.client_id,
+            scopes or refresh_token.scopes,
+            refresh_token.resource,
+            family=family,
         )
 
     # -- access tokens -----------------------------------------------------
@@ -288,10 +357,13 @@ class SingleUserOAuthProvider:
     async def revoke_token(self, token: AccessToken | RefreshToken) -> None:
         self.access_tokens.pop(token.token, None)
         self.refresh_tokens.pop(token.token, None)
+        self.family_of.pop(token.token, None)
 
     # -- helpers -----------------------------------------------------------
 
-    def _issue(self, client_id: str, scopes: list[str], resource: str | None) -> OAuthToken:
+    def _issue(
+        self, client_id: str, scopes: list[str], resource: str | None, *, family: str
+    ) -> OAuthToken:
         now = int(time.time())
         access = secrets.token_urlsafe(32)
         refresh = secrets.token_urlsafe(32)
@@ -312,6 +384,8 @@ class SingleUserOAuthProvider:
             resource=resource,
             subject=SUBJECT,
         )
+        self.family_of[access] = family
+        self.family_of[refresh] = family
         return OAuthToken(
             access_token=access,
             expires_in=ACCESS_TTL_S,
@@ -319,9 +393,26 @@ class SingleUserOAuthProvider:
             refresh_token=refresh,
         )
 
+    def _revoke_family(self, family: str) -> None:
+        for token in [t for t, f in self.family_of.items() if f == family]:
+            self.access_tokens.pop(token, None)
+            self.refresh_tokens.pop(token, None)
+            del self.family_of[token]
+
     def _expire(self, now: float) -> None:
         for key in [k for k, v in self.pending.items() if v.expires_at < now]:
             del self.pending[key]
+        for key in [k for k, (_, exp) in self.consumed.items() if exp < now]:
+            del self.consumed[key]
+        live = {t.client_id for t in self.refresh_tokens.values()}
+        live |= {p.client_id for p in self.pending.values()}
+        for cid in [
+            c
+            for c in self.clients
+            if c not in live and now - self.client_seen.get(c, now) > CLIENT_IDLE_TTL_S
+        ]:
+            del self.clients[cid]
+            self.client_seen.pop(cid, None)
 
 
 def auth_settings(public_url: str, resource_url: str) -> AuthSettings:

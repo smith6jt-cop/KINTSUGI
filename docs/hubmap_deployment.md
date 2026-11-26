@@ -241,7 +241,7 @@ git clone https://github.com/smith6jt-cop/KINTSUGI.git
 cd KINTSUGI/deploy/oracle
 cp .env.example .env
 python3 -c 'import secrets; print(secrets.token_urlsafe(32))'   # put this in KINTSUGI_MCP_TOKEN
-nano .env                                                       # PUBLIC_HOST, PROJECT_DIR, ACME_EMAIL
+nano .env                                                       # PUBLIC_HOST, PROJECT_DIR
 docker compose up -d --build
 docker compose logs -f
 ```
@@ -253,7 +253,7 @@ docker compose logs -f
 | `Dockerfile` | Python 3.11 slim with libvips, `pip install ".[mcp]"`, a non-root user, and `kintsugi mcp start --transport streamable-http` serving `/project` |
 | `compose.yaml` | The KINTSUGI container (internal port 8000 only, read-only root filesystem, no capabilities, 9 GB memory limit) and Caddy (ports 80/443) |
 | `Caddyfile` | Automatic HTTPS for `PUBLIC_HOST`, reverse proxy to KINTSUGI with response buffering off (server-sent events) |
-| `.env.example` | `KINTSUGI_MCP_TOKEN`, `PUBLIC_HOST`, `PROJECT_DIR`, `ACME_EMAIL`, `KINTSUGI_MEM_LIMIT` |
+| `.env.example` | `KINTSUGI_MCP_TOKEN`, `PUBLIC_HOST`, `PROJECT_DIR`, `KINTSUGI_MEM_LIMIT` |
 
 Check the server from any machine:
 

@@ -167,8 +167,19 @@ def _wrap_handler(handler: Callable[..., Awaitable[Any]]) -> Callable[..., Await
 
     @functools.wraps(handler)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
-        from kintsugi.mcp.session import ProjectOutsideRoot, check_project_path
+        from kintsugi.mcp.session import (
+            ProjectOutsideRoot,
+            check_project_path,
+            configured_project_root,
+            is_confined,
+        )
 
+        project_path = kwargs.get("project_path")
+        if is_confined() and isinstance(project_path, str) and not project_path.strip():
+            # Some handlers take project_path as a required string and resolve it
+            # directly; a blank one would mean the server's working directory.
+            root = configured_project_root()
+            kwargs["project_path"] = str(root) if root is not None else project_path
         try:
             check_project_path(kwargs.get("project_path"))
         except ProjectOutsideRoot as exc:

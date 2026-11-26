@@ -209,11 +209,12 @@ def is_confined() -> bool:
 def check_project_path(project_path: str | os.PathLike[str] | None) -> None:
     """Raise :class:`ProjectOutsideRoot` if a confined server is given a foreign project.
 
-    A no-op when the server is not confined or ``project_path`` is empty. While
+    A no-op when the server is not confined or ``project_path`` is ``None``. While
     confined, the path (symlinks and ``..`` resolved) must be the configured root
-    or lie inside it.
+    or lie inside it; a blank string resolves to the working directory and is
+    checked like any other path.
     """
-    if not _confined or not project_path:
+    if not _confined or project_path is None:
         return
     root = configured_project_root()
     if root is None:

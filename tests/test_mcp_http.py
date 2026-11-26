@@ -374,3 +374,159 @@ def test_cli_refuses_unsafe_http_configurations(tmp_path, monkeypatch, args, env
     result = CliRunner().invoke(main, argv, env=env)
     assert result.exit_code == 2
     assert message in " ".join(result.output.split())
+
+
+# ---------------------------------------------------------------------------
+# Review fixes: blank project_path, loopback guard, OAuth state, token replay
+# ---------------------------------------------------------------------------
+
+
+async def test_blank_project_path_is_replaced_by_the_served_root(project, tmp_path, monkeypatch):
+    from kintsugi.mcp.server import _wrap_handler
+    from kintsugi.mcp.session import set_confined
+
+    seen = {}
+
+    async def handler(project_path: str) -> dict:
+        seen["path"] = project_path
+        return {"ok": True}
+
+    other = _project(tmp_path / "cwd_project")
+    monkeypatch.chdir(other)  # a blank path must not mean the working directory
+    set_confined(True)
+    wrapped = _wrap_handler(handler)
+    for blank in ("", "   "):
+        assert await wrapped(project_path=blank) == {"ok": True}
+        assert seen["path"] == str(project.resolve())
+
+
+def test_blank_project_path_is_checked_when_confined(project, tmp_path, monkeypatch):
+    from kintsugi.mcp.session import ProjectOutsideRoot, check_project_path, set_confined
+
+    monkeypatch.chdir(tmp_path)
+    set_confined(True)
+    with pytest.raises(ProjectOutsideRoot):
+        check_project_path("")
+    check_project_path(None)
+
+
+def test_blank_project_path_over_http_stays_in_the_root(client):
+    headers = _session(client, SECRET)
+    reply = _call(
+        client,
+        headers,
+        "tools/call",
+        {"name": "list_channels", "arguments": {"project_path": ""}},
+    )
+    assert "outside the project" not in json.dumps(reply)
+
+
+def test_cli_refuses_http_public_url_on_a_public_bind(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+
+    from kintsugi.cli import main
+
+    monkeypatch.delenv("KINTSUGI_MCP_PUBLIC_URL", raising=False)
+    proj = _project(tmp_path / "p")
+    argv = ["mcp", "start", "--transport", "streamable-http", "--project-dir", str(proj)]
+    argv += ["--host", "0.0.0.0", "--public-url", "http://127.0.0.1:8000"]
+    result = CliRunner().invoke(main, argv, env={"KINTSUGI_MCP_TOKEN": SECRET})
+    assert result.exit_code == 2
+    assert "both it and --host are loopback" in " ".join(result.output.split())
+
+
+def _provider():
+    from kintsugi.mcp.remote_auth import SingleUserOAuthProvider
+
+    return SingleUserOAuthProvider(
+        secret=SECRET,
+        public_url="http://127.0.0.1:8000",
+        resource_url="http://127.0.0.1:8000/mcp",
+    )
+
+
+def _client_info(client_id: str):
+    from mcp.shared.auth import OAuthClientInformationFull
+
+    return OAuthClientInformationFull(
+        client_id=client_id,
+        redirect_uris=[CLAUDE_CALLBACK],
+        token_endpoint_auth_method="none",
+        grant_types=["authorization_code", "refresh_token"],
+        response_types=["code"],
+    )
+
+
+def _auth_params(challenge: str = "c" * 43):
+    from mcp.server.auth.provider import AuthorizationParams
+
+    return AuthorizationParams(
+        state="s",
+        scopes=["kintsugi"],
+        code_challenge=challenge,
+        redirect_uri=CLAUDE_CALLBACK,
+        redirect_uri_provided_explicitly=True,
+        resource="http://127.0.0.1:8000/mcp",
+    )
+
+
+async def test_client_and_pending_stores_are_bounded():
+    from kintsugi.mcp import remote_auth as ra
+
+    provider = _provider()
+    provider.rate.limit = 10_000
+    for i in range(ra.MAX_CLIENTS + 10):
+        await provider.register_client(_client_info(f"c{i}"))
+    assert len(provider.clients) <= ra.MAX_CLIENTS
+    assert "c0" not in provider.clients  # oldest evicted
+    assert f"c{ra.MAX_CLIENTS + 9}" in provider.clients
+
+    client = provider.clients[f"c{ra.MAX_CLIENTS + 9}"]
+    for _ in range(ra.MAX_PENDING + 10):
+        await provider.authorize(client, _auth_params())
+    assert len(provider.pending) <= ra.MAX_PENDING
+
+
+async def test_unauthenticated_requests_are_rate_limited():
+    from mcp.server.auth.provider import AuthorizeError, RegistrationError
+
+    from kintsugi.mcp import remote_auth as ra
+
+    provider = _provider()
+    for i in range(ra.MAX_UNAUTH_PER_WINDOW):
+        await provider.register_client(_client_info(f"c{i}"))
+    with pytest.raises(RegistrationError):
+        await provider.register_client(_client_info("one-too-many"))
+    with pytest.raises(AuthorizeError):
+        await provider.authorize(provider.clients["c0"], _auth_params())
+
+
+async def test_idle_clients_expire(monkeypatch):
+    from kintsugi.mcp import remote_auth as ra
+
+    provider = _provider()
+    await provider.register_client(_client_info("idle"))
+    later = ra.time.time() + ra.CLIENT_IDLE_TTL_S + 1
+    monkeypatch.setattr(ra.time, "time", lambda: later)
+    assert await provider.get_client("idle") is None
+
+
+async def test_refresh_token_replay_revokes_the_family():
+    provider = _provider()
+    await provider.register_client(_client_info("app"))
+    client = provider.clients["app"]
+    request_id = (await provider.authorize(client, _auth_params())).split("request=")[1]
+    redirect = provider.complete_login(request_id, SECRET)
+    code = parse_qs(urlparse(redirect).query)["code"][0]
+    loaded = await provider.load_authorization_code(client, code)
+    first = await provider.exchange_authorization_code(client, loaded)
+
+    # An attacker uses the stolen refresh token first ...
+    stolen = await provider.load_refresh_token(client, first.refresh_token)
+    attacker = await provider.exchange_refresh_token(client, stolen, [])
+    assert await provider.load_access_token(attacker.access_token) is not None
+
+    # ... then the legitimate client replays it: the whole family is revoked.
+    assert await provider.load_refresh_token(client, first.refresh_token) is None
+    assert await provider.load_access_token(attacker.access_token) is None
+    assert await provider.load_refresh_token(client, attacker.refresh_token) is None

@@ -39,7 +39,6 @@ services:
       - kintsugi
     environment:
       PUBLIC_HOST: ${PUBLIC_HOST}
-      ACME_EMAIL: ${ACME_EMAIL:-}
     ports:
       - "80:80"
       - "443:443"

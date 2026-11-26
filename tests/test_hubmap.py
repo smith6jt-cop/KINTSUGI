@@ -185,7 +185,7 @@ def test_stage_links_cycles_and_writes_metadata(tmp_path, project):
 def test_stage_refuses_to_overwrite_without_force(tmp_path, project):
     download = _download(tmp_path / "dl")
     stage_dataset(download, project)
-    with pytest.raises(HubmapError, match="already exists"):
+    with pytest.raises(HubmapError, match="Already staged"):
         stage_dataset(download, project)
     report = stage_dataset(download, project, force=True)
     assert sorted(report.cycles) == [1, 2, 3]
@@ -234,3 +234,36 @@ def test_cli_stage_offline(tmp_path, project):
     assert "Staged 3 cycles" in result.output
     prov = json.loads((project / "meta" / "hubmap_provenance.json").read_text())
     assert prov["dataset"]["hubmap_id"] == HBM
+
+
+def test_stage_refuses_the_projects_own_raw_directory(tmp_path, project):
+    download = _download(tmp_path / "dl")
+    stage_dataset(download, project, copy=True)
+    raw = project / "data" / "raw"
+    before = sorted(p.name for p in (raw / "cyc001").iterdir())
+    with pytest.raises(HubmapError, match="inside the project's raw data"):
+        stage_dataset(raw, project, force=True, copy=True)
+    assert sorted(p.name for p in (raw / "cyc001").iterdir()) == before
+
+
+def test_stage_refuses_a_source_inside_a_replaced_target(tmp_path, project):
+    from kintsugi.hubmap import _cycle_dirs, _preflight
+
+    raw = project / "data" / "raw"
+    inner = raw / "cyc001" / "nested"
+    _download(inner, cycles=(1,))
+    source = inner / HBM / "src_LN"
+    cycles = _cycle_dirs(source)
+    with pytest.raises(HubmapError, match="overlaps the staging target"):
+        _preflight(source, tmp_path / "elsewhere", cycles, {1: raw / "cyc001"}, force=True)
+
+
+def test_stage_conflict_changes_nothing(tmp_path, project):
+    download = _download(tmp_path / "dl")
+    raw = project / "data" / "raw"
+    (raw / "cyc002").mkdir(parents=True)
+    with pytest.raises(HubmapError, match="Already staged"):
+        stage_dataset(download, project)
+    assert not (raw / "cyc001").exists() and not (raw / "cyc001").is_symlink()
+    assert not (raw / ".staged").exists()
+    assert not (project / "meta" / "hubmap_provenance.json").exists()

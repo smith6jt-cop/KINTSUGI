@@ -1182,3 +1182,9 @@ class TestFindCycleDirHubmap:
         source = (Path(__file__).parents[1] / "workflow" / "scripts" / "stitch.py").read_text()
         assert 'f"Cyc{cycle_num}_reg*"' in source
         assert 'f"cyc{cycle_num}_reg*"' in source
+
+    def test_snakefile_resolver_has_the_hubmap_patterns(self):
+        snakefile = (Path(__file__).parents[1] / "workflow" / "Snakefile").read_text()
+        resolver = snakefile.split("def _resolve_raw_cycle_dir", 1)[1].split("\ndef ", 1)[0]
+        assert 'f"Cyc{cycle_num}_reg*"' in resolver
+        assert 'f"cyc{cycle_num}_reg*"' in resolver
